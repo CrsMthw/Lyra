@@ -1,0 +1,49 @@
+# ---> Android
+# Gradle files
+.gradle/
+build/
+app/build/
+gradle/wrapper/gradle-wrapper.jar
+
+# Local configuration file (sdk path, etc)
+local.properties
+
+# Log/OS files
+*.log
+
+# Spotify App Remote SDK — proprietary, redistribution not permitted
+app/libs/*.aar
+
+# Android Studio generated files and folders
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+output.json
+app/release/
+
+# IntelliJ
+*.iml
+*.iws
+*.ipr
+.idea/
+misc.xml
+deploymentTargetDropDown.xml
+render.experimental.xml
+
+# Keystore files
+*.jks
+*.keystore
+
+# Google Services (e.g. APIs or Firebase)
+google-services.json
+
+# Heap dumps
+*.hprof
+
+# Claude Code
+CLAUDE.md
+.claude/
+
+# macOS
+.DS_Store

@@ -1,0 +1,168 @@
+# Lyra
+
+A minimal Spotify client for Android with an adaptive layout for phones, foldables, and tablets. Lyra uses your own Spotify Developer credentials — no third-party servers, no data collection.
+
+---
+
+## Features
+
+- Library browser with playlist and liked songs support
+- Full player with seek, shuffle, repeat, sleep timer, and queue-aware playback
+- Search
+- Adaptive two-pane layout for foldables and tablets
+- Material You dynamic colour + AMOLED black mode
+- Tokens stored encrypted via AES-256-GCM (Android Keystore)
+
+---
+
+## Screenshots
+
+### Single pane
+
+<table>
+  <tr>
+    <td><img src="assets/screenshots/single-pane/library-light.png" width="200"/></td>
+    <td><img src="assets/screenshots/single-pane/library-dark.png" width="200"/></td>
+    <td><img src="assets/screenshots/single-pane/player-dark.png" width="200"/></td>
+  </tr>
+  <tr>
+    <td><img src="assets/screenshots/single-pane/tracks-light.png" width="200"/></td>
+    <td><img src="assets/screenshots/single-pane/tracks-dark.png" width="200"/></td>
+    <td></td>
+  </tr>
+</table>
+
+### Dual pane
+
+<table>
+  <tr>
+    <td><img src="assets/screenshots/dual-pane/library-2p.png" width="400"/></td>
+    <td><img src="assets/screenshots/dual-pane/mini-player-2p.png" width="400"/></td>
+  </tr>
+</table>
+
+---
+
+## Install
+
+Download the latest APK from the [Releases](../../releases) page and install it directly on your device. You may need to allow installation from unknown sources in your Android settings.
+
+---
+
+## Prerequisites
+
+- Android Studio Meerkat or later
+- Android SDK 37 (compile), min SDK 35
+- A free [Spotify Developer account](https://developer.spotify.com)
+- The Spotify app installed on your device (required for App Remote playback)
+
+---
+
+## Spotify Developer Dashboard Setup
+
+Lyra requires you to register the app in the Spotify Developer Dashboard. This is a one-time step and takes about two minutes.
+
+### 1. Create an app
+
+1. Go to [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard)
+2. Click **Create app**
+3. Fill in any name and description — these are just for your dashboard
+
+### 2. Add the redirect URI
+
+In your app's **Settings**, add the following under **Redirect URIs** and save:
+
+```
+com.crsmthw.lyra://callback
+```
+
+### 3. Add the Android package
+
+Still in **Settings**, scroll to **Android** and add:
+
+| Field | Value |
+|---|---|
+| Package name | `com.crsmthw.lyra` |
+| SHA-1 certificate fingerprint | `50530A2931B5B1595D1C991F92DA6644ABA6AFD6` |
+
+This fingerprint is for the release keystore. If you are running a debug build, you will also need to add the SHA-1 of your local debug keystore (found via `./gradlew signingReport`). The App Remote SDK validates both the package name and fingerprint — without this step it will fail to connect when Spotify is in the background.
+
+### 4. Copy your Client ID
+
+From the dashboard overview, copy your **Client ID**. You will enter this in the app on first launch — it is stored encrypted on-device and never leaves it.
+
+---
+
+## Building
+
+### 1. Get the Spotify App Remote SDK
+
+The SDK is proprietary and cannot be redistributed, so it is not included in this repo.
+
+1. Go to [github.com/spotify/android-sdk/releases](https://github.com/spotify/android-sdk/releases)
+2. Download `spotify-app-remote-release-x.x.x.aar`
+3. Place it in `app/libs/` and rename it to `spotify-app-remote-release-0.8.0.aar` (or update the filename in `app/build.gradle.kts` to match your downloaded version)
+
+### 2. Build
+
+Clone the repo, add the AAR as above, then open the root folder in Android Studio.
+
+```bash
+# Debug build
+./gradlew assembleDebug
+
+# Release build
+./gradlew assembleRelease
+```
+
+On first launch, enter your Client ID on the auth screen and tap **Connect with Spotify**.
+
+---
+
+## Architecture
+
+```
+app/src/main/java/com/crsmthw/lyra/
+├── data/
+│   ├── auth/        SpotifyAuthManager (OAuth 2.0 PKCE via AppAuth), TokenManager
+│   ├── local/       EncryptedPrefs, LyraDataStore, LibraryCache
+│   ├── remote/      SpotifyApiService (Retrofit), SpotifyRemoteManager (App Remote)
+│   │   └── model/   Spotify API data models
+│   └── repository/  SpotifyRepository, SettingsRepository
+├── di/              AppContainer — manual DI, no Hilt
+├── ui/
+│   ├── components/  MiniPlayer, TrackRow, PlaylistCard
+│   ├── navigation/  LyraNavGraph, Screen
+│   ├── screens/     auth / library / player / search / settings
+│   └── theme/       Material You + static colour schemes, AMOLED overlay
+└── util/            Extensions
+```
+
+**Auth**: PKCE via AppAuth — browser-based OAuth, no client secret ever stored.
+
+**DI**: Manual `AppContainer` created in `LyraApplication`. No annotation processing.
+
+**Playback**: Web API first; falls back to Spotify App Remote SDK on 404 (no active device). The SDK binds directly to the Spotify service via IPC, bypassing the Connect device requirement.
+
+**Caching**: Coil disk cache (150 MB, survives system cache clears) for images. Gson-based JSON cache for library data with stale-while-revalidate refresh and per-playlist snapshot invalidation.
+
+---
+
+## Tech Stack
+
+| Layer | Library |
+|---|---|
+| UI | Jetpack Compose + Material3 1.5.0-alpha19 |
+| Navigation | Navigation Compose 2.9.8 |
+| Auth | AppAuth 0.11.1 (PKCE) |
+| Network | Retrofit 2.11.0 + OkHttp 4.12.0 |
+| Images | Coil 3 |
+| Secure storage | EncryptedSharedPreferences (AES-256-GCM) |
+| Settings | DataStore Preferences |
+| Build | AGP 9.2.1 · Kotlin 2.3.10 · KSP 2.3.8 |
+
+---
+
+## License
+
+MIT

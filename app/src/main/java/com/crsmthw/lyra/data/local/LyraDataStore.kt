@@ -1,0 +1,55 @@
+package com.crsmthw.lyra.data.local
+
+import android.content.Context
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.preferencesDataStore
+import com.crsmthw.lyra.ui.theme.ThemeMode
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+
+// Top-level delegate – DataStore is a singleton per name
+private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "lyra_settings")
+
+class LyraDataStore(private val context: Context) {
+
+    // ── Reads ───────────────────────────────────────────────────────────────
+
+    val themeMode: Flow<ThemeMode> = context.dataStore.data.map { prefs ->
+        val raw = prefs[Keys.THEME_MODE] ?: ThemeMode.SYSTEM.name
+        runCatching { ThemeMode.valueOf(raw) }.getOrDefault(ThemeMode.SYSTEM)
+    }
+
+    val amoledBlack: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[Keys.AMOLED_BLACK] ?: false
+    }
+
+    val dynamicColor: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[Keys.DYNAMIC_COLOR] ?: true
+    }
+
+    // ── Writes ──────────────────────────────────────────────────────────────
+
+    suspend fun setThemeMode(mode: ThemeMode) {
+        context.dataStore.edit { it[Keys.THEME_MODE] = mode.name }
+    }
+
+    suspend fun setAmoledBlack(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.AMOLED_BLACK] = enabled }
+    }
+
+    suspend fun setDynamicColor(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.DYNAMIC_COLOR] = enabled }
+    }
+
+    // ── Keys ────────────────────────────────────────────────────────────────
+
+    private object Keys {
+        val THEME_MODE    = stringPreferencesKey("theme_mode")
+        val AMOLED_BLACK  = booleanPreferencesKey("amoled_black")
+        val DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
+    }
+}

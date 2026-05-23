@@ -1,0 +1,14 @@
+package com.crsmthw.lyra.ui.navigation
+
+sealed class Screen(val route: String) {
+    data object Auth     : Screen("auth")
+    data object Library  : Screen("library")
+    data object Search   : Screen("search")
+    data object Settings : Screen("settings")
+    data object Player   : Screen("player")
+
+    // Deep-link to a specific playlist's track list
+    data object PlaylistDetail : Screen("playlist/{id}") {
+        fun createRoute(id: String) = "playlist/$id"
+    }
+}

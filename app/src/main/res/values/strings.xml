@@ -1,0 +1,74 @@
+<resources>
+    <string name="app_name">Lyra</string>
+
+    <!-- Auth -->
+    <string name="auth_welcome_title">Connect to Spotify</string>
+    <string name="auth_welcome_subtitle">Enter your Spotify Client ID to get started</string>
+    <string name="auth_client_id_label">Client ID</string>
+    <string name="auth_client_id_placeholder">Paste your Client ID here</string>
+    <string name="auth_connect_button">Connect</string>
+    <string name="auth_help_text">Get your Client ID from developer.spotify.com → Your App → Settings</string>
+
+    <!-- Nav -->
+    <string name="nav_home">Home</string>
+    <string name="nav_search">Search</string>
+    <string name="nav_settings">Settings</string>
+
+    <!-- Library -->
+    <string name="library_title">Your Library</string>
+    <string name="liked_songs">Liked Songs</string>
+    <string name="discover_weekly">Discover Weekly</string>
+
+    <!-- Player -->
+    <string name="player_shuffle">Shuffle</string>
+    <string name="player_previous">Previous</string>
+    <string name="player_play">Play</string>
+    <string name="player_pause">Pause</string>
+    <string name="player_next">Next</string>
+    <string name="player_repeat">Repeat</string>
+    <string name="player_sleep_timer">Sleep Timer</string>
+    <string name="player_add_to_library">Add to Library</string>
+    <string name="player_queue">Queue</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_spotify">Spotify</string>
+    <string name="settings_client_id">Client ID</string>
+    <string name="settings_reconnect">Re-authenticate</string>
+    <string name="settings_appearance">Appearance</string>
+    <string name="settings_theme">Theme</string>
+    <string name="settings_theme_system">System</string>
+    <string name="settings_theme_light">Light</string>
+    <string name="settings_theme_dark">Dark</string>
+    <string name="settings_amoled">Pure Black (AMOLED)</string>
+    <string name="settings_amoled_desc">Ultra-dark background in dark mode</string>
+    <string name="settings_dynamic_color">Material You Colors</string>
+    <string name="settings_dynamic_color_desc">Extract colors from your wallpaper</string>
+    <string name="settings_logout">Disconnect Spotify</string>
+    <string name="settings_about">About</string>
+    <string name="settings_version">Version</string>
+    <string name="about_tagline">Listen beautifully.</string>
+    <string name="about_credits_section">Credits</string>
+    <string name="about_credit_app">Made by CrsMthw and Claude</string>
+    <string name="about_credit_app_desc">App design &amp; development</string>
+    <string name="about_credit_icon">Icon by Shubbu</string>
+    <string name="about_credit_icon_desc">App icon design</string>
+    <string name="about_github">GitHub</string>
+    <string name="about_github_url">github.com/CrsMthw</string>
+    <string name="about_bmac_desc">Buy me a coffee</string>
+    <string name="about_bottom_note">Because good music deserves\na clean interface.</string>
+
+    <!-- Sleep timer -->
+    <string name="sleep_timer_off">Off</string>
+    <string name="sleep_timer_active">%d min remaining</string>
+    <string name="sleep_timer_5">5 minutes</string>
+    <string name="sleep_timer_15">15 minutes</string>
+    <string name="sleep_timer_30">30 minutes</string>
+    <string name="sleep_timer_45">45 minutes</string>
+    <string name="sleep_timer_60">1 hour</string>
+
+    <!-- Errors -->
+    <string name="error_generic">Something went wrong</string>
+    <string name="error_no_spotify">Spotify app not installed</string>
+    <string name="error_auth_failed">Authentication failed</string>
+</resources>
