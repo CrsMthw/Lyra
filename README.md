@@ -24,13 +24,13 @@
 <table>
   <tr>
     <td><img src="assets/screenshots/single-pane/library-light.png" width="200"/></td>
-    <td><img src="assets/screenshots/single-pane/player-light.png" width="200"/></td>
     <td><img src="assets/screenshots/single-pane/tracks-light.png" width="200"/></td>
+    <td><img src="assets/screenshots/single-pane/player-light.png" width="200"/></td>
   </tr>
   <tr>
     <td><img src="assets/screenshots/single-pane/library-dark.png" width="200"/></td>
-    <td><img src="assets/screenshots/single-pane/player-dark.png" width="200"/></td>
     <td><img src="assets/screenshots/single-pane/tracks-dark.png" width="200"/></td>
+    <td><img src="assets/screenshots/single-pane/player-dark.png" width="200"/></td>
   </tr>
 </table>
 
