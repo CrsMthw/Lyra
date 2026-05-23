@@ -1,6 +1,8 @@
-# Lyra
-
-A minimal Spotify client for Android with an adaptive layout for phones, foldables, and tablets. Lyra uses your own Spotify Developer credentials — no third-party servers, no data collection.
+<div align="center">
+  <img src="assets/icons/Logo_light.svg" width="120"/>
+  <h1>Lyra</h1>
+  <p>A minimal Spotify client for Android with an adaptive layout for phones, foldables, and tablets.<br/>Lyra uses your own Spotify Developer credentials — no third-party servers, no data collection.</p>
+</div>
 
 ---
 
@@ -22,13 +24,13 @@ A minimal Spotify client for Android with an adaptive layout for phones, foldabl
 <table>
   <tr>
     <td><img src="assets/screenshots/single-pane/library-light.png" width="200"/></td>
-    <td><img src="assets/screenshots/single-pane/library-dark.png" width="200"/></td>
-    <td><img src="assets/screenshots/single-pane/player-dark.png" width="200"/></td>
+    <td><img src="assets/screenshots/single-pane/player-light.png" width="200"/></td>
+    <td><img src="assets/screenshots/single-pane/tracks-light.png" width="200"/></td>
   </tr>
   <tr>
-    <td><img src="assets/screenshots/single-pane/tracks-light.png" width="200"/></td>
+    <td><img src="assets/screenshots/single-pane/library-dark.png" width="200"/></td>
+    <td><img src="assets/screenshots/single-pane/player-dark.png" width="200"/></td>
     <td><img src="assets/screenshots/single-pane/tracks-dark.png" width="200"/></td>
-    <td></td>
   </tr>
 </table>
 
@@ -47,22 +49,9 @@ A minimal Spotify client for Android with an adaptive layout for phones, foldabl
 
 Download the latest APK from the [Releases](../../releases) page and install it directly on your device. You may need to allow installation from unknown sources in your Android settings.
 
----
+Before launching, you need to register the app in the Spotify Developer Dashboard — this is a one-time step and takes about two minutes.
 
-## Prerequisites
-
-- Android Studio Meerkat or later
-- Android SDK 37 (compile), min SDK 35
-- A free [Spotify Developer account](https://developer.spotify.com)
-- The Spotify app installed on your device (required for App Remote playback)
-
----
-
-## Spotify Developer Dashboard Setup
-
-Lyra requires you to register the app in the Spotify Developer Dashboard. This is a one-time step and takes about two minutes.
-
-### 1. Create an app
+### 1. Create a Spotify Developer app
 
 1. Go to [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard)
 2. Click **Create app**
@@ -85,15 +74,22 @@ Still in **Settings**, scroll to **Android** and add:
 | Package name | `com.crsmthw.lyra` |
 | SHA-1 certificate fingerprint | `50530A2931B5B1595D1C991F92DA6644ABA6AFD6` |
 
-This fingerprint is for the release keystore. If you are running a debug build, you will also need to add the SHA-1 of your local debug keystore (found via `./gradlew signingReport`). The App Remote SDK validates both the package name and fingerprint — without this step it will fail to connect when Spotify is in the background.
+### 4. Get your Client ID
 
-### 4. Copy your Client ID
-
-From the dashboard overview, copy your **Client ID**. You will enter this in the app on first launch — it is stored encrypted on-device and never leaves it.
+From the dashboard overview, copy your **Client ID**. Enter it in the app on first launch — it is stored encrypted on-device and never leaves it.
 
 ---
 
 ## Building
+
+### Prerequisites
+
+- Android Studio Meerkat or later
+- Android SDK 37 (compile), min SDK 35
+- A free [Spotify Developer account](https://developer.spotify.com)
+- The Spotify app installed on your device (required for App Remote playback)
+
+Follow the Spotify Developer Dashboard Setup steps in the [Install](#install) section above. For debug builds, also add the SHA-1 of your local debug keystore (found via `./gradlew signingReport`) to the Android package settings in your Spotify app.
 
 ### 1. Get the Spotify App Remote SDK
 
@@ -114,8 +110,6 @@ Clone the repo, add the AAR as above, then open the root folder in Android Studi
 # Release build
 ./gradlew assembleRelease
 ```
-
-On first launch, enter your Client ID on the auth screen and tap **Connect with Spotify**.
 
 ---
 
