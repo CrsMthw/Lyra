@@ -139,7 +139,7 @@ class SpotifyAuthManager(
         }
     }
 
-    fun isAuthenticated(): Boolean = encryptedPrefs.isTokenValid
+    fun isAuthenticated(): Boolean = encryptedPrefs.isTokenValid || encryptedPrefs.refreshToken.isNotBlank()
 
     fun logout() {
         encryptedPrefs.clearTokens()

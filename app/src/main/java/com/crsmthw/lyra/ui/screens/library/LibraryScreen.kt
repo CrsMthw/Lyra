@@ -12,6 +12,7 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -34,7 +35,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.GenericShape
+import androidx.compose.material3.MaterialShapes
+import androidx.compose.material3.toShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -1388,36 +1390,8 @@ private fun PlayerCardContent(
         }
     }
 
-    // ── Squiggly shape ─────────────────────────────────────────────────────
-    val squigglyShape = remember {
-        val n = 8
-        val vertices = FloatArray(n * 4)
-        for (i in 0 until n * 2) {
-            val angle = Math.PI * i / n - Math.PI / 2
-            val r = if (i % 2 == 0) 1f else 0.92f
-            vertices[i * 2]     = (r * kotlin.math.cos(angle)).toFloat()
-            vertices[i * 2 + 1] = (r * kotlin.math.sin(angle)).toFloat()
-        }
-        val poly = androidx.graphics.shapes.RoundedPolygon(
-            vertices = vertices,
-            rounding = androidx.graphics.shapes.CornerRounding(radius = 0.5f, smoothing = 0.9f),
-        )
-        GenericShape { size, _ ->
-            val hw = size.width / 2
-            val hh = size.height / 2
-            val segments = poly.cubics
-            if (segments.isEmpty()) return@GenericShape
-            moveTo(segments[0].anchor0X * hw + hw, segments[0].anchor0Y * hh + hh)
-            for (c in segments) {
-                cubicTo(
-                    c.control0X * hw + hw, c.control0Y * hh + hh,
-                    c.control1X * hw + hw, c.control1Y * hh + hh,
-                    c.anchor1X  * hw + hw, c.anchor1Y  * hh + hh,
-                )
-            }
-            close()
-        }
-    }
+    // ── Play/pause button shape (M3 Expressive cookie) ───────────────────────
+    val squigglyShape = MaterialShapes.Cookie12Sided.toShape()
 
     Box(modifier = Modifier.fillMaxWidth()) {
         // Gradient background
@@ -1564,9 +1538,18 @@ private fun PlayerCardContent(
                 IconButton(onClick = onSkipPrev, modifier = Modifier.size(48.dp)) {
                     Icon(Icons.Default.SkipPrevious, "Previous", modifier = Modifier.size(36.dp))
                 }
+                val cookieRotation = remember { Animatable(0f) }
+                LaunchedEffect(state.isPlaying) {
+                    if (state.isPlaying) {
+                        while (true) {
+                            cookieRotation.animateTo(cookieRotation.value + 360f, tween(8000, easing = LinearEasing))
+                            cookieRotation.snapTo(0f)
+                        }
+                    }
+                }
                 FilledIconButton(
                     onClick  = playerViewModel::playPause,
-                    modifier = Modifier.size(60.dp),
+                    modifier = Modifier.size(60.dp).graphicsLayer { rotationZ = cookieRotation.value },
                     shape    = squigglyShape,
                     colors   = IconButtonDefaults.filledIconButtonColors(
                         containerColor = accentColor, contentColor = Color.White),
@@ -1574,7 +1557,7 @@ private fun PlayerCardContent(
                     Icon(
                         imageVector = if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                         contentDescription = if (state.isPlaying) "Pause" else "Play",
-                        modifier = Modifier.size(30.dp),
+                        modifier = Modifier.size(30.dp).graphicsLayer { rotationZ = -cookieRotation.value },
                     )
                 }
                 IconButton(onClick = onSkipNext, modifier = Modifier.size(48.dp)) {

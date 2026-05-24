@@ -7,6 +7,7 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -14,7 +15,8 @@ import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.GenericShape
+import androidx.compose.material3.MaterialShapes
+import androidx.compose.material3.toShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -171,36 +173,8 @@ fun PlayerScreen(
         }
     }
 
-    // ── Squiggly play/pause shape ─────────────────────────────────────────────
-    val squigglyShape = remember {
-        val n = 8
-        val vertices = FloatArray(n * 4)
-        for (i in 0 until n * 2) {
-            val angle = Math.PI * i / n - Math.PI / 2
-            val r = if (i % 2 == 0) 1f else 0.92f
-            vertices[i * 2]     = (r * kotlin.math.cos(angle)).toFloat()
-            vertices[i * 2 + 1] = (r * kotlin.math.sin(angle)).toFloat()
-        }
-        val poly = androidx.graphics.shapes.RoundedPolygon(
-            vertices = vertices,
-            rounding = androidx.graphics.shapes.CornerRounding(radius = 0.5f, smoothing = 0.9f),
-        )
-        GenericShape { size, _ ->
-            val hw = size.width / 2
-            val hh = size.height / 2
-            val segments = poly.cubics
-            if (segments.isEmpty()) return@GenericShape
-            moveTo(segments[0].anchor0X * hw + hw, segments[0].anchor0Y * hh + hh)
-            for (c in segments) {
-                cubicTo(
-                    c.control0X * hw + hw, c.control0Y * hh + hh,
-                    c.control1X * hw + hw, c.control1Y * hh + hh,
-                    c.anchor1X  * hw + hw, c.anchor1Y  * hh + hh,
-                )
-            }
-            close()
-        }
-    }
+    // ── Play/pause button shape (M3 Expressive cookie) ───────────────────────
+    val squigglyShape = MaterialShapes.Cookie12Sided.toShape()
 
     // ── Gradient background overlay (rendered outside Scaffold so it fills everything) ──
     Box(
@@ -584,10 +558,19 @@ private fun PlayerControls(
                 modifier = Modifier.size(36.dp))
         }
 
-        // Squiggly play/pause button
+        // Cookie play/pause button — rotates slowly while playing
+        val cookieRotation = remember { Animatable(0f) }
+        LaunchedEffect(state.isPlaying) {
+            if (state.isPlaying) {
+                while (true) {
+                    cookieRotation.animateTo(cookieRotation.value + 360f, tween(8000, easing = LinearEasing))
+                    cookieRotation.snapTo(0f)
+                }
+            }
+        }
         FilledIconButton(
             onClick  = onPlayPause,
-            modifier = Modifier.size(68.dp),
+            modifier = Modifier.size(68.dp).graphicsLayer { rotationZ = cookieRotation.value },
             shape    = squigglyShape,
             colors   = IconButtonDefaults.filledIconButtonColors(
                 containerColor = accentColor,
@@ -597,7 +580,7 @@ private fun PlayerControls(
             Icon(
                 imageVector        = if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                 contentDescription = if (state.isPlaying) "Pause" else "Play",
-                modifier           = Modifier.size(34.dp),
+                modifier           = Modifier.size(34.dp).graphicsLayer { rotationZ = -cookieRotation.value },
             )
         }
 
