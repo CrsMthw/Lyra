@@ -600,6 +600,7 @@ private fun TwoPaneLayout(
     BackHandler(enabled = showPlayerPanel) { showPlayerPanel = false }
 
     SharedTransitionLayout {
+    Box(modifier = Modifier.fillMaxSize()) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -732,6 +733,7 @@ private fun TwoPaneLayout(
                 }
             }
         }
+    }   // closes inset-padded Box
 
         // ── Pop-out player (hidden in short landscape) ────────────────────────
         if (!isShortScreen) {

@@ -12,8 +12,8 @@ android {
         applicationId = "com.crsmthw.lyra"
         minSdk        = 35
         targetSdk     = 37
-        versionCode   = 2
-        versionName   = "1.0.1"
+        versionCode   = 3
+        versionName   = "1.0.2"
 
         // AppAuth redirect scheme – must match AndroidManifest intent-filter
         manifestPlaceholders["appAuthRedirectScheme"] = "com.crsmthw.lyra"
