@@ -47,7 +47,9 @@
 
 ## Install
 
-Download the latest APK from the [Releases](../../releases) page and install it directly on your device. You may need to allow installation from unknown sources in your Android settings.
+[<img src="https://raw.githubusercontent.com/ImranR98/Obtainium/main/assets/graphics/badge_obtainium.png" alt="Get it on Obtainium" height="80">](http://apps.obtainium.imranr.dev/redirect.html?r=obtainium://add/https://github.com/CrsMthw/Lyra)
+
+Or download the latest APK from the [Releases](../../releases) page and install it directly on your device. You may need to allow installation from unknown sources in your Android settings.
 
 Before launching, you need to register the app in the Spotify Developer Dashboard — this is a one-time step and takes about two minutes.
 
