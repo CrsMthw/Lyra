@@ -18,7 +18,9 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.auth.SpotifyAuthManager
 import com.crsmthw.lyra.data.local.EncryptedPrefs
 import kotlinx.coroutines.launch
@@ -81,9 +83,9 @@ fun AuthScreen(
         ) {
 
             // ── App name ─────────────────────────────────────────────────────
-            Text("Lyra", style = MaterialTheme.typography.displaySmall)
+            Text(stringResource(R.string.app_name), style = MaterialTheme.typography.displaySmall)
             Text(
-                "A minimal Spotify client",
+                stringResource(R.string.auth_welcome_subtitle),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -94,8 +96,8 @@ fun AuthScreen(
             OutlinedTextField(
                 value            = clientId,
                 onValueChange    = { clientId = it; errorMessage = null },
-                label            = { Text("Spotify Client ID") },
-                placeholder      = { Text("Paste your Client ID here") },
+                label            = { Text(stringResource(R.string.auth_client_id_label)) },
+                placeholder      = { Text(stringResource(R.string.auth_client_id_placeholder)) },
                 singleLine       = true,
                 visualTransformation = if (showClientId) VisualTransformation.None
                                        else PasswordVisualTransformation(),
@@ -130,7 +132,7 @@ fun AuthScreen(
 
             // Helper text
             Text(
-                text  = "Get your Client ID at developer.spotify.com → Your App → Settings",
+                text  = stringResource(R.string.auth_help_text),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -168,7 +170,7 @@ fun AuthScreen(
                         strokeWidth = 2.dp,
                     )
                 } else {
-                    Text("Connect to Spotify")
+                    Text(stringResource(R.string.auth_connect_button))
                 }
             }
         }

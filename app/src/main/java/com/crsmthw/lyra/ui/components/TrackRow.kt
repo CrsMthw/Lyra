@@ -20,10 +20,10 @@ import com.crsmthw.lyra.util.toTimeString
 @Composable
 fun TrackRow(
     track      : SpotifyTrack,
-    isPlaying  : Boolean   = false,
     onClick    : () -> Unit,
-    onMoreClick: (() -> Unit)? = null,
     modifier   : Modifier = Modifier,
+    isPlaying  : Boolean   = false,
+    onMoreClick: (() -> Unit)? = null,
 ) {
     Row(
         modifier = modifier

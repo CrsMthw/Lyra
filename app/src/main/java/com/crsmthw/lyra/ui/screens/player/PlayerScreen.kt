@@ -1,3 +1,5 @@
+@file:Suppress("ConfigurationScreenWidthHeight")
+
 package com.crsmthw.lyra.ui.screens.player
 
 import androidx.compose.animation.AnimatedContentScope
@@ -35,7 +37,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
+import com.crsmthw.lyra.R
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.palette.graphics.Palette
@@ -238,7 +242,7 @@ fun PlayerScreen(
                                 )
                             }
                         } else {
-                            Icon(Icons.Default.Timer, contentDescription = "Sleep timer",
+                            Icon(Icons.Default.Timer, contentDescription = stringResource(R.string.player_sleep_timer),
                                 tint = onAccentColor)
                         }
                     }
@@ -548,13 +552,13 @@ private fun PlayerControls(
         verticalAlignment     = Alignment.CenterVertically,
     ) {
         IconButton(onClick = onToggleShuffle) {
-            Icon(Icons.Default.Shuffle, contentDescription = "Shuffle",
+            Icon(Icons.Default.Shuffle, contentDescription = stringResource(R.string.player_shuffle),
                 tint = if (state.shuffleEnabled) surfaceAccentColor
                        else MaterialTheme.colorScheme.onSurfaceVariant)
         }
 
         IconButton(onClick = onSkipPrev, modifier = Modifier.size(48.dp)) {
-            Icon(Icons.Default.SkipPrevious, contentDescription = "Previous",
+            Icon(Icons.Default.SkipPrevious, contentDescription = stringResource(R.string.player_previous),
                 modifier = Modifier.size(36.dp))
         }
 
@@ -579,13 +583,13 @@ private fun PlayerControls(
         ) {
             Icon(
                 imageVector        = if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                contentDescription = if (state.isPlaying) "Pause" else "Play",
+                contentDescription = if (state.isPlaying) stringResource(R.string.player_pause) else stringResource(R.string.player_play),
                 modifier           = Modifier.size(34.dp).graphicsLayer { rotationZ = -cookieRotation.value },
             )
         }
 
         IconButton(onClick = onSkipNext, modifier = Modifier.size(48.dp)) {
-            Icon(Icons.Default.SkipNext, contentDescription = "Next",
+            Icon(Icons.Default.SkipNext, contentDescription = stringResource(R.string.player_next),
                 modifier = Modifier.size(36.dp))
         }
 
@@ -595,7 +599,7 @@ private fun PlayerControls(
                     RepeatMode.TRACK -> Icons.Default.RepeatOne
                     else             -> Icons.Default.Repeat
                 },
-                contentDescription = "Repeat",
+                contentDescription = stringResource(R.string.player_repeat),
                 tint = if (state.repeatMode != RepeatMode.OFF) surfaceAccentColor
                        else MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -612,11 +616,18 @@ private fun SleepTimerDialog(
     onDismiss     : () -> Unit,
 ) {
     val options = listOf(0, 5, 15, 30, 45, 60)
-    val labels  = listOf("Off", "5 min", "15 min", "30 min", "45 min", "1 hour")
+    val labels  = listOf(
+        stringResource(R.string.sleep_timer_off),
+        stringResource(R.string.sleep_timer_5),
+        stringResource(R.string.sleep_timer_15),
+        stringResource(R.string.sleep_timer_30),
+        stringResource(R.string.sleep_timer_45),
+        stringResource(R.string.sleep_timer_60),
+    )
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title            = { Text("Sleep Timer") },
+        title            = { Text(stringResource(R.string.player_sleep_timer)) },
         text             = {
             Column {
                 options.zip(labels).forEach { (minutes, label) ->

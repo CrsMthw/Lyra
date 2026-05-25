@@ -1,3 +1,5 @@
+@file:Suppress("ConfigurationScreenWidthHeight")
+
 package com.crsmthw.lyra.ui.screens.library
 
 import androidx.activity.compose.BackHandler
@@ -70,6 +72,8 @@ import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.SuccessResult
 import coil3.toBitmap
+import androidx.compose.ui.res.stringResource
+import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.remote.model.SpotifyPlaylist
 import com.crsmthw.lyra.ui.components.MiniPlayer
 import com.crsmthw.lyra.ui.components.PlaylistCard
@@ -801,7 +805,8 @@ private fun RightPaneContent(
     }
     val artUrl       = mosaicFile?.absolutePath
         ?: playlist?.thumbnailUrl?.takeIf { it.isNotBlank() }
-    val playlistName = playlist?.name ?: "Liked Songs"
+    val likedSongsStr = stringResource(R.string.liked_songs)
+    val playlistName  = playlist?.name ?: likedSongsStr
     val trackCount   = when {
         isLikedSongs && state.likedSongsTotal > 0 -> state.likedSongsTotal
         isLikedSongs                              -> state.likedSongCount
@@ -911,7 +916,7 @@ private fun RightPaneContent(
                             Spacer(Modifier.height(16.dp))
                             Button(onClick = { viewModel.playPlaylist(playUri) }) {
                                 Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(8.dp))
-                                Text("Play")
+                                Text(stringResource(R.string.player_play))
                             }
                         }
                     }
@@ -1013,12 +1018,12 @@ private fun RightPaneHeader(
             FilledTonalButton(onClick = onShuffle) {
                 Icon(Icons.Default.Shuffle, null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(4.dp))
-                Text("Shuffle")
+                Text(stringResource(R.string.player_shuffle))
             }
             Button(onClick = onPlay) {
                 Icon(Icons.Default.PlayArrow, null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(4.dp))
-                Text("Play")
+                Text(stringResource(R.string.player_play))
             }
         }
 
@@ -1066,7 +1071,7 @@ private fun LikedSongsCard(
             Spacer(Modifier.width(12.dp))
 
             Column(modifier = Modifier.weight(1f)) {
-                Text("Liked Songs", style = MaterialTheme.typography.titleMedium, maxLines = 1)
+                Text(stringResource(R.string.liked_songs), style = MaterialTheme.typography.titleMedium, maxLines = 1)
                 Text("$count songs", style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
@@ -1229,8 +1234,8 @@ private fun TrackList(
 private fun CollapsingDetailBar(
     name             : String,
     collapseProgress : androidx.compose.runtime.State<Float>,
-    onBack           : (() -> Unit)? = null,
     modifier         : Modifier = Modifier,
+    onBack           : (() -> Unit)? = null,
     windowInsets     : WindowInsets = WindowInsets(0),
 ) {
     // Read in composition so recomposition (not just draw phase) drives the alpha update.
@@ -1534,11 +1539,11 @@ private fun PlayerCardContent(
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = playerViewModel::toggleShuffle) {
-                    Icon(Icons.Default.Shuffle, "Shuffle",
+                    Icon(Icons.Default.Shuffle, stringResource(R.string.player_shuffle),
                         tint = if (state.shuffleEnabled) surfaceAccentColor else MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 IconButton(onClick = onSkipPrev, modifier = Modifier.size(48.dp)) {
-                    Icon(Icons.Default.SkipPrevious, "Previous", modifier = Modifier.size(36.dp))
+                    Icon(Icons.Default.SkipPrevious, stringResource(R.string.player_previous), modifier = Modifier.size(36.dp))
                 }
                 val cookieRotation = remember { Animatable(0f) }
                 LaunchedEffect(state.isPlaying) {
@@ -1558,19 +1563,19 @@ private fun PlayerCardContent(
                 ) {
                     Icon(
                         imageVector = if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        contentDescription = if (state.isPlaying) "Pause" else "Play",
+                        contentDescription = if (state.isPlaying) stringResource(R.string.player_pause) else stringResource(R.string.player_play),
                         modifier = Modifier.size(30.dp).graphicsLayer { rotationZ = -cookieRotation.value },
                     )
                 }
                 IconButton(onClick = onSkipNext, modifier = Modifier.size(48.dp)) {
-                    Icon(Icons.Default.SkipNext, "Next", modifier = Modifier.size(36.dp))
+                    Icon(Icons.Default.SkipNext, stringResource(R.string.player_next), modifier = Modifier.size(36.dp))
                 }
                 IconButton(onClick = playerViewModel::cycleRepeat) {
                     Icon(
                         imageVector = when (state.repeatMode) {
                             RepeatMode.TRACK -> Icons.Default.RepeatOne else -> Icons.Default.Repeat
                         },
-                        contentDescription = "Repeat",
+                        contentDescription = stringResource(R.string.player_repeat),
                         tint = if (state.repeatMode != RepeatMode.OFF) surfaceAccentColor
                                else MaterialTheme.colorScheme.onSurfaceVariant,
                     )

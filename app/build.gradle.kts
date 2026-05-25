@@ -12,8 +12,8 @@ android {
         applicationId = "com.crsmthw.lyra"
         minSdk        = 35
         targetSdk     = 37
-        versionCode   = 3
-        versionName   = "1.0.2"
+        versionCode   = 4
+        versionName   = "1.0.3"
 
         // AppAuth redirect scheme – must match AndroidManifest intent-filter
         manifestPlaceholders["appAuthRedirectScheme"] = "com.crsmthw.lyra"
@@ -35,7 +35,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_21
     }
 
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
 }
 
 kotlin { jvmToolchain(21) }

@@ -2,6 +2,7 @@ package com.crsmthw.lyra.data.local
 
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.core.content.edit
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 
@@ -27,46 +28,46 @@ class EncryptedPrefs(context: Context) {
     // ── Spotify Client ID (user-supplied) ───────────────────────────────────
     var clientId: String
         get()      = prefs.getString(KEY_CLIENT_ID, "") ?: ""
-        set(value) { prefs.edit().putString(KEY_CLIENT_ID, value).apply() }
+        set(value) { prefs.edit { putString(KEY_CLIENT_ID, value) } }
 
     val hasClientId: Boolean get() = clientId.isNotBlank()
 
     // ── OAuth tokens ────────────────────────────────────────────────────────
     var accessToken: String
         get()      = prefs.getString(KEY_ACCESS_TOKEN, "") ?: ""
-        set(value) { prefs.edit().putString(KEY_ACCESS_TOKEN, value).apply() }
+        set(value) { prefs.edit { putString(KEY_ACCESS_TOKEN, value) } }
 
     var refreshToken: String
         get()      = prefs.getString(KEY_REFRESH_TOKEN, "") ?: ""
-        set(value) { prefs.edit().putString(KEY_REFRESH_TOKEN, value).apply() }
+        set(value) { prefs.edit { putString(KEY_REFRESH_TOKEN, value) } }
 
     /** Unix timestamp (ms) when the access token expires. */
     var tokenExpiry: Long
         get()      = prefs.getLong(KEY_TOKEN_EXPIRY, 0L)
-        set(value) { prefs.edit().putLong(KEY_TOKEN_EXPIRY, value).apply() }
+        set(value) { prefs.edit { putLong(KEY_TOKEN_EXPIRY, value) } }
 
     val isTokenValid: Boolean
         get() = accessToken.isNotBlank() &&
                 System.currentTimeMillis() < (tokenExpiry - TOKEN_BUFFER_MS)
 
     fun saveTokens(access: String, refresh: String, expiresInSeconds: Long) {
-        prefs.edit()
-            .putString(KEY_ACCESS_TOKEN, access)
-            .putString(KEY_REFRESH_TOKEN, refresh)
-            .putLong(KEY_TOKEN_EXPIRY, System.currentTimeMillis() + expiresInSeconds * 1000L)
-            .apply()
+        prefs.edit {
+            putString(KEY_ACCESS_TOKEN, access)
+            putString(KEY_REFRESH_TOKEN, refresh)
+            putLong(KEY_TOKEN_EXPIRY, System.currentTimeMillis() + expiresInSeconds * 1000L)
+        }
     }
 
     fun clearTokens() {
-        prefs.edit()
-            .remove(KEY_ACCESS_TOKEN)
-            .remove(KEY_REFRESH_TOKEN)
-            .remove(KEY_TOKEN_EXPIRY)
-            .apply()
+        prefs.edit {
+            remove(KEY_ACCESS_TOKEN)
+            remove(KEY_REFRESH_TOKEN)
+            remove(KEY_TOKEN_EXPIRY)
+        }
     }
 
     fun clearAll() {
-        prefs.edit().clear().apply()
+        prefs.edit { clear() }
     }
 
     companion object {

@@ -148,14 +148,14 @@ app/src/main/java/com/crsmthw/lyra/
 
 | Layer | Library |
 |---|---|
-| UI | Jetpack Compose + Material3 1.5.0-alpha19 |
+| UI | Jetpack Compose + Material3 1.5.0-alpha20 |
 | Navigation | Navigation Compose 2.9.8 |
 | Auth | AppAuth 0.11.1 (PKCE) |
 | Network | Retrofit 2.11.0 + OkHttp 4.12.0 |
 | Images | Coil 3 |
 | Secure storage | EncryptedSharedPreferences (AES-256-GCM) |
 | Settings | DataStore Preferences |
-| Build | AGP 9.2.1 · Kotlin 2.3.10 · KSP 2.3.8 |
+| Build | AGP 9.2.1 · Kotlin 2.3.21 · KSP 2.3.8 |
 
 ---
 

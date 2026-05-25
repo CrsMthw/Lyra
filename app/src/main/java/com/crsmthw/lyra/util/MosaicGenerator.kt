@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.RectF
+import androidx.core.graphics.createBitmap
 import coil3.BitmapImage
 import coil3.ImageLoader
 import coil3.request.ImageRequest
@@ -50,7 +51,7 @@ class MosaicGenerator(
             RectF(half.toFloat(), half.toFloat(), sizePx.toFloat(), sizePx.toFloat()),
         )
 
-        val result = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+        val result = createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(result)
 
         if (softBitmaps.size == 1) {

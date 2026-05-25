@@ -27,7 +27,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
+import com.crsmthw.lyra.R
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.crsmthw.lyra.data.remote.model.SpotifyTrack
@@ -141,7 +143,7 @@ fun MiniPlayer(
                     ) {
                         Icon(
                             imageVector        = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            contentDescription = if (isPlaying) "Pause" else "Play",
+                            contentDescription = if (isPlaying) stringResource(R.string.player_pause) else stringResource(R.string.player_play),
                             modifier           = Modifier.size(22.dp),
                         )
                     }
@@ -153,7 +155,7 @@ fun MiniPlayer(
                 ) {
                     Icon(
                         Icons.Default.SkipNext,
-                        contentDescription = "Next",
+                        contentDescription = stringResource(R.string.player_next),
                         modifier           = Modifier.size(22.dp),
                     )
                 }

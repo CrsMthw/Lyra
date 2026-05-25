@@ -27,6 +27,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.crsmthw.lyra.BuildConfig
 import com.crsmthw.lyra.R
 import com.crsmthw.lyra.ui.theme.ThemeMode
 
@@ -53,7 +54,7 @@ fun SettingsScreen(
             TopAppBar(
                 modifier     = Modifier.statusBarsPadding(),
                 windowInsets = WindowInsets(0),
-                title        = { Text("Settings") },
+                title        = { Text(stringResource(R.string.settings_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -72,27 +73,27 @@ fun SettingsScreen(
         ) {
 
             // ── Spotify ───────────────────────────────────────────────────────
-            SettingsSectionHeader("Spotify")
+            SettingsSectionHeader(stringResource(R.string.settings_spotify))
 
             SettingsItem(
                 icon    = Icons.Default.Key,
-                title   = "Client ID",
+                title   = stringResource(R.string.settings_client_id),
                 subtitle= viewModel.clientIdMasked(),
             )
 
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
 
             // ── Appearance ────────────────────────────────────────────────────
-            SettingsSectionHeader("Appearance")
+            SettingsSectionHeader(stringResource(R.string.settings_appearance))
 
             // Theme picker
             SettingsItem(
                 icon     = Icons.Default.Palette,
-                title    = "Theme",
+                title    = stringResource(R.string.settings_theme),
                 subtitle = when (themeMode) {
-                    ThemeMode.SYSTEM -> "System default"
-                    ThemeMode.LIGHT  -> "Light"
-                    ThemeMode.DARK   -> "Dark"
+                    ThemeMode.SYSTEM -> stringResource(R.string.settings_theme_system)
+                    ThemeMode.LIGHT  -> stringResource(R.string.settings_theme_light)
+                    ThemeMode.DARK   -> stringResource(R.string.settings_theme_dark)
                 },
                 onClick  = { showThemeDialog = true },
             )
@@ -100,8 +101,8 @@ fun SettingsScreen(
             // AMOLED toggle (only meaningful when dark is active)
             SettingsToggleItem(
                 icon    = Icons.Default.DarkMode,
-                title   = "Pure Black (AMOLED)",
-                subtitle= "Ultra-dark background in dark mode",
+                title   = stringResource(R.string.settings_amoled),
+                subtitle= stringResource(R.string.settings_amoled_desc),
                 checked = amoledBlack,
                 onCheckedChange = viewModel::setAmoledBlack,
             )
@@ -109,8 +110,8 @@ fun SettingsScreen(
             // Material You toggle
             SettingsToggleItem(
                 icon    = Icons.Default.ColorLens,
-                title   = "Material You Colors",
-                subtitle= "Extract accent color from your wallpaper",
+                title   = stringResource(R.string.settings_dynamic_color),
+                subtitle= stringResource(R.string.settings_dynamic_color_desc),
                 checked = dynamicColor,
                 onCheckedChange = viewModel::setDynamicColor,
             )
@@ -206,7 +207,7 @@ fun SettingsScreen(
 
             SettingsItem(
                 icon    = Icons.AutoMirrored.Filled.Logout,
-                title   = "Disconnect Spotify",
+                title   = stringResource(R.string.settings_logout),
                 subtitle= "Clears tokens and returns to login",
                 onClick = { showLogoutDialog = true },
                 tintError = true,
@@ -242,9 +243,9 @@ fun SettingsScreen(
                             )
                             Spacer(Modifier.width(8.dp))
                             Text(when (mode) {
-                                ThemeMode.SYSTEM -> "System default"
-                                ThemeMode.LIGHT  -> "Light"
-                                ThemeMode.DARK   -> "Dark"
+                                ThemeMode.SYSTEM -> stringResource(R.string.settings_theme_system)
+                                ThemeMode.LIGHT  -> stringResource(R.string.settings_theme_light)
+                                ThemeMode.DARK   -> stringResource(R.string.settings_theme_dark)
                             })
                         }
                     }
@@ -303,7 +304,7 @@ private fun AboutSection() {
         Spacer(Modifier.height(16.dp))
 
         Text(
-            text      = "Lyra",
+            text      = stringResource(R.string.app_name),
             style     = MaterialTheme.typography.headlineLarge,
             textAlign = TextAlign.Center,
         )
@@ -311,6 +312,13 @@ private fun AboutSection() {
         Text(
             text      = stringResource(R.string.about_tagline),
             style     = MaterialTheme.typography.bodyMedium,
+            color     = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+
+        Text(
+            text      = stringResource(R.string.settings_version, BuildConfig.VERSION_NAME),
+            style     = MaterialTheme.typography.bodySmall,
             color     = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
@@ -413,7 +421,7 @@ private fun AboutSection() {
         Spacer(Modifier.height(16.dp))
 
         Text(
-            text      = "Because good music deserves\na clean interface.",
+            text      = stringResource(R.string.about_bottom_note),
             style     = MaterialTheme.typography.bodySmall,
             color     = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,

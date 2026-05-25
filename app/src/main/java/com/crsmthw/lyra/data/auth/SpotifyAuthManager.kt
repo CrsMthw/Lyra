@@ -2,7 +2,7 @@ package com.crsmthw.lyra.data.auth
 
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
+import androidx.core.net.toUri
 import com.crsmthw.lyra.data.local.EncryptedPrefs
 import net.openid.appauth.*
 import kotlin.coroutines.resume
@@ -51,15 +51,15 @@ class SpotifyAuthManager(
 
     fun buildAuthIntent(clientId: String): Intent {
         val config = AuthorizationServiceConfiguration(
-            Uri.parse(AUTH_ENDPOINT),
-            Uri.parse(TOKEN_ENDPOINT),
+            AUTH_ENDPOINT.toUri(),
+            TOKEN_ENDPOINT.toUri(),
         )
 
         val request = AuthorizationRequest.Builder(
             config,
             clientId,
             ResponseTypeValues.CODE,
-            Uri.parse(REDIRECT_URI),
+            REDIRECT_URI.toUri(),
         )
             .setScopes(SCOPES)
             .setAdditionalParameters(mapOf("show_dialog" to "true"))
@@ -112,8 +112,8 @@ class SpotifyAuthManager(
         }
 
         val config = AuthorizationServiceConfiguration(
-            Uri.parse(AUTH_ENDPOINT),
-            Uri.parse(TOKEN_ENDPOINT),
+            AUTH_ENDPOINT.toUri(),
+            TOKEN_ENDPOINT.toUri(),
         )
 
         val refreshRequest = TokenRequest.Builder(config, clientId)

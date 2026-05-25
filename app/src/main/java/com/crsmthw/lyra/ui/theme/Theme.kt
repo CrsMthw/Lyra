@@ -1,6 +1,5 @@
 package com.crsmthw.lyra.ui.theme
 
-import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialExpressiveTheme
@@ -61,7 +60,7 @@ fun LyraTheme(
 
     // Resolve base scheme
     var colorScheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+        dynamicColor -> {
             if (darkTheme) dynamicDarkColorScheme(context)
             else           dynamicLightColorScheme(context)
         }
