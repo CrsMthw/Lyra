@@ -35,6 +35,8 @@ class SpotifyAuthManager(
             "user-library-modify",
             "playlist-read-private",
             "playlist-read-collaborative",
+            "playlist-modify-public",
+            "playlist-modify-private",
             "user-read-playback-state",
             "user-modify-playback-state",
             "user-read-currently-playing",

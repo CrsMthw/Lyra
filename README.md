@@ -10,7 +10,9 @@
 
 - Library browser with playlist and liked songs support
 - Full player with seek, shuffle, repeat, sleep timer, and queue-aware playback
+- Add to / remove from playlists directly from the player
 - Search
+- Pull-to-refresh on both the library and track lists
 - Adaptive two-pane layout for foldables and tablets
 - Material You dynamic colour + AMOLED black mode
 - Tokens stored encrypted via AES-256-GCM (Android Keystore)

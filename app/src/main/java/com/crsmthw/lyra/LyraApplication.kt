@@ -5,6 +5,7 @@ import android.content.Context
 import coil3.ImageLoader
 import coil3.SingletonImageLoader
 import com.crsmthw.lyra.di.AppContainer
+import com.crsmthw.lyra.service.LyraForegroundService
 
 class LyraApplication : Application(), SingletonImageLoader.Factory {
     lateinit var container: AppContainer
@@ -12,6 +13,7 @@ class LyraApplication : Application(), SingletonImageLoader.Factory {
 
     override fun onCreate() {
         super.onCreate()
+        LyraForegroundService.createChannel(this)
         container = AppContainer(this)
     }
 

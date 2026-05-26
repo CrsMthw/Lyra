@@ -19,6 +19,13 @@
     <string name="player_next">Next</string>
     <string name="player_repeat">Repeat</string>
     <string name="player_sleep_timer">Sleep Timer</string>
+    <string name="player_share">Share</string>
+    <string name="player_add_to_playlist">Add to playlist</string>
+    <string name="player_add_to_playlist_title">Add to playlist</string>
+    <string name="player_add_to_playlist_empty">No playlists found</string>
+    <string name="player_add_to_playlist_success">Added to %1$s</string>
+    <string name="player_remove_from_playlist_success">Removed from %1$s</string>
+    <string name="player_add_to_playlist_403">Reconnect Spotify in Settings to add to playlists</string>
 
     <!-- Settings -->
     <string name="settings_title">Settings</string>
@@ -54,6 +61,11 @@
     <string name="sleep_timer_30">30 min</string>
     <string name="sleep_timer_45">45 min</string>
     <string name="sleep_timer_60">1 hour</string>
+
+    <!-- Notification -->
+    <string name="notification_channel_name">Now Playing</string>
+    <string name="notification_channel_desc">Shows the current track and sleep timer controls</string>
+    <string name="notification_cancel_timer">Cancel timer · %d min</string>
 
     <!-- Errors -->
     <string name="error_generic">Something went wrong</string>

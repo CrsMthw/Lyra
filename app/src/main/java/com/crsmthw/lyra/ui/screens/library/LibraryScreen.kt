@@ -75,6 +75,9 @@ import coil3.toBitmap
 import androidx.compose.ui.res.stringResource
 import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.remote.model.SpotifyPlaylist
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import com.crsmthw.lyra.ui.components.MiniPlayer
 import com.crsmthw.lyra.ui.components.PlaylistCard
 import com.crsmthw.lyra.ui.components.TrackRow
@@ -82,6 +85,7 @@ import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import com.crsmthw.lyra.ui.screens.player.RepeatMode
 import com.crsmthw.lyra.util.toTimeString
 import java.io.File
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -266,6 +270,7 @@ private fun SinglePaneLayout(
                     playerViewModel = playerViewModel,
                     mosaicDir       = mosaicDir,
                     onTrackClick    = onOpenPlayer,
+                    onRefresh       = viewModel::refreshCurrentTracks,
                     onBack          = { viewModel.clearSelection() },
                     barWindowInsets = WindowInsets.statusBars,
                 )
@@ -465,11 +470,38 @@ private fun LibraryBrowserPane(
                     }
                 }
             } else {
-                LazyColumn(
-                    state          = listState,
-                    modifier       = Modifier.fillMaxSize(),
-                    contentPadding = listContentPadding,
-                ) { listBody() }
+                val landscapePtrState = rememberPullToRefreshState()
+                PullToRefreshBox(
+                    isRefreshing = state.isLibraryRefreshing,
+                    onRefresh    = viewModel::refreshLibrary,
+                    state        = landscapePtrState,
+                    modifier     = Modifier.fillMaxSize(),
+                    indicator    = {
+                        if (state.isLibraryRefreshing) {
+                            ContainedLoadingIndicator(
+                                modifier = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .statusBarsPadding()
+                                    .padding(top = 64.dp + 12.dp),
+                            )
+                        } else {
+                            PullToRefreshDefaults.Indicator(
+                                state        = landscapePtrState,
+                                isRefreshing = false,
+                                modifier     = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .statusBarsPadding()
+                                    .padding(top = 64.dp),
+                            )
+                        }
+                    },
+                ) {
+                    LazyColumn(
+                        state          = listState,
+                        modifier       = Modifier.fillMaxSize(),
+                        contentPadding = listContentPadding,
+                    ) { listBody() }
+                }
             }
 
             TopAppBar(
@@ -546,11 +578,34 @@ private fun LibraryBrowserPane(
                         }
                     }
                 } else {
-                    LazyColumn(
-                        state          = listState,
-                        modifier       = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(bottom = 100.dp + navBarBottomDp),
-                    ) { listBody() }
+                    val portraitPtrState = rememberPullToRefreshState()
+                    PullToRefreshBox(
+                        isRefreshing = state.isLibraryRefreshing,
+                        onRefresh    = viewModel::refreshLibrary,
+                        state        = portraitPtrState,
+                        modifier     = Modifier.fillMaxSize(),
+                        indicator    = {
+                            if (state.isLibraryRefreshing) {
+                                ContainedLoadingIndicator(
+                                    modifier = Modifier
+                                        .align(Alignment.TopCenter)
+                                        .padding(top = 12.dp),
+                                )
+                            } else {
+                                PullToRefreshDefaults.Indicator(
+                                    state        = portraitPtrState,
+                                    isRefreshing = false,
+                                    modifier     = Modifier.align(Alignment.TopCenter),
+                                )
+                            }
+                        },
+                    ) {
+                        LazyColumn(
+                            state          = listState,
+                            modifier       = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(bottom = 100.dp + navBarBottomDp),
+                        ) { listBody() }
+                    }
                 }
             }
         }
@@ -708,6 +763,7 @@ private fun TwoPaneLayout(
                                 playerViewModel = playerViewModel,
                                 mosaicDir       = mosaicDir,
                                 onTrackClick    = { showPlayerPanel = true },
+                                onRefresh       = viewModel::refreshCurrentTracks,
                             )
                         }
                     }
@@ -789,6 +845,7 @@ private fun RightPaneContent(
     playerViewModel : PlayerViewModel,
     mosaicDir       : File,
     onTrackClick    : () -> Unit,
+    onRefresh       : () -> Unit,
     onBack          : (() -> Unit)? = null,
     barWindowInsets : WindowInsets = WindowInsets(0),
 ) {
@@ -834,6 +891,7 @@ private fun RightPaneContent(
     val thresholdPx      = with(density) { 80.dp.toPx() }
     val snapThreshold    = thresholdPx / 2f
     val listState        = rememberLazyListState()
+    val pullToRefreshState   = rememberPullToRefreshState()
     var barHeightPx   by remember { mutableIntStateOf(0) }
     val collapseProgress = remember(listState) {
         derivedStateOf {
@@ -844,29 +902,68 @@ private fun RightPaneContent(
         }
     }
 
-    LaunchedEffect(listState) {
-        snapshotFlow { listState.isScrollInProgress }
-            .collect { isScrolling ->
+    LaunchedEffect(listState, pullToRefreshState) {
+        snapshotFlow { listState.isScrollInProgress to pullToRefreshState.distanceFraction }
+            .collect { (isScrolling, ptrFraction) ->
                 if (isScrolling) return@collect
+                if (ptrFraction > 0f) return@collect
+                if (state.isRefreshing) return@collect
                 if (listState.firstVisibleItemIndex > 0) return@collect
                 val offset = listState.firstVisibleItemScrollOffset
                 if (offset == 0) return@collect
+                val headerInfo = listState.layoutInfo.visibleItemsInfo
+                    .firstOrNull { it.key == "playlist_header" }
+                val targetOffset = if (headerInfo != null)
+                    (headerInfo.size - barHeightPx).coerceAtLeast(0) else 0
                 if (offset.toFloat() >= snapThreshold) {
-                    val headerInfo = listState.layoutInfo.visibleItemsInfo
-                        .firstOrNull { it.key == "playlist_header" }
-                    val targetOffset = if (headerInfo != null)
-                        (headerInfo.size - barHeightPx).coerceAtLeast(0) else 0
-                    listState.animateScrollToItem(0, scrollOffset = targetOffset)
+                    val info        = listState.layoutInfo
+                    val lastVisible = info.visibleItemsInfo.lastOrNull()
+                    val canReachTarget = if (lastVisible == null || lastVisible.index < info.totalItemsCount - 1) {
+                        true // items below viewport — can still scroll
+                    } else {
+                        val remaining = (lastVisible.offset + lastVisible.size + info.afterContentPadding - info.viewportSize.height).coerceAtLeast(0)
+                        offset + remaining >= targetOffset
+                    }
+                    if (canReachTarget) {
+                        try { listState.animateScrollToItem(0, scrollOffset = targetOffset) }
+                        catch (_: CancellationException) { }
+                    }
+                    // else: list too short to collapse header — leave it wherever it settled
                 } else {
-                    listState.animateScrollToItem(0)
+                    try { listState.animateScrollToItem(0) }
+                    catch (_: CancellationException) { }
                 }
             }
     }
 
-    val canLoadMore = isLikedSongs && state.likedSongsTotal > 0 &&
-                      state.likedSongsOffset < state.likedSongsTotal
+    val canLoadMore          = isLikedSongs && state.likedSongsTotal > 0 &&
+                               state.likedSongsOffset < state.likedSongsTotal
 
     Box(modifier = Modifier.fillMaxSize()) {
+        PullToRefreshBox(
+            isRefreshing = state.isRefreshing,
+            onRefresh    = onRefresh,
+            state        = pullToRefreshState,
+            modifier     = Modifier.fillMaxSize(),
+            indicator    = {
+                if (state.isRefreshing) {
+                    ContainedLoadingIndicator(
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .statusBarsPadding()
+                            .padding(top = 12.dp),
+                    )
+                } else {
+                    PullToRefreshDefaults.Indicator(
+                        state        = pullToRefreshState,
+                        isRefreshing = false,
+                        modifier     = Modifier
+                            .align(Alignment.TopCenter)
+                            .statusBarsPadding(),
+                    )
+                }
+            },
+        ) {
         TrackList(
             tracks         = state.currentTracks,
             currentTrackId = currentTrackId,
@@ -924,6 +1021,7 @@ private fun RightPaneContent(
                 else -> null
             },
         )
+        } // PullToRefreshBox
         CollapsingDetailBar(
             name             = playlistName,
             collapseProgress = collapseProgress,

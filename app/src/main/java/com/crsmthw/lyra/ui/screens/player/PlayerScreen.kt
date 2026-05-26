@@ -34,6 +34,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import android.content.Intent
+import android.widget.Toast
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
@@ -48,6 +51,7 @@ import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.SuccessResult
 import coil3.toBitmap
+import com.crsmthw.lyra.ui.components.AddToPlaylistSheet
 import com.crsmthw.lyra.util.toTimeString
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -67,9 +71,9 @@ fun PlayerScreen(
     animatedContentScope  : AnimatedContentScope? = null,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val pickerState by viewModel.pickerState.collectAsStateWithLifecycle()
     var showSleepTimerDialog by remember { mutableStateOf(false) }
-    @Suppress("SpellCheckingInspection")
-    val snackbarHostState = remember { SnackbarHostState() }
+    var showPlaylistPicker   by rememberSaveable { mutableStateOf(false) }
     val isLandscape = LocalConfiguration.current.let { it.screenWidthDp > it.screenHeightDp }
 
     // ── Dynamic color extraction ──────────────────────────────────────────────
@@ -155,7 +159,22 @@ fun PlayerScreen(
     }
 
     LaunchedEffect(state.error) {
-        state.error?.let { snackbarHostState.showSnackbar(it, duration = SnackbarDuration.Short) }
+        state.error?.let { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
+    }
+
+    val addResult = pickerState.addResult
+    val addResultToastMsg = when (addResult) {
+        is AddToPlaylistResult.Added          -> stringResource(R.string.player_add_to_playlist_success, addResult.playlistName)
+        is AddToPlaylistResult.Removed        -> stringResource(R.string.player_remove_from_playlist_success, addResult.playlistName)
+        is AddToPlaylistResult.NeedsReconnect -> stringResource(R.string.player_add_to_playlist_403)
+        is AddToPlaylistResult.Error          -> addResult.message ?: stringResource(R.string.error_generic)
+        null                                  -> null
+    }
+    LaunchedEffect(addResult) {
+        addResultToastMsg?.let {
+            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+            viewModel.clearPickerResult()
+        }
     }
 
     val onSkipNext: () -> Unit = {
@@ -188,7 +207,6 @@ fun PlayerScreen(
     )
 
     Scaffold(
-        snackbarHost        = { SnackbarHost(snackbarHostState) },
         contentWindowInsets = WindowInsets(0),
         containerColor      = Color.Transparent,
         topBar = {
@@ -344,6 +362,17 @@ fun PlayerScreen(
                         onToggleShuffle    = viewModel::toggleShuffle,
                         onCycleRepeat      = viewModel::cycleRepeat,
                         onSeek             = viewModel::seekTo,
+                        onShare            = {
+                            state.currentTrack?.id?.let { id ->
+                                context.startActivity(Intent.createChooser(
+                                    Intent(Intent.ACTION_SEND).apply {
+                                        putExtra(Intent.EXTRA_TEXT, "https://open.spotify.com/track/$id")
+                                        type = "text/plain"
+                                    }, null
+                                ))
+                            }
+                        },
+                        onAddToPlaylist    = { viewModel.loadOwnedPlaylists(); showPlaylistPicker = true },
                     )
                 }
             }
@@ -437,10 +466,29 @@ fun PlayerScreen(
                         onToggleShuffle    = viewModel::toggleShuffle,
                         onCycleRepeat      = viewModel::cycleRepeat,
                         onSeek             = viewModel::seekTo,
+                        onShare            = {
+                            state.currentTrack?.id?.let { id ->
+                                context.startActivity(Intent.createChooser(
+                                    Intent(Intent.ACTION_SEND).apply {
+                                        putExtra(Intent.EXTRA_TEXT, "https://open.spotify.com/track/$id")
+                                        type = "text/plain"
+                                    }, null
+                                ))
+                            }
+                        },
+                        onAddToPlaylist    = { viewModel.loadOwnedPlaylists(); showPlaylistPicker = true },
                     )
                 }
             }
         }
+    }
+
+    if (showPlaylistPicker) {
+        AddToPlaylistSheet(
+            pickerState = pickerState,
+            onSelect    = viewModel::togglePlaylistTrack,
+            onDismiss   = { showPlaylistPicker = false },
+        )
     }
 
     if (showSleepTimerDialog) {
@@ -468,6 +516,8 @@ private fun PlayerControls(
     onToggleShuffle : () -> Unit,
     onCycleRepeat   : () -> Unit,
     onSeek          : (Float) -> Unit,
+    onShare         : () -> Unit,
+    onAddToPlaylist : () -> Unit,
 ) {
     // Track name + like
     Row(
@@ -606,7 +656,25 @@ private fun PlayerControls(
         }
     }
 
-    Spacer(Modifier.height(4.dp))
+    Row(
+        modifier              = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.End,
+    ) {
+        IconButton(onClick = onShare, enabled = state.currentTrack != null) {
+            Icon(
+                imageVector        = Icons.Default.Share,
+                contentDescription = stringResource(R.string.player_share),
+                tint               = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        IconButton(onClick = onAddToPlaylist, enabled = state.currentTrack != null) {
+            Icon(
+                imageVector        = Icons.Default.LibraryAdd,
+                contentDescription = stringResource(R.string.player_add_to_playlist),
+                tint               = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
 }
 
 @Composable

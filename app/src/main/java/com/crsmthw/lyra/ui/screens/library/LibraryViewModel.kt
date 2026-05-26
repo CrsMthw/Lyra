@@ -27,6 +27,8 @@ data class LibraryUiState(
     val isLoading             : Boolean                = true,
     val isLoadingTracks       : Boolean                = false,
     val isLoadingMoreTracks   : Boolean                = false,
+    val isRefreshing          : Boolean                = false,
+    val isLibraryRefreshing   : Boolean                = false,
     val likedSongsOffset      : Int                    = 0,
     val likedSongsTotal       : Int                    = 0,
     val error                 : String?                = null,  // blocking — shown when no cache
@@ -121,6 +123,53 @@ class LibraryViewModel(
         }
     }
 
+    fun refreshLibrary() {
+        if (_uiState.value.isLibraryRefreshing) return
+        _uiState.update { it.copy(isLibraryRefreshing = true, refreshError = null) }
+        viewModelScope.launch {
+            repository.getCurrentUser().fold(
+                onSuccess = { user -> _uiState.update { it.copy(user = user) } },
+                onFailure = { },
+            )
+
+            val playlistsResult = repository.getUserPlaylists()
+            if (playlistsResult.isFailure) {
+                val e = playlistsResult.exceptionOrNull()
+                if (!e.isTransientNetworkError()) {
+                    _uiState.update { it.copy(refreshError = e?.message) }
+                }
+                _uiState.update { it.copy(isLibraryRefreshing = false) }
+                return@launch
+            }
+            _uiState.update { it.copy(playlists = playlistsResult.getOrThrow().items) }
+
+            repository.getLikedSongs(limit = 1).fold(
+                onSuccess = { resp -> _uiState.update { it.copy(likedSongCount = resp.total) } },
+                onFailure = { },
+            )
+
+            repository.getFeaturedPlaylists().fold(
+                onSuccess = { resp -> _uiState.update { it.copy(featuredPlaylists = resp.playlists.items) } },
+                onFailure = { },
+            )
+
+            _uiState.update { it.copy(isLibraryRefreshing = false) }
+
+            val s = _uiState.value
+            withContext(Dispatchers.IO) {
+                val existingTrackLists = cache.load()?.trackLists ?: emptyMap()
+                cache.save(LibraryCacheData(
+                    playlists         = s.playlists,
+                    featuredPlaylists = s.featuredPlaylists,
+                    likedSongCount    = s.likedSongCount,
+                    user              = s.user,
+                    trackLists        = existingTrackLists,
+                ))
+            }
+            generateMissingMosaicsAsync(s.playlists + s.featuredPlaylists, cache.load()?.trackLists ?: emptyMap())
+        }
+    }
+
     private fun generateMissingMosaicsAsync(
         playlists  : List<SpotifyPlaylist>,
         trackLists : Map<String, CachedTrackList>,
@@ -142,35 +191,38 @@ class LibraryViewModel(
         _uiState.update { it.copy(currentPlaylist = playlist, isLoadingTracks = true, currentTracks = emptyList(), error = null) }
         viewModelScope.launch {
             val snapshotId = playlist.snapshotId
+            var cacheHit   = false
             if (snapshotId != null) {
                 val cached = withContext(Dispatchers.IO) { cache.loadTrackList(playlist.id) }
                 if (cached != null && cached.snapshotId == snapshotId) {
                     _uiState.update { it.copy(currentTracks = cached.tracks, isLoadingTracks = false) }
-                    // Generate mosaic if missing (tracks already cached, Coil has album art)
                     if (playlist.id !in _uiState.value.playlistsWithMosaics) {
                         withContext(Dispatchers.IO) { mosaicGenerator.generate(playlist.id, cached.tracks) }
                         _uiState.update { s -> s.copy(playlistsWithMosaics = s.playlistsWithMosaics + playlist.id) }
                     }
-                    return@launch
+                    cacheHit = true
                 }
             }
 
+            // Always fetch from network — foreground load if no cache, silent background refresh if cache hit
             repository.getPlaylistTracks(playlist.id).fold(
                 onSuccess = { resp ->
+                    if (_uiState.value.currentPlaylist?.id != playlist.id) return@fold
                     val tracks = (resp.items ?: emptyList()).mapNotNull { it.resolvedTrack }.filter { it.isPlayable != false }
                     _uiState.update { it.copy(currentTracks = tracks, isLoadingTracks = false) }
                     if (snapshotId != null) {
                         withContext(Dispatchers.IO) { cache.saveTrackList(playlist.id, snapshotId, tracks) }
                     }
-                    // Always regenerate mosaic on fresh fetch (snapshot changed or first load)
                     withContext(Dispatchers.IO) { mosaicGenerator.generate(playlist.id, tracks) }
                     _uiState.update { s -> s.copy(playlistsWithMosaics = s.playlistsWithMosaics + playlist.id) }
                 },
                 onFailure = { e ->
-                    val msg = if (e.message?.contains("403") == true)
-                        "Track list unavailable for this playlist. You can still play it with the ▶ button."
-                    else e.message
-                    _uiState.update { it.copy(error = msg, isLoadingTracks = false) }
+                    if (!cacheHit) {
+                        val msg = if (e.message?.contains("403") == true)
+                            "Track list unavailable for this playlist. You can still play it with the ▶ button."
+                        else e.message
+                        _uiState.update { it.copy(error = msg, isLoadingTracks = false) }
+                    }
                 },
             )
         }
@@ -295,6 +347,46 @@ class LibraryViewModel(
                     _uiState.update { it.copy(isLoadingMoreTracks = false) }
                 },
             )
+        }
+    }
+
+    fun refreshCurrentTracks() {
+        if (_uiState.value.isRefreshing) return
+        _uiState.update { it.copy(isRefreshing = true) }
+        viewModelScope.launch {
+            val s = _uiState.value
+            if (s.currentPlaylist == null) {
+                repository.getLikedSongs(limit = 50, offset = 0).fold(
+                    onSuccess = { resp ->
+                        val tracks = (resp.items ?: emptyList()).mapNotNull { it.track }.filter { it.isPlayable != false }
+                        _uiState.update { it.copy(
+                            currentTracks    = tracks,
+                            likedSongsOffset = tracks.size,
+                            likedSongsTotal  = resp.total,
+                            likedSongCount   = resp.total,
+                        )}
+                        withContext(Dispatchers.IO) {
+                            cache.saveTrackList(LIKED_SONGS_KEY, resp.total.toString(), tracks)
+                        }
+                    },
+                    onFailure = { },
+                )
+            } else {
+                val playlist = s.currentPlaylist
+                repository.getPlaylistTracks(playlist.id).fold(
+                    onSuccess = { resp ->
+                        val tracks = (resp.items ?: emptyList()).mapNotNull { it.resolvedTrack }.filter { it.isPlayable != false }
+                        _uiState.update { it.copy(currentTracks = tracks) }
+                        if (playlist.snapshotId != null) {
+                            withContext(Dispatchers.IO) { cache.saveTrackList(playlist.id, playlist.snapshotId, tracks) }
+                        }
+                        withContext(Dispatchers.IO) { mosaicGenerator.generate(playlist.id, tracks) }
+                        _uiState.update { s -> s.copy(playlistsWithMosaics = s.playlistsWithMosaics + playlist.id) }
+                    },
+                    onFailure = { },
+                )
+            }
+            _uiState.update { it.copy(isRefreshing = false) }
         }
     }
 

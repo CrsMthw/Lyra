@@ -168,3 +168,20 @@ data class FeaturedPlaylistsResponse(
     val message  : String?,
     val playlists: UserPlaylistsResponse,
 )
+
+// ── Add / remove playlist items requests ─────────────────────────────────────
+data class AddTracksRequest(
+    @SerializedName("uris") val uris: List<String>,
+)
+
+data class RemoveItemEntry(
+    @SerializedName("uri") val uri: String,
+)
+
+data class RemoveItemsRequest(
+    @SerializedName("items") val items: List<RemoveItemEntry>,
+)
+
+data class SnapshotIdResponse(
+    @SerializedName("snapshot_id") val snapshotId: String? = null,
+)

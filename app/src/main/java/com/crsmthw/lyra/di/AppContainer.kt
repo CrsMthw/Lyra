@@ -12,6 +12,7 @@ import com.crsmthw.lyra.data.local.LibraryCache
 import com.crsmthw.lyra.data.local.LyraDataStore
 import com.crsmthw.lyra.data.remote.SpotifyApiService
 import com.crsmthw.lyra.data.remote.SpotifyRemoteManager
+import com.crsmthw.lyra.data.player.PlayerStateManager
 import com.crsmthw.lyra.data.repository.SettingsRepository
 import com.crsmthw.lyra.data.repository.SpotifyRepository
 import okhttp3.OkHttpClient
@@ -71,4 +72,7 @@ class AppContainer(context: Context) {
     // ── Repositories ─────────────────────────────────────────────────────────
     val spotifyRepository  = SpotifyRepository(spotifyApiService, encryptedPrefs)
     val settingsRepository = SettingsRepository(dataStore)
+
+    // ── App-scoped player state ───────────────────────────────────────────────
+    val playerStateManager = PlayerStateManager(context, spotifyRepository, remoteManager)
 }

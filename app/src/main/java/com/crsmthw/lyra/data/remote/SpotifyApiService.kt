@@ -43,6 +43,18 @@ interface SpotifyApiService {
         @Query("offset") offset: Int = 0,
     ): Response<PlaylistTracksResponse>
 
+    @POST("playlists/{id}/items")
+    suspend fun addTracksToPlaylist(
+        @Path("id") id  : String,
+        @Body       body: AddTracksRequest,
+    ): Response<SnapshotIdResponse>
+
+    @HTTP(method = "DELETE", path = "playlists/{id}/items", hasBody = true)
+    suspend fun removeItemsFromPlaylist(
+        @Path("id") id  : String,
+        @Body       body: RemoveItemsRequest,
+    ): Response<SnapshotIdResponse>
+
     // ── Player ───────────────────────────────────────────────────────────────
     @GET("me/player")
     suspend fun getPlayerState(): Response<PlayerStateResponse>

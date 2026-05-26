@@ -96,6 +96,16 @@ class SpotifyRepository(
         }
     }
 
+    suspend fun addTrackToPlaylist(playlistId: String, trackUri: String): Result<Unit> = safeCall {
+        val resp = api.addTracksToPlaylist(playlistId, AddTracksRequest(listOf(trackUri)))
+        if (!resp.isSuccessful) throw Exception("HTTP ${resp.code()}: ${resp.errorBody()?.string()}")
+    }
+
+    suspend fun removeTrackFromPlaylist(playlistId: String, trackUri: String): Result<Unit> = safeCall {
+        val resp = api.removeItemsFromPlaylist(playlistId, RemoveItemsRequest(listOf(RemoveItemEntry(trackUri))))
+        if (!resp.isSuccessful) throw Exception("HTTP ${resp.code()}: ${resp.errorBody()?.string()}")
+    }
+
     suspend fun pause(): Result<Unit>                          = safeCall { api.pause().bodyOrThrow() }
     suspend fun skipNext(): Result<Unit>                       = safeCall { api.skipNext().bodyOrThrow() }
     suspend fun skipPrevious(): Result<Unit>                   = safeCall { api.skipPrevious().bodyOrThrow() }
