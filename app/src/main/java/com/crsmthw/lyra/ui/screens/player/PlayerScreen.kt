@@ -22,6 +22,7 @@ import androidx.compose.material3.toShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.*
@@ -66,6 +67,7 @@ import kotlinx.coroutines.withContext
 fun PlayerScreen(
     viewModel             : PlayerViewModel,
     onBack                : () -> Unit,
+    onOpenQueue           : () -> Unit,
     onFullScreen          : (() -> Unit)? = null,
     sharedTransitionScope : SharedTransitionScope? = null,
     animatedContentScope  : AnimatedContentScope? = null,
@@ -362,6 +364,7 @@ fun PlayerScreen(
                         onToggleShuffle    = viewModel::toggleShuffle,
                         onCycleRepeat      = viewModel::cycleRepeat,
                         onSeek             = viewModel::seekTo,
+                        onOpenQueue        = onOpenQueue,
                         onShare            = {
                             state.currentTrack?.id?.let { id ->
                                 context.startActivity(Intent.createChooser(
@@ -466,6 +469,7 @@ fun PlayerScreen(
                         onToggleShuffle    = viewModel::toggleShuffle,
                         onCycleRepeat      = viewModel::cycleRepeat,
                         onSeek             = viewModel::seekTo,
+                        onOpenQueue        = onOpenQueue,
                         onShare            = {
                             state.currentTrack?.id?.let { id ->
                                 context.startActivity(Intent.createChooser(
@@ -516,6 +520,7 @@ private fun PlayerControls(
     onToggleShuffle : () -> Unit,
     onCycleRepeat   : () -> Unit,
     onSeek          : (Float) -> Unit,
+    onOpenQueue     : () -> Unit,
     onShare         : () -> Unit,
     onAddToPlaylist : () -> Unit,
 ) {
@@ -554,19 +559,13 @@ private fun PlayerControls(
     // Wavy seek bar
     var isDragging by remember { mutableStateOf(false) }
     var dragValue  by remember { mutableFloatStateOf(0f) }
-    val waveAmplitude by animateFloatAsState(
-        targetValue   = if (state.isPlaying) 1f else 0f,
-        animationSpec = tween(400),
-        label         = "waveAmplitude",
-    )
-
     Box(modifier = Modifier.fillMaxWidth().height(44.dp)) {
         LinearWavyProgressIndicator(
             progress   = { if (isDragging) dragValue else state.progress },
             modifier   = Modifier.fillMaxWidth().align(Alignment.Center),
             color      = surfaceAccentColor,
             trackColor = surfaceAccentColor.copy(alpha = 0.25f),
-            amplitude  = { p -> WavyProgressIndicatorDefaults.indicatorAmplitude(p) * waveAmplitude },
+            amplitude  = { p -> if (state.isPlaying) WavyProgressIndicatorDefaults.indicatorAmplitude(p) else 0f },
         )
         Slider(
             value                 = if (isDragging) dragValue else state.progress,
@@ -660,6 +659,13 @@ private fun PlayerControls(
         modifier              = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.End,
     ) {
+        IconButton(onClick = onOpenQueue, enabled = state.currentTrack != null) {
+            Icon(
+                imageVector        = Icons.AutoMirrored.Filled.QueueMusic,
+                contentDescription = stringResource(R.string.player_queue),
+                tint               = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         IconButton(onClick = onShare, enabled = state.currentTrack != null) {
             Icon(
                 imageVector        = Icons.Default.Share,

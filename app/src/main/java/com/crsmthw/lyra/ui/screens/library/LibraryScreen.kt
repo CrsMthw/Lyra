@@ -1602,18 +1602,13 @@ private fun PlayerCardContent(
             // Wavy seek bar
             var isDragging by remember { mutableStateOf(false) }
             var dragValue  by remember { mutableFloatStateOf(0f) }
-            val waveAmplitude by animateFloatAsState(
-                targetValue   = if (state.isPlaying) 1f else 0f,
-                animationSpec = tween(400),
-                label         = "waveAmplitude",
-            )
             Box(modifier = Modifier.fillMaxWidth().height(44.dp)) {
                 LinearWavyProgressIndicator(
                     progress   = { if (isDragging) dragValue else state.progress },
                     modifier   = Modifier.fillMaxWidth().align(Alignment.Center),
                     color      = surfaceAccentColor,
                     trackColor = surfaceAccentColor.copy(alpha = 0.25f),
-                    amplitude  = { p -> WavyProgressIndicatorDefaults.indicatorAmplitude(p) * waveAmplitude },
+                    amplitude  = { p -> if (state.isPlaying) WavyProgressIndicatorDefaults.indicatorAmplitude(p) else 0f },
                 )
                 Slider(
                     value = if (isDragging) dragValue else state.progress,

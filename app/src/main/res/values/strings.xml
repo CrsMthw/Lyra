@@ -27,6 +27,14 @@
     <string name="player_remove_from_playlist_success">Removed from %1$s</string>
     <string name="player_add_to_playlist_403">Reconnect Spotify in Settings to add to playlists</string>
 
+    <!-- Queue -->
+    <string name="player_queue">Queue</string>
+    <string name="queue_title">Queue</string>
+    <string name="queue_now_playing">Now playing</string>
+    <string name="queue_next_up">Next up</string>
+    <string name="queue_empty">Nothing up next</string>
+    <string name="queue_nothing_playing">Nothing playing right now</string>
+
     <!-- Settings -->
     <string name="settings_title">Settings</string>
     <string name="settings_spotify">Spotify</string>
@@ -67,7 +75,8 @@
     <string name="notification_channel_desc">Shows the current track and sleep timer controls</string>
     <string name="notification_cancel_timer">Cancel timer · %d min</string>
 
-    <!-- Errors -->
+    <!-- Errors / system messages -->
+    <string name="spotify_waking_up">Waking up Spotify…</string>
     <string name="error_generic">Something went wrong</string>
     <string name="error_no_spotify">Spotify app not installed</string>
     <string name="error_auth_failed">Authentication failed</string>

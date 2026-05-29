@@ -169,6 +169,12 @@ data class FeaturedPlaylistsResponse(
     val playlists: UserPlaylistsResponse,
 )
 
+// ── Queue ─────────────────────────────────────────────────────────────────────
+data class QueueResponse(
+    @SerializedName("currently_playing") val currentlyPlaying: SpotifyTrack?,
+    @SerializedName("queue")             val queue            : List<SpotifyTrack> = emptyList(),
+)
+
 // ── Add / remove playlist items requests ─────────────────────────────────────
 data class AddTracksRequest(
     @SerializedName("uris") val uris: List<String>,

@@ -4,8 +4,6 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
@@ -124,18 +122,13 @@ fun MiniPlayer(
                 Spacer(Modifier.width(4.dp))
 
                 // Play/pause wrapped in CircularWavyProgressIndicator
-                val waveAmplitude by animateFloatAsState(
-                    targetValue   = if (isPlaying) 1f else 0f,
-                    animationSpec = tween(400),
-                    label         = "waveAmplitude",
-                )
                 Box(contentAlignment = Alignment.Center, modifier = Modifier.size(52.dp)) {
                     CircularWavyProgressIndicator(
                         progress  = { progress },
                         modifier  = Modifier.size(52.dp),
                         color     = resolvedSurfaceAccent,
                         trackColor = MaterialTheme.colorScheme.surfaceVariant,
-                        amplitude = { p -> WavyProgressIndicatorDefaults.indicatorAmplitude(p) * waveAmplitude },
+                        amplitude = { p -> if (isPlaying) WavyProgressIndicatorDefaults.indicatorAmplitude(p) else 0f },
                     )
                     IconButton(
                         onClick  = onPlayPause,

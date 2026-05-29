@@ -83,6 +83,14 @@ class PlayerStateManager(
                     if (isNowPlaying && progressTickJob?.isActive != true) startProgressTick()
                     else if (!isNowPlaying) progressTickJob?.cancel()
                     maybeStartService()
+                } else {
+                    // 204 — no active device (Spotify killed or closed)
+                    // Clear playing state unless an optimistic lock is in effect (e.g. SDK wake-up in progress)
+                    val now = System.currentTimeMillis()
+                    if (now >= isPlayingLockUntil) {
+                        _state.update { it.copy(isPlaying = false) }
+                        progressTickJob?.cancel()
+                    }
                 }
             },
             onFailure = { e ->
@@ -140,11 +148,20 @@ class PlayerStateManager(
                 remoteManager.pause()
                 repository.pause()
             } else {
+                val track = current.currentTrack
                 _state.update { it.copy(isPlaying = true) }
                 startProgressTick()
                 maybeStartService()
-                remoteManager.resume()
-                repository.play()
+                repository.play().fold(
+                    onSuccess = { delay(500L); fetchPlayerState() },
+                    onFailure = { e ->
+                        if (e.message?.contains("404") == true && track != null) {
+                            remoteManager.connectAndPlay(track.uri)
+                            delay(500L)
+                            fetchPlayerState()
+                        }
+                    },
+                )
             }
         }
     }

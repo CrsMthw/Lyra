@@ -86,6 +86,9 @@ interface SpotifyApiService {
     @PUT("me/player/volume")
     suspend fun setVolume(@Query("volume_percent") volume: Int): Response<Unit>
 
+    @GET("me/player/queue")
+    suspend fun getQueue(): Response<QueueResponse>
+
     // ── Search ───────────────────────────────────────────────────────────────
     @GET("search")
     suspend fun search(

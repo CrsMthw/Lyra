@@ -106,6 +106,11 @@ class SpotifyRepository(
         if (!resp.isSuccessful) throw Exception("HTTP ${resp.code()}: ${resp.errorBody()?.string()}")
     }
 
+    suspend fun getQueue(): Result<QueueResponse?> = safeCall {
+        val response = api.getQueue()
+        if (response.code() == 204) null else response.bodyOrThrow()
+    }
+
     suspend fun pause(): Result<Unit>                          = safeCall { api.pause().bodyOrThrow() }
     suspend fun skipNext(): Result<Unit>                       = safeCall { api.skipNext().bodyOrThrow() }
     suspend fun skipPrevious(): Result<Unit>                   = safeCall { api.skipPrevious().bodyOrThrow() }

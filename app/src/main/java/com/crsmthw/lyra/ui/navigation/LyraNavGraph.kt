@@ -24,6 +24,9 @@ import com.crsmthw.lyra.ui.screens.library.LibraryViewModelFactory
 import com.crsmthw.lyra.ui.screens.player.PlayerScreen
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModelFactory
+import com.crsmthw.lyra.ui.screens.queue.QueueScreen
+import com.crsmthw.lyra.ui.screens.queue.QueueViewModel
+import com.crsmthw.lyra.ui.screens.queue.QueueViewModelFactory
 import com.crsmthw.lyra.ui.screens.search.SearchScreen
 import com.crsmthw.lyra.ui.screens.search.SearchViewModel
 import com.crsmthw.lyra.ui.screens.search.SearchViewModelFactory
@@ -104,8 +107,17 @@ fun LyraNavGraph(container: AppContainer) {
                 PlayerScreen(
                     viewModel             = playerVm,
                     onBack                = ::safeNavigateUp,
+                    onOpenQueue           = { safePush(Screen.Queue.route) },
                     sharedTransitionScope = this@SharedTransitionLayout,
                     animatedContentScope  = this@composable,
+                )
+            }
+
+            composable(Screen.Queue.route) {
+                val vm = viewModel<QueueViewModel>(factory = QueueViewModelFactory(container))
+                QueueScreen(
+                    viewModel = vm,
+                    onBack    = ::safeNavigateUp,
                 )
             }
 

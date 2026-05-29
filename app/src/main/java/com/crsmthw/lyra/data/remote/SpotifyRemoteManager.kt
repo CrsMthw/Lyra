@@ -1,6 +1,8 @@
 package com.crsmthw.lyra.data.remote
 
 import android.content.Context
+import android.widget.Toast
+import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.auth.SpotifyAuthManager
 import com.crsmthw.lyra.data.local.EncryptedPrefs
 import com.spotify.android.appremote.api.ConnectionParams
@@ -35,6 +37,7 @@ class SpotifyRemoteManager(
     suspend fun connectSuspend(): Boolean {
         if (_connected.value && _appRemote != null) return true
         return withContext(Dispatchers.Main) {
+            Toast.makeText(context, context.getString(R.string.spotify_waking_up), Toast.LENGTH_SHORT).show()
             suspendCancellableCoroutine { cont ->
                 val params = ConnectionParams.Builder(encryptedPrefs.clientId)
                     .setRedirectUri(SpotifyAuthManager.REDIRECT_URI)
@@ -95,12 +98,16 @@ class SpotifyRemoteManager(
         _appRemote?.playerApi?.resume()
     }
 
-    fun skipNext() {
+    suspend fun skipNext(): Boolean {
+        if (!connectSuspend()) return false
         _appRemote?.playerApi?.skipNext()
+        return true
     }
 
-    fun skipPrevious() {
+    suspend fun skipPrevious(): Boolean {
+        if (!connectSuspend()) return false
         _appRemote?.playerApi?.skipPrevious()
+        return true
     }
 
     fun setShuffle(enabled: Boolean) {
