@@ -7,8 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [2.0.0] - 2026-05-30
-
 ### Added
 - Album detail screen — accessible from search results and by tapping the album name in the player controls; shows artwork, release year, type, track count, runtime, full numbered track list with explicit badges, play button, and label/copyright footer
 - Album detail adapts to screen width: two-pane layout (art + info left, tracks right) on wide screens (≥600dp), single-column on narrow; art sizes dynamically via `BoxWithConstraints` to fit the left pane on both tall and short wide screens
@@ -86,8 +84,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial release
 
-[Unreleased]: https://github.com/CrsMthw/Lyra/compare/v2.0.0...HEAD
-[2.0.0]: https://github.com/CrsMthw/Lyra/compare/v1.2.0...v2.0.0
+[Unreleased]: https://github.com/CrsMthw/Lyra/compare/v1.2.0...HEAD
 [1.2.0]: https://github.com/CrsMthw/Lyra/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/CrsMthw/Lyra/compare/v1.0.3...v1.1.0
 [1.0.3]: https://github.com/CrsMthw/Lyra/compare/v1.0.2...v1.0.3
