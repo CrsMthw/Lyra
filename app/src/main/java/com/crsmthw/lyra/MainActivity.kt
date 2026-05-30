@@ -1,6 +1,7 @@
 package com.crsmthw.lyra
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -14,6 +15,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.crsmthw.lyra.ui.navigation.LyraNavGraph
@@ -24,6 +27,14 @@ class MainActivity : ComponentActivity() {
 
     private val requestNotificationPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
+    // Warm-start deep link: set in onNewIntent, read by LyraNavGraph via handleDeepLink.
+    private var pendingDeepLinkIntent by mutableStateOf<Intent?>(null)
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        pendingDeepLinkIntent = intent
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
@@ -63,7 +74,10 @@ class MainActivity : ComponentActivity() {
                 dynamicColor = dynamicColor,
             ) {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    LyraNavGraph(container = container)
+                    LyraNavGraph(
+                        container              = container,
+                        pendingDeepLinkIntent  = pendingDeepLinkIntent,
+                    )
                 }
             }
         }

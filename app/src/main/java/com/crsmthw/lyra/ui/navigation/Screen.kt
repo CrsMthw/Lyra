@@ -13,4 +13,16 @@ sealed class Screen(val route: String) {
     data object PlaylistDetail : Screen("playlist/{id}") {
         fun createRoute(id: String) = "playlist/$id"
     }
+
+    data object AlbumDetail : Screen("album/{id}") {
+        fun createRoute(id: String) = "album/$id"
+    }
+
+    data object ArtistDetail : Screen("artist/{id}") {
+        fun createRoute(id: String) = "artist/$id"
+    }
+
+    data object TrackDeepLink : Screen("deeplink/track/{id}") {
+        fun createRoute(id: String) = "deeplink/track/$id"
+    }
 }

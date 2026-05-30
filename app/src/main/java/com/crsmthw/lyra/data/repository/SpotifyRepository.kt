@@ -55,8 +55,20 @@ class SpotifyRepository(
         api.getFeaturedPlaylists().bodyOrThrow()
     }
 
+    suspend fun getAlbum(id: String): Result<SpotifyAlbumFull> = safeCall {
+        api.getAlbum(id).bodyOrThrow()
+    }
+
+    suspend fun getArtist(id: String): Result<SpotifyArtistFull> = safeCall {
+        api.getArtist(id).bodyOrThrow()
+    }
+
+    suspend fun getArtistAlbums(id: String, offset: Int = 0): Result<Paged<SpotifyAlbum>> = safeCall {
+        api.getArtistAlbums(id, offset = offset).bodyOrThrow()
+    }
+
     suspend fun search(query: String): Result<SearchResponse> = safeCall {
-        api.search(query = query, type = "track", limit = 10).bodyOrThrow()
+        api.search(query = query, type = "track,album,artist", limit = 10).bodyOrThrow()
     }
 
     suspend fun saveTrack(trackId: String): Result<Unit> = safeCall {

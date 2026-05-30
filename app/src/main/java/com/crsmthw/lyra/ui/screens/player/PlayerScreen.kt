@@ -14,6 +14,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -69,6 +70,8 @@ fun PlayerScreen(
     onBack                : () -> Unit,
     onOpenQueue           : () -> Unit,
     onFullScreen          : (() -> Unit)? = null,
+    onOpenAlbum           : ((albumId: String) -> Unit)? = null,
+    onOpenArtist          : ((artistId: String) -> Unit)? = null,
     sharedTransitionScope : SharedTransitionScope? = null,
     animatedContentScope  : AnimatedContentScope? = null,
 ) {
@@ -365,6 +368,8 @@ fun PlayerScreen(
                         onCycleRepeat      = viewModel::cycleRepeat,
                         onSeek             = viewModel::seekTo,
                         onOpenQueue        = onOpenQueue,
+                        onOpenAlbum        = onOpenAlbum,
+                        onOpenArtist       = onOpenArtist,
                         onShare            = {
                             state.currentTrack?.id?.let { id ->
                                 context.startActivity(Intent.createChooser(
@@ -470,6 +475,8 @@ fun PlayerScreen(
                         onCycleRepeat      = viewModel::cycleRepeat,
                         onSeek             = viewModel::seekTo,
                         onOpenQueue        = onOpenQueue,
+                        onOpenAlbum        = onOpenAlbum,
+                        onOpenArtist       = onOpenArtist,
                         onShare            = {
                             state.currentTrack?.id?.let { id ->
                                 context.startActivity(Intent.createChooser(
@@ -521,6 +528,8 @@ private fun PlayerControls(
     onCycleRepeat   : () -> Unit,
     onSeek          : (Float) -> Unit,
     onOpenQueue     : () -> Unit,
+    onOpenAlbum     : ((albumId: String) -> Unit)? = null,
+    onOpenArtist    : ((artistId: String) -> Unit)? = null,
     onShare         : () -> Unit,
     onAddToPlaylist : () -> Unit,
 ) {
@@ -537,13 +546,29 @@ private fun PlayerControls(
                 overflow = TextOverflow.Clip,
                 modifier = Modifier.basicMarquee(),
             )
+            val artistId = state.currentTrack?.primaryArtistId
             Text(
                 text     = state.currentTrack?.primaryArtist ?: "–",
                 style    = MaterialTheme.typography.bodyMedium,
                 color    = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                modifier = if (onOpenArtist != null && artistId != null)
+                    Modifier.clickable { onOpenArtist(artistId) }
+                else Modifier,
             )
+            val albumId   = state.currentTrack?.album?.id
+            val albumName = state.currentTrack?.album?.name
+            if (albumName != null && albumId != null && onOpenAlbum != null) {
+                Text(
+                    text     = albumName,
+                    style    = MaterialTheme.typography.bodySmall,
+                    color    = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.clickable { onOpenAlbum(albumId) },
+                )
+            }
         }
         IconButton(onClick = onToggleLike) {
             Icon(

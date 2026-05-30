@@ -1,5 +1,6 @@
 package com.crsmthw.lyra.ui.navigation
 
+import android.content.Intent
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.fadeIn
@@ -7,16 +8,27 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
+import androidx.navigation.navDeepLink
 import com.crsmthw.lyra.di.AppContainer
+import com.crsmthw.lyra.ui.screens.album.AlbumDetailScreen
+import com.crsmthw.lyra.ui.screens.deeplink.TrackDeepLinkScreen
+import com.crsmthw.lyra.ui.screens.album.AlbumDetailViewModel
+import com.crsmthw.lyra.ui.screens.album.AlbumDetailViewModelFactory
+import com.crsmthw.lyra.ui.screens.artist.ArtistDetailScreen
+import com.crsmthw.lyra.ui.screens.artist.ArtistDetailViewModel
+import com.crsmthw.lyra.ui.screens.artist.ArtistDetailViewModelFactory
 import com.crsmthw.lyra.ui.screens.auth.AuthScreen
 import com.crsmthw.lyra.ui.screens.library.LibraryScreen
 import com.crsmthw.lyra.ui.screens.library.LibraryViewModel
@@ -36,9 +48,15 @@ import com.crsmthw.lyra.ui.screens.settings.SettingsViewModelFactory
 
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
-fun LyraNavGraph(container: AppContainer) {
+fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null) {
     val navController: NavHostController = rememberNavController()
     val playerVm = viewModel<PlayerViewModel>(factory = PlayerViewModelFactory(container))
+
+    // Handle deep links on warm start (activity already running, onNewIntent fired).
+    // Cold-start deep links are handled automatically by NavHost reading Activity.intent.
+    LaunchedEffect(pendingDeepLinkIntent) {
+        pendingDeepLinkIntent?.let { navController.handleDeepLink(it) }
+    }
 
     // ── Global back-tap debounce guard ───────────────────────────────────────
     var lastNavTime by remember { mutableLongStateOf(0L) }
@@ -108,6 +126,8 @@ fun LyraNavGraph(container: AppContainer) {
                     viewModel             = playerVm,
                     onBack                = ::safeNavigateUp,
                     onOpenQueue           = { safePush(Screen.Queue.route) },
+                    onOpenAlbum           = { albumId -> safePush(Screen.AlbumDetail.createRoute(albumId)) },
+                    onOpenArtist          = { artistId -> safePush(Screen.ArtistDetail.createRoute(artistId)) },
                     sharedTransitionScope = this@SharedTransitionLayout,
                     animatedContentScope  = this@composable,
                 )
@@ -124,12 +144,66 @@ fun LyraNavGraph(container: AppContainer) {
             composable(Screen.Search.route) {
                 val vm = viewModel<SearchViewModel>(factory = SearchViewModelFactory(container))
                 SearchScreen(
-                    viewModel    = vm,
-                    onBack       = ::safeNavigateUp,
-                    onOpenPlayer = { safePush(Screen.Player.route) },
-                    onTrackClick = { uri, uris ->
+                    viewModel     = vm,
+                    onBack        = ::safeNavigateUp,
+                    onOpenPlayer  = { safePush(Screen.Player.route) },
+                    onAlbumClick  = { albumId -> safePush(Screen.AlbumDetail.createRoute(albumId)) },
+                    onArtistClick = { artistId -> safePush(Screen.ArtistDetail.createRoute(artistId)) },
+                    onTrackClick  = { uri, uris ->
                         playerVm.playTrack(uri, uris = uris)
                         safePush(Screen.Player.route)
+                    },
+                )
+            }
+
+            composable(
+                route      = Screen.AlbumDetail.route,
+                arguments  = listOf(navArgument("id") { type = NavType.StringType }),
+                deepLinks  = listOf(navDeepLink { uriPattern = "https://open.spotify.com/album/{id}" }),
+            ) { backStackEntry ->
+                val albumId = backStackEntry.arguments?.getString("id") ?: return@composable
+                val vm = viewModel<AlbumDetailViewModel>(
+                    factory = AlbumDetailViewModelFactory(container, albumId)
+                )
+                AlbumDetailScreen(
+                    viewModel          = vm,
+                    playerViewModel    = playerVm,
+                    onBack             = ::safeNavigateUp,
+                    onNavigateToPlayer = { safePush(Screen.Player.route) },
+                    onOpenArtist       = { artistId -> safePush(Screen.ArtistDetail.createRoute(artistId)) },
+                )
+            }
+
+            composable(
+                route      = Screen.ArtistDetail.route,
+                arguments  = listOf(navArgument("id") { type = NavType.StringType }),
+                deepLinks  = listOf(navDeepLink { uriPattern = "https://open.spotify.com/artist/{id}" }),
+            ) { backStackEntry ->
+                val artistId = backStackEntry.arguments?.getString("id") ?: return@composable
+                val vm = viewModel<ArtistDetailViewModel>(
+                    factory = ArtistDetailViewModelFactory(container, artistId)
+                )
+                ArtistDetailScreen(
+                    viewModel   = vm,
+                    onBack      = ::safeNavigateUp,
+                    onOpenAlbum = { albumId -> safePush(Screen.AlbumDetail.createRoute(albumId)) },
+                )
+            }
+
+            composable(
+                route     = Screen.TrackDeepLink.route,
+                arguments = listOf(navArgument("id") { type = NavType.StringType }),
+                deepLinks = listOf(navDeepLink { uriPattern = "https://open.spotify.com/track/{id}" }),
+            ) { backStackEntry ->
+                val trackId = backStackEntry.arguments?.getString("id") ?: return@composable
+                TrackDeepLinkScreen(
+                    trackId            = trackId,
+                    playerViewModel    = playerVm,
+                    onNavigateToPlayer = {
+                        navController.navigate(Screen.Player.route) {
+                            popUpTo(Screen.TrackDeepLink.route) { inclusive = true }
+                            launchSingleTop = true
+                        }
                     },
                 )
             }

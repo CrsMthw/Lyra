@@ -25,14 +25,45 @@ data class SpotifyArtist(
     val images : List<SpotifyImage>? = null,
 )
 
+data class ArtistFollowers(
+    val total : Int = 0,
+)
+
+data class SpotifyArtistFull(
+    val id         : String,
+    val name       : String,
+    val images     : List<SpotifyImage>? = null,
+    val genres     : List<String>?       = null,
+    val followers  : ArtistFollowers?    = null,
+    val popularity : Int?                = null,
+    val uri        : String              = "",
+) {
+    val imageUrl          : String get() = images?.firstOrNull()?.url ?: ""
+    val formattedFollowers: String get() {
+        val total = followers?.total ?: return ""
+        return when {
+            total >= 1_000_000 -> "${"%.1f".format(total / 1_000_000f)}M followers"
+            total >= 1_000     -> "${total / 1_000}K followers"
+            else               -> "$total followers"
+        }
+    }
+}
+
+data class ArtistTopTracksResponse(
+    val tracks: List<SpotifyTrack> = emptyList(),
+)
+
 // ── Album ────────────────────────────────────────────────────────────────────
 data class SpotifyAlbum(
     val id     : String,
     val name   : String,
     val images : List<SpotifyImage>?  = null,
     val artists: List<SpotifyArtist>? = null,
-    @SerializedName("release_date") val releaseDate: String = "",
-)
+    @SerializedName("release_date") val releaseDate : String? = null,
+    @SerializedName("album_type")   val albumType   : String? = null,
+) {
+    val releaseYear: String get() = releaseDate.orEmpty().take(4)
+}
 
 // ── Track ────────────────────────────────────────────────────────────────────
 data class SpotifyTrack(
@@ -47,9 +78,10 @@ data class SpotifyTrack(
     @SerializedName("preview_url")  val previewUrl  : String?  = null,
     @SerializedName("is_playable")  val isPlayable  : Boolean? = null,
 ) {
-    val primaryArtist: String get() = artists?.firstOrNull()?.name ?: "Unknown"
-    val thumbnailUrl : String get() = album?.images?.lastOrNull()?.url ?: ""
-    val artUrl       : String get() = album?.images?.firstOrNull()?.url ?: ""
+    val primaryArtist  : String  get() = artists?.firstOrNull()?.name ?: "Unknown"
+    val primaryArtistId: String? get() = artists?.firstOrNull()?.id
+    val thumbnailUrl   : String  get() = album?.images?.lastOrNull()?.url ?: ""
+    val artUrl         : String  get() = album?.images?.firstOrNull()?.url ?: ""
 }
 
 // ── Saved track wrapper (for liked songs) ───────────────────────────────────
@@ -168,6 +200,45 @@ data class FeaturedPlaylistsResponse(
     val message  : String?,
     val playlists: UserPlaylistsResponse,
 )
+
+// ── Album (full) ─────────────────────────────────────────────────────────────
+
+data class SpotifyCopyright(
+    val text : String = "",
+    val type : String = "",
+)
+
+data class AlbumTrack(
+    val id           : String,
+    val name         : String,
+    val uri          : String,
+    val artists      : List<SpotifyArtist>? = null,
+    @SerializedName("duration_ms")  val durationMs  : Long     = 0L,
+    @SerializedName("explicit")     val explicit    : Boolean  = false,
+    @SerializedName("is_playable")  val isPlayable  : Boolean? = null,
+    @SerializedName("track_number") val trackNumber : Int      = 0,
+    @SerializedName("disc_number")  val discNumber  : Int      = 1,
+) {
+    val primaryArtist: String get() = artists?.firstOrNull()?.name ?: "Unknown"
+}
+
+data class SpotifyAlbumFull(
+    val id         : String,
+    val name       : String,
+    val images     : List<SpotifyImage>?     = null,
+    val artists    : List<SpotifyArtist>?    = null,
+    val tracks     : Paged<AlbumTrack>?      = null,
+    val copyrights : List<SpotifyCopyright>? = null,
+    val label      : String?                 = null,
+    val popularity : Int?                    = null,
+    @SerializedName("release_date") val releaseDate : String = "",
+    @SerializedName("album_type")   val albumType   : String = "",
+    @SerializedName("total_tracks") val totalTracks : Int    = 0,
+) {
+    val artUrl          : String get() = images?.firstOrNull()?.url ?: ""
+    val releaseYear     : String get() = releaseDate.take(4)
+    val albumTypeDisplay: String get() = albumType.replaceFirstChar { it.uppercaseChar() }
+}
 
 // ── Queue ─────────────────────────────────────────────────────────────────────
 data class QueueResponse(

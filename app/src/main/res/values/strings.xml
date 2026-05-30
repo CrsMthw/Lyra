@@ -75,6 +75,27 @@
     <string name="notification_channel_desc">Shows the current track and sleep timer controls</string>
     <string name="notification_cancel_timer">Cancel timer · %d min</string>
 
+    <!-- Album detail -->
+    <string name="album_play">Play</string>
+    <string name="album_tracks_count">%1$d songs</string>
+
+    <!-- Artist detail -->
+    <string name="artist_popular">Popular</string>
+    <string name="artist_albums">Albums</string>
+    <string name="artist_singles">Singles</string>
+    <string name="artist_compilations">Compilations</string>
+    <string name="artist_load_more">Load more</string>
+    <string name="artist_play_popular">Play Popular</string>
+
+    <!-- Navigation -->
+    <string name="nav_back">Back</string>
+
+    <!-- Search -->
+    <string name="search_placeholder">Search</string>
+
+    <!-- Deep links -->
+    <string name="deeplink_loading_track">Loading track…</string>
+
     <!-- Errors / system messages -->
     <string name="spotify_waking_up">Waking up Spotify…</string>
     <string name="error_generic">Something went wrong</string>

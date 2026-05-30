@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-05-30
+
+### Added
+- Album detail screen — accessible from search results and by tapping the album name in the player controls; shows artwork, release year, type, track count, runtime, full numbered track list with explicit badges, play button, and label/copyright footer
+- Album detail adapts to screen width: two-pane layout (art + info left, tracks right) on wide screens (≥600dp), single-column on narrow; art sizes dynamically via `BoxWithConstraints` to fit the left pane on both tall and short wide screens
+- Artist detail screen — accessible from search results, album detail (tap artist name), and player controls (tap artist name); shows artist photo, discography grouped into Albums / Singles / Compilations with a "Load more" button for large catalogues
+- Artist detail uses the same two-pane adaptive layout as album detail
+- Search now returns albums and artists alongside tracks; artists appear as a horizontal scrollable row of circle photos at the top of results (Instagram Stories style); tapping any result navigates to the respective detail screen
+- Artist name in the player controls is tappable — navigates to artist detail
+- Album name in the player is tappable — navigates to album detail
+- Bottom fade scrim behind the navigation bar on search results, album detail, and artist detail screens, matching the Queue screen
+
+- Open supported links — tapping a Spotify share link (`open.spotify.com/track/…`, `/album/…`, `/artist/…`) offers to open in Lyra; track links play immediately and navigate to the player, album/artist links navigate directly to the respective detail screen
+  - **Optional recommended setup**: Settings → Apps → Lyra → Set as default → Supported web addresses → enable `open.spotify.com`; after this, tapping any Spotify share link will offer Lyra as an option
+
+### Fixed
+- Crash on launch after adding `albumType` field to `SpotifyAlbum` — Gson bypasses Kotlin non-null defaults on deserialization, leaving the field `null` on cached tracks and crashing `hashCode()`; fixed by making the field nullable
+
 ## [1.2.0] - 2026-05-29
 
 ### Added
@@ -68,7 +86,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial release
 
-[Unreleased]: https://github.com/CrsMthw/Lyra/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/CrsMthw/Lyra/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/CrsMthw/Lyra/compare/v1.2.0...v2.0.0
 [1.2.0]: https://github.com/CrsMthw/Lyra/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/CrsMthw/Lyra/compare/v1.0.3...v1.1.0
 [1.0.3]: https://github.com/CrsMthw/Lyra/compare/v1.0.2...v1.0.3

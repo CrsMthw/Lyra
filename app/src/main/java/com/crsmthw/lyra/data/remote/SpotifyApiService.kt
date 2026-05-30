@@ -89,6 +89,26 @@ interface SpotifyApiService {
     @GET("me/player/queue")
     suspend fun getQueue(): Response<QueueResponse>
 
+    // ── Albums ───────────────────────────────────────────────────────────────
+    @GET("albums/{id}")
+    suspend fun getAlbum(
+        @Path("id")     id    : String,
+        @Query("limit") limit : Int = 50,
+    ): Response<SpotifyAlbumFull>
+
+    // ── Artists ──────────────────────────────────────────────────────────────
+    @GET("artists/{id}")
+    suspend fun getArtist(@Path("id") id: String): Response<SpotifyArtistFull>
+
+    @GET("artists/{id}/albums")
+    suspend fun getArtistAlbums(
+        @Path("id")                                       id            : String,
+        @Query(value = "include_groups", encoded = true)  includeGroups : String = "album,single,compilation",
+        @Query("market")                                  market        : String = "from_token",
+        @Query("limit")                                   limit         : Int    = 10,
+        @Query("offset")                                  offset        : Int    = 0,
+    ): Response<Paged<SpotifyAlbum>>
+
     // ── Search ───────────────────────────────────────────────────────────────
     @GET("search")
     suspend fun search(

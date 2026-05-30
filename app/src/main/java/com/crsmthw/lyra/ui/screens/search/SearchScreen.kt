@@ -1,8 +1,10 @@
 package com.crsmthw.lyra.ui.screens.search
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -23,11 +25,17 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
+import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.remote.model.SpotifyAlbum
 import com.crsmthw.lyra.data.remote.model.SpotifyArtist
 import com.crsmthw.lyra.data.remote.model.SpotifyPlaylist
@@ -36,10 +44,12 @@ import com.crsmthw.lyra.ui.components.TrackRow
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SearchScreen(
-    viewModel    : SearchViewModel,
-    onBack       : () -> Unit,
-    onOpenPlayer : () -> Unit,
-    onTrackClick : (uri: String, allUris: List<String>) -> Unit,
+    viewModel     : SearchViewModel,
+    onBack        : () -> Unit,
+    onOpenPlayer  : () -> Unit,
+    onAlbumClick  : (albumId: String) -> Unit,
+    onArtistClick : (artistId: String) -> Unit,
+    onTrackClick  : (uri: String, allUris: List<String>) -> Unit,
 ) {
     val state          by viewModel.uiState.collectAsStateWithLifecycle()
     val keyboard        = LocalSoftwareKeyboardController.current
@@ -60,21 +70,25 @@ fun SearchScreen(
             }
         },
     ) { paddingValues ->
-        Column(
+        val density        = LocalDensity.current
+        val navBarBottomDp = with(density) { WindowInsets.navigationBars.getBottom(this).toDp() }
+        val scrimHeight    = navBarBottomDp + 48.dp
+        val background     = MaterialTheme.colorScheme.background
+
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .navigationBarsPadding()
                 .imePadding(),
         ) {
             when {
                 state.isLoading -> {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Box(Modifier.fillMaxSize().navigationBarsPadding(), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator()
                     }
                 }
                 state.error != null -> {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Box(Modifier.fillMaxSize().navigationBarsPadding(), contentAlignment = Alignment.Center) {
                         Text(state.error!!, color = MaterialTheme.colorScheme.error)
                     }
                 }
@@ -89,16 +103,38 @@ fun SearchScreen(
                                  artists.isNotEmpty() || playlists.isNotEmpty()
 
                     if (!hasAny) {
-                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Box(Modifier.fillMaxSize().navigationBarsPadding(), contentAlignment = Alignment.Center) {
                             Text("No results for \"${state.query}\"",
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     } else {
-                        LazyColumn(modifier = Modifier.fillMaxSize()) {
+                        LazyColumn(
+                            modifier       = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(bottom = navBarBottomDp + 16.dp),
+                        ) {
+
+                            // ── Artists — horizontal stories row ──────────────
+                            if (artists.isNotEmpty()) {
+                                item(key = "section_artists") {
+                                    SectionHeader("Artists")
+                                }
+                                item(key = "artists_row") {
+                                    LazyRow(
+                                        contentPadding = PaddingValues(horizontal = 8.dp),
+                                    ) {
+                                        items(artists, key = { "artist_${it.id}" }) { artist ->
+                                            ArtistChip(
+                                                artist  = artist,
+                                                onClick = { onArtistClick(artist.id) },
+                                            )
+                                        }
+                                    }
+                                }
+                            }
 
                             // ── Tracks ────────────────────────────────────────
                             if (tracks.isNotEmpty()) {
-                                item {
+                                item(key = "section_tracks") {
                                     SectionHeader("Tracks")
                                 }
                                 items(tracks, key = { "track_${it.id}" }) { track ->
@@ -112,32 +148,22 @@ fun SearchScreen(
                                 }
                             }
 
-                            // ── Artists ───────────────────────────────────────
-                            if (artists.isNotEmpty()) {
-                                item {
-                                    SectionHeader("Artists")
-                                }
-                                items(artists, key = { "artist_${it.id}" }) { artist ->
-                                    ArtistRow(artist = artist)
-                                }
-                            }
-
                             // ── Albums ────────────────────────────────────────
                             if (albums.isNotEmpty()) {
-                                item {
+                                item(key = "section_albums") {
                                     SectionHeader("Albums")
                                 }
                                 items(albums, key = { "album_${it.id}" }) { album ->
                                     AlbumRow(
                                         album   = album,
-                                        onClick = onOpenPlayer,
+                                        onClick = { onAlbumClick(album.id) },
                                     )
                                 }
                             }
 
                             // ── Playlists ─────────────────────────────────────
                             if (playlists.isNotEmpty()) {
-                                item {
+                                item(key = "section_playlists") {
                                     SectionHeader("Playlists")
                                 }
                                 items(playlists, key = { "playlist_${it.id}" }) { playlist ->
@@ -148,23 +174,31 @@ fun SearchScreen(
                                 }
                             }
 
-                            item { Spacer(Modifier.height(16.dp)) }
+                            item(key = "footer_space") { Spacer(Modifier.height(16.dp)) }
                         }
                     }
                 }
                 state.query.isBlank() -> {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Box(Modifier.fillMaxSize().navigationBarsPadding(), contentAlignment = Alignment.Center) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Icon(Icons.Default.Search, contentDescription = null,
                                 modifier = Modifier.size(64.dp),
                                 tint     = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
                             Spacer(Modifier.height(8.dp))
-                            Text("Search for tracks",
+                            Text(stringResource(R.string.search_placeholder),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
             }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(scrimHeight)
+                    .align(Alignment.BottomCenter)
+                    .background(Brush.verticalGradient(listOf(Color.Transparent, background)))
+            )
         }
     }
 
@@ -181,33 +215,44 @@ private fun SectionHeader(title: String) {
 }
 
 @Composable
-private fun ArtistRow(artist: SpotifyArtist) {
-    ListItem(
-        headlineContent  = { Text(artist.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-        supportingContent= { Text("Artist", color = MaterialTheme.colorScheme.onSurfaceVariant) },
-        leadingContent   = {
-            val imageUrl = artist.images?.firstOrNull()?.url
-            if (imageUrl != null) {
-                AsyncImage(
-                    model              = imageUrl,
-                    contentDescription = artist.name,
-                    contentScale       = ContentScale.Crop,
-                    modifier           = Modifier.size(52.dp).clip(CircleShape),
-                )
-            } else {
-                Surface(
-                    modifier = Modifier.size(52.dp),
-                    shape    = CircleShape,
-                    color    = MaterialTheme.colorScheme.surfaceVariant,
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.Default.Person, contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+private fun ArtistChip(artist: SpotifyArtist, onClick: () -> Unit) {
+    Column(
+        modifier            = Modifier
+            .width(88.dp)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        val imageUrl = artist.images?.firstOrNull()?.url
+        if (imageUrl != null) {
+            AsyncImage(
+                model              = imageUrl,
+                contentDescription = artist.name,
+                contentScale       = ContentScale.Crop,
+                modifier           = Modifier.size(64.dp).clip(CircleShape),
+            )
+        } else {
+            Surface(
+                modifier = Modifier.size(64.dp),
+                shape    = CircleShape,
+                color    = MaterialTheme.colorScheme.surfaceVariant,
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.Person, contentDescription = null,
+                        modifier = Modifier.size(28.dp),
+                        tint     = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
-        },
-    )
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text      = artist.name,
+            style     = MaterialTheme.typography.labelSmall,
+            maxLines  = 2,
+            overflow  = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+        )
+    }
 }
 
 @Composable
@@ -310,7 +355,7 @@ private fun SearchBar(
         OutlinedTextField(
             value         = query,
             onValueChange = onQueryChange,
-            placeholder   = { Text("Search tracks") },
+            placeholder   = { Text(stringResource(R.string.search_placeholder)) },
             singleLine    = true,
             trailingIcon  = if (query.isNotBlank()) {
                 { IconButton(onClick = onClear) {
