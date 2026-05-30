@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/icons/Logo_light.svg" width="120"/>
+  <img src="assets/icons/Lyra_light.png" width="120"/>
   <h1>Lyra</h1>
   <p>A minimal Spotify client for Android with an adaptive layout for phones, foldables, and tablets.<br/>Lyra uses your own Spotify Developer credentials — no third-party servers, no data collection.</p>
 </div>
@@ -60,25 +60,24 @@ Before launching, you need to register the app in the Spotify Developer Dashboar
 1. Go to [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard)
 2. Click **Create app**
 3. Fill in any name and description — these are just for your dashboard
+4. At the bottom, under **Which API/SDKs are you planning to use?**, check **Web API** and **Android**
 
-### 2. Add the redirect URI
+### 2. Configure your app settings
 
-In your app's **Settings**, add the following under **Redirect URIs** and save:
+In your app's **Settings**:
 
-```
-com.crsmthw.lyra://callback
-```
+- Under **Redirect URIs**, add the following and save:
+  ```
+  com.crsmthw.lyra://callback
+  ```
+- Under **Android**, add:
 
-### 3. Add the Android package
+  | Field | Value |
+  |---|---|
+  | Package name | `com.crsmthw.lyra` |
+  | SHA-1 certificate fingerprint | `50530A2931B5B1595D1C991F92DA6644ABA6AFD6` |
 
-Still in **Settings**, scroll to **Android** and add:
-
-| Field | Value |
-|---|---|
-| Package name | `com.crsmthw.lyra` |
-| SHA-1 certificate fingerprint | `50530A2931B5B1595D1C991F92DA6644ABA6AFD6` |
-
-### 4. Get your Client ID
+### 3. Get your Client ID
 
 From the dashboard overview, copy your **Client ID**. Enter it in the app on first launch — it is stored encrypted on-device and never leaves it.
 
