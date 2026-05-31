@@ -10,37 +10,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [2.0.0] - 2026-05-31
 
 ### Added
-- Open supported links — tapping a Spotify share link (`open.spotify.com/track/…`, `/album/…`, `/artist/…`) offers to open in Lyra; track links play immediately and navigate to the player, album/artist links navigate directly to the respective detail screen
-  - **Optional recommended setup**: Settings → Apps → Lyra → Set as default → Supported web addresses → enable `open.spotify.com`; after this, tapping any Spotify share link will offer Lyra as an option
-- Album detail screen — accessible from search results and by tapping the album name in the player controls; shows artwork, release year, type, track count, runtime, full numbered track list with explicit badges, play button, and label/copyright footer
-- Album detail adapts to screen width: two-pane layout (art + info left, tracks right) on wide screens (≥600dp), single-column on narrow; art sizes dynamically via `BoxWithConstraints` to fit the left pane on both tall and short wide screens
-- Artist detail screen — accessible from search results, album detail (tap artist name), and player controls (tap artist name); shows artist photo, discography grouped into Albums / Singles / Compilations with a "Load more" button for large catalogues
-- Artist detail uses the same two-pane adaptive layout as album detail
-- Search now returns albums and artists alongside tracks; artists appear as a horizontal scrollable row of circle photos at the top of results (Instagram Stories style); tapping any result navigates to the respective detail screen
-- Artist name in the player controls is tappable — navigates to artist detail
-- Album name in the player is tappable — navigates to album detail
-- Share button in the top bar of Album Detail and Artist Detail screens — opens the Android share sheet with the Spotify link for the album or artist
-- Bottom fade scrim behind the navigation bar on search results, album detail, and artist detail screens, matching the Queue screen
-- Multiple artists displayed everywhere a track's artist name appears (track lists, mini player, pop-out panel, full player screen, album detail rows) using " · " separator; artist names in the full player screen remain individually tappable
-- Mini player now visible on Album Detail and Artist Detail screens, matching the Library screen behaviour — same accent colors, same animations, same wavy progress ring
-- On unfolded (≥600dp) and folded landscape: mini player sits at the bottom of the right content pane, matching the Library two-pane layout; tapping a track or the play button opens the pop-out player panel instead of navigating away; tapping the mini player also opens the panel
-- On folded portrait: tapping the mini player navigates to the full player screen with the shared album-art transition
-- Album art morphs between the mini player and the full player screen when navigating via album/artist name taps (folded and unfolded)
-- Liked Songs queue now uses the full cached track list at play time (up to 750 songs from the tapped position) instead of only what was loaded on screen
-- Background liked-songs fetcher: while music is playing (notification visible), Lyra quietly fetches one page of liked songs every 30 seconds into the library cache until the full library is indexed; the fetcher respects Spotify's rate-limit window and backs off on 429
-- Like/unlike from the player now surgically updates the liked-songs cache (prepend on like, remove on unlike) without invalidating or re-fetching the full list; external likes/unlikes are detected by count diff on next library open — new songs prepended in one API call, removed songs trigger a full refetch
-- Sleep timer Live notification on Android 16+ devices — when a sleep timer is active, a separate pinned notification appears in the Live notifications section showing a live countdown and a Cancel button; on Samsung OneUI 8, requires enabling "Live notifications for all apps" in Developer options (a Samsung limitation)
-- Settings → Notifications section (Android 16+ only) — shows whether Live notifications are enabled for Lyra; on Samsung, tapping Enable opens an explanatory dialog with a direct link to Developer options
+- **Open supported links** — tapping a Spotify share link (`open.spotify.com/track/…`, `/album/…`, `/artist/…`) offers to open in Lyra; track links play immediately and navigate to the player, album/artist links navigate directly to the respective detail screen
+  > **Optional recommended setup**: Settings → Apps → Lyra → Set as default → Supported web addresses → enable `open.spotify.com`; after this, tapping any Spotify share link will offer Lyra as an option
+- **Album detail screen** — accessible from search results and by tapping the album name in the player controls; shows artwork, release year, type, track count, runtime, full numbered track list with explicit badges, play button, and label/copyright footer
+- **Album detail** adapts to screen width: two-pane layout (art + info left, tracks right) on wide screens (≥600dp), single-column on narrow; art sizes dynamically via `BoxWithConstraints` to fit the left pane on both tall and short wide screens
+- **Artist detail screen** — accessible from search results, album detail (tap artist name), and player controls (tap artist name); shows artist photo, discography grouped into Albums / Singles / Compilations with a "Load more" button for large catalogues
+- **Artist detail** uses the same two-pane adaptive layout as album detail
+- **Search** now returns albums and artists alongside tracks; artists appear as a horizontal scrollable row of circle photos at the top of results (Instagram Stories style); tapping any result navigates to the respective detail screen
+- **Artist name** in the player controls is tappable — navigates to artist detail
+- **Album name** in the player is tappable — navigates to album detail
+- **Share button** in the top bar of Album Detail and Artist Detail screens — opens the Android share sheet with the Spotify link for the album or artist
+- **Bottom fade scrim** behind the navigation bar on search results, album detail, and artist detail screens, matching the Queue screen
+- **Multiple artists** displayed everywhere a track's artist name appears (track lists, mini player, pop-out panel, full player screen, album detail rows) using " · " separator; artist names in the full player screen remain individually tappable
+- **Mini player** now visible on Album Detail and Artist Detail screens, matching the Library screen behaviour — same accent colors, same animations, same wavy progress ring
+- **On unfolded (≥600dp) and folded landscape**: mini player sits at the bottom of the right content pane, matching the Library two-pane layout; tapping a track or the play button opens the pop-out player panel instead of navigating away; tapping the mini player also opens the panel
+- **On folded portrait**: tapping the mini player navigates to the full player screen with the shared album-art transition
+- **Album art** morphs between the mini player and the full player screen when navigating via album/artist name taps (folded and unfolded)
+- **Liked Songs queue** now uses the full cached track list at play time (up to 750 songs from the tapped position) instead of only what was loaded on screen
+- **Background liked-songs fetcher**: while music is playing (notification visible), Lyra quietly fetches one page of liked songs every 30 seconds into the library cache until the full library is indexed; the fetcher respects Spotify's rate-limit window and backs off on 429
+- **Like/unlike** from the player now surgically updates the liked-songs cache (prepend on like, remove on unlike) without invalidating or re-fetching the full list; external likes/unlikes are detected by count diff on next library open — new songs prepended in one API call, removed songs trigger a full refetch
+- **Sleep timer Live notification** on Android 16+ devices — when a sleep timer is active, a separate pinned notification appears in the Live notifications section showing a live countdown and a Cancel button; on Samsung OneUI 8, requires enabling "Live notifications for all apps" in Developer options (a Samsung limitation)
+- **Settings → Notifications** section (Android 16+ only) — shows whether Live notifications are enabled for Lyra; on Samsung, tapping Enable opens an explanatory dialog with a direct link to Developer options
 
 ### Changed
-- Pull-to-refresh on liked songs now preserves background-fetch progress beyond page 1 instead of overwriting the full cache with only 50 tracks
+- **Pull-to-refresh** on liked songs now preserves background-fetch progress beyond page 1 instead of overwriting the full cache with only 50 tracks
 
 ### Fixed
-- Album track count now reads "1 song" instead of "1 songs"
-- Playlist thumbnails not showing in the library browser — Spotify's thumbnail URL was available on every playlist object but `PlaylistCard` and `PlaylistListCard` only ever rendered a mosaic or a blank icon; both now fall back to the Spotify thumbnail when no mosaic exists, with mosaic generation skipped entirely for playlists that already have Spotify art
-- Crash opening the Queue screen when shuffle is on with a small playlist — Spotify's queue API repeats the same track multiple times in the response; duplicates are now filtered out before display
-- Shuffle and repeat active state now shows a small dot indicator below the button (both full player and pop-out panel), matching Spotify's own affordance; the previous color-only tint was hard to read against many album art colors
-- Crash on launch after adding `albumType` field to `SpotifyAlbum` — Gson bypasses Kotlin non-null defaults on deserialization, leaving the field `null` on cached tracks and crashing `hashCode()`; fixed by making the field nullable
+- **Album track count** now reads "1 song" instead of "1 songs"
+- **Playlist thumbnails** not showing in the library browser — Spotify's thumbnail URL was available on every playlist object but `PlaylistCard` and `PlaylistListCard` only ever rendered a mosaic or a blank icon; both now fall back to the Spotify thumbnail when no mosaic exists, with mosaic generation skipped entirely for playlists that already have Spotify art
+- **Queue screen crash** when shuffle is on with a small playlist — Spotify's queue API repeats the same track multiple times in the response; duplicates are now filtered out before display
+- **Shuffle and repeat** active state now shows a small dot indicator below the button (both full player and pop-out panel), matching Spotify's own affordance; the previous color-only tint was hard to read against many album art colors
+- **Launch crash** after adding `albumType` field to `SpotifyAlbum` — Gson bypasses Kotlin non-null defaults on deserialization, leaving the field `null` on cached tracks and crashing `hashCode()`; fixed by making the field nullable
 
 ## [1.2.0] - 2026-05-29
 
