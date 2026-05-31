@@ -177,6 +177,7 @@ class LibraryViewModel(
         viewModelScope.launch(Dispatchers.IO) {
             for (playlist in playlists) {
                 if (playlist.id in _uiState.value.playlistsWithMosaics) continue
+                if (playlist.thumbnailUrl.isNotBlank()) continue
                 val trackList = trackLists[playlist.id] ?: continue
                 if (playlist.snapshotId != null && trackList.snapshotId != playlist.snapshotId) continue
                 if (mosaicGenerator.generate(playlist.id, trackList.tracks)) {
@@ -196,7 +197,7 @@ class LibraryViewModel(
                 val cached = withContext(Dispatchers.IO) { cache.loadTrackList(playlist.id) }
                 if (cached != null && cached.snapshotId == snapshotId) {
                     _uiState.update { it.copy(currentTracks = cached.tracks, isLoadingTracks = false) }
-                    if (playlist.id !in _uiState.value.playlistsWithMosaics) {
+                    if (playlist.id !in _uiState.value.playlistsWithMosaics && playlist.thumbnailUrl.isBlank()) {
                         withContext(Dispatchers.IO) { mosaicGenerator.generate(playlist.id, cached.tracks) }
                         _uiState.update { s -> s.copy(playlistsWithMosaics = s.playlistsWithMosaics + playlist.id) }
                     }
@@ -213,8 +214,10 @@ class LibraryViewModel(
                     if (snapshotId != null) {
                         withContext(Dispatchers.IO) { cache.saveTrackList(playlist.id, snapshotId, tracks) }
                     }
-                    withContext(Dispatchers.IO) { mosaicGenerator.generate(playlist.id, tracks) }
-                    _uiState.update { s -> s.copy(playlistsWithMosaics = s.playlistsWithMosaics + playlist.id) }
+                    if (playlist.thumbnailUrl.isBlank()) {
+                        withContext(Dispatchers.IO) { mosaicGenerator.generate(playlist.id, tracks) }
+                        _uiState.update { s -> s.copy(playlistsWithMosaics = s.playlistsWithMosaics + playlist.id) }
+                    }
                 },
                 onFailure = { e ->
                     if (!cacheHit) {
@@ -271,7 +274,7 @@ class LibraryViewModel(
             isLoadingMoreTracks = false,
         )}
         viewModelScope.launch {
-            val cached = withContext(Dispatchers.IO) { cache.loadTrackList(LIKED_SONGS_KEY) }
+            val cached = withContext(Dispatchers.IO) { cache.loadTrackList(LibraryCache.LIKED_SONGS_KEY) }
 
             if (cached != null) {
                 // Show cached tracks immediately — no loading spinner for the user
@@ -283,13 +286,34 @@ class LibraryViewModel(
                     likedSongsTotal  = cachedCount,
                 )}
 
-                // Background count check (1 lightweight call) — detects adds/removes
-                // without requiring the user to close and reopen the app.
+                // Background count check — detects external likes/unlikes since last open.
                 repository.getLikedSongs(limit = 1).fold(
                     onSuccess = { resp ->
-                        _uiState.update { it.copy(likedSongCount = resp.total) }
-                        if (resp.total != cachedCount) {
-                            fetchAndReplaceLikedSongs()
+                        val newTotal = resp.total
+                        _uiState.update { it.copy(likedSongCount = newTotal) }
+                        val diff = newTotal - cachedCount
+                        when {
+                            diff in 1..50 -> {
+                                // Songs added externally: fetch only the new ones and prepend.
+                                repository.getLikedSongs(limit = diff, offset = 0).fold(
+                                    onSuccess = { newResp ->
+                                        val newTracks = (newResp.items ?: emptyList())
+                                            .mapNotNull { it.track }
+                                            .filter { it.isPlayable != false }
+                                        val merged = newTracks + cached.tracks
+                                        _uiState.update { s -> s.copy(
+                                            currentTracks    = merged,
+                                            likedSongsOffset = merged.size,
+                                            likedSongsTotal  = newTotal,
+                                        )}
+                                        withContext(Dispatchers.IO) {
+                                            cache.saveTrackList(LibraryCache.LIKED_SONGS_KEY, newTotal.toString(), merged)
+                                        }
+                                    },
+                                    onFailure = { fetchAndReplaceLikedSongs() },
+                                )
+                            }
+                            diff != 0 -> fetchAndReplaceLikedSongs()  // decreased or jumped >50
                         }
                     },
                     onFailure = { },  // network unavailable — keep showing cache
@@ -315,7 +339,7 @@ class LibraryViewModel(
                     likedSongCount   = resp.total,
                 )}
                 withContext(Dispatchers.IO) {
-                    cache.saveTrackList(LIKED_SONGS_KEY, resp.total.toString(), tracks)
+                    cache.saveTrackList(LibraryCache.LIKED_SONGS_KEY, resp.total.toString(), tracks)
                 }
             },
             onFailure = { e ->
@@ -340,7 +364,7 @@ class LibraryViewModel(
                         likedSongsTotal     = resp.total,
                     )}
                     withContext(Dispatchers.IO) {
-                        cache.saveTrackList(LIKED_SONGS_KEY, resp.total.toString(), allTracks)
+                        cache.saveTrackList(LibraryCache.LIKED_SONGS_KEY, resp.total.toString(), allTracks)
                     }
                 },
                 onFailure = {
@@ -358,15 +382,17 @@ class LibraryViewModel(
             if (s.currentPlaylist == null) {
                 repository.getLikedSongs(limit = 50, offset = 0).fold(
                     onSuccess = { resp ->
-                        val tracks = (resp.items ?: emptyList()).mapNotNull { it.track }.filter { it.isPlayable != false }
+                        val freshFirst50 = (resp.items ?: emptyList()).mapNotNull { it.track }.filter { it.isPlayable != false }
                         _uiState.update { it.copy(
-                            currentTracks    = tracks,
-                            likedSongsOffset = tracks.size,
+                            currentTracks    = freshFirst50,
+                            likedSongsOffset = freshFirst50.size,
                             likedSongsTotal  = resp.total,
                             likedSongCount   = resp.total,
                         )}
                         withContext(Dispatchers.IO) {
-                            cache.saveTrackList(LIKED_SONGS_KEY, resp.total.toString(), tracks)
+                            // Preserve tracks cached beyond page 0 so background-fetch progress isn't lost.
+                            val beyond50 = cache.loadTrackList(LibraryCache.LIKED_SONGS_KEY)?.tracks?.drop(50) ?: emptyList()
+                            cache.saveTrackList(LibraryCache.LIKED_SONGS_KEY, resp.total.toString(), freshFirst50 + beyond50)
                         }
                     },
                     onFailure = { },
@@ -380,8 +406,10 @@ class LibraryViewModel(
                         if (playlist.snapshotId != null) {
                             withContext(Dispatchers.IO) { cache.saveTrackList(playlist.id, playlist.snapshotId, tracks) }
                         }
-                        withContext(Dispatchers.IO) { mosaicGenerator.generate(playlist.id, tracks) }
-                        _uiState.update { s -> s.copy(playlistsWithMosaics = s.playlistsWithMosaics + playlist.id) }
+                        if (playlist.thumbnailUrl.isBlank()) {
+                            withContext(Dispatchers.IO) { mosaicGenerator.generate(playlist.id, tracks) }
+                            _uiState.update { s -> s.copy(playlistsWithMosaics = s.playlistsWithMosaics + playlist.id) }
+                        }
                     },
                     onFailure = { },
                 )
@@ -390,9 +418,6 @@ class LibraryViewModel(
         }
     }
 
-    companion object {
-        private const val LIKED_SONGS_KEY = "liked_songs"
-    }
 }
 
 private fun Throwable?.isTransientNetworkError(): Boolean =

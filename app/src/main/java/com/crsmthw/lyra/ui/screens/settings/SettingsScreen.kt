@@ -1,6 +1,9 @@
 package com.crsmthw.lyra.ui.screens.settings
 
+import android.app.NotificationManager
 import android.content.Intent
+import android.os.Build
+import android.provider.Settings
 import androidx.core.net.toUri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -26,6 +29,8 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.crsmthw.lyra.BuildConfig
 import com.crsmthw.lyra.R
@@ -117,6 +122,84 @@ fun SettingsScreen(
             )
 
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+
+            // ── Notifications ─────────────────────────────────────────────────
+            if (Build.VERSION.SDK_INT >= 36) {
+                val context = LocalContext.current
+                val nm = context.getSystemService(NotificationManager::class.java)
+                var liveNotifsEnabled by remember { mutableStateOf(nm.canPostPromotedNotifications()) }
+                LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+                    liveNotifsEnabled = nm.canPostPromotedNotifications()
+                }
+                var showLiveNotifHelpDialog by remember { mutableStateOf(false) }
+
+                SettingsSectionHeader(stringResource(R.string.settings_notifications))
+                ListItem(
+                    leadingContent   = {
+                        Icon(Icons.Default.Timer, contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    },
+                    headlineContent  = { Text(stringResource(R.string.settings_live_notifications)) },
+                    supportingContent = {
+                        Text(
+                            stringResource(
+                                if (liveNotifsEnabled) R.string.settings_live_notifications_on
+                                else R.string.settings_live_notifications_off
+                            ),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    },
+                    trailingContent  = {
+                        if (liveNotifsEnabled) {
+                            Icon(Icons.Default.Check, contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary)
+                        } else {
+                            TextButton(onClick = {
+                                if (Build.MANUFACTURER.equals("samsung", ignoreCase = true)) {
+                                    showLiveNotifHelpDialog = true
+                                } else {
+                                    @Suppress("NewApi")
+                                    val launched = try {
+                                        context.startActivity(
+                                            Intent(Settings.ACTION_APP_NOTIFICATION_PROMOTION_SETTINGS).apply {
+                                                putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                                            }
+                                        ); true
+                                    } catch (_: android.content.ActivityNotFoundException) { false }
+                                    if (!launched) context.startActivity(
+                                        Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                                            putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                                        }
+                                    )
+                                }
+                            }) {
+                                Text(stringResource(R.string.settings_live_notifications_enable))
+                            }
+                        }
+                    },
+                )
+
+                if (showLiveNotifHelpDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showLiveNotifHelpDialog = false },
+                        title  = { Text(stringResource(R.string.settings_live_notif_dialog_title)) },
+                        text   = { Text(stringResource(R.string.settings_live_notif_dialog_samsung)) },
+                        confirmButton  = {
+                            TextButton(onClick = {
+                                context.startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS))
+                                showLiveNotifHelpDialog = false
+                            }) { Text(stringResource(R.string.settings_live_notif_dialog_open_dev_options)) }
+                        },
+                        dismissButton  = {
+                            TextButton(onClick = { showLiveNotifHelpDialog = false }) {
+                                Text(stringResource(R.string.settings_live_notif_dialog_got_it))
+                            }
+                        },
+                    )
+                }
+
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            }
 
             // ── Storage ───────────────────────────────────────────────────────
             SettingsSectionHeader("Storage")

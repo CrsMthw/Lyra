@@ -32,9 +32,10 @@ fun PlaylistCard(
             .clickable(onClick = onClick)
             .padding(bottom = 4.dp),
     ) {
-        if (mosaicFile != null) {
+        val imageModel = mosaicFile ?: playlist.thumbnailUrl.takeIf { it.isNotBlank() }
+        if (imageModel != null) {
             AsyncImage(
-                model              = mosaicFile,
+                model              = imageModel,
                 contentDescription = playlist.name,
                 contentScale       = ContentScale.Crop,
                 modifier           = Modifier

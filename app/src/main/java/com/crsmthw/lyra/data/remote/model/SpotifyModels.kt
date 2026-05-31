@@ -80,6 +80,7 @@ data class SpotifyTrack(
 ) {
     val primaryArtist  : String  get() = artists?.firstOrNull()?.name ?: "Unknown"
     val primaryArtistId: String? get() = artists?.firstOrNull()?.id
+    val allArtists     : String  get() = artists?.joinToString(" · ") { it.name } ?: primaryArtist
     val thumbnailUrl   : String  get() = album?.images?.lastOrNull()?.url ?: ""
     val artUrl         : String  get() = album?.images?.firstOrNull()?.url ?: ""
 }
@@ -220,6 +221,7 @@ data class AlbumTrack(
     @SerializedName("disc_number")  val discNumber  : Int      = 1,
 ) {
     val primaryArtist: String get() = artists?.firstOrNull()?.name ?: "Unknown"
+    val allArtists   : String get() = artists?.joinToString(" · ") { it.name } ?: primaryArtist
 }
 
 data class SpotifyAlbumFull(

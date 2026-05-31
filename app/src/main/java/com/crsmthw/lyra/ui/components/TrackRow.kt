@@ -55,7 +55,7 @@ fun TrackRow(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text     = track.primaryArtist,
+                text     = track.allArtists,
                 style    = MaterialTheme.typography.bodySmall,
                 color    = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,

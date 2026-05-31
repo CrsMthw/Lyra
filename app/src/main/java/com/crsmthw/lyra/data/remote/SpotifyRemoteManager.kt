@@ -110,12 +110,16 @@ class SpotifyRemoteManager(
         return true
     }
 
-    fun setShuffle(enabled: Boolean) {
+    suspend fun setShuffle(enabled: Boolean): Boolean {
+        if (!connectSuspend()) return false
         _appRemote?.playerApi?.setShuffle(enabled)
+        return true
     }
 
-    fun setRepeat(repeatMode: Int) {
+    suspend fun setRepeat(repeatMode: Int): Boolean {
+        if (!connectSuspend()) return false
         _appRemote?.playerApi?.setRepeat(repeatMode)
+        return true
     }
 
     fun subscribeToPlayerState(callback: (isPlaying: Boolean, trackUri: String, progressMs: Long) -> Unit) {

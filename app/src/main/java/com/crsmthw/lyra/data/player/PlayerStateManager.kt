@@ -132,9 +132,11 @@ class PlayerStateManager(
 
     // ── Optimistic locks ──────────────────────────────────────────────────────
 
-    fun lockIsPlaying() { isPlayingLockUntil = System.currentTimeMillis() + 5_000L }
-    fun lockShuffle()   { shuffleLockUntil   = System.currentTimeMillis() + 5_000L }
-    fun lockRepeat()    { repeatLockUntil    = System.currentTimeMillis() + 5_000L }
+    fun lockIsPlaying()  { isPlayingLockUntil = System.currentTimeMillis() + 5_000L }
+    fun lockShuffle()    { shuffleLockUntil   = System.currentTimeMillis() + 5_000L }
+    fun lockRepeat()     { repeatLockUntil    = System.currentTimeMillis() + 5_000L }
+    fun isRateLimited()  = System.currentTimeMillis() < pollBackoffUntil
+    fun noteRateLimited() { pollBackoffUntil  = System.currentTimeMillis() + 60_000L }
 
     // ── Controls ──────────────────────────────────────────────────────────────
 
@@ -203,8 +205,9 @@ class PlayerStateManager(
         lockShuffle()
         _state.update { it.copy(shuffleEnabled = new) }
         scope.launch {
-            remoteManager.setShuffle(new)
-            repository.setShuffle(new)
+            repository.setShuffle(new).onFailure { e ->
+                if (e.message?.contains("404") == true) remoteManager.setShuffle(new)
+            }
         }
     }
 
@@ -218,8 +221,9 @@ class PlayerStateManager(
         _state.update { it.copy(repeatState = next) }
         val sdkMode = when (next) { "context" -> 1; "track" -> 2; else -> 0 }
         scope.launch {
-            remoteManager.setRepeat(sdkMode)
-            repository.setRepeat(next)
+            repository.setRepeat(next).onFailure { e ->
+                if (e.message?.contains("404") == true) remoteManager.setRepeat(sdkMode)
+            }
         }
     }
 

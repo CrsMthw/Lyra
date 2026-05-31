@@ -13,7 +13,7 @@ class LyraApplication : Application(), SingletonImageLoader.Factory {
 
     override fun onCreate() {
         super.onCreate()
-        LyraForegroundService.createChannel(this)
+        LyraForegroundService.createChannels(this)
         container = AppContainer(this)
     }
 

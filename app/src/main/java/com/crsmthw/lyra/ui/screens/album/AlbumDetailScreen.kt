@@ -1,5 +1,8 @@
 package com.crsmthw.lyra.ui.screens.album
 
+import androidx.compose.animation.AnimatedContentScope
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -8,9 +11,11 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import android.content.Intent
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -20,7 +25,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -29,26 +36,36 @@ import coil3.compose.AsyncImage
 import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.remote.model.AlbumTrack
 import com.crsmthw.lyra.data.remote.model.SpotifyAlbumFull
+import com.crsmthw.lyra.ui.components.PlayerPanelHost
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import com.crsmthw.lyra.util.toDurationString
 import com.crsmthw.lyra.util.toTimeString
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalSharedTransitionApi::class)
 @Composable
 fun AlbumDetailScreen(
-    viewModel          : AlbumDetailViewModel,
-    playerViewModel    : PlayerViewModel,
-    onBack             : () -> Unit,
-    onNavigateToPlayer : () -> Unit,
-    onOpenArtist       : ((artistId: String) -> Unit)? = null,
+    viewModel             : AlbumDetailViewModel,
+    playerViewModel       : PlayerViewModel,
+    onBack                : () -> Unit,
+    onNavigateToPlayer    : () -> Unit,
+    onOpenArtist          : ((artistId: String) -> Unit)? = null,
+    sharedTransitionScope : SharedTransitionScope? = null,
+    animatedContentScope  : AnimatedContentScope? = null,
 ) {
     val state         by viewModel.uiState.collectAsStateWithLifecycle()
+    val context        = LocalContext.current
     val density        = LocalDensity.current
     val navBarBottomDp = with(density) { WindowInsets.navigationBars.getBottom(this).toDp() }
-    val scrimHeight    = navBarBottomDp + 48.dp
+    val scrimHeight    = 140.dp
     val background     = MaterialTheme.colorScheme.background
     val isWideScreen   = LocalConfiguration.current.screenWidthDp >= 600
 
+    PlayerPanelHost(
+        playerViewModel          = playerViewModel,
+        onOpenPlayer             = onNavigateToPlayer,
+        navSharedTransitionScope = sharedTransitionScope,
+        navAnimatedContentScope  = animatedContentScope,
+    ) { onRequestPlayer ->
     Scaffold(
         contentWindowInsets = WindowInsets(0),
         topBar = {
@@ -68,6 +85,23 @@ fun AlbumDetailScreen(
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(R.string.nav_back))
+                    }
+                },
+                actions = {
+                    IconButton(
+                        onClick = {
+                            state.album?.id?.let { id ->
+                                context.startActivity(Intent.createChooser(
+                                    Intent(Intent.ACTION_SEND).apply {
+                                        putExtra(Intent.EXTRA_TEXT, "https://open.spotify.com/album/$id")
+                                        type = "text/plain"
+                                    }, null
+                                ))
+                            }
+                        },
+                        enabled = state.album != null,
+                    ) {
+                        Icon(Icons.Default.Share, contentDescription = stringResource(R.string.player_share))
                     }
                 },
             )
@@ -94,12 +128,12 @@ fun AlbumDetailScreen(
                 val onPlayAll: () -> Unit = {
                     if (tracks.isNotEmpty()) {
                         playerViewModel.playTrack(uri = tracks[0].uri, contextUri = albumUri, index = 0)
-                        onNavigateToPlayer()
+                        onRequestPlayer()
                     }
                 }
                 val onPlayTrack = { track: AlbumTrack, idx: Int ->
                     playerViewModel.playTrack(uri = track.uri, contextUri = albumUri, index = idx)
-                    onNavigateToPlayer()
+                    onRequestPlayer()
                 }
 
                 if (isWideScreen) {
@@ -122,7 +156,7 @@ fun AlbumDetailScreen(
                                 AlbumHeader(
                                     album         = album,
                                     tracks        = tracks,
-                                    artModifier   = Modifier
+                                    modifier      = Modifier
                                         .size(artSize)
                                         .clip(RoundedCornerShape(8.dp)),
                                     compact       = compact,
@@ -139,7 +173,7 @@ fun AlbumDetailScreen(
                         Box(modifier = Modifier.weight(0.58f).fillMaxHeight()) {
                             LazyColumn(
                                 modifier       = Modifier.fillMaxSize(),
-                                contentPadding = PaddingValues(bottom = 16.dp + navBarBottomDp),
+                                contentPadding = PaddingValues(bottom = 100.dp + navBarBottomDp),
                             ) {
                                 itemsIndexed(tracks, key = { idx, t -> "track_${t.id}_$idx" }) { idx, track ->
                                     AlbumTrackRow(track = track, onClick = { onPlayTrack(track, idx) })
@@ -166,7 +200,7 @@ fun AlbumDetailScreen(
                     ) {
                         LazyColumn(
                             modifier       = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(bottom = 16.dp + navBarBottomDp),
+                            contentPadding = PaddingValues(bottom = 100.dp + navBarBottomDp),
                         ) {
                             item(key = "header") {
                                 AlbumHeader(album = album, tracks = tracks, onPlayAll = onPlayAll, onOpenArtist = onOpenArtist)
@@ -190,13 +224,14 @@ fun AlbumDetailScreen(
             }
         }
     }
+    } // PlayerPanelHost
 }
 
 @Composable
 private fun AlbumHeader(
     album        : SpotifyAlbumFull,
     tracks       : List<AlbumTrack>,
-    artModifier  : Modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+    modifier     : Modifier = Modifier.fillMaxWidth().aspectRatio(1f),
     compact      : Boolean  = false,
     showDivider  : Boolean  = true,
     onPlayAll    : () -> Unit,
@@ -208,7 +243,7 @@ private fun AlbumHeader(
                 model              = album.artUrl,
                 contentDescription = album.name,
                 contentScale       = ContentScale.Crop,
-                modifier           = artModifier,
+                modifier           = modifier,
             )
         }
         Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
@@ -235,7 +270,7 @@ private fun AlbumHeader(
             val metaParts = listOfNotNull(
                 album.releaseYear.takeIf { it.isNotBlank() },
                 album.albumTypeDisplay.takeIf { it.isNotBlank() },
-                if (tracks.isNotEmpty()) stringResource(R.string.album_tracks_count, tracks.size) else null,
+                if (tracks.isNotEmpty()) pluralStringResource(R.plurals.album_tracks_count, tracks.size, tracks.size) else null,
                 if (totalMs > 0L) totalMs.toDurationString() else null,
             )
             Text(
@@ -284,7 +319,7 @@ private fun AlbumTrackRow(
         },
         supportingContent = {
             Text(
-                text     = track.primaryArtist,
+                text     = track.allArtists,
                 style    = MaterialTheme.typography.bodySmall,
                 color    = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,

@@ -9,11 +9,13 @@ import com.crsmthw.lyra.data.remote.SpotifyRemoteManager
 import com.crsmthw.lyra.data.remote.model.SpotifyPlaylist
 import com.crsmthw.lyra.data.remote.model.SpotifyTrack
 import com.crsmthw.lyra.data.repository.SpotifyRepository
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 enum class RepeatMode { OFF, CONTEXT, TRACK }
 
@@ -114,13 +116,33 @@ class PlayerViewModel(
     // ── Like ──────────────────────────────────────────────────────────────────
 
     fun toggleLike() {
-        val state   = _uiState.value
-        val trackId = state.currentTrack?.id ?: return
+        val state    = _uiState.value
+        val track    = state.currentTrack ?: return
+        val trackId  = track.id ?: return
         val newLiked = !state.isLiked
         _uiState.update { it.copy(isLiked = newLiked) }
         viewModelScope.launch {
-            if (newLiked) repository.saveTrack(trackId)
-            else          repository.removeTrack(trackId)
+            if (newLiked) {
+                repository.saveTrack(trackId)
+                withContext(Dispatchers.IO) { libraryCache.prependToLikedSongs(track) }
+            } else {
+                repository.removeTrack(trackId)
+                withContext(Dispatchers.IO) { libraryCache.removeFromLikedSongs(trackId) }
+            }
+        }
+    }
+
+    fun playFromLikedSongs(trackUri: String) {
+        viewModelScope.launch {
+            val cached = withContext(Dispatchers.IO) {
+                libraryCache.loadTrackList(LibraryCache.LIKED_SONGS_KEY)?.tracks
+            }
+            if (cached != null) {
+                val idx = cached.indexOfFirst { it.uri == trackUri }.coerceAtLeast(0)
+                playTrack(trackUri, uris = cached.drop(idx).map { it.uri }.take(750))
+            } else {
+                playTrack(trackUri)
+            }
         }
     }
 

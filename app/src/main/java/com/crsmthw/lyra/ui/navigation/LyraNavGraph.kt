@@ -166,11 +166,13 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
                     factory = AlbumDetailViewModelFactory(container, albumId)
                 )
                 AlbumDetailScreen(
-                    viewModel          = vm,
-                    playerViewModel    = playerVm,
-                    onBack             = ::safeNavigateUp,
-                    onNavigateToPlayer = { safePush(Screen.Player.route) },
-                    onOpenArtist       = { artistId -> safePush(Screen.ArtistDetail.createRoute(artistId)) },
+                    viewModel             = vm,
+                    playerViewModel       = playerVm,
+                    onBack                = ::safeNavigateUp,
+                    onNavigateToPlayer    = { safePush(Screen.Player.route) },
+                    onOpenArtist          = { artistId -> safePush(Screen.ArtistDetail.createRoute(artistId)) },
+                    sharedTransitionScope = this@SharedTransitionLayout,
+                    animatedContentScope  = this@composable,
                 )
             }
 
@@ -184,9 +186,13 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
                     factory = ArtistDetailViewModelFactory(container, artistId)
                 )
                 ArtistDetailScreen(
-                    viewModel   = vm,
-                    onBack      = ::safeNavigateUp,
-                    onOpenAlbum = { albumId -> safePush(Screen.AlbumDetail.createRoute(albumId)) },
+                    viewModel             = vm,
+                    playerViewModel       = playerVm,
+                    onBack                = ::safeNavigateUp,
+                    onOpenAlbum           = { albumId -> safePush(Screen.AlbumDetail.createRoute(albumId)) },
+                    onOpenPlayer          = { safePush(Screen.Player.route) },
+                    sharedTransitionScope = this@SharedTransitionLayout,
+                    animatedContentScope  = this@composable,
                 )
             }
 

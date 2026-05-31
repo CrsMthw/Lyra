@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.toShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -546,17 +547,36 @@ private fun PlayerControls(
                 overflow = TextOverflow.Clip,
                 modifier = Modifier.basicMarquee(),
             )
-            val artistId = state.currentTrack?.primaryArtistId
-            Text(
-                text     = state.currentTrack?.primaryArtist ?: "–",
-                style    = MaterialTheme.typography.bodyMedium,
-                color    = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = if (onOpenArtist != null && artistId != null)
-                    Modifier.clickable { onOpenArtist(artistId) }
-                else Modifier,
-            )
+            val artists = state.currentTrack?.artists.orEmpty()
+            if (artists.isNotEmpty()) {
+                FlowRow {
+                    artists.forEachIndexed { index, artist ->
+                        if (index > 0) {
+                            Text(
+                                text  = " · ",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Text(
+                            text     = artist.name,
+                            style    = MaterialTheme.typography.bodyMedium,
+                            color    = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = if (onOpenArtist != null)
+                                Modifier.clickable { onOpenArtist(artist.id) }
+                            else Modifier,
+                        )
+                    }
+                }
+            } else {
+                Text(
+                    text  = "–",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             val albumId   = state.currentTrack?.album?.id
             val albumName = state.currentTrack?.album?.name
             if (albumName != null && albumId != null && onOpenAlbum != null) {
@@ -625,10 +645,21 @@ private fun PlayerControls(
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment     = Alignment.CenterVertically,
     ) {
-        IconButton(onClick = onToggleShuffle) {
-            Icon(Icons.Default.Shuffle, contentDescription = stringResource(R.string.player_shuffle),
-                tint = if (state.shuffleEnabled) surfaceAccentColor
-                       else MaterialTheme.colorScheme.onSurfaceVariant)
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            IconButton(onClick = onToggleShuffle) {
+                Icon(Icons.Default.Shuffle, contentDescription = stringResource(R.string.player_shuffle),
+                    tint = if (state.shuffleEnabled) surfaceAccentColor
+                           else MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Box(
+                Modifier
+                    .size(5.dp)
+                    .offset(y = (-10).dp)
+                    .background(
+                        color = if (state.shuffleEnabled) surfaceAccentColor else Color.Transparent,
+                        shape = CircleShape,
+                    )
+            )
         }
 
         IconButton(onClick = onSkipPrev, modifier = Modifier.size(48.dp)) {
@@ -667,15 +698,26 @@ private fun PlayerControls(
                 modifier = Modifier.size(36.dp))
         }
 
-        IconButton(onClick = onCycleRepeat) {
-            Icon(
-                imageVector = when (state.repeatMode) {
-                    RepeatMode.TRACK -> Icons.Default.RepeatOne
-                    else             -> Icons.Default.Repeat
-                },
-                contentDescription = stringResource(R.string.player_repeat),
-                tint = if (state.repeatMode != RepeatMode.OFF) surfaceAccentColor
-                       else MaterialTheme.colorScheme.onSurfaceVariant,
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            IconButton(onClick = onCycleRepeat) {
+                Icon(
+                    imageVector = when (state.repeatMode) {
+                        RepeatMode.TRACK -> Icons.Default.RepeatOne
+                        else             -> Icons.Default.Repeat
+                    },
+                    contentDescription = stringResource(R.string.player_repeat),
+                    tint = if (state.repeatMode != RepeatMode.OFF) surfaceAccentColor
+                           else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Box(
+                Modifier
+                    .size(5.dp)
+                    .offset(y = (-10).dp)
+                    .background(
+                        color = if (state.repeatMode != RepeatMode.OFF) surfaceAccentColor else Color.Transparent,
+                        shape = CircleShape,
+                    )
             )
         }
     }

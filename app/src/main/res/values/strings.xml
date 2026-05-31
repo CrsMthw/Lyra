@@ -63,7 +63,6 @@
 
     <!-- Sleep timer -->
     <string name="sleep_timer_off">Off</string>
-    <string name="sleep_timer_active">%d min remaining</string>
     <string name="sleep_timer_5">5 min</string>
     <string name="sleep_timer_15">15 min</string>
     <string name="sleep_timer_30">30 min</string>
@@ -74,18 +73,29 @@
     <string name="notification_channel_name">Now Playing</string>
     <string name="notification_channel_desc">Shows the current track and sleep timer controls</string>
     <string name="notification_cancel_timer">Cancel timer · %d min</string>
+    <string name="notification_sleep_timer_channel_name">Sleep Timer</string>
+    <string name="notification_sleep_timer_channel_desc">Shows the active sleep timer countdown</string>
+    <string name="notification_sleep_timer_title">Sleep Timer</string>
+    <string name="notification_sleep_timer_stopping_at">Stopping at %s</string>
+    <string name="notification_sleep_timer_cancel">Cancel</string>
+    <string name="settings_notifications">Notifications</string>
+    <string name="settings_live_notifications">Live Notifications</string>
+    <string name="settings_live_notifications_on">Sleep timer shows as a pinned Live notification</string>
+    <string name="settings_live_notifications_off">Enable to show the sleep timer as a pinned Live notification</string>
+    <string name="settings_live_notifications_enable">Enable</string>
+    <string name="settings_live_notif_dialog_title">Enabling Live Notifications</string>
+    <string name="settings_live_notif_dialog_samsung">On Samsung devices (OneUI 8 and above), open Developer options and enable \"Live notifications for all apps\".\n\nThis is a Samsung limitation — regular sleep timer notifications work without this setting.</string>
+    <string name="settings_live_notif_dialog_open_dev_options">Open Developer Options</string>
+    <string name="settings_live_notif_dialog_got_it">Got it</string>
 
     <!-- Album detail -->
     <string name="album_play">Play</string>
-    <string name="album_tracks_count">%1$d songs</string>
 
     <!-- Artist detail -->
-    <string name="artist_popular">Popular</string>
     <string name="artist_albums">Albums</string>
     <string name="artist_singles">Singles</string>
     <string name="artist_compilations">Compilations</string>
     <string name="artist_load_more">Load more</string>
-    <string name="artist_play_popular">Play Popular</string>
 
     <!-- Navigation -->
     <string name="nav_back">Back</string>
@@ -99,6 +109,4 @@
     <!-- Errors / system messages -->
     <string name="spotify_waking_up">Waking up Spotify…</string>
     <string name="error_generic">Something went wrong</string>
-    <string name="error_no_spotify">Spotify app not installed</string>
-    <string name="error_auth_failed">Authentication failed</string>
 </resources>

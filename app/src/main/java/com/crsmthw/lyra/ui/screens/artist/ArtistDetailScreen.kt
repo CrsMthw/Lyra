@@ -1,5 +1,8 @@
 package com.crsmthw.lyra.ui.screens.artist
 
+import androidx.compose.animation.AnimatedContentScope
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -9,10 +12,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import android.content.Intent
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -22,6 +27,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -31,21 +37,34 @@ import coil3.compose.AsyncImage
 import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.remote.model.SpotifyAlbum
 import com.crsmthw.lyra.data.remote.model.SpotifyArtistFull
+import com.crsmthw.lyra.ui.components.PlayerPanelHost
+import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalSharedTransitionApi::class)
 @Composable
 fun ArtistDetailScreen(
-    viewModel   : ArtistDetailViewModel,
-    onBack      : () -> Unit,
-    onOpenAlbum : (albumId: String) -> Unit,
+    viewModel             : ArtistDetailViewModel,
+    playerViewModel       : PlayerViewModel,
+    onBack                : () -> Unit,
+    onOpenAlbum           : (albumId: String) -> Unit,
+    onOpenPlayer          : () -> Unit = {},
+    sharedTransitionScope : SharedTransitionScope? = null,
+    animatedContentScope  : AnimatedContentScope? = null,
 ) {
     val state         by viewModel.uiState.collectAsStateWithLifecycle()
+    val context        = LocalContext.current
     val density        = LocalDensity.current
     val navBarBottomDp = with(density) { WindowInsets.navigationBars.getBottom(this).toDp() }
-    val scrimHeight    = navBarBottomDp + 48.dp
+    val scrimHeight    = 140.dp
     val background     = MaterialTheme.colorScheme.background
     val isWideScreen   = LocalConfiguration.current.screenWidthDp >= 600
 
+    PlayerPanelHost(
+        playerViewModel          = playerViewModel,
+        onOpenPlayer             = onOpenPlayer,
+        navSharedTransitionScope = sharedTransitionScope,
+        navAnimatedContentScope  = animatedContentScope,
+    ) { _ ->
     Scaffold(
         contentWindowInsets = WindowInsets(0),
         topBar = {
@@ -65,6 +84,23 @@ fun ArtistDetailScreen(
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(R.string.nav_back))
+                    }
+                },
+                actions = {
+                    IconButton(
+                        onClick = {
+                            state.artist?.id?.let { id ->
+                                context.startActivity(Intent.createChooser(
+                                    Intent(Intent.ACTION_SEND).apply {
+                                        putExtra(Intent.EXTRA_TEXT, "https://open.spotify.com/artist/$id")
+                                        type = "text/plain"
+                                    }, null
+                                ))
+                            }
+                        },
+                        enabled = state.artist != null,
+                    ) {
+                        Icon(Icons.Default.Share, contentDescription = stringResource(R.string.player_share))
                     }
                 },
             )
@@ -118,7 +154,7 @@ fun ArtistDetailScreen(
                             ) {
                                 ArtistHeader(
                                     artist        = artist,
-                                    photoModifier = Modifier.size(photoSize).clip(RoundedCornerShape(12.dp)),
+                                    modifier      = Modifier.size(photoSize).clip(RoundedCornerShape(12.dp)),
                                     compact       = compact,
                                     showDivider   = false,
                                 )
@@ -130,7 +166,7 @@ fun ArtistDetailScreen(
                         Box(modifier = Modifier.weight(0.58f).fillMaxHeight()) {
                             LazyColumn(
                                 modifier       = Modifier.fillMaxSize(),
-                                contentPadding = PaddingValues(bottom = 16.dp + navBarBottomDp),
+                                contentPadding = PaddingValues(bottom = 100.dp + navBarBottomDp),
                             ) {
                                 artistContent(
                                     state         = state,
@@ -157,7 +193,7 @@ fun ArtistDetailScreen(
                     ) {
                         LazyColumn(
                             modifier       = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(bottom = 16.dp + navBarBottomDp),
+                            contentPadding = PaddingValues(bottom = 100.dp + navBarBottomDp),
                         ) {
                             item(key = "header") {
                                 ArtistHeader(artist = artist)
@@ -181,6 +217,7 @@ fun ArtistDetailScreen(
             }
         }
     }
+    } // PlayerPanelHost
 }
 
 private fun LazyListScope.artistContent(
@@ -219,7 +256,7 @@ private fun LazyListScope.artistContent(
 @Composable
 private fun ArtistHeader(
     artist        : SpotifyArtistFull,
-    photoModifier : Modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+    modifier      : Modifier = Modifier.fillMaxWidth().aspectRatio(1f),
     compact       : Boolean  = false,
     showDivider   : Boolean  = true,
 ) {
@@ -230,11 +267,11 @@ private fun ArtistHeader(
                     model              = artist.imageUrl,
                     contentDescription = artist.name,
                     contentScale       = ContentScale.Crop,
-                    modifier           = photoModifier,
+                    modifier           = modifier,
                 )
             } else {
                 Surface(
-                    modifier = photoModifier,
+                    modifier = modifier,
                     color    = MaterialTheme.colorScheme.surfaceVariant,
                     shape    = RoundedCornerShape(12.dp),
                 ) {

@@ -59,9 +59,9 @@ class QueueViewModel(
                             isLoading        = false,
                             currentlyPlaying = response.currentlyPlaying
                                 ?.takeIf { t -> t.uri.startsWith("spotify:track:") },
-                            queue            = response.queue.filter { t ->
-                                t.uri.startsWith("spotify:track:") && t.isPlayable != false
-                            },
+                            queue            = response.queue
+                                .filter { t -> t.uri.startsWith("spotify:track:") && t.isPlayable != false }
+                                .distinctBy { it.uri },
                             error            = null,
                         )
                     }

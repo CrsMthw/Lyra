@@ -11,7 +11,11 @@
 - Library browser with playlist and liked songs support
 - Full player with seek, shuffle, repeat, sleep timer, and queue-aware playback
 - Add to / remove from playlists directly from the player
-- Search
+- Album detail screen — full track list, play button, label/copyright footer
+- Artist detail screen — discography grouped by Albums / Singles / Compilations
+- Search for tracks, albums, and artists
+- Open Spotify share links directly in Lyra (`open.spotify.com/track/…`, `/album/…`, `/artist/…`)
+- Sleep timer with Live notification countdown on Android 16+
 - Pull-to-refresh on both the library and track lists
 - Adaptive two-pane layout for foldables and tablets
 - Material You dynamic colour + AMOLED black mode
@@ -127,10 +131,12 @@ app/src/main/java/com/crsmthw/lyra/
 │   │   └── model/   Spotify API data models
 │   └── repository/  SpotifyRepository, SettingsRepository
 ├── di/              AppContainer — manual DI, no Hilt
+├── service/         LyraForegroundService (Now Playing + sleep timer notifications)
 ├── ui/
-│   ├── components/  MiniPlayer, TrackRow, PlaylistCard
+│   ├── components/  MiniPlayer, PlayerCardContent, PlayerPopOutPanel, PlayerPanelHost,
+│   │                TrackRow, PlaylistCard, AddToPlaylistSheet
 │   ├── navigation/  LyraNavGraph, Screen
-│   ├── screens/     auth / library / player / search / settings
+│   ├── screens/     auth / library / player / search / settings / album / artist / queue
 │   └── theme/       Material You + static colour schemes, AMOLED overlay
 └── util/            Extensions
 ```

@@ -45,8 +45,11 @@ fun MiniPlayer(
     visible               : Boolean = true,
     accentColor             : Color = Color.Unspecified,
     surfaceAccentColor      : Color = Color.Unspecified,
-    sharedTransitionScope   : SharedTransitionScope? = null,
-    animatedVisibilityScope : AnimatedVisibilityScope? = null,
+    sharedTransitionScope      : SharedTransitionScope? = null,
+    animatedVisibilityScope    : AnimatedVisibilityScope? = null,
+    // Secondary scope — used when both local (mini↔panel) and nav (mini↔PlayerScreen) are needed.
+    navSharedTransitionScope   : SharedTransitionScope? = null,
+    navAnimatedVisibilityScope : AnimatedVisibilityScope? = null,
 ) {
     val resolvedAccent        = if (accentColor == Color.Unspecified) MaterialTheme.colorScheme.primary else accentColor
     val resolvedSurfaceAccent = if (surfaceAccentColor == Color.Unspecified) resolvedAccent else surfaceAccentColor
@@ -82,7 +85,7 @@ fun MiniPlayer(
                     .padding(start = 12.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Album art — shared element when transition params are provided
+                // Album art — chains up to two shared element scopes when both are provided.
                 val artModifier = if (sharedTransitionScope != null) {
                     with(sharedTransitionScope) {
                         Modifier.sharedElement(
@@ -91,12 +94,20 @@ fun MiniPlayer(
                         )
                     }
                 } else Modifier
+                val navArtModifier = if (navSharedTransitionScope != null && navAnimatedVisibilityScope != null) {
+                    with(navSharedTransitionScope) {
+                        Modifier.sharedElement(
+                            sharedContentState      = rememberSharedContentState(key = "album-art"),
+                            animatedVisibilityScope = navAnimatedVisibilityScope,
+                        )
+                    }
+                } else Modifier
 
                 AsyncImage(
                     model              = currentTrack.thumbnailUrl,
                     contentDescription = currentTrack.album?.name,
                     contentScale       = ContentScale.Crop,
-                    modifier           = artModifier
+                    modifier           = artModifier.then(navArtModifier)
                         .size(44.dp)
                         .clip(RoundedCornerShape(10.dp)),
                 )
@@ -111,7 +122,7 @@ fun MiniPlayer(
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        text     = currentTrack.primaryArtist,
+                        text     = currentTrack.allArtists,
                         style    = MaterialTheme.typography.bodySmall,
                         color    = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
