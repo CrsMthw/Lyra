@@ -1,104 +1,103 @@
 package com.crsmthw.lyra.data.remote
 
 import com.crsmthw.lyra.data.remote.model.*
-import retrofit2.Response
 import retrofit2.http.*
 
 interface SpotifyApiService {
 
     // ── User ─────────────────────────────────────────────────────────────────
     @GET("me")
-    suspend fun getCurrentUser(): Response<SpotifyUser>
+    suspend fun getCurrentUser(): SpotifyUser
 
     // ── Library ──────────────────────────────────────────────────────────────
     @GET("me/playlists")
     suspend fun getUserPlaylists(
         @Query("limit")  limit : Int = 50,
         @Query("offset") offset: Int = 0,
-    ): Response<UserPlaylistsResponse>
+    ): UserPlaylistsResponse
 
     @GET("me/tracks")
     suspend fun getLikedSongs(
         @Query("limit")  limit : Int = 50,
         @Query("offset") offset: Int = 0,
-    ): Response<SavedTracksResponse>
+    ): SavedTracksResponse
 
     @PUT("me/library")
-    suspend fun saveTracks(@Query("uris") uris: String): Response<Unit>
+    suspend fun saveTracks(@Query("uris") uris: String)
 
     @DELETE("me/library")
-    suspend fun removeTracks(@Query("uris") uris: String): Response<Unit>
+    suspend fun removeTracks(@Query("uris") uris: String)
 
     @GET("me/library/contains")
-    suspend fun checkSavedTracks(@Query("uris") uris: String): Response<List<Boolean>>
+    suspend fun checkSavedTracks(@Query("uris") uris: String): List<Boolean>
 
     // ── Playlists ────────────────────────────────────────────────────────────
     @GET("playlists/{id}")
-    suspend fun getPlaylistFull(@Path("id") id: String): Response<SpotifyPlaylistFull>
+    suspend fun getPlaylistFull(@Path("id") id: String): SpotifyPlaylistFull
 
     @GET("playlists/{id}/items")
     suspend fun getPlaylistTracks(
         @Path("id")      id    : String,
         @Query("limit")  limit : Int = 50,
         @Query("offset") offset: Int = 0,
-    ): Response<PlaylistTracksResponse>
+    ): PlaylistTracksResponse
 
     @POST("playlists/{id}/items")
     suspend fun addTracksToPlaylist(
         @Path("id") id  : String,
         @Body       body: AddTracksRequest,
-    ): Response<SnapshotIdResponse>
+    ): SnapshotIdResponse
 
     @HTTP(method = "DELETE", path = "playlists/{id}/items", hasBody = true)
     suspend fun removeItemsFromPlaylist(
         @Path("id") id  : String,
         @Body       body: RemoveItemsRequest,
-    ): Response<SnapshotIdResponse>
+    ): SnapshotIdResponse
 
     // ── Player ───────────────────────────────────────────────────────────────
     @GET("me/player")
-    suspend fun getPlayerState(): Response<PlayerStateResponse>
+    suspend fun getPlayerState(): PlayerStateResponse?
 
     @PUT("me/player/play")
-    suspend fun resumePlayback(): Response<Unit>
+    suspend fun resumePlayback()
 
     @PUT("me/player/play")
-    suspend fun play(@Body body: PlayRequest): Response<Unit>
+    suspend fun play(@Body body: PlayRequest)
 
     @PUT("me/player/pause")
-    suspend fun pause(): Response<Unit>
+    suspend fun pause()
 
     @POST("me/player/next")
-    suspend fun skipNext(): Response<Unit>
+    suspend fun skipNext()
 
     @POST("me/player/previous")
-    suspend fun skipPrevious(): Response<Unit>
+    suspend fun skipPrevious()
 
     @PUT("me/player/seek")
-    suspend fun seek(@Query("position_ms") positionMs: Long): Response<Unit>
+    suspend fun seek(@Query("position_ms") positionMs: Long)
 
     @PUT("me/player/shuffle")
-    suspend fun setShuffle(@Query("state") state: Boolean): Response<Unit>
+    suspend fun setShuffle(@Query("state") state: Boolean)
 
     @PUT("me/player/repeat")
-    suspend fun setRepeat(@Query("state") state: String): Response<Unit>
+    suspend fun setRepeat(@Query("state") state: String)
 
     @PUT("me/player/volume")
-    suspend fun setVolume(@Query("volume_percent") volume: Int): Response<Unit>
+    suspend fun setVolume(@Query("volume_percent") volume: Int)
 
     @GET("me/player/queue")
-    suspend fun getQueue(): Response<QueueResponse>
+    suspend fun getQueue(): QueueResponse?
 
     // ── Albums ───────────────────────────────────────────────────────────────
     @GET("albums/{id}")
     suspend fun getAlbum(
         @Path("id")     id    : String,
         @Query("limit") limit : Int = 50,
-    ): Response<SpotifyAlbumFull>
+    ): SpotifyAlbumFull
 
     // ── Artists ──────────────────────────────────────────────────────────────
     @GET("artists/{id}")
-    suspend fun getArtist(@Path("id") id: String): Response<SpotifyArtistFull>
+    suspend fun getArtist(@Path("id") id: String): SpotifyArtistFull
 
     @GET("artists/{id}/albums")
     suspend fun getArtistAlbums(
@@ -107,7 +106,7 @@ interface SpotifyApiService {
         @Query("market")                                  market        : String = "from_token",
         @Query("limit")                                   limit         : Int    = 10,
         @Query("offset")                                  offset        : Int    = 0,
-    ): Response<Paged<SpotifyAlbum>>
+    ): Paged<SpotifyAlbum>
 
     // ── Search ───────────────────────────────────────────────────────────────
     @GET("search")
@@ -115,15 +114,14 @@ interface SpotifyApiService {
         @Query("q")     query: String,
         @Query("type")  type : String,
         @Query("limit") limit: Int,
-    ): Response<SearchResponse>
+    ): SearchResponse
 
     // ── Browse / Featured ────────────────────────────────────────────────────
     @GET("browse/featured-playlists")
     suspend fun getFeaturedPlaylists(
         @Query("limit") limit: Int = 10,
-    ): Response<FeaturedPlaylistsResponse>
+    ): FeaturedPlaylistsResponse
 
     // ── Token refresh (hits accounts endpoint, not api) ──────────────────────
     // Note: handled by TokenManager via OkHttp directly (not Retrofit)
 }
-

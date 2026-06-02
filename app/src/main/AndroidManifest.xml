@@ -29,21 +29,23 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
             <!-- open.spotify.com deep links — tracks -->
-            <intent-filter>
+            <!-- autoVerify=false: open.spotify.com is Spotify's domain; verification is impossible.
+                 Users set Lyra as default handler manually via Settings → Open by default. -->
+            <intent-filter android:autoVerify="false">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="https" android:host="open.spotify.com" android:pathPrefix="/track/" />
             </intent-filter>
             <!-- open.spotify.com deep links — albums -->
-            <intent-filter>
+            <intent-filter android:autoVerify="false">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="https" android:host="open.spotify.com" android:pathPrefix="/album/" />
             </intent-filter>
             <!-- open.spotify.com deep links — artists -->
-            <intent-filter>
+            <intent-filter android:autoVerify="false">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />

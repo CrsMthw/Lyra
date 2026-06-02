@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Upgraded Retrofit 2.11.0 → 3.0.0; service methods now return `T` directly (no `Response<T>` wrapper); `HttpException` handling centralised in `safeCall`
+- Upgraded OkHttp 4.12.0 → 5.3.2; timeout configuration now uses `kotlin.time.Duration`
+- `open.spotify.com` deep-link intent filters marked `android:autoVerify="false"` — verification was never possible (third-party domain); behaviour unchanged, lint warning resolved
+
 ## [2.0.0] - 2026-05-31
 
 ### Added

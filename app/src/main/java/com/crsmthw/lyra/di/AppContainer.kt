@@ -19,7 +19,7 @@ import okhttp3.OkHttpClient
 import okio.Path.Companion.toOkioPath
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
-import java.util.concurrent.TimeUnit
+import kotlin.time.Duration.Companion.seconds
 
 class AppContainer(context: Context) {
 
@@ -35,8 +35,8 @@ class AppContainer(context: Context) {
     // ── Network ──────────────────────────────────────────────────────────────
     private val okHttpClient = OkHttpClient.Builder()
         .addInterceptor(tokenManager)
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout   (15, TimeUnit.SECONDS)
+        .connectTimeout(15.seconds)
+        .readTimeout   (15.seconds)
         .build()
 
     private val retrofit = Retrofit.Builder()

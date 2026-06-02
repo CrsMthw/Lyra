@@ -5,6 +5,7 @@ import com.crsmthw.lyra.data.remote.SpotifyApiService
 import com.crsmthw.lyra.data.remote.model.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import retrofit2.HttpException
 
 /**
  * Single source of truth for all Spotify data.
@@ -16,15 +17,15 @@ class SpotifyRepository(
 ) {
 
     suspend fun getCurrentUser(): Result<SpotifyUser> = safeCall {
-        api.getCurrentUser().bodyOrThrow()
+        api.getCurrentUser()
     }
 
     suspend fun getUserPlaylists(limit: Int = 50, offset: Int = 0): Result<UserPlaylistsResponse> = safeCall {
-        api.getUserPlaylists(limit, offset).bodyOrThrow()
+        api.getUserPlaylists(limit, offset)
     }
 
     suspend fun getLikedSongs(limit: Int = 50, offset: Int = 0): Result<SavedTracksResponse> = safeCall {
-        api.getLikedSongs(limit, offset).bodyOrThrow()
+        api.getLikedSongs(limit, offset)
     }
 
     suspend fun getAllLikedSongs(): Result<List<SpotifyTrack>> = safeCall {
@@ -32,7 +33,7 @@ class SpotifyRepository(
         var offset = 0
         val limit  = 50
         while (true) {
-            val page = api.getLikedSongs(limit, offset).bodyOrThrow()
+            val page = api.getLikedSongs(limit, offset)
             all.addAll((page.items ?: emptyList()).mapNotNull { it.track }.filter { it.isPlayable != false })
             if (page.next == null || all.size >= page.total) break
             offset += limit
@@ -42,51 +43,49 @@ class SpotifyRepository(
 
     suspend fun getPlaylistTracks(id: String, limit: Int = 50, offset: Int = 0): Result<PlaylistTracksResponse> = safeCall {
         if (offset == 0) {
-            val fullResp = api.getPlaylistFull(id)
-            if (fullResp.isSuccessful) {
-                val embedded = fullResp.body()?.tracks
+            try {
+                val full = api.getPlaylistFull(id)
+                val embedded = full.tracks
                 if (embedded != null) return@safeCall embedded
-            }
+            } catch (_: Exception) { }
         }
-        api.getPlaylistTracks(id, limit, offset).bodyOrThrow()
+        api.getPlaylistTracks(id, limit, offset)
     }
 
     suspend fun getFeaturedPlaylists(): Result<FeaturedPlaylistsResponse> = safeCall {
-        api.getFeaturedPlaylists().bodyOrThrow()
+        api.getFeaturedPlaylists()
     }
 
     suspend fun getAlbum(id: String): Result<SpotifyAlbumFull> = safeCall {
-        api.getAlbum(id).bodyOrThrow()
+        api.getAlbum(id)
     }
 
     suspend fun getArtist(id: String): Result<SpotifyArtistFull> = safeCall {
-        api.getArtist(id).bodyOrThrow()
+        api.getArtist(id)
     }
 
     suspend fun getArtistAlbums(id: String, offset: Int = 0): Result<Paged<SpotifyAlbum>> = safeCall {
-        api.getArtistAlbums(id, offset = offset).bodyOrThrow()
+        api.getArtistAlbums(id, offset = offset)
     }
 
     suspend fun search(query: String): Result<SearchResponse> = safeCall {
-        api.search(query = query, type = "track,album,artist", limit = 10).bodyOrThrow()
+        api.search(query = query, type = "track,album,artist", limit = 10)
     }
 
     suspend fun saveTrack(trackId: String): Result<Unit> = safeCall {
-        api.saveTracks("spotify:track:$trackId").bodyOrThrow()
+        api.saveTracks("spotify:track:$trackId")
     }
 
     suspend fun removeTrack(trackId: String): Result<Unit> = safeCall {
-        api.removeTracks("spotify:track:$trackId").bodyOrThrow()
+        api.removeTracks("spotify:track:$trackId")
     }
 
     suspend fun isTrackSaved(trackId: String): Result<Boolean> = safeCall {
-        api.checkSavedTracks("spotify:track:$trackId").bodyOrThrow().firstOrNull() ?: false
+        api.checkSavedTracks("spotify:track:$trackId").firstOrNull() ?: false
     }
 
     suspend fun getPlayerState(): Result<PlayerStateResponse?> = safeCall {
-        val response = api.getPlayerState()
-        // 204 = no active device; that's fine, not an error
-        if (response.code() == 204) null else response.bodyOrThrow()
+        api.getPlayerState()
     }
 
     suspend fun play(
@@ -101,51 +100,47 @@ class SpotifyRepository(
                 contextUri = contextUri,
                 offset     = offsetUri?.let { PlayOffset(uri = it) },
                 positionMs = positionMs,
-            )).bodyOrThrow()
-            uris != null -> api.play(PlayRequest(uris = uris, positionMs = positionMs)).bodyOrThrow()
-            uri  != null -> api.play(PlayRequest(uris = listOf(uri), positionMs = positionMs)).bodyOrThrow()
-            else         -> api.resumePlayback().bodyOrThrow()
+            ))
+            uris != null -> api.play(PlayRequest(uris = uris, positionMs = positionMs))
+            uri  != null -> api.play(PlayRequest(uris = listOf(uri), positionMs = positionMs))
+            else         -> api.resumePlayback()
         }
     }
 
     suspend fun addTrackToPlaylist(playlistId: String, trackUri: String): Result<Unit> = safeCall {
-        val resp = api.addTracksToPlaylist(playlistId, AddTracksRequest(listOf(trackUri)))
-        if (!resp.isSuccessful) throw Exception("HTTP ${resp.code()}: ${resp.errorBody()?.string()}")
+        api.addTracksToPlaylist(playlistId, AddTracksRequest(listOf(trackUri)))
+        Unit
     }
 
     suspend fun removeTrackFromPlaylist(playlistId: String, trackUri: String): Result<Unit> = safeCall {
-        val resp = api.removeItemsFromPlaylist(playlistId, RemoveItemsRequest(listOf(RemoveItemEntry(trackUri))))
-        if (!resp.isSuccessful) throw Exception("HTTP ${resp.code()}: ${resp.errorBody()?.string()}")
+        api.removeItemsFromPlaylist(playlistId, RemoveItemsRequest(listOf(RemoveItemEntry(trackUri))))
+        Unit
     }
 
     suspend fun getQueue(): Result<QueueResponse?> = safeCall {
-        val response = api.getQueue()
-        if (response.code() == 204) null else response.bodyOrThrow()
+        api.getQueue()
     }
 
-    suspend fun pause(): Result<Unit>                          = safeCall { api.pause().bodyOrThrow() }
-    suspend fun skipNext(): Result<Unit>                       = safeCall { api.skipNext().bodyOrThrow() }
-    suspend fun skipPrevious(): Result<Unit>                   = safeCall { api.skipPrevious().bodyOrThrow() }
-    suspend fun seek(positionMs: Long): Result<Unit>           = safeCall { api.seek(positionMs).bodyOrThrow() }
-    suspend fun setShuffle(state: Boolean): Result<Unit>       = safeCall { api.setShuffle(state).bodyOrThrow() }
-    suspend fun setRepeat(state: String): Result<Unit>         = safeCall { api.setRepeat(state).bodyOrThrow() }
+    suspend fun pause(): Result<Unit>                          = safeCall { api.pause() }
+    suspend fun skipNext(): Result<Unit>                       = safeCall { api.skipNext() }
+    suspend fun skipPrevious(): Result<Unit>                   = safeCall { api.skipPrevious() }
+    suspend fun seek(positionMs: Long): Result<Unit>           = safeCall { api.seek(positionMs) }
+    suspend fun setShuffle(state: Boolean): Result<Unit>       = safeCall { api.setShuffle(state) }
+    suspend fun setRepeat(state: String): Result<Unit>         = safeCall { api.setRepeat(state) }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
     private suspend fun <T> safeCall(block: suspend () -> T): Result<T> =
         withContext(Dispatchers.IO) {
-            runCatching { block() }
-        }
-
-    @Suppress("UNCHECKED_CAST")
-    private fun <T> retrofit2.Response<T>.bodyOrThrow(): T =
-        when {
-            code() == 204  -> Unit as T
-            isSuccessful   -> body()!!
-            code() == 429  -> {
-                val retryAfter = headers()["Retry-After"]
-                throw Exception("HTTP 429: Retry-After=${retryAfter ?: "unknown"}")
+            runCatching {
+                try {
+                    block()
+                } catch (e: HttpException) {
+                    when (e.code()) {
+                        429  -> throw Exception("HTTP 429: Retry-After=${e.response()?.headers()?.get("Retry-After") ?: "unknown"}")
+                        else -> throw Exception("HTTP ${e.code()}: ${e.response()?.errorBody()?.string()}")
+                    }
+                }
             }
-            else           -> throw Exception("HTTP ${code()}: ${errorBody()?.string()}")
         }
 }
