@@ -70,6 +70,7 @@ class PlayerViewModel(
 
     private fun clearIsWakingUp() {
         clearWakingUpJob?.cancel()
+        playerStateManager.ensureTickRunning()
         _uiState.update { it.copy(isWakingUp = false) }
     }
 
@@ -258,6 +259,7 @@ class PlayerViewModel(
 
     fun playTrack(uri: String, contextUri: String? = null, uris: List<String>? = null, index: Int? = null) {
         playerStateManager.setOptimisticallyPlaying()
+        playerStateManager.resetProgressForNewTrack()
         _uiState.update { it.copy(isPlaying = true, isLiked = false, error = null, isWakingUp = true) }
         val trackId = uri.substringAfterLast(":")
         viewModelScope.launch { checkIsLiked(trackId) }

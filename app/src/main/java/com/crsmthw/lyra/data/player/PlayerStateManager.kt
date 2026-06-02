@@ -149,6 +149,19 @@ class PlayerStateManager(
 
     // Optimistically marks Spotify as playing AND locks the state so transient 204 polls
     // during SDK wake-up don't flip the UI back to the play icon.
+    // Resets progress to 0 and stops the tick so the bar doesn't count up from the old position
+    // while the new track is loading. Call immediately after setOptimisticallyPlaying().
+    fun resetProgressForNewTrack() {
+        progressTickJob?.cancel()
+        _state.update { it.copy(progressMs = 0L) }
+    }
+
+    // Starts the progress tick if isPlaying=true and the tick isn't already running.
+    // Call just before clearing isWakingUp so the bar starts counting the moment it becomes determinate.
+    fun ensureTickRunning() {
+        if (_state.value.isPlaying && progressTickJob?.isActive != true) startProgressTick()
+    }
+
     fun setOptimisticallyPlaying() {
         isPlayingLockUntil = System.currentTimeMillis() + 5_000L
         _state.update { it.copy(isPlaying = true) }
@@ -205,8 +218,12 @@ class PlayerStateManager(
         scope.launch {
             setOptimisticallyPlaying()
             val prevId = _state.value.currentTrack?.id
+            resetProgressForNewTrack()
             repository.skipNext().fold(
-                onSuccess = { fetchUntilTrackChanges(prevId) },
+                onSuccess = {
+                    fetchUntilTrackChanges(prevId)
+                    ensureTickRunning()
+                },
                 onFailure = { e ->
                     if (e.message?.contains("404") == true) {
                         onWakeOperationStart?.invoke()
@@ -225,8 +242,12 @@ class PlayerStateManager(
         scope.launch {
             setOptimisticallyPlaying()
             val prevId = _state.value.currentTrack?.id
+            resetProgressForNewTrack()
             repository.skipPrevious().fold(
-                onSuccess = { fetchUntilTrackChanges(prevId) },
+                onSuccess = {
+                    fetchUntilTrackChanges(prevId)
+                    ensureTickRunning()
+                },
                 onFailure = { e ->
                     if (e.message?.contains("404") == true) {
                         onWakeOperationStart?.invoke()
