@@ -4,6 +4,9 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
@@ -17,10 +20,13 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.Modifier
+import kotlin.math.abs
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
@@ -37,6 +43,7 @@ import com.crsmthw.lyra.data.remote.model.SpotifyTrack
 fun MiniPlayer(
     currentTrack          : SpotifyTrack?,
     isPlaying             : Boolean,
+    isWakingUp            : Boolean = false,
     progress              : Float,
     onPlayPause           : () -> Unit,
     onSkipNext            : () -> Unit,
@@ -134,13 +141,29 @@ fun MiniPlayer(
 
                 // Play/pause wrapped in CircularWavyProgressIndicator
                 Box(contentAlignment = Alignment.Center, modifier = Modifier.size(52.dp)) {
-                    CircularWavyProgressIndicator(
-                        progress  = { progress },
-                        modifier  = Modifier.size(52.dp),
-                        color     = resolvedSurfaceAccent,
-                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
-                        amplitude = { p -> if (isPlaying) WavyProgressIndicatorDefaults.indicatorAmplitude(p) else 0f },
-                    )
+                    val progressAnim = remember { Animatable(progress) }
+                    LaunchedEffect(progress, isPlaying) {
+                        if (!isPlaying || abs(progress - progressAnim.value) > 0.5f) {
+                            progressAnim.snapTo(progress)
+                        } else {
+                            progressAnim.animateTo(progress, tween(1100, easing = LinearEasing))
+                        }
+                    }
+                    if (isWakingUp) {
+                        CircularWavyProgressIndicator(
+                            modifier   = Modifier.size(52.dp),
+                            color      = resolvedSurfaceAccent,
+                            trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                        )
+                    } else {
+                        CircularWavyProgressIndicator(
+                            progress   = { progressAnim.value },
+                            modifier   = Modifier.size(52.dp),
+                            color      = resolvedSurfaceAccent,
+                            trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                            amplitude  = { p -> if (isPlaying) WavyProgressIndicatorDefaults.indicatorAmplitude(p) else 0f },
+                        )
+                    }
                     IconButton(
                         onClick  = onPlayPause,
                         modifier = Modifier.size(40.dp),

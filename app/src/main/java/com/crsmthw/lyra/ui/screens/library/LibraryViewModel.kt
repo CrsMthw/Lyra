@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.crsmthw.lyra.data.local.CachedTrackList
 import com.crsmthw.lyra.data.local.LibraryCache
 import com.crsmthw.lyra.data.local.LibraryCacheData
+import com.crsmthw.lyra.data.player.PlayerStateManager
 import com.crsmthw.lyra.data.remote.SpotifyRemoteManager
 import com.crsmthw.lyra.data.remote.model.*
 import com.crsmthw.lyra.data.repository.SpotifyRepository
@@ -42,6 +43,7 @@ class LibraryViewModel(
     private val cache           : LibraryCache,
     private val mosaicGenerator : MosaicGenerator,
     private val remoteManager   : SpotifyRemoteManager,
+    private val playerStateManager: PlayerStateManager,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(LibraryUiState())
@@ -244,21 +246,27 @@ class LibraryViewModel(
     }
 
     fun playPlaylist(uri: String) {
+        playerStateManager.setOptimisticallyPlaying()
         viewModelScope.launch {
             repository.play(contextUri = uri).onFailure { e ->
                 if (e.message?.contains("404") == true) {
                     remoteManager.connectAndPlay(uri)
+                } else {
+                    playerStateManager.releasePlayingOptimism()
                 }
             }
         }
     }
 
     fun shufflePlaylist(uri: String) {
+        playerStateManager.setOptimisticallyPlaying()
         viewModelScope.launch {
             repository.setShuffle(true)
             repository.play(contextUri = uri).onFailure { e ->
                 if (e.message?.contains("404") == true) {
                     remoteManager.connectAndPlay(uri)
+                } else {
+                    playerStateManager.releasePlayingOptimism()
                 }
             }
         }
@@ -429,5 +437,5 @@ private fun Throwable?.isTransientNetworkError(): Boolean =
 class LibraryViewModelFactory(private val container: AppContainer) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T =
-        LibraryViewModel(container.spotifyRepository, container.libraryCache, container.mosaicGenerator, container.remoteManager) as T
+        LibraryViewModel(container.spotifyRepository, container.libraryCache, container.mosaicGenerator, container.remoteManager, container.playerStateManager) as T
 }

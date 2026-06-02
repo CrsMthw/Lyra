@@ -49,6 +49,15 @@ class PlayerStateManager(
 
     @Volatile private var serviceRunning = false
 
+    // Fired at the START of each SDK 404 path — before connectAndPlay/skipNext/etc.
+    // PlayerViewModel sets isWakingUp=true here. Fires even when connectSuspend() short-circuits
+    // on a stale connection, so the indeterminate indicator always shows during position restore.
+    var onWakeOperationStart: (() -> Unit)? = null
+
+    // Called after each SDK-wake operation completes (playPause/skip 404 paths).
+    // PlayerViewModel sets this to clear its isWakingUp flag precisely when the operation is done.
+    var onWakeOperationComplete: (() -> Unit)? = null
+
     init { startPolling() }
 
     // ── Polling ───────────────────────────────────────────────────────────────
@@ -138,6 +147,23 @@ class PlayerStateManager(
     fun isRateLimited()  = System.currentTimeMillis() < pollBackoffUntil
     fun noteRateLimited() { pollBackoffUntil  = System.currentTimeMillis() + 60_000L }
 
+    // Optimistically marks Spotify as playing AND locks the state so transient 204 polls
+    // during SDK wake-up don't flip the UI back to the play icon.
+    fun setOptimisticallyPlaying() {
+        isPlayingLockUntil = System.currentTimeMillis() + 5_000L
+        _state.update { it.copy(isPlaying = true) }
+        if (progressTickJob?.isActive != true) startProgressTick()
+        maybeStartService()
+    }
+
+    // Releases the optimistic lock and marks playback as stopped.
+    // Call on failure paths where the wake attempt failed entirely.
+    fun releasePlayingOptimism() {
+        isPlayingLockUntil = 0L
+        _state.update { it.copy(isPlaying = false) }
+        progressTickJob?.cancel()
+    }
+
     // ── Controls ──────────────────────────────────────────────────────────────
 
     fun playPause() {
@@ -158,9 +184,16 @@ class PlayerStateManager(
                     onSuccess = { delay(500L); fetchPlayerState() },
                     onFailure = { e ->
                         if (e.message?.contains("404") == true && track != null) {
+                            onWakeOperationStart?.invoke()
+                            progressTickJob?.cancel()
+                            _state.update { it.copy(progressMs = 0L) }
                             remoteManager.connectAndPlay(track.uri)
                             delay(500L)
                             fetchPlayerState()
+                            // Start tick optimistically so the bar counts from the moment
+                            // indeterminate clears, even if fetchPlayerState returned 204.
+                            if (progressTickJob?.isActive != true) startProgressTick()
+                            onWakeOperationComplete?.invoke()
                         }
                     },
                 )
@@ -170,11 +203,18 @@ class PlayerStateManager(
 
     fun skipNext() {
         scope.launch {
+            setOptimisticallyPlaying()
+            val prevId = _state.value.currentTrack?.id
             repository.skipNext().fold(
-                onSuccess = { delay(500L); fetchPlayerState() },
+                onSuccess = { fetchUntilTrackChanges(prevId) },
                 onFailure = { e ->
                     if (e.message?.contains("404") == true) {
-                        remoteManager.skipNext(); delay(500L); fetchPlayerState()
+                        onWakeOperationStart?.invoke()
+                        remoteManager.skipNext()
+                        fetchUntilTrackChanges(prevId)
+                        onWakeOperationComplete?.invoke()
+                    } else {
+                        releasePlayingOptimism()
                     }
                 },
             )
@@ -183,14 +223,31 @@ class PlayerStateManager(
 
     fun skipPrevious() {
         scope.launch {
+            setOptimisticallyPlaying()
+            val prevId = _state.value.currentTrack?.id
             repository.skipPrevious().fold(
-                onSuccess = { delay(500L); fetchPlayerState() },
+                onSuccess = { fetchUntilTrackChanges(prevId) },
                 onFailure = { e ->
                     if (e.message?.contains("404") == true) {
-                        remoteManager.skipPrevious(); delay(500L); fetchPlayerState()
+                        onWakeOperationStart?.invoke()
+                        remoteManager.skipPrevious()
+                        fetchUntilTrackChanges(prevId)
+                        onWakeOperationComplete?.invoke()
+                    } else {
+                        releasePlayingOptimism()
                     }
                 },
             )
+        }
+    }
+
+    // Polls until currentTrack.id changes from prevTrackId (up to maxMs), checking every 700 ms.
+    private suspend fun fetchUntilTrackChanges(prevTrackId: String?, maxMs: Long = 4_000L) {
+        val deadline = System.currentTimeMillis() + maxMs
+        while (System.currentTimeMillis() < deadline) {
+            delay(700L)
+            fetchPlayerState()
+            if (_state.value.currentTrack?.id != prevTrackId) return
         }
     }
 

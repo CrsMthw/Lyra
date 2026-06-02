@@ -1,8 +1,6 @@
 package com.crsmthw.lyra.data.remote
 
 import android.content.Context
-import android.widget.Toast
-import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.auth.SpotifyAuthManager
 import com.crsmthw.lyra.data.local.EncryptedPrefs
 import com.spotify.android.appremote.api.ConnectionParams
@@ -11,6 +9,7 @@ import com.spotify.android.appremote.api.SpotifyAppRemote
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
@@ -22,8 +21,11 @@ class SpotifyRemoteManager(
     private val context       : Context,
     private val encryptedPrefs: EncryptedPrefs,
 ) {
-    private val _connected = MutableStateFlow(false)
+    private val _connected   = MutableStateFlow(false)
     val connected: StateFlow<Boolean> = _connected
+
+    private val _connecting  = MutableStateFlow(false)
+    val connecting: StateFlow<Boolean> = _connecting.asStateFlow()
 
     private var _appRemote: SpotifyAppRemote? = null
 
@@ -36,25 +38,29 @@ class SpotifyRemoteManager(
     // showAuthView(true): one-time Spotify auth dialog on first use; silent thereafter.
     suspend fun connectSuspend(): Boolean {
         if (_connected.value && _appRemote != null) return true
-        return withContext(Dispatchers.Main) {
-            Toast.makeText(context, context.getString(R.string.spotify_waking_up), Toast.LENGTH_SHORT).show()
-            suspendCancellableCoroutine { cont ->
-                val params = ConnectionParams.Builder(encryptedPrefs.clientId)
-                    .setRedirectUri(SpotifyAuthManager.REDIRECT_URI)
-                    .showAuthView(true)
-                    .build()
-                SpotifyAppRemote.connect(context, params, object : Connector.ConnectionListener {
-                    override fun onConnected(appRemote: SpotifyAppRemote) {
-                        _appRemote = appRemote
-                        _connected.value = true
-                        if (cont.isActive) cont.resume(true)
-                    }
-                    override fun onFailure(throwable: Throwable) {
-                        _connected.value = false
-                        if (cont.isActive) cont.resume(false)
-                    }
-                })
+        _connecting.value = true
+        return try {
+            withContext(Dispatchers.Main) {
+                suspendCancellableCoroutine { cont ->
+                    val params = ConnectionParams.Builder(encryptedPrefs.clientId)
+                        .setRedirectUri(SpotifyAuthManager.REDIRECT_URI)
+                        .showAuthView(true)
+                        .build()
+                    SpotifyAppRemote.connect(context, params, object : Connector.ConnectionListener {
+                        override fun onConnected(appRemote: SpotifyAppRemote) {
+                            _appRemote = appRemote
+                            _connected.value = true
+                            if (cont.isActive) cont.resume(true)
+                        }
+                        override fun onFailure(throwable: Throwable) {
+                            _connected.value = false
+                            if (cont.isActive) cont.resume(false)
+                        }
+                    })
+                }
             }
+        } finally {
+            _connecting.value = false
         }
     }
 

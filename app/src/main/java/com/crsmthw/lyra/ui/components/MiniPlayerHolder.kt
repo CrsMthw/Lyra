@@ -80,6 +80,7 @@ fun MiniPlayerHolder(
     MiniPlayer(
         currentTrack               = playerState.currentTrack,
         isPlaying                  = playerState.isPlaying,
+        isWakingUp                 = playerState.isWakingUp,
         progress                   = playerState.progress,
         accentColor                = accentColor,
         surfaceAccentColor         = surfaceAccentColor,

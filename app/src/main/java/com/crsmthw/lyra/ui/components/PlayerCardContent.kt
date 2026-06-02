@@ -9,6 +9,7 @@ import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
+import kotlin.math.abs
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
@@ -259,14 +260,35 @@ fun PlayerCardContent(
             // Wavy seek bar
             var isDragging by remember { mutableStateOf(false) }
             var dragValue  by remember { mutableFloatStateOf(0f) }
+            val progressAnim  = remember { Animatable(state.progress) }
+            val snapThreshold = if (state.durationMs > 0L) (3000f / state.durationMs.toFloat()).coerceAtMost(0.5f) else 0.05f
+            val prevTrackIdRef = remember { arrayOf(state.currentTrack?.id) }
+            LaunchedEffect(state.progress, state.currentTrack?.id, state.isPlaying, isDragging) {
+                val target = if (isDragging) dragValue else state.progress
+                val trackChanged = state.currentTrack?.id != prevTrackIdRef[0]
+                if (trackChanged) prevTrackIdRef[0] = state.currentTrack?.id
+                if (trackChanged || !state.isPlaying || isDragging || abs(target - progressAnim.value) > snapThreshold) {
+                    progressAnim.snapTo(target)
+                } else {
+                    progressAnim.animateTo(target, tween(1100, easing = LinearEasing))
+                }
+            }
             Box(modifier = Modifier.fillMaxWidth().height(44.dp)) {
-                LinearWavyProgressIndicator(
-                    progress   = { if (isDragging) dragValue else state.progress },
-                    modifier   = Modifier.fillMaxWidth().align(Alignment.Center),
-                    color      = surfaceAccentColor,
-                    trackColor = surfaceAccentColor.copy(alpha = 0.25f),
-                    amplitude  = { p -> if (state.isPlaying) WavyProgressIndicatorDefaults.indicatorAmplitude(p) else 0f },
-                )
+                if (state.isWakingUp) {
+                    LinearWavyProgressIndicator(
+                        modifier   = Modifier.fillMaxWidth().align(Alignment.Center),
+                        color      = surfaceAccentColor,
+                        trackColor = surfaceAccentColor.copy(alpha = 0.25f),
+                    )
+                } else {
+                    LinearWavyProgressIndicator(
+                        progress   = { if (isDragging) dragValue else progressAnim.value },
+                        modifier   = Modifier.fillMaxWidth().align(Alignment.Center),
+                        color      = surfaceAccentColor,
+                        trackColor = surfaceAccentColor.copy(alpha = 0.25f),
+                        amplitude  = { p -> if (state.isPlaying) WavyProgressIndicatorDefaults.indicatorAmplitude(p) else 0f },
+                    )
+                }
                 Slider(
                     value                 = if (isDragging) dragValue else state.progress,
                     onValueChange         = { isDragging = true; dragValue = it },
@@ -322,11 +344,19 @@ fun PlayerCardContent(
                     colors   = IconButtonDefaults.filledIconButtonColors(
                         containerColor = accentColor, contentColor = Color.White),
                 ) {
-                    Icon(
-                        imageVector        = if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        contentDescription = if (state.isPlaying) stringResource(R.string.player_pause) else stringResource(R.string.player_play),
-                        modifier           = Modifier.size(30.dp).graphicsLayer { rotationZ = -cookieRotation.value },
-                    )
+                    if (state.isWakingUp) {
+                        CircularWavyProgressIndicator(
+                            modifier   = Modifier.size(26.dp).graphicsLayer { rotationZ = -cookieRotation.value },
+                            color      = Color.White,
+                            trackColor = Color.White.copy(alpha = 0.3f),
+                        )
+                    } else {
+                        Icon(
+                            imageVector        = if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = if (state.isPlaying) stringResource(R.string.player_pause) else stringResource(R.string.player_play),
+                            modifier           = Modifier.size(30.dp).graphicsLayer { rotationZ = -cookieRotation.value },
+                        )
+                    }
                 }
                 IconButton(onClick = onSkipNext, modifier = Modifier.size(48.dp)) {
                     Icon(Icons.Default.SkipNext, stringResource(R.string.player_next), modifier = Modifier.size(36.dp))

@@ -7,7 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Indeterminate progress while Spotify wakes up** — seek bar switches to an indeterminate wavy animation and the play/pause button shows a spinning wavy circle from the moment a track is tapped until playback is confirmed; applies to the player screen, pop-out panel, and mini player (library / album / artist screens); covers all wake paths: tapping a track (including first-ever tap with no prior song loaded), tapping play on a playlist from the library, and skip/previous when Spotify is dead
+
 ### Changed
+- **Smooth seek bar** — progress now animates continuously instead of jumping once per second; poll corrections blend in invisibly; snaps immediately on seek, track change, or pause
+- **Press Play when Spotify is dead** — progress resets to 0:00, tick is frozen while the indeterminate bar is showing, then resumes counting from the moment playback is confirmed; no more counting during the wake-up phase or jumps after the poll
+- **Skip next/previous** now detects the new track within ~700 ms (retry poll loop) instead of waiting up to 3 s for the background poll; progress bar resets to 0 as soon as the new track is confirmed
+- **Pause icon / rotating cookie** appear immediately after tapping a track or skip, even when the player was previously paused — fixed by setting an optimistic playing lock in `PlayerStateManager` so transient 204 polls during wake-up do not revert the UI to the play icon
+- Removed "Waking up Spotify…" toast — the player UI now provides the feedback directly
 - Upgraded Retrofit 2.11.0 → 3.0.0; service methods now return `T` directly (no `Response<T>` wrapper); `HttpException` handling centralised in `safeCall`
 - Upgraded OkHttp 4.12.0 → 5.3.2; timeout configuration now uses `kotlin.time.Duration`
 - `open.spotify.com` deep-link intent filters marked `android:autoVerify="false"` — verification was never possible (third-party domain); behaviour unchanged, lint warning resolved

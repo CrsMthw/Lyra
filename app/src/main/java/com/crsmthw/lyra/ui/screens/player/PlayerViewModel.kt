@@ -10,6 +10,7 @@ import com.crsmthw.lyra.data.remote.model.SpotifyPlaylist
 import com.crsmthw.lyra.data.remote.model.SpotifyTrack
 import com.crsmthw.lyra.data.repository.SpotifyRepository
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -44,6 +45,7 @@ data class PlayerUiState(
     val sleepTimerMinutes     : Int           = 0,
     val sleepTimerTotalMinutes: Int           = 0,
     val error                 : String?       = null,
+    val isWakingUp            : Boolean       = false,
 ) {
     val progress: Float
         get() = if (durationMs > 0L) (progressMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
@@ -61,6 +63,15 @@ class PlayerViewModel(
 
     private val _pickerState = MutableStateFlow(PlaylistPickerState())
     val pickerState: StateFlow<PlaylistPickerState> = _pickerState
+
+    // Fallback timer used when the wake path goes through LibraryViewModel (no callback available).
+    // playTrack / playPause / skip paths cancel this job and clear explicitly via clearIsWakingUp().
+    private var clearWakingUpJob: Job? = null
+
+    private fun clearIsWakingUp() {
+        clearWakingUpJob?.cancel()
+        _uiState.update { it.copy(isWakingUp = false) }
+    }
 
     init {
         viewModelScope.launch {
@@ -81,6 +92,9 @@ class PlayerViewModel(
                         sleepTimerMinutes      = state.sleepTimerMinutes,
                         sleepTimerTotalMinutes = state.sleepTimerTotalMinutes,
                         error                  = null,
+                        // isWakingUp is intentionally NOT cleared here — clearing is explicit.
+                        // playTrack() clears directly; playPause/skip use onWakeOperationComplete;
+                        // library-play falls back to the 3.5s timer below.
                     )
                 }
                 val newTrack = state.currentTrack
@@ -88,6 +102,30 @@ class PlayerViewModel(
                     checkIsLiked(newTrack.id)
                 }
             }
+        }
+        viewModelScope.launch {
+            remoteManager.connecting.collect { connecting ->
+                if (connecting) {
+                    clearWakingUpJob?.cancel()
+                    _uiState.update { it.copy(isWakingUp = true) }
+                } else {
+                    // Fallback: library-play (LibraryViewModel) calls the SDK with no callback.
+                    // For playTrack/playPause/skip the explicit clear will cancel this before it fires.
+                    clearWakingUpJob = viewModelScope.launch {
+                        delay(3_500L)
+                        _uiState.update { it.copy(isWakingUp = false) }
+                    }
+                }
+            }
+        }
+        // PlayerStateManager calls these at the start and end of each SDK 404 path.
+        // onWakeOperationStart fires even when connectSuspend() short-circuits on a stale
+        // connection — ensuring isWakingUp=true shows through the position-restore loop.
+        playerStateManager.onWakeOperationStart = {
+            viewModelScope.launch { _uiState.update { it.copy(isWakingUp = true) } }
+        }
+        playerStateManager.onWakeOperationComplete = {
+            viewModelScope.launch { clearIsWakingUp() }
         }
         remoteManager.connect(onConnected = { }, onFailure = { })
     }
@@ -219,8 +257,8 @@ class PlayerViewModel(
     // ── Play track (keeps SDK fallback logic, always user-initiated) ──────────
 
     fun playTrack(uri: String, contextUri: String? = null, uris: List<String>? = null, index: Int? = null) {
-        playerStateManager.lockIsPlaying()
-        _uiState.update { it.copy(isPlaying = true, isLiked = false, error = null) }
+        playerStateManager.setOptimisticallyPlaying()
+        _uiState.update { it.copy(isPlaying = true, isLiked = false, error = null, isWakingUp = true) }
         val trackId = uri.substringAfterLast(":")
         viewModelScope.launch { checkIsLiked(trackId) }
         viewModelScope.launch {
@@ -233,6 +271,7 @@ class PlayerViewModel(
                 onSuccess = {
                     delay(1_000L)
                     playerStateManager.fetchOnce()
+                    clearIsWakingUp()
                 },
                 onFailure = { e ->
                     if (e.message?.contains("404") == true) {
@@ -244,6 +283,8 @@ class PlayerViewModel(
                             }
                             else -> remoteManager.connectAndPlay(uri)
                         }
+                        // Cancel the 3.5s fallback timer — we own the clear from here.
+                        clearWakingUpJob?.cancel()
                         if (sdkSuccess) {
                             val needsRestore = uris != null || (contextUri != null && index == null)
                             if (needsRestore) {
@@ -263,11 +304,14 @@ class PlayerViewModel(
                             delay(500L)
                             playerStateManager.fetchOnce()
                         } else {
+                            playerStateManager.releasePlayingOptimism()
                             _uiState.update { it.copy(error = "Couldn't connect to Spotify.", isPlaying = false) }
                         }
                     } else {
+                        playerStateManager.releasePlayingOptimism()
                         _uiState.update { it.copy(error = e.message, isPlaying = false) }
                     }
+                    clearIsWakingUp()
                 },
             )
         }
