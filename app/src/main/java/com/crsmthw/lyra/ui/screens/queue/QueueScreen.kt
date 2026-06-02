@@ -27,7 +27,7 @@ import com.crsmthw.lyra.data.remote.model.SpotifyTrack
 import com.crsmthw.lyra.util.toTimeString
 import kotlinx.coroutines.delay
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun QueueScreen(
     viewModel: QueueViewModel,
@@ -73,7 +73,7 @@ fun QueueScreen(
         ) {
             when {
                 state.isLoading -> {
-                    CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                    ContainedLoadingIndicator(modifier = Modifier.size(100.dp).align(Alignment.Center))
                 }
                 state.error != null && state.currentlyPlaying == null && state.queue.isEmpty() -> {
                     Column(

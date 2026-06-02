@@ -709,10 +709,9 @@ private fun PlayerControls(
             ),
         ) {
             if (state.isWakingUp) {
-                CircularWavyProgressIndicator(
-                    modifier   = Modifier.size(28.dp).graphicsLayer { rotationZ = -cookieRotation.value },
-                    color      = Color.White,
-                    trackColor = Color.White.copy(alpha = 0.3f),
+                LoadingIndicator(
+                    modifier = Modifier.size(44.dp).graphicsLayer { rotationZ = -cookieRotation.value },
+                    color    = Color.White,
                 )
             } else {
                 Icon(

@@ -12,6 +12,7 @@ import com.crsmthw.lyra.R
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import kotlinx.coroutines.delay
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun TrackDeepLinkScreen(
     trackId            : String,
@@ -32,7 +33,7 @@ fun TrackDeepLinkScreen(
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            CircularProgressIndicator()
+            ContainedLoadingIndicator()
             Spacer(Modifier.height(16.dp))
             Text(
                 text  = stringResource(R.string.deeplink_loading_track),

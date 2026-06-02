@@ -8,9 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Indeterminate progress while Spotify wakes up** — seek bar switches to an indeterminate wavy animation and the play/pause button shows a spinning wavy circle from the moment a track is tapped until playback is confirmed; applies to the player screen, pop-out panel, and mini player (library / album / artist screens); covers all wake paths: tapping a track (including first-ever tap with no prior song loaded), tapping play on a playlist from the library, and skip/previous when Spotify is dead
+- **Indeterminate progress while Spotify wakes up** — seek bar switches to an indeterminate wavy animation and the play/pause button shows an M3 `LoadingIndicator` (bouncing dots) from the moment a track is tapped until playback is confirmed; applies to the player screen, pop-out panel, and mini player (library / album / artist screens); covers all wake paths: tapping a track (including first-ever tap with no prior song loaded), tapping play on a playlist from the library, and skip/previous when Spotify is dead
 
 ### Changed
+- **Full-screen loading states** now use M3 `ContainedLoadingIndicator` throughout — Queue, Album Detail, Artist Detail, Search, Library browser, track list, Add to Playlist sheet, and deep-link screen; replaces the plain `CircularProgressIndicator`
 - **Smooth seek bar** — progress now animates continuously instead of jumping once per second; poll corrections blend in invisibly; snaps immediately on seek, track change, or pause
 - **Progress bar resets to 0 and freezes on every new-track action** — tapping a track, pressing skip, or pressing Play (Spotify dead) all immediately stop the tick and reset progress to 0; the bar starts counting only once the new track is confirmed playing, so there is no more counting from the old position during loading or indeterminate phases
 - **Skip next/previous** now detects the new track within ~700 ms (retry poll loop) instead of waiting up to 3 s for the background poll

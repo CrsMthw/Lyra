@@ -345,10 +345,9 @@ fun PlayerCardContent(
                         containerColor = accentColor, contentColor = Color.White),
                 ) {
                     if (state.isWakingUp) {
-                        CircularWavyProgressIndicator(
-                            modifier   = Modifier.size(26.dp).graphicsLayer { rotationZ = -cookieRotation.value },
-                            color      = Color.White,
-                            trackColor = Color.White.copy(alpha = 0.3f),
+                        LoadingIndicator(
+                            modifier = Modifier.size(40.dp).graphicsLayer { rotationZ = -cookieRotation.value },
+                            color    = Color.White,
                         )
                     } else {
                         Icon(

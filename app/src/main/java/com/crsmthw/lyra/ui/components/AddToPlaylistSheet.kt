@@ -21,7 +21,7 @@ import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.remote.model.SpotifyPlaylist
 import com.crsmthw.lyra.ui.screens.player.PlaylistPickerState
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun AddToPlaylistSheet(
     pickerState: PlaylistPickerState,
@@ -41,7 +41,7 @@ fun AddToPlaylistSheet(
                     modifier         = Modifier.fillMaxWidth().height(200.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    CircularProgressIndicator()
+                    ContainedLoadingIndicator()
                 }
             }
             pickerState.playlists.isEmpty() -> {

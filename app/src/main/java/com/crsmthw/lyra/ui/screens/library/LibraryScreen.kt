@@ -368,7 +368,7 @@ private fun LibraryBrowserPane(
 
         Box(modifier = modifier.fillMaxSize()) {
             if (state.isLoading) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { LoadingIndicator() }
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { ContainedLoadingIndicator() }
             } else if (state.error != null && state.playlists.isEmpty() && !state.isLoadingTracks) {
                 val isRateLimit   = state.error.contains("429")
                 val retryAfterSec = if (isRateLimit)
@@ -476,7 +476,7 @@ private fun LibraryBrowserPane(
                 .weight(1f)
                 .fillMaxWidth()) {
                 if (state.isLoading) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { LoadingIndicator() }
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { ContainedLoadingIndicator() }
                 } else if (state.error != null && state.playlists.isEmpty() && !state.isLoadingTracks) {
                     val isRateLimit   = state.error.contains("429")
                     val retryAfterSec = if (isRateLimit)
@@ -913,7 +913,7 @@ private fun RightPaneContent(
             emptyContent = when {
                 showLoadingIndicator && state.currentTracks.isEmpty() -> { {
                     Box(Modifier.fillMaxWidth().height(280.dp), contentAlignment = Alignment.Center) {
-                        LoadingIndicator()
+                        ContainedLoadingIndicator()
                     }
                 } }
                 state.error != null && state.currentTracks.isEmpty() -> { {

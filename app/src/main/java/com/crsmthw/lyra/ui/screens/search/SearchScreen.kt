@@ -41,7 +41,7 @@ import com.crsmthw.lyra.data.remote.model.SpotifyArtist
 import com.crsmthw.lyra.data.remote.model.SpotifyPlaylist
 import com.crsmthw.lyra.ui.components.TrackRow
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun SearchScreen(
     viewModel     : SearchViewModel,
@@ -84,7 +84,7 @@ fun SearchScreen(
             when {
                 state.isLoading -> {
                     Box(Modifier.fillMaxSize().navigationBarsPadding(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
+                        ContainedLoadingIndicator(modifier = Modifier.size(90.dp))
                     }
                 }
                 state.error != null -> {

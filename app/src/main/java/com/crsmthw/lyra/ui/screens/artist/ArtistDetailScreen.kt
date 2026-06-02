@@ -40,7 +40,7 @@ import com.crsmthw.lyra.data.remote.model.SpotifyArtistFull
 import com.crsmthw.lyra.ui.components.PlayerPanelHost
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalSharedTransitionApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class, ExperimentalSharedTransitionApi::class)
 @Composable
 fun ArtistDetailScreen(
     viewModel             : ArtistDetailViewModel,
@@ -111,7 +111,7 @@ fun ArtistDetailScreen(
                 Box(
                     modifier         = Modifier.fillMaxSize().padding(paddingValues),
                     contentAlignment = Alignment.Center,
-                ) { CircularProgressIndicator() }
+                ) { ContainedLoadingIndicator(modifier = Modifier.size(100.dp)) }
             }
             state.error != null -> {
                 Box(

@@ -41,7 +41,7 @@ import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import com.crsmthw.lyra.util.toDurationString
 import com.crsmthw.lyra.util.toTimeString
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalSharedTransitionApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class, ExperimentalSharedTransitionApi::class)
 @Composable
 fun AlbumDetailScreen(
     viewModel             : AlbumDetailViewModel,
@@ -112,7 +112,7 @@ fun AlbumDetailScreen(
                 Box(
                     modifier         = Modifier.fillMaxSize().padding(paddingValues),
                     contentAlignment = Alignment.Center,
-                ) { CircularProgressIndicator() }
+                ) { ContainedLoadingIndicator(modifier = Modifier.size(100.dp)) }
             }
             state.error != null -> {
                 Box(
