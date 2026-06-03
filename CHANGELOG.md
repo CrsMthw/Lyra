@@ -8,18 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Queue, share, and add-to-playlist buttons in the pop-out player panel** — same action bar as the full player screen; S-size icon-only connected buttons via M3 `ButtonGroup` + `customItem` with `FilledTonalIconButton` on both surfaces
-- **Pop-out panel height cap** — panel is now capped at 80% of screen height; album art shrinks dynamically to fit rather than the panel scrolling
+- **Spotify Connect device switching** — `AssistChip` on the left side of the player action bar shows the active device name and type icon; tapping opens a bottom sheet listing all available Spotify Connect devices; each device shown as a `ListItem` with a `RadioButton` indicating the active one; "This device" shown as a separate `ElevatedCard` above the list (not a radio item) with a subtext explaining it wakes Spotify when dead; other devices transfer via `PUT /me/player` (preserves playback position); "This device" uses the App Remote SDK (`connectAndPlay`) as a fallback when Spotify is not running locally; accessible from both the full player screen and the pop-out panel on wide screens
+- **Queue, share, and add-to-playlist buttons in the pop-out player panel** — the full action bar (device chip + three action buttons) now appears on both the pop-out panel and the full player screen
 
 ### Changed
-- **Pop-out player panel is now managed by `PlayerPanelHost`** in all screens — `LibraryScreen` previously had its own duplicated `SharedTransitionLayout`, `MiniPlayerHolder`, `BackHandler`, and `PlayerPopOutPanel` inside `TwoPaneLayout` and `SinglePaneLayout`; all player management is now unified in the modular `PlayerPanelHost` component
-- **Player action bar buttons** (queue, share, add-to-playlist) on the full player screen are now an M3 connected `ButtonGroup` instead of three separate `IconButton`s; visually connected with shared borders
-- **More vertical spacing** between the playback controls row and the action bar in the pop-out panel (4 dp → 16 dp)
+- **Player action bar** (both surfaces) — queue, share, and add-to-playlist buttons are now an M3 connected `ButtonGroup` using `customItem` + S-size `FilledTonalIconButton` (40dp container, 18dp icon, `ButtonGroupDefaults` connected corner shapes); replaces the previous three separate `IconButton`s whose `clickableItem` label rendered as visible text, causing layout reflow when dragging across buttons
+- **Action bar accent colors** — the device `AssistChip` and all three action buttons now use album art `surfaceAccentColor` (12% alpha container, full-opacity icons, 40% alpha chip border) instead of Material You colors, matching the seek bar, shuffle/repeat indicators, and like button
+- **Pop-out panel height and scroll** — panel is capped at 80% of screen height; album art shrinks dynamically via `BoxWithConstraints` to fit rather than the panel scrolling; scrim and panel dismiss immediately when folding the phone
+- **Pop-out player panel modularized** — `LibraryScreen` previously duplicated player management (`SharedTransitionLayout`, `MiniPlayerHolder`, `BackHandler`, `PlayerPopOutPanel`) in both `TwoPaneLayout` and `SinglePaneLayout`; all screens now delegate to `PlayerPanelHost`, consistent with Album/Artist screens
+- **Spacing** between playback controls and action bar: 4dp → 24dp in the pop-out panel, 0dp → 16dp explicit spacer in the full player screen
 - **Album Detail and Artist Detail two-pane layouts** now use the same Card-based style as the Library screen — each pane wrapped in a `Card` with rounded top corners and an 8dp gap; `VerticalDivider` removed
 - **Adaptive breakpoints** migrated from manual `LocalConfiguration.current.screenWidthDp >= 600` to `currentWindowAdaptiveInfo().windowSizeClass.isWidthAtLeastBreakpoint(600)` across all screens (Library, Album Detail, Artist Detail, PlayerPanelHost)
-
-### Added
-- **Spotify Connect device switching** — `AssistChip` on the left side of the player action bar shows the active device name and type icon; tapping opens a bottom sheet listing all available Spotify Connect devices; each device shown as a `ListItem` with a `RadioButton` indicating the active one; "This device" shown as a separate `ElevatedCard` above the list (not a radio item) with a subtext explaining it wakes Spotify when dead; other devices transfer via `PUT /me/player` (preserves playback position); "This device" uses the App Remote SDK (`connectAndPlay`) as a fallback when Spotify is not running locally; accessible from both the full player screen and the pop-out panel on wide screens
 
 ## [2.1.0] - 2026-06-03
 
