@@ -30,6 +30,7 @@ fun PlayerPopOutPanel(
     onFullScreen               : () -> Unit,
     localSharedTransitionScope : SharedTransitionScope,
     modifier                   : Modifier = Modifier,
+    onOpenQueue                : () -> Unit = {},
     navSharedTransitionScope   : SharedTransitionScope? = null,
     navAnimatedContentScope    : AnimatedContentScope? = null,
 ) {
@@ -51,6 +52,7 @@ fun PlayerPopOutPanel(
                 playerViewModel          = playerViewModel,
                 onClose                  = onClose,
                 onFullScreen             = onFullScreen,
+                onOpenQueue              = onOpenQueue,
                 sharedTransitionScope    = localSharedTransitionScope,
                 animatedVisibilityScope  = panelScope,
                 navSharedTransitionScope = navSharedTransitionScope,

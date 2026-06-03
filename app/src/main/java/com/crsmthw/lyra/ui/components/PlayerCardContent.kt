@@ -19,7 +19,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import android.content.Intent
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.*
@@ -45,6 +47,7 @@ import coil3.request.ImageRequest
 import coil3.request.SuccessResult
 import coil3.toBitmap
 import com.crsmthw.lyra.R
+import com.crsmthw.lyra.ui.components.AddToPlaylistSheet
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import com.crsmthw.lyra.ui.screens.player.RepeatMode
 import com.crsmthw.lyra.util.toTimeString
@@ -58,6 +61,7 @@ fun PlayerCardContent(
     playerViewModel          : PlayerViewModel,
     onClose                  : () -> Unit,
     onFullScreen             : () -> Unit,
+    onOpenQueue              : () -> Unit = {},
     // Local scope — mini player ↔ panel expansion
     sharedTransitionScope   : SharedTransitionScope? = null,
     animatedVisibilityScope : AnimatedVisibilityScope? = null,
@@ -66,7 +70,9 @@ fun PlayerCardContent(
     navAnimatedContentScope   : AnimatedContentScope? = null,
 ) {
     val state by playerViewModel.uiState.collectAsStateWithLifecycle()
+    val pickerState by playerViewModel.pickerState.collectAsStateWithLifecycle()
     var showDevicePicker by remember { mutableStateOf(false) }
+    var showPlaylistPicker by remember { mutableStateOf(false) }
 
     // ── Dynamic color extraction ───────────────────────────────────────────
     val context     = LocalContext.current
@@ -384,9 +390,10 @@ fun PlayerCardContent(
                 }
             }
 
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(16.dp))
 
-            // Device chip
+            // Action bar — device chip left, connected button group right
+            val enabled = state.currentTrack != null
             val deviceIcon = when (state.currentDevice?.type?.lowercase()) {
                 "computer"               -> Icons.Default.Computer
                 "smartphone"             -> Icons.Default.PhoneAndroid
@@ -396,25 +403,63 @@ fun PlayerCardContent(
                 "automobile"             -> Icons.Default.DirectionsCar
                 else                     -> Icons.Default.Cast
             }
-            AssistChip(
-                onClick    = { playerViewModel.loadAvailableDevices(); showDevicePicker = true },
-                enabled    = state.currentTrack != null,
-                label      = {
-                    Text(
-                        text     = state.currentDevice?.name ?: stringResource(R.string.player_no_device),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+            Row(
+                modifier              = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment     = Alignment.CenterVertically,
+            ) {
+                AssistChip(
+                    onClick    = { playerViewModel.loadAvailableDevices(); showDevicePicker = true },
+                    enabled    = enabled,
+                    label      = {
+                        Text(
+                            text     = state.currentDevice?.name ?: stringResource(R.string.player_no_device),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector        = deviceIcon,
+                            contentDescription = null,
+                            modifier           = Modifier.size(18.dp),
+                        )
+                    },
+                    modifier = Modifier.widthIn(max = 160.dp),
+                )
+                val labelQueue         = stringResource(R.string.player_queue)
+                val labelShare         = stringResource(R.string.player_share)
+                val labelAddToPlaylist = stringResource(R.string.player_add_to_playlist)
+                ButtonGroup(overflowIndicator = {}) {
+                    clickableItem(
+                        onClick  = onOpenQueue,
+                        label    = labelQueue,
+                        icon     = @Composable { Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = null) },
+                        enabled  = enabled,
                     )
-                },
-                leadingIcon = {
-                    Icon(
-                        imageVector        = deviceIcon,
-                        contentDescription = null,
-                        modifier           = Modifier.size(18.dp),
+                    clickableItem(
+                        onClick = {
+                            state.currentTrack?.id?.let { id ->
+                                context.startActivity(Intent.createChooser(
+                                    Intent(Intent.ACTION_SEND).apply {
+                                        putExtra(Intent.EXTRA_TEXT, "https://open.spotify.com/track/$id")
+                                        type = "text/plain"
+                                    }, null
+                                ))
+                            }
+                        },
+                        label   = labelShare,
+                        icon    = @Composable { Icon(Icons.Default.Share, contentDescription = null) },
+                        enabled = enabled,
                     )
-                },
-                modifier = Modifier.widthIn(max = 200.dp),
-            )
+                    clickableItem(
+                        onClick  = { playerViewModel.loadOwnedPlaylists(); showPlaylistPicker = true },
+                        label    = labelAddToPlaylist,
+                        icon     = @Composable { Icon(Icons.Default.LibraryAdd, contentDescription = null) },
+                        enabled  = enabled,
+                    )
+                }
+            }
         }
     }
 
@@ -433,6 +478,14 @@ fun PlayerCardContent(
             },
             onDismiss      = { showDevicePicker = false },
             onRetry        = { playerViewModel.loadAvailableDevices() },
+        )
+    }
+
+    if (showPlaylistPicker) {
+        AddToPlaylistSheet(
+            pickerState = pickerState,
+            onSelect    = playerViewModel::togglePlaylistTrack,
+            onDismiss   = { showPlaylistPicker = false },
         )
     }
 }

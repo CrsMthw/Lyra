@@ -32,14 +32,16 @@ fun PlayerPanelHost(
     playerViewModel         : PlayerViewModel,
     onOpenPlayer            : () -> Unit,
     modifier                : Modifier = Modifier,
+    onOpenQueue             : () -> Unit = {},
     navSharedTransitionScope: SharedTransitionScope? = null,
     navAnimatedContentScope : AnimatedContentScope? = null,
     content                 : @Composable BoxScope.(onRequestPlayer: () -> Unit) -> Unit,
 ) {
-    val config        = LocalConfiguration.current
-    val isWideScreen  = currentWindowAdaptiveInfo().windowSizeClass.isWidthAtLeastBreakpoint(600)
-    val isShortScreen = config.screenHeightDp < 500
-    val canShowPanel  = isWideScreen && !isShortScreen
+    val config         = LocalConfiguration.current
+    val isWideScreen   = currentWindowAdaptiveInfo().windowSizeClass.isWidthAtLeastBreakpoint(600)
+    val isShortScreen  = config.screenHeightDp < 500
+    val canShowPanel   = isWideScreen && !isShortScreen
+    val maxPanelHeight = (config.screenHeightDp * 0.8f).dp
 
     var showPlayerPanel by rememberSaveable { mutableStateOf(false) }
     val density  = LocalDensity.current
@@ -104,6 +106,7 @@ fun PlayerPanelHost(
                     playerViewModel            = playerViewModel,
                     onClose                    = { showPlayerPanel = false },
                     onFullScreen               = onOpenPlayer,
+                    onOpenQueue                = onOpenQueue,
                     localSharedTransitionScope = this@SharedTransitionLayout,
                     navSharedTransitionScope   = navSharedTransitionScope,
                     navAnimatedContentScope    = navAnimatedContentScope,
@@ -111,6 +114,7 @@ fun PlayerPanelHost(
                         .align(Alignment.BottomEnd)
                         .padding(start = 8.dp, end = 16.dp, bottom = 16.dp)
                         .fillMaxWidth(0.54f)
+                        .heightIn(max = maxPanelHeight)
                         .navigationBarsPadding(),
                 )
             }

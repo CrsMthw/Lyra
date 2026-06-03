@@ -116,6 +116,7 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
                     onOpenPlayer          = { safePush(Screen.Player.route) },
                     onOpenSearch          = { safePush(Screen.Search.route) },
                     onOpenSettings        = { safePush(Screen.Settings.route) },
+                    onOpenQueue           = { safePush(Screen.Queue.route) },
                     sharedTransitionScope = this@SharedTransitionLayout,
                     animatedContentScope  = this@composable,
                 )
@@ -170,6 +171,7 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
                     playerViewModel       = playerVm,
                     onBack                = ::safeNavigateUp,
                     onNavigateToPlayer    = { safePush(Screen.Player.route) },
+                    onOpenQueue           = { safePush(Screen.Queue.route) },
                     onOpenArtist          = { artistId -> safePush(Screen.ArtistDetail.createRoute(artistId)) },
                     sharedTransitionScope = this@SharedTransitionLayout,
                     animatedContentScope  = this@composable,
@@ -191,6 +193,7 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
                     onBack                = ::safeNavigateUp,
                     onOpenAlbum           = { albumId -> safePush(Screen.AlbumDetail.createRoute(albumId)) },
                     onOpenPlayer          = { safePush(Screen.Player.route) },
+                    onOpenQueue           = { safePush(Screen.Queue.route) },
                     sharedTransitionScope = this@SharedTransitionLayout,
                     animatedContentScope  = this@composable,
                 )

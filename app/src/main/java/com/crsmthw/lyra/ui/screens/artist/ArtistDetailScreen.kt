@@ -48,6 +48,7 @@ fun ArtistDetailScreen(
     onBack                : () -> Unit,
     onOpenAlbum           : (albumId: String) -> Unit,
     onOpenPlayer          : () -> Unit = {},
+    onOpenQueue           : () -> Unit = {},
     sharedTransitionScope : SharedTransitionScope? = null,
     animatedContentScope  : AnimatedContentScope? = null,
 ) {
@@ -62,6 +63,7 @@ fun ArtistDetailScreen(
     PlayerPanelHost(
         playerViewModel          = playerViewModel,
         onOpenPlayer             = onOpenPlayer,
+        onOpenQueue              = onOpenQueue,
         navSharedTransitionScope = sharedTransitionScope,
         navAnimatedContentScope  = animatedContentScope,
     ) { _ ->

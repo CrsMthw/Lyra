@@ -810,28 +810,28 @@ private fun PlayerControls(
             },
             modifier = Modifier.widthIn(max = 160.dp),
         )
-        Row {
-            IconButton(onClick = onOpenQueue, enabled = state.currentTrack != null) {
-                Icon(
-                    imageVector        = Icons.AutoMirrored.Filled.QueueMusic,
-                    contentDescription = stringResource(R.string.player_queue),
-                    tint               = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            IconButton(onClick = onShare, enabled = state.currentTrack != null) {
-                Icon(
-                    imageVector        = Icons.Default.Share,
-                    contentDescription = stringResource(R.string.player_share),
-                    tint               = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            IconButton(onClick = onAddToPlaylist, enabled = state.currentTrack != null) {
-                Icon(
-                    imageVector        = Icons.Default.LibraryAdd,
-                    contentDescription = stringResource(R.string.player_add_to_playlist),
-                    tint               = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+        val labelQueue         = stringResource(R.string.player_queue)
+        val labelShare         = stringResource(R.string.player_share)
+        val labelAddToPlaylist = stringResource(R.string.player_add_to_playlist)
+        ButtonGroup(overflowIndicator = {}) {
+            clickableItem(
+                onClick  = onOpenQueue,
+                label    = labelQueue,
+                icon     = @Composable { Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = null) },
+                enabled  = state.currentTrack != null,
+            )
+            clickableItem(
+                onClick  = onShare,
+                label    = labelShare,
+                icon     = @Composable { Icon(Icons.Default.Share, contentDescription = null) },
+                enabled  = state.currentTrack != null,
+            )
+            clickableItem(
+                onClick  = onAddToPlaylist,
+                label    = labelAddToPlaylist,
+                icon     = @Composable { Icon(Icons.Default.LibraryAdd, contentDescription = null) },
+                enabled  = state.currentTrack != null,
+            )
         }
     }
 }

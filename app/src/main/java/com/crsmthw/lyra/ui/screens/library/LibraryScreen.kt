@@ -5,10 +5,7 @@ package com.crsmthw.lyra.ui.screens.library
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedContentScope
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
-import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
@@ -16,7 +13,6 @@ import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -27,7 +23,6 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -48,7 +43,6 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -80,9 +74,7 @@ import com.crsmthw.lyra.data.remote.model.SpotifyPlaylist
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
-import com.crsmthw.lyra.ui.components.MiniPlayer
-import com.crsmthw.lyra.ui.components.MiniPlayerHolder
-import com.crsmthw.lyra.ui.components.PlayerPopOutPanel
+import com.crsmthw.lyra.ui.components.PlayerPanelHost
 import com.crsmthw.lyra.ui.components.PlaylistCard
 import com.crsmthw.lyra.ui.components.TrackRow
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
@@ -107,51 +99,53 @@ fun LibraryScreen(
     onOpenPlayer          : () -> Unit,
     onOpenSearch          : () -> Unit,
     onOpenSettings        : () -> Unit,
+    onOpenQueue           : () -> Unit = {},
     sharedTransitionScope : SharedTransitionScope? = null,
     animatedContentScope  : AnimatedContentScope? = null,
 ) {
     val state        by viewModel.uiState.collectAsStateWithLifecycle()
     val isWideScreen  = currentWindowAdaptiveInfo().windowSizeClass.isWidthAtLeastBreakpoint(600)
 
-    if (isWideScreen) {
-        TwoPaneLayout(
-            state                 = state,
-            viewModel             = viewModel,
-            playerViewModel       = playerViewModel,
-            onOpenPlayer          = onOpenPlayer,
-            onOpenSearch          = onOpenSearch,
-            onOpenSettings        = onOpenSettings,
-            sharedTransitionScope = sharedTransitionScope,
-            animatedContentScope  = animatedContentScope,
-        )
-    } else {
-        SinglePaneLayout(
-            state                 = state,
-            viewModel             = viewModel,
-            playerViewModel       = playerViewModel,
-            onOpenPlayer          = onOpenPlayer,
-            onOpenSearch          = onOpenSearch,
-            onOpenSettings        = onOpenSettings,
-            sharedTransitionScope = sharedTransitionScope,
-            animatedContentScope  = animatedContentScope,
-        )
+    PlayerPanelHost(
+        playerViewModel          = playerViewModel,
+        onOpenPlayer             = onOpenPlayer,
+        onOpenQueue              = onOpenQueue,
+        navSharedTransitionScope = sharedTransitionScope,
+        navAnimatedContentScope  = animatedContentScope,
+    ) { onRequestPlayer ->
+        if (isWideScreen) {
+            TwoPaneLayout(
+                state           = state,
+                viewModel       = viewModel,
+                playerViewModel = playerViewModel,
+                onOpenSearch    = onOpenSearch,
+                onOpenSettings  = onOpenSettings,
+                onRequestPlayer = onRequestPlayer,
+            )
+        } else {
+            SinglePaneLayout(
+                state           = state,
+                viewModel       = viewModel,
+                playerViewModel = playerViewModel,
+                onOpenSearch    = onOpenSearch,
+                onOpenSettings  = onOpenSettings,
+                onRequestPlayer = onRequestPlayer,
+            )
+        }
     }
 }
 
 // ── Single pane (phone / folded) ─────────────────────────────────────────────
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class,
-    ExperimentalSharedTransitionApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun SinglePaneLayout(
-    state                 : LibraryUiState,
-    viewModel             : LibraryViewModel,
-    playerViewModel       : PlayerViewModel,
-    onOpenPlayer          : () -> Unit,
-    onOpenSearch          : () -> Unit,
-    onOpenSettings        : () -> Unit,
-    sharedTransitionScope : SharedTransitionScope? = null,
-    animatedContentScope  : AnimatedContentScope? = null,
+    state           : LibraryUiState,
+    viewModel       : LibraryViewModel,
+    playerViewModel : PlayerViewModel,
+    onOpenSearch    : () -> Unit,
+    onOpenSettings  : () -> Unit,
+    onRequestPlayer : () -> Unit,
 ) {
     val isShowingDetail = state.currentPlaylist != null || state.isLoadingTracks || state.currentTracks.isNotEmpty()
     val isLandscape = LocalConfiguration.current.let { it.screenWidthDp > it.screenHeightDp }
@@ -199,7 +193,7 @@ private fun SinglePaneLayout(
                     viewModel       = viewModel,
                     playerViewModel = playerViewModel,
                     mosaicDir       = mosaicDir,
-                    onTrackClick    = onOpenPlayer,
+                    onTrackClick    = onRequestPlayer,
                     onRefresh       = viewModel::refreshCurrentTracks,
                     onBack          = { viewModel.clearSelection() },
                     barWindowInsets = WindowInsets.statusBars,
@@ -214,7 +208,6 @@ private fun SinglePaneLayout(
             }
         }
 
-        // MiniPlayer floats on top — state collection is isolated inside MiniPlayerHolder.
         val fabBottomPadding by animateDpAsState(
             targetValue   = if (hasCurrentTrack) 90.dp else 16.dp,
             animationSpec = tween(300),
@@ -236,14 +229,6 @@ private fun SinglePaneLayout(
                     )
             )
         }
-
-        MiniPlayerHolder(
-            playerViewModel         = playerViewModel,
-            onExpand                = onOpenPlayer,
-            modifier                = Modifier.align(Alignment.BottomCenter).navigationBarsPadding(),
-            sharedTransitionScope   = sharedTransitionScope,
-            animatedVisibilityScope = animatedContentScope,
-        )
 
         if (!isShowingDetail) {
             FloatingActionButton(
@@ -548,33 +533,20 @@ private fun LibraryBrowserPane(
 
 // ── Two-pane (unfolded / tablet) ─────────────────────────────────────────────
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class,
-    ExperimentalSharedTransitionApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun TwoPaneLayout(
-    state                 : LibraryUiState,
-    viewModel             : LibraryViewModel,
-    playerViewModel       : PlayerViewModel,
-    onOpenPlayer          : () -> Unit,
-    onOpenSearch          : () -> Unit,
-    onOpenSettings        : () -> Unit,
-    sharedTransitionScope : SharedTransitionScope? = null,
-    animatedContentScope  : AnimatedContentScope? = null,
+    state           : LibraryUiState,
+    viewModel       : LibraryViewModel,
+    playerViewModel : PlayerViewModel,
+    onOpenSearch    : () -> Unit,
+    onOpenSettings  : () -> Unit,
+    onRequestPlayer : () -> Unit,
 ) {
-    var showPlayerPanel by rememberSaveable { mutableStateOf(false) }
-    val config       = LocalConfiguration.current
-    val isLandscape  = config.screenWidthDp > config.screenHeightDp
-    val isShortScreen = config.screenHeightDp < 500
-    val context      = LocalContext.current
-    val mosaicDir    = remember { File(context.filesDir, "mosaics") }
-    val density      = LocalDensity.current
-    val navBarPx     = WindowInsets.navigationBars.getBottom(density)
-
-    val scrimAlpha by animateFloatAsState(
-        targetValue   = if (showPlayerPanel) 0.45f else 0f,
-        animationSpec = tween(300),
-        label         = "scrim",
-    )
+    val config    = LocalConfiguration.current
+    val isLandscape = config.screenWidthDp > config.screenHeightDp
+    val context   = LocalContext.current
+    val mosaicDir = remember { File(context.filesDir, "mosaics") }
 
     // Auto-select Liked Songs on first load so right pane is never blank
     LaunchedEffect(state.isLoading) {
@@ -586,10 +558,6 @@ private fun TwoPaneLayout(
         }
     }
 
-    BackHandler(enabled = showPlayerPanel) { showPlayerPanel = false }
-
-    SharedTransitionLayout {
-    Box(modifier = Modifier.fillMaxSize()) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -692,7 +660,7 @@ private fun TwoPaneLayout(
                                 viewModel       = viewModel,
                                 playerViewModel = playerViewModel,
                                 mosaicDir       = mosaicDir,
-                                onTrackClick    = { showPlayerPanel = true },
+                                onTrackClick    = onRequestPlayer,
                                 onRefresh       = viewModel::refreshCurrentTracks,
                             )
                         }
@@ -710,48 +678,10 @@ private fun TwoPaneLayout(
                                 )
                             )
                     )
-
-                    // visible=!showPlayerPanel drives the mini player's own AnimatedVisibility,
-                    // giving its scope to the shared element so it exits when the panel opens.
-                    MiniPlayerHolder(
-                        playerViewModel       = playerViewModel,
-                        onExpand              = { if (!isShortScreen) showPlayerPanel = true else onOpenPlayer() },
-                        visible               = !showPlayerPanel,
-                        modifier              = Modifier.align(Alignment.BottomCenter).navigationBarsPadding(),
-                        sharedTransitionScope = this@SharedTransitionLayout,
-                    )
                 }
             }
         }
-    }   // closes inset-padded Box
-
-        // ── Pop-out player (hidden in short landscape) ────────────────────────
-        if (!isShortScreen) {
-            if (scrimAlpha > 0f) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = scrimAlpha))
-                        .clickable(enabled = showPlayerPanel) { showPlayerPanel = false },
-                )
-            }
-            PlayerPopOutPanel(
-                showPanel                  = showPlayerPanel,
-                playerViewModel            = playerViewModel,
-                onClose                    = { showPlayerPanel = false },
-                onFullScreen               = onOpenPlayer,
-                localSharedTransitionScope = this@SharedTransitionLayout,
-                navSharedTransitionScope   = sharedTransitionScope,
-                navAnimatedContentScope    = animatedContentScope,
-                modifier                   = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(start = 8.dp, end = 16.dp, bottom = 16.dp)
-                    .fillMaxWidth(0.54f)
-                    .navigationBarsPadding(),
-            )
-        }
     }
-    } // SharedTransitionLayout
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
