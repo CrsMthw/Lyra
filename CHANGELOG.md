@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Album Detail and Artist Detail two-pane layouts** now use the same Card-based style as the Library screen — each pane wrapped in a `Card` with rounded top corners and an 8dp gap; `VerticalDivider` removed
+- **Adaptive breakpoints** migrated from manual `LocalConfiguration.current.screenWidthDp >= 600` to `currentWindowAdaptiveInfo().windowSizeClass.isWidthAtLeastBreakpoint(600)` across all screens (Library, Album Detail, Artist Detail, PlayerPanelHost)
+
 ### Added
 - **Spotify Connect device switching** — `AssistChip` on the left side of the player action bar shows the active device name and type icon; tapping opens a bottom sheet listing all available Spotify Connect devices; each device shown as a `ListItem` with a `RadioButton` indicating the active one; "This device" shown as a separate `ElevatedCard` above the list (not a radio item) with a subtext explaining it wakes Spotify when dead; other devices transfer via `PUT /me/player` (preserves playback position); "This device" uses the App Remote SDK (`connectAndPlay`) as a fallback when Spotify is not running locally; accessible from both the full player screen and the pop-out panel on wide screens
 

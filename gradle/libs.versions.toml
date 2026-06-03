@@ -49,6 +49,7 @@ kotlinx-coroutines-android           = { group = "org.jetbrains.kotlinx",      n
 gson                                 = { group = "com.google.code.gson",       name = "gson",                        version.ref = "gson" }
 androidx-palette                     = { group = "androidx.palette",            name = "palette-ktx",                 version.ref = "palette" }
 androidx-graphics-shapes             = { group = "androidx.graphics",            name = "graphics-shapes",             version.ref = "graphicsShapes" }
+androidx-material3-adaptive          = { group = "androidx.compose.material3.adaptive", name = "adaptive" }
 
 [plugins]
 android-application = { id = "com.android.application",             version.ref = "agp" }

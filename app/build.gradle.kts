@@ -67,6 +67,7 @@ dependencies {
 
     // Adaptive / Window
     implementation(libs.androidx.window)
+    implementation(libs.androidx.material3.adaptive)
 
     // OAuth PKCE
     implementation(libs.appauth)

@@ -26,7 +26,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
@@ -57,7 +57,7 @@ fun ArtistDetailScreen(
     val navBarBottomDp = with(density) { WindowInsets.navigationBars.getBottom(this).toDp() }
     val scrimHeight    = 140.dp
     val background     = MaterialTheme.colorScheme.background
-    val isWideScreen   = LocalConfiguration.current.screenWidthDp >= 600
+    val isWideScreen   = currentWindowAdaptiveInfo().windowSizeClass.isWidthAtLeastBreakpoint(600)
 
     PlayerPanelHost(
         playerViewModel          = playerViewModel,
@@ -141,47 +141,63 @@ fun ArtistDetailScreen(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(paddingValues)
+                            .padding(8.dp)
                             .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal)),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        BoxWithConstraints(modifier = Modifier.weight(0.42f).fillMaxHeight()) {
-                            val photoSize = maxWidth.coerceAtMost(maxHeight * 0.5f)
-                            val compact   = maxHeight < 500.dp
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .verticalScroll(rememberScrollState())
-                                    .padding(bottom = navBarBottomDp),
-                            ) {
-                                ArtistHeader(
-                                    artist        = artist,
-                                    modifier      = Modifier.size(photoSize).clip(RoundedCornerShape(12.dp)),
-                                    compact       = compact,
-                                    showDivider   = false,
-                                )
+                        // Left pane — artist photo + info
+                        Card(
+                            modifier  = Modifier.weight(0.42f).fillMaxHeight(),
+                            shape     = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+                            colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                        ) {
+                            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                                val photoSize = maxWidth.coerceAtMost(maxHeight * 0.5f)
+                                val compact   = maxHeight < 500.dp
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .verticalScroll(rememberScrollState())
+                                        .padding(bottom = navBarBottomDp),
+                                ) {
+                                    ArtistHeader(
+                                        artist        = artist,
+                                        modifier      = Modifier.size(photoSize).clip(RoundedCornerShape(12.dp)),
+                                        compact       = compact,
+                                        showDivider   = false,
+                                    )
+                                }
                             }
                         }
 
-                        VerticalDivider()
-
-                        Box(modifier = Modifier.weight(0.58f).fillMaxHeight()) {
-                            LazyColumn(
-                                modifier       = Modifier.fillMaxSize(),
-                                contentPadding = PaddingValues(bottom = 100.dp + navBarBottomDp),
-                            ) {
-                                artistContent(
-                                    state         = state,
-                                    groupedAlbums = groupedAlbums,
-                                    onOpenAlbum   = onOpenAlbum,
-                                    onLoadMore    = viewModel::loadMoreAlbums,
+                        // Right pane — discography
+                        Card(
+                            modifier  = Modifier.weight(0.58f).fillMaxHeight(),
+                            shape     = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+                            colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize()) {
+                                LazyColumn(
+                                    modifier       = Modifier.fillMaxSize(),
+                                    contentPadding = PaddingValues(bottom = 100.dp + navBarBottomDp),
+                                ) {
+                                    artistContent(
+                                        state         = state,
+                                        groupedAlbums = groupedAlbums,
+                                        onOpenAlbum   = onOpenAlbum,
+                                        onLoadMore    = viewModel::loadMoreAlbums,
+                                    )
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(scrimHeight)
+                                        .align(Alignment.BottomCenter)
+                                        .background(Brush.verticalGradient(listOf(Color.Transparent, background)))
                                 )
                             }
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(scrimHeight)
-                                    .align(Alignment.BottomCenter)
-                                    .background(Brush.verticalGradient(listOf(Color.Transparent, background)))
-                            )
                         }
                     }
                 } else {

@@ -59,6 +59,7 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -110,7 +111,7 @@ fun LibraryScreen(
     animatedContentScope  : AnimatedContentScope? = null,
 ) {
     val state        by viewModel.uiState.collectAsStateWithLifecycle()
-    val isWideScreen  = LocalConfiguration.current.screenWidthDp >= 600
+    val isWideScreen  = currentWindowAdaptiveInfo().windowSizeClass.isWidthAtLeastBreakpoint(600)
 
     if (isWideScreen) {
         TwoPaneLayout(

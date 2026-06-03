@@ -24,7 +24,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.pluralStringResource
@@ -58,7 +58,7 @@ fun AlbumDetailScreen(
     val navBarBottomDp = with(density) { WindowInsets.navigationBars.getBottom(this).toDp() }
     val scrimHeight    = 140.dp
     val background     = MaterialTheme.colorScheme.background
-    val isWideScreen   = LocalConfiguration.current.screenWidthDp >= 600
+    val isWideScreen   = currentWindowAdaptiveInfo().windowSizeClass.isWidthAtLeastBreakpoint(600)
 
     PlayerPanelHost(
         playerViewModel          = playerViewModel,
@@ -141,54 +141,68 @@ fun AlbumDetailScreen(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(paddingValues)
+                            .padding(8.dp)
                             .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal)),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         // Left pane — art + info + play button
-                        BoxWithConstraints(modifier = Modifier.weight(0.42f).fillMaxHeight()) {
-                            val artSize = maxWidth.coerceAtMost(maxHeight * 0.5f)
-                            val compact = maxHeight < 500.dp
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .verticalScroll(rememberScrollState())
-                                    .padding(bottom = navBarBottomDp),
-                            ) {
-                                AlbumHeader(
-                                    album         = album,
-                                    tracks        = tracks,
-                                    modifier      = Modifier
-                                        .size(artSize)
-                                        .clip(RoundedCornerShape(8.dp)),
-                                    compact       = compact,
-                                    showDivider   = false,
-                                    onPlayAll     = onPlayAll,
-                                    onOpenArtist  = onOpenArtist,
-                                )
+                        Card(
+                            modifier  = Modifier.weight(0.42f).fillMaxHeight(),
+                            shape     = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+                            colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                        ) {
+                            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                                val artSize = maxWidth.coerceAtMost(maxHeight * 0.5f)
+                                val compact = maxHeight < 500.dp
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .verticalScroll(rememberScrollState())
+                                        .padding(bottom = navBarBottomDp),
+                                ) {
+                                    AlbumHeader(
+                                        album         = album,
+                                        tracks        = tracks,
+                                        modifier      = Modifier
+                                            .size(artSize)
+                                            .clip(RoundedCornerShape(8.dp)),
+                                        compact       = compact,
+                                        showDivider   = false,
+                                        onPlayAll     = onPlayAll,
+                                        onOpenArtist  = onOpenArtist,
+                                    )
+                                }
                             }
                         }
 
-                        VerticalDivider()
-
                         // Right pane — track list
-                        Box(modifier = Modifier.weight(0.58f).fillMaxHeight()) {
-                            LazyColumn(
-                                modifier       = Modifier.fillMaxSize(),
-                                contentPadding = PaddingValues(bottom = 100.dp + navBarBottomDp),
-                            ) {
-                                itemsIndexed(tracks, key = { idx, t -> "track_${t.id}_$idx" }) { idx, track ->
-                                    AlbumTrackRow(track = track, onClick = { onPlayTrack(track, idx) })
+                        Card(
+                            modifier  = Modifier.weight(0.58f).fillMaxHeight(),
+                            shape     = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+                            colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize()) {
+                                LazyColumn(
+                                    modifier       = Modifier.fillMaxSize(),
+                                    contentPadding = PaddingValues(bottom = 100.dp + navBarBottomDp),
+                                ) {
+                                    itemsIndexed(tracks, key = { idx, t -> "track_${t.id}_$idx" }) { idx, track ->
+                                        AlbumTrackRow(track = track, onClick = { onPlayTrack(track, idx) })
+                                    }
+                                    if (!album.label.isNullOrBlank() || album.copyrights?.isNotEmpty() == true) {
+                                        item(key = "footer") { AlbumFooter(album = album) }
+                                    }
                                 }
-                                if (!album.label.isNullOrBlank() || album.copyrights?.isNotEmpty() == true) {
-                                    item(key = "footer") { AlbumFooter(album = album) }
-                                }
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(scrimHeight)
+                                        .align(Alignment.BottomCenter)
+                                        .background(Brush.verticalGradient(listOf(Color.Transparent, background)))
+                                )
                             }
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(scrimHeight)
-                                    .align(Alignment.BottomCenter)
-                                    .background(Brush.verticalGradient(listOf(Color.Transparent, background)))
-                            )
                         }
                     }
                 } else {
