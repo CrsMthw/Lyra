@@ -11,6 +11,7 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import kotlin.math.abs
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -435,12 +436,22 @@ fun PlayerCardContent(
                             modifier           = Modifier.size(18.dp),
                         )
                     },
+                    colors = AssistChipDefaults.assistChipColors(
+                        containerColor          = surfaceAccentColor.copy(alpha = 0.12f),
+                        labelColor              = surfaceAccentColor,
+                        leadingIconContentColor = surfaceAccentColor,
+                    ),
+                    border   = BorderStroke(1.dp, surfaceAccentColor.copy(alpha = 0.4f)),
                     modifier = Modifier.widthIn(max = 160.dp),
                 )
                 // S-size (12dp padding, 18dp icon) connected icon buttons via customItem
                 val queueLabel         = stringResource(R.string.player_queue)
                 val shareLabel         = stringResource(R.string.player_share)
                 val addToPlaylistLabel = stringResource(R.string.player_add_to_playlist)
+                val accentButtonColors = IconButtonDefaults.filledTonalIconButtonColors(
+                    containerColor = surfaceAccentColor.copy(alpha = 0.12f),
+                    contentColor   = surfaceAccentColor,
+                )
                 ButtonGroup(overflowIndicator = {}) {
                     customItem(
                         buttonGroupContent = @Composable {
@@ -449,6 +460,7 @@ fun PlayerCardContent(
                                 enabled  = enabled,
                                 modifier = Modifier.size(40.dp),
                                 shape    = ButtonGroupDefaults.connectedLeadingButtonShape,
+                                colors   = accentButtonColors,
                             ) {
                                 Icon(Icons.AutoMirrored.Filled.QueueMusic, queueLabel, Modifier.size(18.dp))
                             }
@@ -471,6 +483,7 @@ fun PlayerCardContent(
                                 enabled  = enabled,
                                 modifier = Modifier.size(40.dp),
                                 shape    = RoundedCornerShape(2.dp),
+                                colors   = accentButtonColors,
                             ) {
                                 Icon(Icons.Default.Share, shareLabel, Modifier.size(18.dp))
                             }
@@ -484,6 +497,7 @@ fun PlayerCardContent(
                                 enabled  = enabled,
                                 modifier = Modifier.size(40.dp),
                                 shape    = ButtonGroupDefaults.connectedTrailingButtonShape,
+                                colors   = accentButtonColors,
                             ) {
                                 Icon(Icons.Default.LibraryAdd, addToPlaylistLabel, Modifier.size(18.dp))
                             }
