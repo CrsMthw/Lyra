@@ -10,9 +10,12 @@ import com.crsmthw.lyra.data.auth.TokenManager
 import com.crsmthw.lyra.data.local.EncryptedPrefs
 import com.crsmthw.lyra.data.local.LibraryCache
 import com.crsmthw.lyra.data.local.LyraDataStore
+import com.crsmthw.lyra.BuildConfig
+import com.crsmthw.lyra.data.remote.LrcLibApiService
 import com.crsmthw.lyra.data.remote.SpotifyApiService
 import com.crsmthw.lyra.data.remote.SpotifyRemoteManager
 import com.crsmthw.lyra.data.player.PlayerStateManager
+import com.crsmthw.lyra.data.repository.LyricsRepository
 import com.crsmthw.lyra.data.repository.SettingsRepository
 import com.crsmthw.lyra.data.repository.SpotifyRepository
 import okhttp3.OkHttpClient
@@ -47,6 +50,27 @@ class AppContainer(context: Context) {
 
     val spotifyApiService: SpotifyApiService = retrofit.create(SpotifyApiService::class.java)
 
+    // ── LRCLIB (separate client — no token interceptor) ───────────────────────
+    private val lrcLibOkHttpClient = OkHttpClient.Builder()
+        .addInterceptor { chain ->
+            chain.proceed(
+                chain.request().newBuilder()
+                    .header("User-Agent", "Lyra/${BuildConfig.VERSION_NAME} (github.com/CrsMthw/Lyra)")
+                    .build()
+            )
+        }
+        .connectTimeout(10.seconds)
+        .readTimeout   (10.seconds)
+        .build()
+
+    private val lrcLibRetrofit = Retrofit.Builder()
+        .baseUrl("https://lrclib.net/")
+        .client(lrcLibOkHttpClient)
+        .addConverterFactory(GsonConverterFactory.create())
+        .build()
+
+    val lrcLibApiService: LrcLibApiService = lrcLibRetrofit.create(LrcLibApiService::class.java)
+
     // ── Image loader (permanent disk cache in filesDir) ──────────────────────
     val imageLoader: ImageLoader = ImageLoader.Builder(context)
         .memoryCache {
@@ -72,6 +96,7 @@ class AppContainer(context: Context) {
     // ── Repositories ─────────────────────────────────────────────────────────
     val spotifyRepository  = SpotifyRepository(spotifyApiService, encryptedPrefs)
     val settingsRepository = SettingsRepository(dataStore)
+    val lyricsRepository   = LyricsRepository(lrcLibApiService)
 
     // ── App-scoped player state ───────────────────────────────────────────────
     val playerStateManager = PlayerStateManager(context, spotifyRepository, remoteManager)

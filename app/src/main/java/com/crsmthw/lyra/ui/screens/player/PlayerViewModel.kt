@@ -9,7 +9,11 @@ import com.crsmthw.lyra.data.remote.SpotifyRemoteManager
 import com.crsmthw.lyra.data.remote.model.SpotifyDevice
 import com.crsmthw.lyra.data.remote.model.SpotifyPlaylist
 import com.crsmthw.lyra.data.remote.model.SpotifyTrack
+import com.crsmthw.lyra.data.repository.LyricsRepository
+import com.crsmthw.lyra.data.repository.LyricsState
+import com.crsmthw.lyra.data.repository.SettingsRepository
 import com.crsmthw.lyra.data.repository.SpotifyRepository
+import com.crsmthw.lyra.util.LyricLine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -52,6 +56,9 @@ data class PlayerUiState(
     val availableDevices      : List<SpotifyDevice> = emptyList(),
     val devicePickerError     : String?        = null,
     val deviceTransferError   : String?        = null,
+    val lyricsMode            : Boolean        = false,
+    val lyricsState           : LyricsState    = LyricsState.None,
+    val currentLyricLineIndex : Int            = -1,
 ) {
     val progress: Float
         get() = if (durationMs > 0L) (progressMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
@@ -62,6 +69,8 @@ class PlayerViewModel(
     private val repository        : SpotifyRepository,
     private val remoteManager     : SpotifyRemoteManager,
     private val libraryCache      : LibraryCache,
+    private val lyricsRepository  : LyricsRepository,
+    private val settingsRepository: SettingsRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(PlayerUiState())
@@ -73,6 +82,7 @@ class PlayerViewModel(
     // Fallback timer used when the wake path goes through LibraryViewModel (no callback available).
     // playTrack / playPause / skip paths cancel this job and clear explicitly via clearIsWakingUp().
     private var clearWakingUpJob: Job? = null
+    private var lyricsJob: Job? = null
 
     private fun clearIsWakingUp() {
         clearWakingUpJob?.cancel()
@@ -100,6 +110,7 @@ class PlayerViewModel(
                         sleepTimerTotalMinutes = state.sleepTimerTotalMinutes,
                         currentDevice          = state.currentDevice,
                         error                  = null,
+                        currentLyricLineIndex  = computeCurrentLine(state.progressMs, ui.lyricsState),
                         // isWakingUp is intentionally NOT cleared here — clearing is explicit.
                         // playTrack() clears directly; playPause/skip use onWakeOperationComplete;
                         // library-play falls back to the 3.5s timer below.
@@ -108,7 +119,16 @@ class PlayerViewModel(
                 val newTrack = state.currentTrack
                 if (newTrack != null && newTrack.id != prevTrack?.id) {
                     checkIsLiked(newTrack.id)
+                    fetchLyricsForTrack(newTrack, state.durationMs)
+                } else if (newTrack == null && prevTrack != null) {
+                    lyricsJob?.cancel()
+                    _uiState.update { it.copy(lyricsState = LyricsState.None, currentLyricLineIndex = -1) }
                 }
+            }
+        }
+        viewModelScope.launch {
+            settingsRepository.lyricsMode.collect { enabled ->
+                _uiState.update { it.copy(lyricsMode = enabled) }
             }
         }
         viewModelScope.launch {
@@ -147,6 +167,50 @@ class PlayerViewModel(
 
     fun recheckLiked(trackId: String) {
         viewModelScope.launch { checkIsLiked(trackId) }
+    }
+
+    // ── Lyrics ────────────────────────────────────────────────────────────────
+
+    fun toggleLyricsMode() {
+        viewModelScope.launch { settingsRepository.setLyricsMode(!_uiState.value.lyricsMode) }
+    }
+
+    private fun fetchLyricsForTrack(track: SpotifyTrack, durationMs: Long) {
+        val artistName = track.artists?.firstOrNull()?.name
+        lyricsJob?.cancel()
+        if (artistName == null) {
+            _uiState.update { it.copy(lyricsState = LyricsState.None, currentLyricLineIndex = -1) }
+            return
+        }
+        val albumName = track.album?.name.orEmpty()
+        _uiState.update { it.copy(lyricsState = LyricsState.Loading, currentLyricLineIndex = -1) }
+        lyricsJob = viewModelScope.launch {
+            delay(500L)
+            val result = lyricsRepository.fetchLyrics(
+                trackId    = track.id,
+                trackName  = track.name,
+                artistName = artistName,
+                albumName  = albumName,
+                durationMs = durationMs,
+            )
+            _uiState.update { ui ->
+                ui.copy(
+                    lyricsState           = result,
+                    currentLyricLineIndex = computeCurrentLine(ui.progressMs, result),
+                )
+            }
+        }
+    }
+
+    private fun computeCurrentLine(progressMs: Long, lyricsState: LyricsState): Int {
+        if (lyricsState !is LyricsState.Synced) return -1
+        val lines = lyricsState.lines
+        if (lines.isEmpty()) return -1
+        var idx = 0
+        for (i in lines.indices) {
+            if (lines[i].timestampMs <= progressMs) idx = i else break
+        }
+        return idx
     }
 
     // ── Controls (delegate to PlayerStateManager) ─────────────────────────────
@@ -379,5 +443,12 @@ class PlayerViewModelFactory(private val container: com.crsmthw.lyra.di.AppConta
     ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T =
-        PlayerViewModel(container.playerStateManager, container.spotifyRepository, container.remoteManager, container.libraryCache) as T
+        PlayerViewModel(
+            playerStateManager = container.playerStateManager,
+            repository         = container.spotifyRepository,
+            remoteManager      = container.remoteManager,
+            libraryCache       = container.libraryCache,
+            lyricsRepository   = container.lyricsRepository,
+            settingsRepository = container.settingsRepository,
+        ) as T
 }

@@ -2,11 +2,15 @@
 
 package com.crsmthw.lyra.ui.screens.player
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedContentScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
@@ -56,8 +60,11 @@ import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.SuccessResult
 import coil3.toBitmap
+import com.crsmthw.lyra.data.repository.LyricsState
 import com.crsmthw.lyra.ui.components.AddToPlaylistSheet
 import com.crsmthw.lyra.ui.components.DevicePickerSheet
+import com.crsmthw.lyra.ui.components.PlainLyricsView
+import com.crsmthw.lyra.ui.components.SyncedLyricsView
 import com.crsmthw.lyra.util.toTimeString
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -291,7 +298,7 @@ fun PlayerScreen(
                     .padding(paddingValues)
                     .navigationBarsPadding(),
             ) {
-                // Left: album art — square, constrained by available height
+                // Left: album art / lyrics — square, constrained by available height
                 BoxWithConstraints(
                     modifier         = Modifier
                         .weight(0.45f)
@@ -310,47 +317,104 @@ fun PlayerScreen(
                         }
                     } else Modifier
 
-                    AsyncImage(
-                        model              = displayedTrack?.artUrl,
-                        contentDescription = "Album art",
-                        contentScale       = ContentScale.Crop,
-                        modifier           = artMod
-                            .size(side)
-                            .clip(RoundedCornerShape(16.dp))
-                            .graphicsLayer {
-                                translationX = (artDragX * 0.3f).coerceIn(-80f, 80f) + artOffsetX.value
-                            }
-                            .pointerInput(Unit) {
-                                detectHorizontalDragGestures(
-                                    onDragStart      = { artDragX = 0f },
-                                    onDragEnd        = {
-                                        when {
-                                            artDragX < -swipeThresholdPx -> {
-                                                val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
-                                                artDragX = 0f; skipDirection = 1
-                                                scope.launch {
-                                                    artOffsetX.snapTo(s)
-                                                    artOffsetX.animateTo(-1500f, tween(250, easing = FastOutLinearInEasing))
-                                                }
-                                                viewModel.skipNext()
-                                            }
-                                            artDragX > swipeThresholdPx -> {
-                                                val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
-                                                artDragX = 0f; skipDirection = -1
-                                                scope.launch {
-                                                    artOffsetX.snapTo(s)
-                                                    artOffsetX.animateTo(1500f, tween(250, easing = FastOutLinearInEasing))
-                                                }
-                                                viewModel.skipPrevious()
-                                            }
-                                            else -> artDragX = 0f
-                                        }
-                                    },
-                                    onDragCancel     = { artDragX = 0f },
-                                    onHorizontalDrag = { _, amount -> artDragX += amount },
-                                )
+                    val lyricsContentMod = remember(side) { Modifier.size(side).clip(RoundedCornerShape(16.dp)) }
+                    val lyricsAvailable  = state.lyricsState is LyricsState.Synced || state.lyricsState is LyricsState.Plain
+                    val lyricsShowing    = state.lyricsMode && lyricsAvailable
+
+                    Box(Modifier.size(side)) {
+                        AnimatedContent(
+                            targetState  = state,
+                            contentKey   = { s ->
+                                val avail = s.lyricsState is LyricsState.Synced || s.lyricsState is LyricsState.Plain
+                                s.lyricsMode && avail
                             },
-                    )
+                            transitionSpec = { fadeIn(tween(300)) togetherWith fadeOut(tween(300)) },
+                            modifier     = Modifier.fillMaxSize(),
+                            label        = "art-lyrics-landscape",
+                        ) { snapshot ->
+                            val snapAvail   = snapshot.lyricsState is LyricsState.Synced || snapshot.lyricsState is LyricsState.Plain
+                            val snapShowing = snapshot.lyricsMode && snapAvail
+                            if (snapShowing) {
+                                when (val ls = snapshot.lyricsState) {
+                                    is LyricsState.Synced -> SyncedLyricsView(
+                                        lines            = ls.lines,
+                                        currentLineIndex = snapshot.currentLyricLineIndex,
+                                        textColor        = onAccentColor,
+                                        modifier         = lyricsContentMod,
+                                    )
+                                    is LyricsState.Plain  -> PlainLyricsView(
+                                        text      = ls.text,
+                                        textColor = onAccentColor,
+                                        modifier  = lyricsContentMod,
+                                    )
+                                }
+                            } else {
+                                AsyncImage(
+                                    model              = displayedTrack?.artUrl,
+                                    contentDescription = "Album art",
+                                    contentScale       = ContentScale.Crop,
+                                    modifier           = artMod
+                                        .size(side)
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .graphicsLayer {
+                                            translationX = (artDragX * 0.3f).coerceIn(-80f, 80f) + artOffsetX.value
+                                        }
+                                        .pointerInput(Unit) {
+                                            detectHorizontalDragGestures(
+                                                onDragStart      = { artDragX = 0f },
+                                                onDragEnd        = {
+                                                    when {
+                                                        artDragX < -swipeThresholdPx -> {
+                                                            val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
+                                                            artDragX = 0f; skipDirection = 1
+                                                            scope.launch {
+                                                                artOffsetX.snapTo(s)
+                                                                artOffsetX.animateTo(-1500f, tween(250, easing = FastOutLinearInEasing))
+                                                            }
+                                                            viewModel.skipNext()
+                                                        }
+                                                        artDragX > swipeThresholdPx -> {
+                                                            val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
+                                                            artDragX = 0f; skipDirection = -1
+                                                            scope.launch {
+                                                                artOffsetX.snapTo(s)
+                                                                artOffsetX.animateTo(1500f, tween(250, easing = FastOutLinearInEasing))
+                                                            }
+                                                            viewModel.skipPrevious()
+                                                        }
+                                                        else -> artDragX = 0f
+                                                    }
+                                                },
+                                                onDragCancel     = { artDragX = 0f },
+                                                onHorizontalDrag = { _, amount -> artDragX += amount },
+                                            )
+                                        },
+                                )
+                            }
+                        }
+
+                        FilledTonalIconToggleButton(
+                            checked          = lyricsShowing,
+                            onCheckedChange  = { viewModel.toggleLyricsMode() },
+                            enabled          = lyricsAvailable,
+                            modifier         = Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(end = 8.dp, bottom = 8.dp)
+                                .size(40.dp),
+                            colors           = IconButtonDefaults.filledTonalIconToggleButtonColors(
+                                containerColor        = surfaceAccentColor.copy(alpha = 0.15f),
+                                contentColor          = surfaceAccentColor,
+                                checkedContainerColor = surfaceAccentColor,
+                                checkedContentColor   = onAccentColor,
+                            ),
+                        ) {
+                            Icon(
+                                imageVector        = Icons.Default.Lyrics,
+                                contentDescription = stringResource(R.string.player_lyrics),
+                                modifier           = Modifier.size(18.dp),
+                            )
+                        }
+                    }
                 }
 
                 // Right: controls
@@ -403,7 +467,7 @@ fun PlayerScreen(
                     .navigationBarsPadding(),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                // Album art
+                // Album art / lyrics
                 BoxWithConstraints(
                     modifier         = Modifier
                         .weight(1f)
@@ -422,47 +486,104 @@ fun PlayerScreen(
                         }
                     } else Modifier
 
-                    AsyncImage(
-                        model              = displayedTrack?.artUrl,
-                        contentDescription = "Album art",
-                        contentScale       = ContentScale.Crop,
-                        modifier           = artMod
-                            .size(side)
-                            .clip(RoundedCornerShape(16.dp))
-                            .graphicsLayer {
-                                translationX = (artDragX * 0.3f).coerceIn(-80f, 80f) + artOffsetX.value
-                            }
-                            .pointerInput(Unit) {
-                                detectHorizontalDragGestures(
-                                    onDragStart      = { artDragX = 0f },
-                                    onDragEnd        = {
-                                        when {
-                                            artDragX < -swipeThresholdPx -> {
-                                                val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
-                                                artDragX = 0f; skipDirection = 1
-                                                scope.launch {
-                                                    artOffsetX.snapTo(s)
-                                                    artOffsetX.animateTo(-1500f, tween(250, easing = FastOutLinearInEasing))
-                                                }
-                                                viewModel.skipNext()
-                                            }
-                                            artDragX > swipeThresholdPx -> {
-                                                val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
-                                                artDragX = 0f; skipDirection = -1
-                                                scope.launch {
-                                                    artOffsetX.snapTo(s)
-                                                    artOffsetX.animateTo(1500f, tween(250, easing = FastOutLinearInEasing))
-                                                }
-                                                viewModel.skipPrevious()
-                                            }
-                                            else -> artDragX = 0f
-                                        }
-                                    },
-                                    onDragCancel     = { artDragX = 0f },
-                                    onHorizontalDrag = { _, amount -> artDragX += amount },
-                                )
+                    val lyricsContentMod = remember(side) { Modifier.size(side).clip(RoundedCornerShape(16.dp)) }
+                    val lyricsAvailable  = state.lyricsState is LyricsState.Synced || state.lyricsState is LyricsState.Plain
+                    val lyricsShowing    = state.lyricsMode && lyricsAvailable
+
+                    Box(Modifier.size(side)) {
+                        AnimatedContent(
+                            targetState  = state,
+                            contentKey   = { s ->
+                                val avail = s.lyricsState is LyricsState.Synced || s.lyricsState is LyricsState.Plain
+                                s.lyricsMode && avail
                             },
-                    )
+                            transitionSpec = { fadeIn(tween(300)) togetherWith fadeOut(tween(300)) },
+                            modifier     = Modifier.fillMaxSize(),
+                            label        = "art-lyrics-portrait",
+                        ) { snapshot ->
+                            val snapAvail   = snapshot.lyricsState is LyricsState.Synced || snapshot.lyricsState is LyricsState.Plain
+                            val snapShowing = snapshot.lyricsMode && snapAvail
+                            if (snapShowing) {
+                                when (val ls = snapshot.lyricsState) {
+                                    is LyricsState.Synced -> SyncedLyricsView(
+                                        lines            = ls.lines,
+                                        currentLineIndex = snapshot.currentLyricLineIndex,
+                                        textColor        = onAccentColor,
+                                        modifier         = lyricsContentMod,
+                                    )
+                                    is LyricsState.Plain  -> PlainLyricsView(
+                                        text      = ls.text,
+                                        textColor = onAccentColor,
+                                        modifier  = lyricsContentMod,
+                                    )
+                                }
+                            } else {
+                                AsyncImage(
+                                    model              = displayedTrack?.artUrl,
+                                    contentDescription = "Album art",
+                                    contentScale       = ContentScale.Crop,
+                                    modifier           = artMod
+                                        .size(side)
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .graphicsLayer {
+                                            translationX = (artDragX * 0.3f).coerceIn(-80f, 80f) + artOffsetX.value
+                                        }
+                                        .pointerInput(Unit) {
+                                            detectHorizontalDragGestures(
+                                                onDragStart      = { artDragX = 0f },
+                                                onDragEnd        = {
+                                                    when {
+                                                        artDragX < -swipeThresholdPx -> {
+                                                            val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
+                                                            artDragX = 0f; skipDirection = 1
+                                                            scope.launch {
+                                                                artOffsetX.snapTo(s)
+                                                                artOffsetX.animateTo(-1500f, tween(250, easing = FastOutLinearInEasing))
+                                                            }
+                                                            viewModel.skipNext()
+                                                        }
+                                                        artDragX > swipeThresholdPx -> {
+                                                            val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
+                                                            artDragX = 0f; skipDirection = -1
+                                                            scope.launch {
+                                                                artOffsetX.snapTo(s)
+                                                                artOffsetX.animateTo(1500f, tween(250, easing = FastOutLinearInEasing))
+                                                            }
+                                                            viewModel.skipPrevious()
+                                                        }
+                                                        else -> artDragX = 0f
+                                                    }
+                                                },
+                                                onDragCancel     = { artDragX = 0f },
+                                                onHorizontalDrag = { _, amount -> artDragX += amount },
+                                            )
+                                        },
+                                )
+                            }
+                        }
+
+                        FilledTonalIconToggleButton(
+                            checked          = lyricsShowing,
+                            onCheckedChange  = { viewModel.toggleLyricsMode() },
+                            enabled          = lyricsAvailable,
+                            modifier         = Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(end = 8.dp, bottom = 8.dp)
+                                .size(40.dp),
+                            colors           = IconButtonDefaults.filledTonalIconToggleButtonColors(
+                                containerColor        = surfaceAccentColor.copy(alpha = 0.15f),
+                                contentColor          = surfaceAccentColor,
+                                checkedContainerColor = surfaceAccentColor,
+                                checkedContentColor   = onAccentColor,
+                            ),
+                        ) {
+                            Icon(
+                                imageVector        = Icons.Default.Lyrics,
+                                contentDescription = stringResource(R.string.player_lyrics),
+                                modifier           = Modifier.size(18.dp),
+                            )
+                        }
+                    }
                 }
 
                 // Controls

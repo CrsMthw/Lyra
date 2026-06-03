@@ -31,6 +31,10 @@ class LyraDataStore(private val context: Context) {
         prefs[Keys.DYNAMIC_COLOR] ?: true
     }
 
+    val lyricsMode: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[Keys.LYRICS_MODE] ?: false
+    }
+
     // ── Writes ──────────────────────────────────────────────────────────────
 
     suspend fun setThemeMode(mode: ThemeMode) {
@@ -45,11 +49,16 @@ class LyraDataStore(private val context: Context) {
         context.dataStore.edit { it[Keys.DYNAMIC_COLOR] = enabled }
     }
 
+    suspend fun setLyricsMode(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.LYRICS_MODE] = enabled }
+    }
+
     // ── Keys ────────────────────────────────────────────────────────────────
 
     private object Keys {
         val THEME_MODE    = stringPreferencesKey("theme_mode")
         val AMOLED_BLACK  = booleanPreferencesKey("amoled_black")
         val DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
+        val LYRICS_MODE   = booleanPreferencesKey("lyrics_mode")
     }
 }

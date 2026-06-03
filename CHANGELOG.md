@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Synchronized lyrics** — full player screen (portrait and landscape) shows a synchronized, auto-scrolling lyrics view in place of the album art when enabled; a `FilledTonalIconToggleButton` (Lyrics icon, bottom-right of the art area) toggles the view; accent-colored so it adapts to album art; disabled with 38% opacity when no lyrics are available for the current track; preference persists to DataStore across app restarts; sourced from LRCLIB (lrclib.net) — a free, community-maintained LRC lyrics database; a separate OkHttp/Retrofit client (no Spotify token interceptor) is used; fetch strategy: exact `GET /api/get` by artist/title/album/duration, falling back to `GET /api/search` if not found; results cached in memory per track; pop-out panel and mini player are intentionally excluded
+- **Synchronized lyrics display** — active line is bold `titleLarge` centered in the art area; surrounding lines fade with distance (65% / 35% / 18% alpha); `LazyColumn` auto-scrolls to keep the active line vertically centered; blank LRC lines rendered as spacers for musical pauses; plain-lyrics fallback (static scrollable `bodyLarge` text) when only unsynced lyrics are available
+
 ## [2.2.0] - 2026-06-03
 
 ### Added
