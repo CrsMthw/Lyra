@@ -366,6 +366,7 @@ fun PlayerScreen(
                     PlayerControls(
                         state              = state,
                         accentColor        = accentColor,
+                        onAccentColor      = onAccentColor,
                         surfaceAccentColor = surfaceAccentColor,
                         squigglyShape      = squigglyShape,
                         onSkipPrev         = onSkipPrev,
@@ -474,6 +475,7 @@ fun PlayerScreen(
                     PlayerControls(
                         state              = state,
                         accentColor        = accentColor,
+                        onAccentColor      = onAccentColor,
                         surfaceAccentColor = surfaceAccentColor,
                         squigglyShape      = squigglyShape,
                         onSkipPrev         = onSkipPrev,
@@ -546,6 +548,7 @@ fun PlayerScreen(
 private fun PlayerControls(
     state              : PlayerUiState,
     accentColor        : Color,
+    onAccentColor      : Color,
     surfaceAccentColor : Color,
     squigglyShape      : androidx.compose.ui.graphics.Shape,
     onSkipPrev         : () -> Unit,
@@ -732,13 +735,13 @@ private fun PlayerControls(
             shape    = squigglyShape,
             colors   = IconButtonDefaults.filledIconButtonColors(
                 containerColor = accentColor,
-                contentColor   = Color.White,
+                contentColor   = onAccentColor,
             ),
         ) {
             if (state.isWakingUp) {
                 LoadingIndicator(
                     modifier = Modifier.size(44.dp).graphicsLayer { rotationZ = -cookieRotation.value },
-                    color    = Color.White,
+                    color    = onAccentColor,
                 )
             } else {
                 Icon(

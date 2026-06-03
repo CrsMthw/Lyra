@@ -360,12 +360,12 @@ fun PlayerCardContent(
                     modifier = Modifier.size(60.dp).graphicsLayer { rotationZ = cookieRotation.value },
                     shape    = squigglyShape,
                     colors   = IconButtonDefaults.filledIconButtonColors(
-                        containerColor = accentColor, contentColor = Color.White),
+                        containerColor = accentColor, contentColor = onAccentColor),
                 ) {
                     if (state.isWakingUp) {
                         LoadingIndicator(
                             modifier = Modifier.size(40.dp).graphicsLayer { rotationZ = -cookieRotation.value },
-                            color    = Color.White,
+                            color    = onAccentColor,
                         )
                     } else {
                         Icon(

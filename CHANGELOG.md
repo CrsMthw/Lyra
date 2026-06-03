@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Spotify Connect device switching** — `AssistChip` on the left side of the player action bar shows the active device name and type icon; tapping opens a bottom sheet listing all available Spotify Connect devices; each device shown as a `ListItem` with a `RadioButton` indicating the active one; "This device" shown as a separate `ElevatedCard` above the list (not a radio item) with a subtext explaining it wakes Spotify when dead; other devices transfer via `PUT /me/player` (preserves playback position); "This device" uses the App Remote SDK (`connectAndPlay`) as a fallback when Spotify is not running locally; accessible from both the full player screen and the pop-out panel on wide screens
 - **Queue, share, and add-to-playlist buttons in the pop-out player panel** — the full action bar (device chip + three action buttons) now appears on both the pop-out panel and the full player screen
 
+### Fixed
+- **Play/pause button icon invisible on white album art** — the cookie button's icon and waking-up `LoadingIndicator` now use `onAccentColor` (Black on light art, White on dark) instead of hardcoded white, so they remain visible when `accentColor` is white or near-white
+
 ### Changed
 - **Player action bar** (both surfaces) — queue, share, and add-to-playlist buttons are now an M3 connected `ButtonGroup` using `customItem` + S-size `FilledTonalIconButton` (40dp container, 18dp icon, `ButtonGroupDefaults` connected corner shapes); replaces the previous three separate `IconButton`s whose `clickableItem` label rendered as visible text, causing layout reflow when dragging across buttons
 - **Action bar accent colors** — the device `AssistChip` and all three action buttons now use album art `surfaceAccentColor` (12% alpha container, full-opacity icons, 40% alpha chip border) instead of Material You colors, matching the seek bar, shuffle/repeat indicators, and like button
