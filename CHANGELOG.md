@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-06-03
+
 ### Added
 - **Indeterminate progress while Spotify wakes up** — seek bar switches to an indeterminate wavy animation and the play/pause button shows an M3 `LoadingIndicator` (bouncing dots) from the moment a track is tapped until playback is confirmed; applies to the player screen, pop-out panel, and mini player (library / album / artist screens); covers all wake paths: tapping a track (including first-ever tap with no prior song loaded), tapping play on a playlist from the library, and skip/previous when Spotify is dead
 
@@ -117,7 +119,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial release
 
-[Unreleased]: https://github.com/CrsMthw/Lyra/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/CrsMthw/Lyra/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/CrsMthw/Lyra/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/CrsMthw/Lyra/compare/v1.2.0...v2.0.0
 [1.2.0]: https://github.com/CrsMthw/Lyra/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/CrsMthw/Lyra/compare/v1.0.3...v1.1.0
