@@ -46,6 +46,11 @@ fun PlayerPanelHost(
     var showPlayerPanel by rememberSaveable { mutableStateOf(false) }
     val density  = LocalDensity.current
 
+    // Dismiss panel when folding — canShowPanel goes false on narrow screens
+    LaunchedEffect(canShowPanel) {
+        if (!canShowPanel) showPlayerPanel = false
+    }
+
     val scrimAlpha by animateFloatAsState(
         targetValue   = if (showPlayerPanel) 0.45f else 0f,
         animationSpec = tween(300),

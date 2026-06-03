@@ -777,6 +777,8 @@ private fun PlayerControls(
         }
     }
 
+    Spacer(Modifier.height(16.dp))
+
     Row(
         modifier              = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
@@ -810,27 +812,49 @@ private fun PlayerControls(
             },
             modifier = Modifier.widthIn(max = 160.dp),
         )
-        val labelQueue         = stringResource(R.string.player_queue)
-        val labelShare         = stringResource(R.string.player_share)
-        val labelAddToPlaylist = stringResource(R.string.player_add_to_playlist)
+        // S-size (12dp padding, 18dp icon) connected icon buttons via customItem
+        val queueLabel         = stringResource(R.string.player_queue)
+        val shareLabel         = stringResource(R.string.player_share)
+        val addToPlaylistLabel = stringResource(R.string.player_add_to_playlist)
         ButtonGroup(overflowIndicator = {}) {
-            clickableItem(
-                onClick  = onOpenQueue,
-                label    = labelQueue,
-                icon     = @Composable { Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = null) },
-                enabled  = state.currentTrack != null,
+            customItem(
+                buttonGroupContent = @Composable {
+                    FilledTonalIconButton(
+                        onClick  = onOpenQueue,
+                        enabled  = state.currentTrack != null,
+                        modifier = Modifier.size(40.dp),
+                        shape    = ButtonGroupDefaults.connectedLeadingButtonShape,
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.QueueMusic, queueLabel, Modifier.size(18.dp))
+                    }
+                },
+                menuContent = @Composable { _ -> },
             )
-            clickableItem(
-                onClick  = onShare,
-                label    = labelShare,
-                icon     = @Composable { Icon(Icons.Default.Share, contentDescription = null) },
-                enabled  = state.currentTrack != null,
+            customItem(
+                buttonGroupContent = @Composable {
+                    FilledTonalIconButton(
+                        onClick  = onShare,
+                        enabled  = state.currentTrack != null,
+                        modifier = Modifier.size(40.dp),
+                        shape    = RoundedCornerShape(2.dp),
+                    ) {
+                        Icon(Icons.Default.Share, shareLabel, Modifier.size(18.dp))
+                    }
+                },
+                menuContent = @Composable { _ -> },
             )
-            clickableItem(
-                onClick  = onAddToPlaylist,
-                label    = labelAddToPlaylist,
-                icon     = @Composable { Icon(Icons.Default.LibraryAdd, contentDescription = null) },
-                enabled  = state.currentTrack != null,
+            customItem(
+                buttonGroupContent = @Composable {
+                    FilledTonalIconButton(
+                        onClick  = onAddToPlaylist,
+                        enabled  = state.currentTrack != null,
+                        modifier = Modifier.size(40.dp),
+                        shape    = ButtonGroupDefaults.connectedTrailingButtonShape,
+                    ) {
+                        Icon(Icons.Default.LibraryAdd, addToPlaylistLabel, Modifier.size(18.dp))
+                    }
+                },
+                menuContent = @Composable { _ -> },
             )
         }
     }

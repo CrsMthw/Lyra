@@ -163,13 +163,24 @@ fun PlayerCardContent(
     // ── Play/pause button shape (M3 Expressive cookie) ───────────────────────
     val squigglyShape = MaterialShapes.Cookie12Sided.toShape()
 
-    Box(modifier = Modifier.fillMaxWidth()) {
+    // BoxWithConstraints to compute dynamic art size — maxHeight propagates from
+    // the panel's heightIn(max) constraint through the Card, so the art shrinks
+    // to fit rather than causing the column to scroll.
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+        // Reserve space for all non-art elements (header, track info, seekbar, time,
+        // controls, spacers, action bar, bottom padding). Art takes the remainder, capped
+        // at the panel width (minus horizontal padding) so it stays square.
+        val reservedChrome = 360.dp
+        val artSize = minOf(
+            maxWidth - 40.dp,  // full width minus 2×20dp horizontal padding
+            (maxHeight - reservedChrome).coerceAtLeast(60.dp),
+        )
+
         // Gradient background
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(Brush.verticalGradient(listOf(gradientTop, surfaceBg)))
-                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 20.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -215,8 +226,7 @@ fun PlayerCardContent(
                 contentDescription = "Album art",
                 contentScale       = ContentScale.Crop,
                 modifier           = artSharedMod
-                    .fillMaxWidth()
-                    .aspectRatio(1f)
+                    .size(artSize)
                     .clip(RoundedCornerShape(16.dp))
                     .graphicsLayer { translationX = (artDragX * 0.3f).coerceIn(-80f, 80f) + artOffsetX.value }
                     .pointerInput(Unit) {
@@ -390,9 +400,9 @@ fun PlayerCardContent(
                 }
             }
 
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(24.dp))
 
-            // Action bar — device chip left, connected button group right
+            // Action bar — device chip left, S-size icon-only connected button group right
             val enabled = state.currentTrack != null
             val deviceIcon = when (state.currentDevice?.type?.lowercase()) {
                 "computer"               -> Icons.Default.Computer
@@ -427,36 +437,58 @@ fun PlayerCardContent(
                     },
                     modifier = Modifier.widthIn(max = 160.dp),
                 )
-                val labelQueue         = stringResource(R.string.player_queue)
-                val labelShare         = stringResource(R.string.player_share)
-                val labelAddToPlaylist = stringResource(R.string.player_add_to_playlist)
+                // S-size (12dp padding, 18dp icon) connected icon buttons via customItem
+                val queueLabel         = stringResource(R.string.player_queue)
+                val shareLabel         = stringResource(R.string.player_share)
+                val addToPlaylistLabel = stringResource(R.string.player_add_to_playlist)
                 ButtonGroup(overflowIndicator = {}) {
-                    clickableItem(
-                        onClick  = onOpenQueue,
-                        label    = labelQueue,
-                        icon     = @Composable { Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = null) },
-                        enabled  = enabled,
-                    )
-                    clickableItem(
-                        onClick = {
-                            state.currentTrack?.id?.let { id ->
-                                context.startActivity(Intent.createChooser(
-                                    Intent(Intent.ACTION_SEND).apply {
-                                        putExtra(Intent.EXTRA_TEXT, "https://open.spotify.com/track/$id")
-                                        type = "text/plain"
-                                    }, null
-                                ))
+                    customItem(
+                        buttonGroupContent = @Composable {
+                            FilledTonalIconButton(
+                                onClick  = onOpenQueue,
+                                enabled  = enabled,
+                                modifier = Modifier.size(40.dp),
+                                shape    = ButtonGroupDefaults.connectedLeadingButtonShape,
+                            ) {
+                                Icon(Icons.AutoMirrored.Filled.QueueMusic, queueLabel, Modifier.size(18.dp))
                             }
                         },
-                        label   = labelShare,
-                        icon    = @Composable { Icon(Icons.Default.Share, contentDescription = null) },
-                        enabled = enabled,
+                        menuContent = @Composable { _ -> },
                     )
-                    clickableItem(
-                        onClick  = { playerViewModel.loadOwnedPlaylists(); showPlaylistPicker = true },
-                        label    = labelAddToPlaylist,
-                        icon     = @Composable { Icon(Icons.Default.LibraryAdd, contentDescription = null) },
-                        enabled  = enabled,
+                    customItem(
+                        buttonGroupContent = @Composable {
+                            FilledTonalIconButton(
+                                onClick = {
+                                    state.currentTrack?.id?.let { id ->
+                                        context.startActivity(Intent.createChooser(
+                                            Intent(Intent.ACTION_SEND).apply {
+                                                putExtra(Intent.EXTRA_TEXT, "https://open.spotify.com/track/$id")
+                                                type = "text/plain"
+                                            }, null
+                                        ))
+                                    }
+                                },
+                                enabled  = enabled,
+                                modifier = Modifier.size(40.dp),
+                                shape    = RoundedCornerShape(2.dp),
+                            ) {
+                                Icon(Icons.Default.Share, shareLabel, Modifier.size(18.dp))
+                            }
+                        },
+                        menuContent = @Composable { _ -> },
+                    )
+                    customItem(
+                        buttonGroupContent = @Composable {
+                            FilledTonalIconButton(
+                                onClick  = { playerViewModel.loadOwnedPlaylists(); showPlaylistPicker = true },
+                                enabled  = enabled,
+                                modifier = Modifier.size(40.dp),
+                                shape    = ButtonGroupDefaults.connectedTrailingButtonShape,
+                            ) {
+                                Icon(Icons.Default.LibraryAdd, addToPlaylistLabel, Modifier.size(18.dp))
+                            }
+                        },
+                        menuContent = @Composable { _ -> },
                     )
                 }
             }

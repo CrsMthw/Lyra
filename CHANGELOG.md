@@ -8,8 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Queue, share, and add-to-playlist buttons in the pop-out player panel** — same action bar as the full player screen; buttons rendered as an M3 connected `ButtonGroup` on both surfaces
-- **Pop-out panel height cap** — panel is now capped at 80% of screen height in landscape mode so it no longer overlaps the status bar; content scrolls internally when needed
+- **Queue, share, and add-to-playlist buttons in the pop-out player panel** — same action bar as the full player screen; S-size icon-only connected buttons via M3 `ButtonGroup` + `customItem` with `FilledTonalIconButton` on both surfaces
+- **Pop-out panel height cap** — panel is now capped at 80% of screen height; album art shrinks dynamically to fit rather than the panel scrolling
 
 ### Changed
 - **Pop-out player panel is now managed by `PlayerPanelHost`** in all screens — `LibraryScreen` previously had its own duplicated `SharedTransitionLayout`, `MiniPlayerHolder`, `BackHandler`, and `PlayerPopOutPanel` inside `TwoPaneLayout` and `SinglePaneLayout`; all player management is now unified in the modular `PlayerPanelHost` component
