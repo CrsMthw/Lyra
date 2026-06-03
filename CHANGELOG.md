@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-06-03
+
 ### Added
 - **Spotify Connect device switching** — `AssistChip` on the left side of the player action bar shows the active device name and type icon; tapping opens a bottom sheet listing all available Spotify Connect devices; each device shown as a `ListItem` with a `RadioButton` indicating the active one; "This device" shown as a separate `ElevatedCard` above the list (not a radio item) with a subtext explaining it wakes Spotify when dead; other devices transfer via `PUT /me/player` (preserves playback position); "This device" uses the App Remote SDK (`connectAndPlay`) as a fallback when Spotify is not running locally; accessible from both the full player screen and the pop-out panel on wide screens
 - **Queue, share, and add-to-playlist buttons in the pop-out player panel** — the full action bar (device chip + three action buttons) now appears on both the pop-out panel and the full player screen
@@ -135,7 +137,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial release
 
-[Unreleased]: https://github.com/CrsMthw/Lyra/compare/v2.1.0...HEAD
+[Unreleased]: https://github.com/CrsMthw/Lyra/compare/v2.2.0...HEAD
+[2.2.0]: https://github.com/CrsMthw/Lyra/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/CrsMthw/Lyra/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/CrsMthw/Lyra/compare/v1.2.0...v2.0.0
 [1.2.0]: https://github.com/CrsMthw/Lyra/compare/v1.1.0...v1.2.0
