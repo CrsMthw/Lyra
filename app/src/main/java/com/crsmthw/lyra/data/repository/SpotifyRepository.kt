@@ -121,6 +121,14 @@ class SpotifyRepository(
         api.getQueue()
     }
 
+    suspend fun getAvailableDevices(): Result<List<SpotifyDevice>> = safeCall {
+        api.getAvailableDevices()?.devices ?: emptyList()
+    }
+
+    suspend fun transferPlayback(deviceId: String): Result<Unit> = safeCall {
+        api.transferPlayback(TransferPlaybackRequest(deviceIds = listOf(deviceId), play = true))
+    }
+
     suspend fun pause(): Result<Unit>                          = safeCall { api.pause() }
     suspend fun skipNext(): Result<Unit>                       = safeCall { api.skipNext() }
     suspend fun skipPrevious(): Result<Unit>                   = safeCall { api.skipPrevious() }

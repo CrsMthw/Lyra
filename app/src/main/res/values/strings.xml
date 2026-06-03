@@ -26,6 +26,12 @@
     <string name="player_add_to_playlist_success">Added to %1$s</string>
     <string name="player_remove_from_playlist_success">Removed from %1$s</string>
     <string name="player_add_to_playlist_403">Reconnect Spotify in Settings to add to playlists</string>
+    <string name="player_connect_device">Connect to a device</string>
+    <string name="player_this_device">This device</string>
+    <string name="player_this_device_hint">Use this if your device isn\'t in the list below — wakes Spotify up and transfers playback here.</string>
+    <string name="player_no_device">No device</string>
+    <string name="player_device_picker_empty">No devices found</string>
+    <string name="player_device_picker_retry">Retry</string>
 
     <!-- Queue -->
     <string name="player_queue">Queue</string>

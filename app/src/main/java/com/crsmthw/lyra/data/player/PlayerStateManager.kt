@@ -3,6 +3,7 @@ package com.crsmthw.lyra.data.player
 import android.content.Context
 import android.content.Intent
 import com.crsmthw.lyra.data.remote.SpotifyRemoteManager
+import com.crsmthw.lyra.data.remote.model.SpotifyDevice
 import com.crsmthw.lyra.data.remote.model.SpotifyTrack
 import com.crsmthw.lyra.data.repository.SpotifyRepository
 import com.crsmthw.lyra.service.LyraForegroundService
@@ -18,14 +19,15 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 data class PlayerState(
-    val isPlaying             : Boolean       = false,
-    val currentTrack          : SpotifyTrack? = null,
-    val progressMs            : Long          = 0L,
-    val durationMs            : Long          = 0L,
-    val shuffleEnabled        : Boolean       = false,
-    val repeatState           : String        = "off",
-    val sleepTimerMinutes     : Int           = 0,
-    val sleepTimerTotalMinutes: Int           = 0,
+    val isPlaying             : Boolean        = false,
+    val currentTrack          : SpotifyTrack?  = null,
+    val progressMs            : Long           = 0L,
+    val durationMs            : Long           = 0L,
+    val shuffleEnabled        : Boolean        = false,
+    val repeatState           : String         = "off",
+    val sleepTimerMinutes     : Int            = 0,
+    val sleepTimerTotalMinutes: Int            = 0,
+    val currentDevice         : SpotifyDevice? = null,
 )
 
 class PlayerStateManager(
@@ -46,6 +48,7 @@ class PlayerStateManager(
     private var shuffleLockUntil  : Long = 0L
     private var repeatLockUntil   : Long = 0L
     private var pollBackoffUntil  : Long = 0L
+    private var trackLockUntil    : Long = 0L
 
     @Volatile private var serviceRunning = false
 
@@ -78,14 +81,19 @@ class PlayerStateManager(
             onSuccess = { response ->
                 if (response != null) {
                     val now = System.currentTimeMillis()
+                    // During a device transfer the API briefly returns a null item (mid-transition).
+                    // Lock track+progress+duration together so the UI doesn't flash "Nothing Playing"
+                    // or reset the seek bar to 0 while Spotify is switching devices.
+                    val lockingTransfer = now < trackLockUntil && response.item == null
                     _state.update {
                         it.copy(
                             isPlaying      = if (now < isPlayingLockUntil) it.isPlaying else response.isPlaying,
-                            currentTrack   = response.item,
-                            progressMs     = response.progressMs,
-                            durationMs     = response.item?.durationMs ?: 0L,
+                            currentTrack   = if (lockingTransfer) it.currentTrack else response.item,
+                            progressMs     = if (lockingTransfer) it.progressMs else response.progressMs,
+                            durationMs     = if (lockingTransfer) it.durationMs else (response.item?.durationMs ?: it.durationMs),
                             shuffleEnabled = if (now < shuffleLockUntil) it.shuffleEnabled else response.shuffleState,
                             repeatState    = if (now < repeatLockUntil) it.repeatState else response.repeatState,
+                            currentDevice  = response.device,
                         )
                     }
                     val isNowPlaying = _state.value.isPlaying
@@ -144,6 +152,8 @@ class PlayerStateManager(
     fun lockIsPlaying()  { isPlayingLockUntil = System.currentTimeMillis() + 5_000L }
     fun lockShuffle()    { shuffleLockUntil   = System.currentTimeMillis() + 5_000L }
     fun lockRepeat()     { repeatLockUntil    = System.currentTimeMillis() + 5_000L }
+    // Prevents currentTrack from being nulled by a mid-transfer poll where response.item is briefly null.
+    fun lockTrack()      { trackLockUntil     = System.currentTimeMillis() + 3_000L }
     fun isRateLimited()  = System.currentTimeMillis() < pollBackoffUntil
     fun noteRateLimited() { pollBackoffUntil  = System.currentTimeMillis() + 60_000L }
 

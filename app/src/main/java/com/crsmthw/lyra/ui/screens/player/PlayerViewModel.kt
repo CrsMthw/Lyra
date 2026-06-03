@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.crsmthw.lyra.data.local.LibraryCache
 import com.crsmthw.lyra.data.player.PlayerStateManager
 import com.crsmthw.lyra.data.remote.SpotifyRemoteManager
+import com.crsmthw.lyra.data.remote.model.SpotifyDevice
 import com.crsmthw.lyra.data.remote.model.SpotifyPlaylist
 import com.crsmthw.lyra.data.remote.model.SpotifyTrack
 import com.crsmthw.lyra.data.repository.SpotifyRepository
@@ -35,17 +36,22 @@ data class PlaylistPickerState(
 )
 
 data class PlayerUiState(
-    val isPlaying             : Boolean       = false,
-    val currentTrack          : SpotifyTrack? = null,
-    val progressMs            : Long          = 0L,
-    val durationMs            : Long          = 0L,
-    val shuffleEnabled        : Boolean       = false,
-    val repeatMode            : RepeatMode    = RepeatMode.OFF,
-    val isLiked               : Boolean       = false,
-    val sleepTimerMinutes     : Int           = 0,
-    val sleepTimerTotalMinutes: Int           = 0,
-    val error                 : String?       = null,
-    val isWakingUp            : Boolean       = false,
+    val isPlaying             : Boolean        = false,
+    val currentTrack          : SpotifyTrack?  = null,
+    val progressMs            : Long           = 0L,
+    val durationMs            : Long           = 0L,
+    val shuffleEnabled        : Boolean        = false,
+    val repeatMode            : RepeatMode     = RepeatMode.OFF,
+    val isLiked               : Boolean        = false,
+    val sleepTimerMinutes     : Int            = 0,
+    val sleepTimerTotalMinutes: Int            = 0,
+    val error                 : String?        = null,
+    val isWakingUp            : Boolean        = false,
+    val currentDevice         : SpotifyDevice? = null,
+    val devicePickerLoading   : Boolean        = false,
+    val availableDevices      : List<SpotifyDevice> = emptyList(),
+    val devicePickerError     : String?        = null,
+    val deviceTransferError   : String?        = null,
 ) {
     val progress: Float
         get() = if (durationMs > 0L) (progressMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
@@ -92,6 +98,7 @@ class PlayerViewModel(
                         },
                         sleepTimerMinutes      = state.sleepTimerMinutes,
                         sleepTimerTotalMinutes = state.sleepTimerTotalMinutes,
+                        currentDevice          = state.currentDevice,
                         error                  = null,
                         // isWakingUp is intentionally NOT cleared here — clearing is explicit.
                         // playTrack() clears directly; playPause/skip use onWakeOperationComplete;
@@ -253,6 +260,54 @@ class PlayerViewModel(
 
     fun clearPickerResult() {
         _pickerState.update { it.copy(addResult = null) }
+    }
+
+    // ── Device picker ──────────────────────────────────────────────────────────
+
+    fun loadAvailableDevices() {
+        _uiState.update { it.copy(devicePickerLoading = true, devicePickerError = null) }
+        viewModelScope.launch {
+            repository.getAvailableDevices().fold(
+                onSuccess = { devices ->
+                    _uiState.update { it.copy(devicePickerLoading = false, availableDevices = devices) }
+                },
+                onFailure = { e ->
+                    _uiState.update { it.copy(devicePickerLoading = false, devicePickerError = e.message) }
+                },
+            )
+        }
+    }
+
+    fun transferToDevice(deviceId: String) {
+        if (playerStateManager.isRateLimited()) {
+            _uiState.update { it.copy(deviceTransferError = "Rate limited — please wait a moment.") }
+            return
+        }
+        playerStateManager.lockIsPlaying()
+        playerStateManager.lockTrack()
+        viewModelScope.launch {
+            repository.transferPlayback(deviceId).fold(
+                onSuccess = {
+                    delay(700L)
+                    playerStateManager.fetchOnce()
+                },
+                onFailure = { e ->
+                    if (e.message?.contains("429") == true) playerStateManager.noteRateLimited()
+                    _uiState.update { it.copy(deviceTransferError = e.message) }
+                },
+            )
+        }
+    }
+
+    fun transferToThisDevice() {
+        val track = _uiState.value.currentTrack ?: return
+        playerStateManager.lockIsPlaying()
+        playerStateManager.lockTrack()
+        viewModelScope.launch {
+            remoteManager.connectAndPlay(track.uri)
+            delay(700L)
+            playerStateManager.fetchOnce()
+        }
     }
 
     // ── Play track (keeps SDK fallback logic, always user-initiated) ──────────

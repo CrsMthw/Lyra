@@ -88,6 +88,12 @@ interface SpotifyApiService {
     @GET("me/player/queue")
     suspend fun getQueue(): QueueResponse?
 
+    @GET("me/player/devices")
+    suspend fun getAvailableDevices(): DevicesResponse?
+
+    @PUT("me/player")
+    suspend fun transferPlayback(@Body request: TransferPlaybackRequest)
+
     // ── Albums ───────────────────────────────────────────────────────────────
     @GET("albums/{id}")
     suspend fun getAlbum(

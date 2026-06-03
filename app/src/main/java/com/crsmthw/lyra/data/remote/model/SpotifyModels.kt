@@ -141,15 +141,22 @@ data class PlayerStateResponse(
 )
 
 data class SpotifyDevice(
-    val id             : String,
-    val name           : String,
-    val type           : String,
-    @SerializedName("volume_percent") val volumePercent: Int,
-    @SerializedName("is_active") val isActive: Boolean,
-    @SerializedName("is_restricted") val isRestricted: Boolean = false,
+    val id                                                        : String?  = null,
+    val name                                                      : String,
+    val type                                                      : String,
+    @SerializedName("volume_percent")    val volumePercent        : Int?     = null,
+    @SerializedName("is_active")         val isActive             : Boolean,
+    @SerializedName("is_restricted")     val isRestricted         : Boolean  = false,
+    @SerializedName("is_private_session") val isPrivateSession    : Boolean  = false,
+    @SerializedName("supports_volume")   val supportsVolume       : Boolean  = true,
 )
 
 data class DevicesResponse(val devices: List<SpotifyDevice>)
+
+data class TransferPlaybackRequest(
+    @SerializedName("device_ids") val deviceIds: List<String>,
+    val play: Boolean? = null,
+)
 
 // ── Full playlist (tracks embedded, avoids /tracks sub-endpoint) ─────────────
 data class SpotifyPlaylistFull(

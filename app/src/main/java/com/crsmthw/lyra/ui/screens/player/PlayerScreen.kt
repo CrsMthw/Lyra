@@ -56,6 +56,7 @@ import coil3.request.ImageRequest
 import coil3.request.SuccessResult
 import coil3.toBitmap
 import com.crsmthw.lyra.ui.components.AddToPlaylistSheet
+import com.crsmthw.lyra.ui.components.DevicePickerSheet
 import com.crsmthw.lyra.util.toTimeString
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -81,6 +82,7 @@ fun PlayerScreen(
     val pickerState by viewModel.pickerState.collectAsStateWithLifecycle()
     var showSleepTimerDialog by remember { mutableStateOf(false) }
     var showPlaylistPicker   by rememberSaveable { mutableStateOf(false) }
+    var showDevicePicker     by remember { mutableStateOf(false) }
     val isLandscape = LocalConfiguration.current.let { it.screenWidthDp > it.screenHeightDp }
 
     // ── Dynamic color extraction ──────────────────────────────────────────────
@@ -167,6 +169,9 @@ fun PlayerScreen(
 
     LaunchedEffect(state.error) {
         state.error?.let { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
+    }
+    LaunchedEffect(state.deviceTransferError) {
+        state.deviceTransferError?.let { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
     }
 
     val addResult = pickerState.addResult
@@ -383,6 +388,7 @@ fun PlayerScreen(
                             }
                         },
                         onAddToPlaylist    = { viewModel.loadOwnedPlaylists(); showPlaylistPicker = true },
+                        onOpenDevicePicker = { viewModel.loadAvailableDevices(); showDevicePicker = true },
                     )
                 }
             }
@@ -490,6 +496,7 @@ fun PlayerScreen(
                             }
                         },
                         onAddToPlaylist    = { viewModel.loadOwnedPlaylists(); showPlaylistPicker = true },
+                        onOpenDevicePicker = { viewModel.loadAvailableDevices(); showDevicePicker = true },
                     )
                 }
             }
@@ -501,6 +508,24 @@ fun PlayerScreen(
             pickerState = pickerState,
             onSelect    = viewModel::togglePlaylistTrack,
             onDismiss   = { showPlaylistPicker = false },
+        )
+    }
+
+    if (showDevicePicker) {
+        DevicePickerSheet(
+            isLoading      = state.devicePickerLoading,
+            devices        = state.availableDevices,
+            error          = state.devicePickerError,
+            onSelectDevice = { deviceId ->
+                showDevicePicker = false
+                viewModel.transferToDevice(deviceId)
+            },
+            onThisDevice   = {
+                showDevicePicker = false
+                viewModel.transferToThisDevice()
+            },
+            onDismiss      = { showDevicePicker = false },
+            onRetry        = { viewModel.loadAvailableDevices() },
         )
     }
 
@@ -522,18 +547,19 @@ private fun PlayerControls(
     accentColor        : Color,
     surfaceAccentColor : Color,
     squigglyShape      : androidx.compose.ui.graphics.Shape,
-    onSkipPrev      : () -> Unit,
-    onSkipNext      : () -> Unit,
-    onPlayPause     : () -> Unit,
-    onToggleLike    : () -> Unit,
-    onToggleShuffle : () -> Unit,
-    onCycleRepeat   : () -> Unit,
-    onSeek          : (Float) -> Unit,
-    onOpenQueue     : () -> Unit,
-    onOpenAlbum     : ((albumId: String) -> Unit)? = null,
-    onOpenArtist    : ((artistId: String) -> Unit)? = null,
-    onShare         : () -> Unit,
-    onAddToPlaylist : () -> Unit,
+    onSkipPrev         : () -> Unit,
+    onSkipNext         : () -> Unit,
+    onPlayPause        : () -> Unit,
+    onToggleLike       : () -> Unit,
+    onToggleShuffle    : () -> Unit,
+    onCycleRepeat      : () -> Unit,
+    onSeek             : (Float) -> Unit,
+    onOpenQueue        : () -> Unit,
+    onOpenAlbum        : ((albumId: String) -> Unit)? = null,
+    onOpenArtist       : ((artistId: String) -> Unit)? = null,
+    onShare            : () -> Unit,
+    onAddToPlaylist    : () -> Unit,
+    onOpenDevicePicker : () -> Unit,
 ) {
     // Track name + like
     Row(
@@ -753,28 +779,59 @@ private fun PlayerControls(
 
     Row(
         modifier              = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.End,
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment     = Alignment.CenterVertically,
     ) {
-        IconButton(onClick = onOpenQueue, enabled = state.currentTrack != null) {
-            Icon(
-                imageVector        = Icons.AutoMirrored.Filled.QueueMusic,
-                contentDescription = stringResource(R.string.player_queue),
-                tint               = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        val deviceIcon = when (state.currentDevice?.type?.lowercase()) {
+            "computer"               -> Icons.Default.Computer
+            "smartphone"             -> Icons.Default.PhoneAndroid
+            "speaker"                -> Icons.Default.Speaker
+            "tv"                     -> Icons.Default.Tv
+            "castaudio", "castvideo" -> Icons.Default.Cast
+            "automobile"             -> Icons.Default.DirectionsCar
+            else                     -> Icons.Default.Cast
         }
-        IconButton(onClick = onShare, enabled = state.currentTrack != null) {
-            Icon(
-                imageVector        = Icons.Default.Share,
-                contentDescription = stringResource(R.string.player_share),
-                tint               = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        IconButton(onClick = onAddToPlaylist, enabled = state.currentTrack != null) {
-            Icon(
-                imageVector        = Icons.Default.LibraryAdd,
-                contentDescription = stringResource(R.string.player_add_to_playlist),
-                tint               = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        AssistChip(
+            onClick    = onOpenDevicePicker,
+            enabled    = state.currentTrack != null,
+            label      = {
+                Text(
+                    text     = state.currentDevice?.name ?: stringResource(R.string.player_no_device),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            },
+            leadingIcon = {
+                Icon(
+                    imageVector        = deviceIcon,
+                    contentDescription = null,
+                    modifier           = Modifier.size(18.dp),
+                )
+            },
+            modifier = Modifier.widthIn(max = 160.dp),
+        )
+        Row {
+            IconButton(onClick = onOpenQueue, enabled = state.currentTrack != null) {
+                Icon(
+                    imageVector        = Icons.AutoMirrored.Filled.QueueMusic,
+                    contentDescription = stringResource(R.string.player_queue),
+                    tint               = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            IconButton(onClick = onShare, enabled = state.currentTrack != null) {
+                Icon(
+                    imageVector        = Icons.Default.Share,
+                    contentDescription = stringResource(R.string.player_share),
+                    tint               = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            IconButton(onClick = onAddToPlaylist, enabled = state.currentTrack != null) {
+                Icon(
+                    imageVector        = Icons.Default.LibraryAdd,
+                    contentDescription = stringResource(R.string.player_add_to_playlist),
+                    tint               = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }

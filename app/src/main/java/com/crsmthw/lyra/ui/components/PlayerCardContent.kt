@@ -55,9 +55,9 @@ import kotlinx.coroutines.withContext
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class, ExperimentalSharedTransitionApi::class)
 @Composable
 fun PlayerCardContent(
-    playerViewModel         : PlayerViewModel,
-    onClose                 : () -> Unit,
-    onFullScreen            : () -> Unit,
+    playerViewModel          : PlayerViewModel,
+    onClose                  : () -> Unit,
+    onFullScreen             : () -> Unit,
     // Local scope — mini player ↔ panel expansion
     sharedTransitionScope   : SharedTransitionScope? = null,
     animatedVisibilityScope : AnimatedVisibilityScope? = null,
@@ -66,6 +66,7 @@ fun PlayerCardContent(
     navAnimatedContentScope   : AnimatedContentScope? = null,
 ) {
     val state by playerViewModel.uiState.collectAsStateWithLifecycle()
+    var showDevicePicker by remember { mutableStateOf(false) }
 
     // ── Dynamic color extraction ───────────────────────────────────────────
     val context     = LocalContext.current
@@ -382,6 +383,56 @@ fun PlayerCardContent(
                     )
                 }
             }
+
+            Spacer(Modifier.height(4.dp))
+
+            // Device chip
+            val deviceIcon = when (state.currentDevice?.type?.lowercase()) {
+                "computer"               -> Icons.Default.Computer
+                "smartphone"             -> Icons.Default.PhoneAndroid
+                "speaker"                -> Icons.Default.Speaker
+                "tv"                     -> Icons.Default.Tv
+                "castaudio", "castvideo" -> Icons.Default.Cast
+                "automobile"             -> Icons.Default.DirectionsCar
+                else                     -> Icons.Default.Cast
+            }
+            AssistChip(
+                onClick    = { playerViewModel.loadAvailableDevices(); showDevicePicker = true },
+                enabled    = state.currentTrack != null,
+                label      = {
+                    Text(
+                        text     = state.currentDevice?.name ?: stringResource(R.string.player_no_device),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector        = deviceIcon,
+                        contentDescription = null,
+                        modifier           = Modifier.size(18.dp),
+                    )
+                },
+                modifier = Modifier.widthIn(max = 200.dp),
+            )
         }
+    }
+
+    if (showDevicePicker) {
+        DevicePickerSheet(
+            isLoading      = state.devicePickerLoading,
+            devices        = state.availableDevices,
+            error          = state.devicePickerError,
+            onSelectDevice = { deviceId ->
+                showDevicePicker = false
+                playerViewModel.transferToDevice(deviceId)
+            },
+            onThisDevice   = {
+                showDevicePicker = false
+                playerViewModel.transferToThisDevice()
+            },
+            onDismiss      = { showDevicePicker = false },
+            onRetry        = { playerViewModel.loadAvailableDevices() },
+        )
     }
 }

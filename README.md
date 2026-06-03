@@ -11,6 +11,7 @@
 - Library browser with playlist and liked songs support
 - Full player with seek, shuffle, repeat, sleep timer, and queue-aware playback
 - Add to / remove from playlists directly from the player
+- **Spotify Connect device switching** — transfer playback to any device on your account; "This device" card wakes Spotify locally when it isn't running
 - Album detail screen — full track list, play button, label/copyright footer
 - Artist detail screen — discography grouped by Albums / Singles / Compilations
 - Search for tracks, albums, and artists
@@ -134,7 +135,7 @@ app/src/main/java/com/crsmthw/lyra/
 ├── service/         LyraForegroundService (Now Playing + sleep timer notifications)
 ├── ui/
 │   ├── components/  MiniPlayer, PlayerCardContent, PlayerPopOutPanel, PlayerPanelHost,
-│   │                TrackRow, PlaylistCard, AddToPlaylistSheet
+│   │                TrackRow, PlaylistCard, AddToPlaylistSheet, DevicePickerSheet
 │   ├── navigation/  LyraNavGraph, Screen
 │   ├── screens/     auth / library / player / search / settings / album / artist / queue
 │   └── theme/       Material You + static colour schemes, AMOLED overlay
