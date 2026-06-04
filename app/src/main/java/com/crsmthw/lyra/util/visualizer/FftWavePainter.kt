@@ -49,9 +49,8 @@ class FftWavePainter(
         psf = runCatching { akima.interpolate(x, y) }.getOrNull()
     }
 
-    fun draw(canvas: Canvas, paint: Paint) {
+    fun draw(canvas: Canvas, paint: Paint, width: Float, height: Float) {
         val psf    = psf ?: return
-        val width  = canvas.width.toFloat()
         val sliceW = width / numBands
 
         path.moveTo(0f, 1f)
@@ -62,7 +61,7 @@ class FftWavePainter(
         path.close()
 
         canvas.save()
-        canvas.translate(0f, canvas.height.toFloat())
+        canvas.translate(0f, height)
         canvas.drawPath(path, paint)
         canvas.restore()
         path.reset()

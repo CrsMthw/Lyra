@@ -56,7 +56,7 @@ fun FftWaveCanvas(
     Spacer(modifier = modifier.clipToBounds().drawBehind {
         renderTick.longValue  // subscribe to draw-phase frame ticks
         drawIntoCanvas { canvas ->
-            painter.draw(canvas.nativeCanvas, paint)
+            painter.draw(canvas.nativeCanvas, paint, size.width, size.height)
         }
     })
 }
@@ -92,7 +92,7 @@ fun FftCWaveCanvas(
     Spacer(modifier = modifier.drawBehind {
         renderTick.longValue  // subscribe to draw-phase frame ticks
         drawIntoCanvas { canvas ->
-            painter.draw(canvas.nativeCanvas, paint)
+            painter.draw(canvas.nativeCanvas, paint, size.width, size.height)
         }
     })
 }

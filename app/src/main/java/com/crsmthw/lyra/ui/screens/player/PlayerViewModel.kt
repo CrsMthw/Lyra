@@ -14,11 +14,15 @@ import com.crsmthw.lyra.data.repository.LyricsState
 import com.crsmthw.lyra.data.repository.SettingsRepository
 import com.crsmthw.lyra.data.repository.SpotifyRepository
 import com.crsmthw.lyra.util.LyricLine
+import com.crsmthw.lyra.util.visualizer.VisualizerManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -59,6 +63,7 @@ data class PlayerUiState(
     val lyricsMode            : Boolean        = false,
     val lyricsState           : LyricsState    = LyricsState.None,
     val currentLyricLineIndex : Int            = -1,
+    val visualizerEnabled     : Boolean        = false,
 ) {
     val progress: Float
         get() = if (durationMs > 0L) (progressMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
@@ -71,6 +76,7 @@ class PlayerViewModel(
     private val libraryCache      : LibraryCache,
     private val lyricsRepository  : LyricsRepository,
     private val settingsRepository: SettingsRepository,
+    private val visualizerManager : VisualizerManager,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(PlayerUiState())
@@ -132,6 +138,28 @@ class PlayerViewModel(
             }
         }
         viewModelScope.launch {
+            settingsRepository.visualizerEnabled.collect { enabled ->
+                _uiState.update { it.copy(visualizerEnabled = enabled) }
+            }
+        }
+        // Gate visualizer capture on isPlaying && visualizerEnabled to avoid the
+        // microphone privacy indicator showing when the user hasn't enabled it.
+        viewModelScope.launch {
+            combine(
+                playerStateManager.state.map { it.isPlaying }.distinctUntilChanged(),
+                settingsRepository.visualizerEnabled,
+            ) { isPlaying, enabled -> isPlaying && enabled }
+            .distinctUntilChanged()
+            .collect { active ->
+                if (active) {
+                    visualizerManager.tryInitialize()
+                    visualizerManager.start()
+                } else {
+                    visualizerManager.stop()
+                }
+            }
+        }
+        viewModelScope.launch {
             remoteManager.connecting.collect { connecting ->
                 if (connecting) {
                     clearWakingUpJob?.cancel()
@@ -170,6 +198,19 @@ class PlayerViewModel(
     }
 
     // ── Lyrics ────────────────────────────────────────────────────────────────
+
+    // ── Visualizer ────────────────────────────────────────────────────────────
+
+    fun setVisualizerEnabled(enabled: Boolean) {
+        viewModelScope.launch { settingsRepository.setVisualizerEnabled(enabled) }
+    }
+
+    fun onRecordAudioGranted() {
+        viewModelScope.launch {
+            visualizerManager.tryInitialize()
+            settingsRepository.setVisualizerEnabled(true)
+        }
+    }
 
     fun toggleLyricsMode() {
         viewModelScope.launch { settingsRepository.setLyricsMode(!_uiState.value.lyricsMode) }
@@ -450,5 +491,6 @@ class PlayerViewModelFactory(private val container: com.crsmthw.lyra.di.AppConta
             libraryCache       = container.libraryCache,
             lyricsRepository   = container.lyricsRepository,
             settingsRepository = container.settingsRepository,
+            visualizerManager  = container.visualizerManager,
         ) as T
 }

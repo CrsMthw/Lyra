@@ -103,5 +103,5 @@ class AppContainer(context: Context) {
     val playerStateManager = PlayerStateManager(context, spotifyRepository, remoteManager)
 
     // ── Audio visualizer ─────────────────────────────────────────────────────
-    val visualizerManager = VisualizerManager(context, playerStateManager)
+    val visualizerManager = VisualizerManager(context)
 }

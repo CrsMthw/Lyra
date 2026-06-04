@@ -6,13 +6,15 @@ import kotlinx.coroutines.flow.Flow
 
 class SettingsRepository(private val dataStore: LyraDataStore) {
 
-    val themeMode   : Flow<ThemeMode> = dataStore.themeMode
-    val amoledBlack : Flow<Boolean>   = dataStore.amoledBlack
-    val dynamicColor: Flow<Boolean>   = dataStore.dynamicColor
-    val lyricsMode  : Flow<Boolean>   = dataStore.lyricsMode
+    val themeMode        : Flow<ThemeMode> = dataStore.themeMode
+    val amoledBlack      : Flow<Boolean>   = dataStore.amoledBlack
+    val dynamicColor     : Flow<Boolean>   = dataStore.dynamicColor
+    val lyricsMode       : Flow<Boolean>   = dataStore.lyricsMode
+    val visualizerEnabled: Flow<Boolean>   = dataStore.visualizerEnabled
 
-    suspend fun setThemeMode   (mode   : ThemeMode) = dataStore.setThemeMode(mode)
-    suspend fun setAmoledBlack (enabled: Boolean)   = dataStore.setAmoledBlack(enabled)
-    suspend fun setDynamicColor(enabled: Boolean)   = dataStore.setDynamicColor(enabled)
-    suspend fun setLyricsMode  (enabled: Boolean)   = dataStore.setLyricsMode(enabled)
+    suspend fun setThemeMode        (mode   : ThemeMode) = dataStore.setThemeMode(mode)
+    suspend fun setAmoledBlack      (enabled: Boolean)   = dataStore.setAmoledBlack(enabled)
+    suspend fun setDynamicColor     (enabled: Boolean)   = dataStore.setDynamicColor(enabled)
+    suspend fun setLyricsMode       (enabled: Boolean)   = dataStore.setLyricsMode(enabled)
+    suspend fun setVisualizerEnabled(enabled: Boolean)   = dataStore.setVisualizerEnabled(enabled)
 }

@@ -12,7 +12,7 @@ class FftCWavePainter(
     var startHz : Int   = 0,
     var endHz   : Int   = 2000,
     var numBands: Int   = 128,
-    var radiusR : Float = 0.4f,
+    var radiusR : Float = 1.0f,  // 1.0 = base circle at art edge; pulses extend outward
     var ampR    : Float = 0.6f,
 ) {
     private val akima  = AkimaSplineInterpolator()
@@ -53,16 +53,15 @@ class FftCWavePainter(
         psf = runCatching { akima.interpolate(x, y) }.getOrNull()
     }
 
-    fun draw(canvas: Canvas, paint: Paint) {
-        val psf      = psf ?: return
-        val shortest = min(canvas.width, canvas.height).toFloat()
-        val radius   = shortest / 2f * radiusR
-        val angle    = (2.0 * PI / numBands).toFloat()
+    fun draw(canvas: Canvas, paint: Paint, width: Float, height: Float) {
+        val psf    = psf ?: return
+        val radius = min(width, height) / 2f * radiusR
+        val angle  = (2.0 * PI / numBands).toFloat()
 
         canvas.save()
-        canvas.translate(canvas.width / 2f, canvas.height / 2f)
+        canvas.translate(width / 2f, height / 2f)
 
-        // Outer ring
+        // Single closed path — filled disc with outward-only pulses (no inner ring, default WINDING fill)
         for (i in 0..numBands) {
             val v  = psf.value(i.toDouble()).toFloat().coerceAtLeast(0f)
             val pt = toCartesian(radius + v, angle * i)
@@ -70,18 +69,8 @@ class FftCWavePainter(
         }
         path.close()
 
-        // Inner ring (donut cutout)
-        for (i in 0..numBands) {
-            val v  = psf.value(i.toDouble()).toFloat().coerceAtLeast(0f)
-            val pt = toCartesian((radius - v).coerceAtLeast(0f), angle * i)
-            if (i == 0) path.moveTo(pt[0], pt[1]) else path.lineTo(pt[0], pt[1])
-        }
-        path.close()
-
-        path.fillType = Path.FillType.EVEN_ODD
         canvas.drawPath(path, paint)
         path.reset()
-
         canvas.restore()
     }
 }

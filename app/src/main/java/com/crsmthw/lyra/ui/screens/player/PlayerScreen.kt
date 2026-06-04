@@ -43,9 +43,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.core.content.ContextCompat
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
@@ -97,6 +102,11 @@ fun PlayerScreen(
 
     // ── Dynamic color extraction ──────────────────────────────────────────────
     val context     = LocalContext.current
+
+    // ── Visualizer permission launcher ───────────────────────────────────────
+    val recordAudioLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted -> if (granted) viewModel.onRecordAudioGranted() }
     val isDarkTheme = MaterialTheme.colorScheme.background.let {
         0.299f * it.red + 0.587f * it.green + 0.114f * it.blue < 0.5f
     }
@@ -401,8 +411,20 @@ fun PlayerScreen(
                         ArtFabMenu(
                             lyricsState        = state.lyricsState,
                             lyricsMode         = state.lyricsMode,
+                            visualizerEnabled  = state.visualizerEnabled,
                             surfaceAccentColor = surfaceAccentColor,
                             onToggleLyrics     = viewModel::toggleLyricsMode,
+                            onToggleVisualizer = {
+                                if (state.visualizerEnabled) {
+                                    viewModel.setVisualizerEnabled(false)
+                                } else {
+                                    val hasPermission = ContextCompat.checkSelfPermission(
+                                        context, Manifest.permission.RECORD_AUDIO
+                                    ) == PackageManager.PERMISSION_GRANTED
+                                    if (hasPermission) viewModel.onRecordAudioGranted()
+                                    else recordAudioLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                }
+                            },
                             modifier           = Modifier.align(Alignment.BottomEnd).offset(y = 32.dp),
                         )
                     }
@@ -566,8 +588,20 @@ fun PlayerScreen(
                         ArtFabMenu(
                             lyricsState        = state.lyricsState,
                             lyricsMode         = state.lyricsMode,
+                            visualizerEnabled  = state.visualizerEnabled,
                             surfaceAccentColor = surfaceAccentColor,
                             onToggleLyrics     = viewModel::toggleLyricsMode,
+                            onToggleVisualizer = {
+                                if (state.visualizerEnabled) {
+                                    viewModel.setVisualizerEnabled(false)
+                                } else {
+                                    val hasPermission = ContextCompat.checkSelfPermission(
+                                        context, Manifest.permission.RECORD_AUDIO
+                                    ) == PackageManager.PERMISSION_GRANTED
+                                    if (hasPermission) viewModel.onRecordAudioGranted()
+                                    else recordAudioLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                }
+                            },
                             modifier           = Modifier.align(Alignment.BottomEnd).offset(y = 32.dp),
                         )
                     }
@@ -994,8 +1028,10 @@ private fun PlayerControls(
 private fun ArtFabMenu(
     lyricsState        : LyricsState,
     lyricsMode         : Boolean,
+    visualizerEnabled  : Boolean,
     surfaceAccentColor : Color,
     onToggleLyrics     : () -> Unit,
+    onToggleVisualizer : () -> Unit,
     modifier           : Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -1043,11 +1079,14 @@ private fun ArtFabMenu(
             }
         },
     ) {
-        // Visualizer placeholder — solid surface, muted text signals "not yet available"
+        // Visualizer — toggles on/off; requests RECORD_AUDIO if not yet granted
         FloatingActionButtonMenuItem(
-            onClick        = {},
-            containerColor = surfaceContainer,
-            contentColor   = outline,
+            onClick        = {
+                onToggleVisualizer()
+                expanded = false
+            },
+            containerColor = if (visualizerEnabled) surfaceAccentColor else surfaceContainer,
+            contentColor   = if (visualizerEnabled) fabIconColor else surfaceAccentColor,
             icon           = { Icon(Icons.Default.Equalizer, contentDescription = null, modifier = Modifier.size(24.dp)) },
             text           = { Text(visualizerLabel) },
         )
