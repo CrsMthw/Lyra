@@ -23,12 +23,11 @@ import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.offset
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.toShape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.*
@@ -37,6 +36,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -52,6 +52,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import com.crsmthw.lyra.R
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.palette.graphics.Palette
@@ -306,7 +307,7 @@ fun PlayerScreen(
                         .padding(start = 16.dp, end = 8.dp, bottom = 16.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    val side = minOf(maxWidth, maxHeight)
+                    val side = minOf(maxWidth, maxHeight * 0.82f)
 
                     val artMod = if (sharedTransitionScope != null && animatedContentScope != null) {
                         with(sharedTransitionScope) {
@@ -318,8 +319,6 @@ fun PlayerScreen(
                     } else Modifier
 
                     val lyricsContentMod = remember(side) { Modifier.size(side).clip(RoundedCornerShape(16.dp)) }
-                    val lyricsAvailable  = state.lyricsState is LyricsState.Synced || state.lyricsState is LyricsState.Plain
-                    val lyricsShowing    = state.lyricsMode && lyricsAvailable
 
                     Box(Modifier.size(side)) {
                         AnimatedContent(
@@ -393,69 +392,62 @@ fun PlayerScreen(
                             }
                         }
 
-                        FilledTonalIconToggleButton(
-                            checked          = lyricsShowing,
-                            onCheckedChange  = { viewModel.toggleLyricsMode() },
-                            enabled          = lyricsAvailable,
-                            modifier         = Modifier
-                                .align(Alignment.BottomEnd)
-                                .padding(end = 8.dp, bottom = 8.dp)
-                                .size(40.dp),
-                            colors           = IconButtonDefaults.filledTonalIconToggleButtonColors(
-                                containerColor        = surfaceAccentColor.copy(alpha = 0.15f),
-                                contentColor          = surfaceAccentColor,
-                                checkedContainerColor = surfaceAccentColor,
-                                checkedContentColor   = onAccentColor,
-                            ),
-                        ) {
-                            Icon(
-                                imageVector        = Icons.Default.Lyrics,
-                                contentDescription = stringResource(R.string.player_lyrics),
-                                modifier           = Modifier.size(18.dp),
-                            )
-                        }
+                        ArtFabMenu(
+                            lyricsState        = state.lyricsState,
+                            lyricsMode         = state.lyricsMode,
+                            surfaceAccentColor = surfaceAccentColor,
+                            onToggleLyrics     = viewModel::toggleLyricsMode,
+                            modifier           = Modifier.align(Alignment.BottomEnd).offset(y = 32.dp),
+                        )
                     }
                 }
 
-                // Right: controls
-                Column(
-                    modifier            = Modifier
+                // Right: controls — BoxWithConstraints for proportional spacing in short landscape
+                BoxWithConstraints(
+                    modifier         = Modifier
                         .weight(0.55f)
                         .fillMaxHeight()
-                        .verticalScroll(rememberScrollState())
                         .padding(horizontal = 24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center,
+                    contentAlignment = Alignment.Center,
                 ) {
-                    PlayerControls(
-                        state              = state,
-                        accentColor        = accentColor,
-                        onAccentColor      = onAccentColor,
-                        surfaceAccentColor = surfaceAccentColor,
-                        squigglyShape      = squigglyShape,
-                        onSkipPrev         = onSkipPrev,
-                        onSkipNext         = onSkipNext,
-                        onPlayPause        = viewModel::playPause,
-                        onToggleLike       = viewModel::toggleLike,
-                        onToggleShuffle    = viewModel::toggleShuffle,
-                        onCycleRepeat      = viewModel::cycleRepeat,
-                        onSeek             = viewModel::seekTo,
-                        onOpenQueue        = onOpenQueue,
-                        onOpenAlbum        = onOpenAlbum,
-                        onOpenArtist       = onOpenArtist,
-                        onShare            = {
-                            state.currentTrack?.id?.let { id ->
-                                context.startActivity(Intent.createChooser(
-                                    Intent(Intent.ACTION_SEND).apply {
-                                        putExtra(Intent.EXTRA_TEXT, "https://open.spotify.com/track/$id")
-                                        type = "text/plain"
-                                    }, null
-                                ))
-                            }
-                        },
-                        onAddToPlaylist    = { viewModel.loadOwnedPlaylists(); showPlaylistPicker = true },
-                        onOpenDevicePicker = { viewModel.loadAvailableDevices(); showDevicePicker = true },
-                    )
+                    val spacingLarge = (maxHeight * 0.04f).coerceIn(6.dp, 16.dp)
+                    val spacingSmall = (maxHeight * 0.03f).coerceIn(4.dp, 12.dp)
+                    Column(
+                        modifier            = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        PlayerControls(
+                            state              = state,
+                            accentColor        = accentColor,
+                            onAccentColor      = onAccentColor,
+                            surfaceAccentColor = surfaceAccentColor,
+                            squigglyShape      = squigglyShape,
+                            onSkipPrev         = onSkipPrev,
+                            onSkipNext         = onSkipNext,
+                            onPlayPause        = viewModel::playPause,
+                            onToggleLike       = viewModel::toggleLike,
+                            onToggleShuffle    = viewModel::toggleShuffle,
+                            onCycleRepeat      = viewModel::cycleRepeat,
+                            onSeek             = viewModel::seekTo,
+                            onOpenQueue        = onOpenQueue,
+                            onOpenAlbum        = onOpenAlbum,
+                            onOpenArtist       = onOpenArtist,
+                            onShare            = {
+                                state.currentTrack?.id?.let { id ->
+                                    context.startActivity(Intent.createChooser(
+                                        Intent(Intent.ACTION_SEND).apply {
+                                            putExtra(Intent.EXTRA_TEXT, "https://open.spotify.com/track/$id")
+                                            type = "text/plain"
+                                        }, null
+                                    ))
+                                }
+                            },
+                            onAddToPlaylist    = { viewModel.loadOwnedPlaylists(); showPlaylistPicker = true },
+                            onOpenDevicePicker = { viewModel.loadAvailableDevices(); showDevicePicker = true },
+                            spacingLarge       = spacingLarge,
+                            spacingSmall       = spacingSmall,
+                        )
+                    }
                 }
             }
         } else {
@@ -487,8 +479,6 @@ fun PlayerScreen(
                     } else Modifier
 
                     val lyricsContentMod = remember(side) { Modifier.size(side).clip(RoundedCornerShape(16.dp)) }
-                    val lyricsAvailable  = state.lyricsState is LyricsState.Synced || state.lyricsState is LyricsState.Plain
-                    val lyricsShowing    = state.lyricsMode && lyricsAvailable
 
                     Box(Modifier.size(side)) {
                         AnimatedContent(
@@ -562,27 +552,13 @@ fun PlayerScreen(
                             }
                         }
 
-                        FilledTonalIconToggleButton(
-                            checked          = lyricsShowing,
-                            onCheckedChange  = { viewModel.toggleLyricsMode() },
-                            enabled          = lyricsAvailable,
-                            modifier         = Modifier
-                                .align(Alignment.BottomEnd)
-                                .padding(end = 8.dp, bottom = 8.dp)
-                                .size(40.dp),
-                            colors           = IconButtonDefaults.filledTonalIconToggleButtonColors(
-                                containerColor        = surfaceAccentColor.copy(alpha = 0.15f),
-                                contentColor          = surfaceAccentColor,
-                                checkedContainerColor = surfaceAccentColor,
-                                checkedContentColor   = onAccentColor,
-                            ),
-                        ) {
-                            Icon(
-                                imageVector        = Icons.Default.Lyrics,
-                                contentDescription = stringResource(R.string.player_lyrics),
-                                modifier           = Modifier.size(18.dp),
-                            )
-                        }
+                        ArtFabMenu(
+                            lyricsState        = state.lyricsState,
+                            lyricsMode         = state.lyricsMode,
+                            surfaceAccentColor = surfaceAccentColor,
+                            onToggleLyrics     = viewModel::toggleLyricsMode,
+                            modifier           = Modifier.align(Alignment.BottomEnd).offset(y = 32.dp),
+                        )
                     }
                 }
 
@@ -685,6 +661,8 @@ private fun PlayerControls(
     onShare            : () -> Unit,
     onAddToPlaylist    : () -> Unit,
     onOpenDevicePicker : () -> Unit,
+    spacingLarge       : Dp = 16.dp,
+    spacingSmall       : Dp = 12.dp,
 ) {
     // Track name + like
     Row(
@@ -751,7 +729,7 @@ private fun PlayerControls(
         }
     }
 
-    Spacer(Modifier.height(16.dp))
+    Spacer(Modifier.height(spacingLarge))
 
     // Wavy seek bar
     var isDragging by remember { mutableStateOf(false) }
@@ -810,7 +788,7 @@ private fun PlayerControls(
             color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 
-    Spacer(Modifier.height(12.dp))
+    Spacer(Modifier.height(spacingSmall))
 
     // Playback controls
     Row(
@@ -818,7 +796,7 @@ private fun PlayerControls(
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment     = Alignment.CenterVertically,
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(contentAlignment = Alignment.Center) {
             IconButton(onClick = onToggleShuffle) {
                 Icon(Icons.Default.Shuffle, contentDescription = stringResource(R.string.player_shuffle),
                     tint = if (state.shuffleEnabled) surfaceAccentColor
@@ -826,8 +804,9 @@ private fun PlayerControls(
             }
             Box(
                 Modifier
+                    .align(Alignment.BottomCenter)
+                    .offset(y = (-5).dp)
                     .size(5.dp)
-                    .offset(y = (-10).dp)
                     .background(
                         color = if (state.shuffleEnabled) surfaceAccentColor else Color.Transparent,
                         shape = CircleShape,
@@ -878,7 +857,7 @@ private fun PlayerControls(
                 modifier = Modifier.size(36.dp))
         }
 
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(contentAlignment = Alignment.Center) {
             IconButton(onClick = onCycleRepeat) {
                 Icon(
                     imageVector = when (state.repeatMode) {
@@ -892,8 +871,9 @@ private fun PlayerControls(
             }
             Box(
                 Modifier
+                    .align(Alignment.BottomCenter)
+                    .offset(y = (-5).dp)
                     .size(5.dp)
-                    .offset(y = (-10).dp)
                     .background(
                         color = if (state.repeatMode != RepeatMode.OFF) surfaceAccentColor else Color.Transparent,
                         shape = CircleShape,
@@ -902,7 +882,7 @@ private fun PlayerControls(
         }
     }
 
-    Spacer(Modifier.height(16.dp))
+    Spacer(Modifier.height(spacingLarge))
 
     Row(
         modifier              = Modifier.fillMaxWidth(),
@@ -995,6 +975,101 @@ private fun PlayerControls(
                 menuContent = @Composable { _ -> },
             )
         }
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun ArtFabMenu(
+    lyricsState        : LyricsState,
+    lyricsMode         : Boolean,
+    surfaceAccentColor : Color,
+    onToggleLyrics     : () -> Unit,
+    modifier           : Modifier = Modifier,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val lyricsAvailable  = lyricsState is LyricsState.Synced || lyricsState is LyricsState.Plain
+    val lyricsShowing    = lyricsMode && lyricsAvailable
+    val lyricsNone       = lyricsState is LyricsState.None
+    val lyricsLoading    = lyricsState is LyricsState.Loading
+    val lyricsLabel      = stringResource(if (lyricsNone) R.string.player_no_lyrics else R.string.player_lyrics)
+    val visualizerLabel  = stringResource(R.string.player_visualizer)
+    val surfaceContainer = MaterialTheme.colorScheme.surfaceContainerHigh
+    val onSurface        = MaterialTheme.colorScheme.onSurface
+    val outline          = MaterialTheme.colorScheme.outline
+    // Derive icon color from surfaceAccentColor's own luminance — onAccentColor uses the dominant
+    // color which can diverge from the surface-accent swatch used for the FAB container.
+    val fabIconColor = if (
+        0.299f * surfaceAccentColor.red + 0.587f * surfaceAccentColor.green + 0.114f * surfaceAccentColor.blue < 0.5f
+    ) Color.White else Color.Black
+
+    FloatingActionButtonMenu(
+        expanded = expanded,
+        modifier = modifier,
+        button   = {
+            ToggleFloatingActionButton(
+                checked               = expanded,
+                onCheckedChange       = { expanded = it },
+                containerColor        = { surfaceAccentColor },
+                containerSize         = ToggleFloatingActionButtonDefaults.containerSize(initialSize = 48.dp),
+                containerCornerRadius = ToggleFloatingActionButtonDefaults.containerCornerRadius(initialSize = 24.dp),
+            ) {
+                val scope = this
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector        = Icons.Default.GraphicEq,
+                        contentDescription = null,
+                        tint               = fabIconColor,
+                        modifier           = Modifier.size(24.dp).graphicsLayer { alpha = 1f - scope.checkedProgress },
+                    )
+                    Icon(
+                        imageVector        = Icons.Default.Close,
+                        contentDescription = null,
+                        tint               = fabIconColor,
+                        modifier           = Modifier.size(24.dp).graphicsLayer { alpha = scope.checkedProgress },
+                    )
+                }
+            }
+        },
+    ) {
+        // Visualizer placeholder — solid surface, muted text signals "not yet available"
+        FloatingActionButtonMenuItem(
+            onClick        = {},
+            containerColor = surfaceContainer,
+            contentColor   = outline,
+            icon           = { Icon(Icons.Default.Equalizer, contentDescription = null, modifier = Modifier.size(24.dp)) },
+            text           = { Text(visualizerLabel) },
+        )
+        // Lyrics — three states: loading, none, available
+        FloatingActionButtonMenuItem(
+            onClick        = {
+                if (lyricsAvailable) {
+                    onToggleLyrics()
+                    expanded = false
+                }
+            },
+            containerColor = if (lyricsShowing) surfaceAccentColor else surfaceContainer,
+            contentColor   = when {
+                lyricsShowing  -> fabIconColor
+                lyricsNone     -> outline
+                else           -> surfaceAccentColor
+            },
+            icon           = {
+                if (lyricsLoading) {
+                    LoadingIndicator(
+                        modifier = Modifier.size(24.dp),
+                        color    = surfaceAccentColor,
+                    )
+                } else {
+                    Icon(
+                        imageVector        = Icons.Default.Lyrics,
+                        contentDescription = null,
+                        modifier           = Modifier.size(24.dp),
+                    )
+                }
+            },
+            text           = { Text(lyricsLabel) },
+        )
     }
 }
 

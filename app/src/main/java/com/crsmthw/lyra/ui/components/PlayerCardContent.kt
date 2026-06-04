@@ -328,15 +328,16 @@ fun PlayerCardContent(
             // Controls
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(contentAlignment = Alignment.Center) {
                     IconButton(onClick = playerViewModel::toggleShuffle) {
                         Icon(Icons.Default.Shuffle, stringResource(R.string.player_shuffle),
                             tint = if (state.shuffleEnabled) surfaceAccentColor else MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Box(
                         Modifier
+                            .align(Alignment.BottomCenter)
+                            .offset(y = (-5).dp)
                             .size(5.dp)
-                            .offset(y = (-10).dp)
                             .background(
                                 color = if (state.shuffleEnabled) surfaceAccentColor else Color.Transparent,
                                 shape = CircleShape,
@@ -378,7 +379,7 @@ fun PlayerCardContent(
                 IconButton(onClick = onSkipNext, modifier = Modifier.size(48.dp)) {
                     Icon(Icons.Default.SkipNext, stringResource(R.string.player_next), modifier = Modifier.size(36.dp))
                 }
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(contentAlignment = Alignment.Center) {
                     IconButton(onClick = playerViewModel::cycleRepeat) {
                         Icon(
                             imageVector = when (state.repeatMode) {
@@ -391,8 +392,9 @@ fun PlayerCardContent(
                     }
                     Box(
                         Modifier
+                            .align(Alignment.BottomCenter)
+                            .offset(y = (-5).dp)
                             .size(5.dp)
-                            .offset(y = (-10).dp)
                             .background(
                                 color = if (state.repeatMode != RepeatMode.OFF) surfaceAccentColor else Color.Transparent,
                                 shape = CircleShape,

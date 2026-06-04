@@ -20,6 +20,8 @@
     <string name="player_repeat">Repeat</string>
     <string name="player_sleep_timer">Sleep Timer</string>
     <string name="player_lyrics">Lyrics</string>
+    <string name="player_no_lyrics">No lyrics</string>
+    <string name="player_visualizer">Visualizer</string>
     <string name="player_share">Share</string>
     <string name="player_add_to_playlist">Add to playlist</string>
     <string name="player_add_to_playlist_title">Add to playlist</string>
