@@ -67,6 +67,7 @@ import com.crsmthw.lyra.ui.components.DevicePickerSheet
 import com.crsmthw.lyra.ui.components.PlainLyricsView
 import com.crsmthw.lyra.ui.components.SyncedLyricsView
 import com.crsmthw.lyra.util.toTimeString
+import com.crsmthw.lyra.util.visualizer.FftCWaveCanvas
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -321,6 +322,11 @@ fun PlayerScreen(
                     val lyricsContentMod = remember(side) { Modifier.size(side).clip(RoundedCornerShape(16.dp)) }
 
                     Box(Modifier.size(side)) {
+                        FftCWaveCanvas(
+                            modifier = Modifier.fillMaxSize(),
+                            color    = surfaceAccentColor,
+                            alpha    = 0.40f,
+                        )
                         AnimatedContent(
                             targetState  = state,
                             contentKey   = { s ->
@@ -481,6 +487,11 @@ fun PlayerScreen(
                     val lyricsContentMod = remember(side) { Modifier.size(side).clip(RoundedCornerShape(16.dp)) }
 
                     Box(Modifier.size(side)) {
+                        FftCWaveCanvas(
+                            modifier = Modifier.fillMaxSize(),
+                            color    = surfaceAccentColor,
+                            alpha    = 0.40f,
+                        )
                         AnimatedContent(
                             targetState  = state,
                             contentKey   = { s ->

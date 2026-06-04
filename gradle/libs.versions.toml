@@ -20,6 +20,7 @@ splashscreen         = "1.2.0"
 gson                 = "2.14.0"
 palette              = "1.0.0"
 graphicsShapes       = "1.1.0"
+commonsMath3         = "3.6.1"
 
 [libraries]
 androidx-core-ktx                    = { group = "androidx.core",              name = "core-ktx",                    version.ref = "coreKtx" }
@@ -50,6 +51,7 @@ gson                                 = { group = "com.google.code.gson",       n
 androidx-palette                     = { group = "androidx.palette",            name = "palette-ktx",                 version.ref = "palette" }
 androidx-graphics-shapes             = { group = "androidx.graphics",            name = "graphics-shapes",             version.ref = "graphicsShapes" }
 androidx-material3-adaptive          = { group = "androidx.compose.material3.adaptive", name = "adaptive" }
+commons-math3                        = { group = "org.apache.commons",                   name = "commons-math3",  version.ref = "commonsMath3" }
 
 [plugins]
 android-application = { id = "com.android.application",             version.ref = "agp" }

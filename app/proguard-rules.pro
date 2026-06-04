@@ -23,3 +23,8 @@
 # OkHttp
 -dontwarn okhttp3.**
 -dontwarn okio.**
+
+# commons-math3 — used for Akima spline interpolation in the audio visualizer
+-keep class org.apache.commons.math3.analysis.interpolation.AkimaSplineInterpolator { *; }
+-keep class org.apache.commons.math3.analysis.polynomials.PolynomialSplineFunction  { *; }
+-dontwarn org.apache.commons.math3.**

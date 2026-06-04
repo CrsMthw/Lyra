@@ -87,6 +87,9 @@ dependencies {
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)
 
+    // FFT interpolation for audio visualizer
+    implementation(libs.commons.math3)
+
     // ─── Spotify App Remote SDK ────────────────────────────────────────────
     implementation(files("libs/spotify-app-remote-release-0.8.0.aar"))
     // ───────────────────────────────────────────────────────────────────────

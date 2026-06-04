@@ -18,6 +18,7 @@ import com.crsmthw.lyra.data.player.PlayerStateManager
 import com.crsmthw.lyra.data.repository.LyricsRepository
 import com.crsmthw.lyra.data.repository.SettingsRepository
 import com.crsmthw.lyra.data.repository.SpotifyRepository
+import com.crsmthw.lyra.util.visualizer.VisualizerManager
 import okhttp3.OkHttpClient
 import okio.Path.Companion.toOkioPath
 import retrofit2.Retrofit
@@ -100,4 +101,7 @@ class AppContainer(context: Context) {
 
     // ── App-scoped player state ───────────────────────────────────────────────
     val playerStateManager = PlayerStateManager(context, spotifyRepository, remoteManager)
+
+    // ── Audio visualizer ─────────────────────────────────────────────────────
+    val visualizerManager = VisualizerManager(context, playerStateManager)
 }

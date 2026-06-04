@@ -25,6 +25,7 @@ import coil3.compose.AsyncImage
 import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.remote.model.SpotifyTrack
 import com.crsmthw.lyra.util.toTimeString
+import com.crsmthw.lyra.util.visualizer.FftWaveCanvas
 import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
@@ -195,6 +196,11 @@ fun QueueScreen(
                             colors = listOf(Color.Transparent, MaterialTheme.colorScheme.background),
                         )
                     )
+            )
+            FftWaveCanvas(
+                modifier = Modifier.fillMaxWidth().height(scrimHeight).align(Alignment.BottomCenter),
+                color    = MaterialTheme.colorScheme.onSurface,
+                alpha    = 0.20f,
             )
         }
     }
