@@ -40,6 +40,8 @@ import com.crsmthw.lyra.data.remote.model.SpotifyAlbum
 import com.crsmthw.lyra.data.remote.model.SpotifyArtist
 import com.crsmthw.lyra.data.remote.model.SpotifyPlaylist
 import com.crsmthw.lyra.ui.components.TrackRow
+import com.crsmthw.lyra.util.visualizer.FftWaveCanvas
+import com.crsmthw.lyra.util.visualizer.LocalVisualizerAccentColor
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -198,6 +200,14 @@ fun SearchScreen(
                     .height(scrimHeight)
                     .align(Alignment.BottomCenter)
                     .background(Brush.verticalGradient(listOf(Color.Transparent, background)))
+            )
+            FftWaveCanvas(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(scrimHeight)
+                    .align(Alignment.BottomCenter),
+                color    = LocalVisualizerAccentColor.current,
+                alpha    = 0.20f,
             )
         }
     }

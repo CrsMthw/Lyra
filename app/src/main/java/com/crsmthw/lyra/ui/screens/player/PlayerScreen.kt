@@ -73,6 +73,7 @@ import com.crsmthw.lyra.ui.components.PlainLyricsView
 import com.crsmthw.lyra.ui.components.SyncedLyricsView
 import com.crsmthw.lyra.util.toTimeString
 import com.crsmthw.lyra.util.visualizer.FftCWaveCanvas
+import com.crsmthw.lyra.util.visualizer.FftWaveCanvas
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -228,6 +229,13 @@ fun PlayerScreen(
         }
     }
 
+    // ── Art shrink when visualizer is on ─────────────────────────────────────
+    val artScale by animateFloatAsState(
+        targetValue   = if (state.visualizerEnabled) 0.8f else 1.0f,
+        animationSpec = tween(400),
+        label         = "artScale",
+    )
+
     // ── Play/pause button shape (M3 Expressive cookie) ───────────────────────
     val squigglyShape = MaterialShapes.Cookie12Sided.toShape()
 
@@ -319,6 +327,7 @@ fun PlayerScreen(
                     contentAlignment = Alignment.Center,
                 ) {
                     val side = minOf(maxWidth, maxHeight * 0.82f)
+                    val displaySide = side * artScale
 
                     val artMod = if (sharedTransitionScope != null && animatedContentScope != null) {
                         with(sharedTransitionScope) {
@@ -329,13 +338,15 @@ fun PlayerScreen(
                         }
                     } else Modifier
 
-                    val lyricsContentMod = remember(side) { Modifier.size(side).clip(RoundedCornerShape(16.dp)) }
+                    val artGapDp = (side - displaySide) / 2
+                    val lyricsContentMod = Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp))
 
                     Box(Modifier.size(side)) {
                         FftCWaveCanvas(
                             modifier = Modifier.fillMaxSize(),
                             color    = surfaceAccentColor,
                             alpha    = 0.40f,
+                            enabled  = state.visualizerEnabled,
                         )
                         AnimatedContent(
                             targetState  = state,
@@ -364,47 +375,49 @@ fun PlayerScreen(
                                     )
                                 }
                             } else {
-                                AsyncImage(
-                                    model              = displayedTrack?.artUrl,
-                                    contentDescription = "Album art",
-                                    contentScale       = ContentScale.Crop,
-                                    modifier           = artMod
-                                        .size(side)
-                                        .clip(RoundedCornerShape(16.dp))
-                                        .graphicsLayer {
-                                            translationX = (artDragX * 0.3f).coerceIn(-80f, 80f) + artOffsetX.value
-                                        }
-                                        .pointerInput(Unit) {
-                                            detectHorizontalDragGestures(
-                                                onDragStart      = { artDragX = 0f },
-                                                onDragEnd        = {
-                                                    when {
-                                                        artDragX < -swipeThresholdPx -> {
-                                                            val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
-                                                            artDragX = 0f; skipDirection = 1
-                                                            scope.launch {
-                                                                artOffsetX.snapTo(s)
-                                                                artOffsetX.animateTo(-1500f, tween(250, easing = FastOutLinearInEasing))
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    AsyncImage(
+                                        model              = displayedTrack?.artUrl,
+                                        contentDescription = "Album art",
+                                        contentScale       = ContentScale.Crop,
+                                        modifier           = artMod
+                                            .size(displaySide)
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .graphicsLayer {
+                                                translationX = (artDragX * 0.3f).coerceIn(-80f, 80f) + artOffsetX.value
+                                            }
+                                            .pointerInput(Unit) {
+                                                detectHorizontalDragGestures(
+                                                    onDragStart      = { artDragX = 0f },
+                                                    onDragEnd        = {
+                                                        when {
+                                                            artDragX < -swipeThresholdPx -> {
+                                                                val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
+                                                                artDragX = 0f; skipDirection = 1
+                                                                scope.launch {
+                                                                    artOffsetX.snapTo(s)
+                                                                    artOffsetX.animateTo(-1500f, tween(250, easing = FastOutLinearInEasing))
+                                                                }
+                                                                viewModel.skipNext()
                                                             }
-                                                            viewModel.skipNext()
-                                                        }
-                                                        artDragX > swipeThresholdPx -> {
-                                                            val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
-                                                            artDragX = 0f; skipDirection = -1
-                                                            scope.launch {
-                                                                artOffsetX.snapTo(s)
-                                                                artOffsetX.animateTo(1500f, tween(250, easing = FastOutLinearInEasing))
+                                                            artDragX > swipeThresholdPx -> {
+                                                                val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
+                                                                artDragX = 0f; skipDirection = -1
+                                                                scope.launch {
+                                                                    artOffsetX.snapTo(s)
+                                                                    artOffsetX.animateTo(1500f, tween(250, easing = FastOutLinearInEasing))
+                                                                }
+                                                                viewModel.skipPrevious()
                                                             }
-                                                            viewModel.skipPrevious()
+                                                            else -> artDragX = 0f
                                                         }
-                                                        else -> artDragX = 0f
-                                                    }
-                                                },
-                                                onDragCancel     = { artDragX = 0f },
-                                                onHorizontalDrag = { _, amount -> artDragX += amount },
-                                            )
-                                        },
-                                )
+                                                    },
+                                                    onDragCancel     = { artDragX = 0f },
+                                                    onHorizontalDrag = { _, amount -> artDragX += amount },
+                                                )
+                                            },
+                                    )
+                                }
                             }
                         }
 
@@ -425,7 +438,7 @@ fun PlayerScreen(
                                     else recordAudioLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                 }
                             },
-                            modifier           = Modifier.align(Alignment.BottomEnd).offset(y = 32.dp),
+                            modifier           = Modifier.align(Alignment.BottomEnd).offset(y = 32.dp - artGapDp),
                         )
                     }
                 }
@@ -496,6 +509,7 @@ fun PlayerScreen(
                     contentAlignment = Alignment.Center,
                 ) {
                     val side = minOf(maxWidth, maxHeight)
+                    val displaySide = side * artScale
 
                     val artMod = if (sharedTransitionScope != null && animatedContentScope != null) {
                         with(sharedTransitionScope) {
@@ -506,13 +520,15 @@ fun PlayerScreen(
                         }
                     } else Modifier
 
-                    val lyricsContentMod = remember(side) { Modifier.size(side).clip(RoundedCornerShape(16.dp)) }
+                    val artGapDp = (side - displaySide) / 2
+                    val lyricsContentMod = Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp))
 
                     Box(Modifier.size(side)) {
                         FftCWaveCanvas(
                             modifier = Modifier.fillMaxSize(),
                             color    = surfaceAccentColor,
                             alpha    = 0.40f,
+                            enabled  = state.visualizerEnabled,
                         )
                         AnimatedContent(
                             targetState  = state,
@@ -541,47 +557,49 @@ fun PlayerScreen(
                                     )
                                 }
                             } else {
-                                AsyncImage(
-                                    model              = displayedTrack?.artUrl,
-                                    contentDescription = "Album art",
-                                    contentScale       = ContentScale.Crop,
-                                    modifier           = artMod
-                                        .size(side)
-                                        .clip(RoundedCornerShape(16.dp))
-                                        .graphicsLayer {
-                                            translationX = (artDragX * 0.3f).coerceIn(-80f, 80f) + artOffsetX.value
-                                        }
-                                        .pointerInput(Unit) {
-                                            detectHorizontalDragGestures(
-                                                onDragStart      = { artDragX = 0f },
-                                                onDragEnd        = {
-                                                    when {
-                                                        artDragX < -swipeThresholdPx -> {
-                                                            val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
-                                                            artDragX = 0f; skipDirection = 1
-                                                            scope.launch {
-                                                                artOffsetX.snapTo(s)
-                                                                artOffsetX.animateTo(-1500f, tween(250, easing = FastOutLinearInEasing))
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    AsyncImage(
+                                        model              = displayedTrack?.artUrl,
+                                        contentDescription = "Album art",
+                                        contentScale       = ContentScale.Crop,
+                                        modifier           = artMod
+                                            .size(displaySide)
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .graphicsLayer {
+                                                translationX = (artDragX * 0.3f).coerceIn(-80f, 80f) + artOffsetX.value
+                                            }
+                                            .pointerInput(Unit) {
+                                                detectHorizontalDragGestures(
+                                                    onDragStart      = { artDragX = 0f },
+                                                    onDragEnd        = {
+                                                        when {
+                                                            artDragX < -swipeThresholdPx -> {
+                                                                val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
+                                                                artDragX = 0f; skipDirection = 1
+                                                                scope.launch {
+                                                                    artOffsetX.snapTo(s)
+                                                                    artOffsetX.animateTo(-1500f, tween(250, easing = FastOutLinearInEasing))
+                                                                }
+                                                                viewModel.skipNext()
                                                             }
-                                                            viewModel.skipNext()
-                                                        }
-                                                        artDragX > swipeThresholdPx -> {
-                                                            val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
-                                                            artDragX = 0f; skipDirection = -1
-                                                            scope.launch {
-                                                                artOffsetX.snapTo(s)
-                                                                artOffsetX.animateTo(1500f, tween(250, easing = FastOutLinearInEasing))
+                                                            artDragX > swipeThresholdPx -> {
+                                                                val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
+                                                                artDragX = 0f; skipDirection = -1
+                                                                scope.launch {
+                                                                    artOffsetX.snapTo(s)
+                                                                    artOffsetX.animateTo(1500f, tween(250, easing = FastOutLinearInEasing))
+                                                                }
+                                                                viewModel.skipPrevious()
                                                             }
-                                                            viewModel.skipPrevious()
+                                                            else -> artDragX = 0f
                                                         }
-                                                        else -> artDragX = 0f
-                                                    }
-                                                },
-                                                onDragCancel     = { artDragX = 0f },
-                                                onHorizontalDrag = { _, amount -> artDragX += amount },
-                                            )
-                                        },
-                                )
+                                                    },
+                                                    onDragCancel     = { artDragX = 0f },
+                                                    onHorizontalDrag = { _, amount -> artDragX += amount },
+                                                )
+                                            },
+                                    )
+                                }
                             }
                         }
 
@@ -602,7 +620,7 @@ fun PlayerScreen(
                                     else recordAudioLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                 }
                             },
-                            modifier           = Modifier.align(Alignment.BottomEnd).offset(y = 32.dp),
+                            modifier           = Modifier.align(Alignment.BottomEnd).offset(y = 32.dp - artGapDp),
                         )
                     }
                 }
@@ -646,6 +664,19 @@ fun PlayerScreen(
                 }
             }
         }
+    }
+
+    // ── Bottom wave overlay ───────────────────────────────────────────────────
+    val waveNavBarDp = with(LocalDensity.current) { WindowInsets.navigationBars.getBottom(this).toDp() }
+    Box(Modifier.fillMaxSize()) {
+        FftWaveCanvas(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(waveNavBarDp + 48.dp)
+                .align(Alignment.BottomCenter),
+            color    = surfaceAccentColor,
+            alpha    = 0.20f,
+        )
     }
 
     if (showPlaylistPicker) {

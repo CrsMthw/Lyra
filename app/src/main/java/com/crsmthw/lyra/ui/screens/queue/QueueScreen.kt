@@ -26,6 +26,7 @@ import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.remote.model.SpotifyTrack
 import com.crsmthw.lyra.util.toTimeString
 import com.crsmthw.lyra.util.visualizer.FftWaveCanvas
+import com.crsmthw.lyra.util.visualizer.LocalVisualizerAccentColor
 import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
@@ -199,7 +200,7 @@ fun QueueScreen(
             )
             FftWaveCanvas(
                 modifier = Modifier.fillMaxWidth().height(scrimHeight).align(Alignment.BottomCenter),
-                color    = MaterialTheme.colorScheme.onSurface,
+                color    = LocalVisualizerAccentColor.current,
                 alpha    = 0.20f,
             )
         }

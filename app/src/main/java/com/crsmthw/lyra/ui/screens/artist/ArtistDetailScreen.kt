@@ -39,6 +39,8 @@ import com.crsmthw.lyra.data.remote.model.SpotifyAlbum
 import com.crsmthw.lyra.data.remote.model.SpotifyArtistFull
 import com.crsmthw.lyra.ui.components.PlayerPanelHost
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
+import com.crsmthw.lyra.util.visualizer.FftWaveCanvas
+import com.crsmthw.lyra.util.visualizer.LocalVisualizerAccentColor
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class, ExperimentalSharedTransitionApi::class)
 @Composable
@@ -139,68 +141,81 @@ fun ArtistDetailScreen(
                 }
 
                 if (isWideScreen) {
-                    Row(
+                    Box(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(paddingValues)
-                            .padding(8.dp)
                             .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal)),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        // Left pane — artist photo + info
-                        Card(
-                            modifier  = Modifier.weight(0.42f).fillMaxHeight(),
-                            shape     = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
-                            colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                        Row(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-                                val photoSize = maxWidth.coerceAtMost(maxHeight * 0.5f)
-                                val compact   = maxHeight < 500.dp
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .verticalScroll(rememberScrollState())
-                                        .padding(bottom = navBarBottomDp),
-                                ) {
-                                    ArtistHeader(
-                                        artist        = artist,
-                                        modifier      = Modifier.size(photoSize).clip(RoundedCornerShape(12.dp)),
-                                        compact       = compact,
-                                        showDivider   = false,
-                                    )
+                            // Left pane — artist photo + info
+                            Card(
+                                modifier  = Modifier.weight(0.42f).fillMaxHeight(),
+                                shape     = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+                                colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                            ) {
+                                BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                                    val photoSize = maxWidth.coerceAtMost(maxHeight * 0.5f)
+                                    val compact   = maxHeight < 500.dp
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .verticalScroll(rememberScrollState())
+                                            .padding(bottom = navBarBottomDp),
+                                    ) {
+                                        ArtistHeader(
+                                            artist        = artist,
+                                            modifier      = Modifier.size(photoSize).clip(RoundedCornerShape(12.dp)),
+                                            compact       = compact,
+                                            showDivider   = false,
+                                        )
+                                    }
                                 }
                             }
-                        }
 
-                        // Right pane — discography
-                        Card(
-                            modifier  = Modifier.weight(0.58f).fillMaxHeight(),
-                            shape     = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
-                            colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                        ) {
-                            Box(modifier = Modifier.fillMaxSize()) {
-                                LazyColumn(
-                                    modifier       = Modifier.fillMaxSize(),
-                                    contentPadding = PaddingValues(bottom = 100.dp + navBarBottomDp),
-                                ) {
-                                    artistContent(
-                                        state         = state,
-                                        groupedAlbums = groupedAlbums,
-                                        onOpenAlbum   = onOpenAlbum,
-                                        onLoadMore    = viewModel::loadMoreAlbums,
+                            // Right pane — discography
+                            Card(
+                                modifier  = Modifier.weight(0.58f).fillMaxHeight(),
+                                shape     = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+                                colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                            ) {
+                                Box(modifier = Modifier.fillMaxSize()) {
+                                    LazyColumn(
+                                        modifier       = Modifier.fillMaxSize(),
+                                        contentPadding = PaddingValues(bottom = 100.dp + navBarBottomDp),
+                                    ) {
+                                        artistContent(
+                                            state         = state,
+                                            groupedAlbums = groupedAlbums,
+                                            onOpenAlbum   = onOpenAlbum,
+                                            onLoadMore    = viewModel::loadMoreAlbums,
+                                        )
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(scrimHeight)
+                                            .align(Alignment.BottomCenter)
+                                            .background(Brush.verticalGradient(listOf(Color.Transparent, MaterialTheme.colorScheme.surface)))
                                     )
                                 }
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(scrimHeight)
-                                        .align(Alignment.BottomCenter)
-                                        .background(Brush.verticalGradient(listOf(Color.Transparent, background)))
-                                )
                             }
                         }
+                        FftWaveCanvas(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(scrimHeight)
+                                .align(Alignment.BottomCenter),
+                            color    = LocalVisualizerAccentColor.current,
+                            alpha    = 0.20f,
+                        )
                     }
                 } else {
                     Box(
@@ -229,6 +244,14 @@ fun ArtistDetailScreen(
                                 .height(scrimHeight)
                                 .align(Alignment.BottomCenter)
                                 .background(Brush.verticalGradient(listOf(Color.Transparent, background)))
+                        )
+                        FftWaveCanvas(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(scrimHeight)
+                                .align(Alignment.BottomCenter),
+                            color    = LocalVisualizerAccentColor.current,
+                            alpha    = 0.20f,
                         )
                     }
                 }

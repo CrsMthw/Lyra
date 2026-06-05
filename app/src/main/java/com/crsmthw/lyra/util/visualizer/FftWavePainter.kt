@@ -10,12 +10,13 @@ class FftWavePainter(
     var startHz : Int   = 0,
     var endHz   : Int   = 2000,
     var numBands: Int   = 128,
-    var ampR    : Float = 1f,
+    var ampR    : Float = 0.4f,
 ) {
-    private val akima  = AkimaSplineInterpolator()
-    private val path   = Path()
-    private var models = Array(0) { GravityModel() }
-    private var psf    : PolynomialSplineFunction? = null
+    private val akima        = AkimaSplineInterpolator()
+    private val path         = Path()
+    private var models       = Array(0) { GravityModel() }
+    private var psf          : PolynomialSplineFunction? = null
+    private var lastActiveMs : Long = 0L
 
     var isActive: Boolean = false
         private set
@@ -23,22 +24,26 @@ class FftWavePainter(
     fun setFftData(fftBytes: ByteArray) {
         var fft = getFftMagnitudeRange(fftBytes, startHz, endHz)
         if (fft.size < 3 || isQuiet(fft)) return
+        lastActiveMs = System.currentTimeMillis()
+        fft = applyFrequencyTilt(fft)
         fft = getMirrorFft(fft)
         if (models.size != fft.size) models = Array(fft.size) { GravityModel() }
         models.forEachIndexed { i, m -> m.update(fft[i].toFloat() * ampR) }
-        rebuildSpline()
         isActive = true
     }
 
     fun tickGravity() {
         if (!isActive) return
+        if (System.currentTimeMillis() - lastActiveMs > 100L && models.isNotEmpty()) {
+            models.forEach { it.update(0f) }
+        }
         var anyActive = false
         models.forEach { m ->
             m.tickDecay()
             if (m.height > 0f) anyActive = true
         }
         isActive = anyActive
-        if (isActive) rebuildSpline()
+        if (isActive) rebuildSpline() else psf = null
     }
 
     private fun rebuildSpline() {

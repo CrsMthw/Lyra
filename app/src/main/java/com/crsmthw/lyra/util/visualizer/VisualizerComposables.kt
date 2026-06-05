@@ -5,9 +5,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ProvidableCompositionLocal
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Modifier
@@ -24,6 +27,10 @@ import kotlinx.coroutines.isActive
 
 val LocalFftData: ProvidableCompositionLocal<StateFlow<ByteArray?>> =
     staticCompositionLocalOf { MutableStateFlow(null) }
+
+// Dynamic (not static) so only FftWaveCanvas readers recompose when color animates
+val LocalVisualizerAccentColor: ProvidableCompositionLocal<Color> =
+    compositionLocalOf { Color.Unspecified }
 
 @Composable
 fun FftWaveCanvas(
@@ -46,10 +53,12 @@ fun FftWaveCanvas(
     }
 
     LaunchedEffect(Unit) {
+        var wasActive = false
         while (isActive) {
             val ms = withFrameMillis { it }
             painter.tickGravity()
-            if (painter.isActive) renderTick.longValue = ms
+            if (painter.isActive || wasActive) renderTick.longValue = ms
+            wasActive = painter.isActive
         }
     }
 
@@ -66,33 +75,39 @@ fun FftCWaveCanvas(
     modifier : Modifier = Modifier,
     color    : Color    = Color.White,
     alpha    : Float    = 0.35f,
+    enabled  : Boolean  = true,
 ) {
-    val fftBytes by LocalFftData.current.collectAsStateWithLifecycle(null)
-    val painter  = remember { FftCWavePainter() }
-    val paint    = remember(color, alpha) {
+    val fftBytes   by LocalFftData.current.collectAsStateWithLifecycle(null)
+    val painter    = remember { FftCWavePainter() }
+    val paint      = remember(color, alpha) {
         AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply {
             this.color = color.copy(alpha = alpha).toArgb()
             style = AndroidPaint.Style.FILL
         }
     }
-    val renderTick = remember { mutableLongStateOf(0L) }
+    val renderTick  = remember { mutableLongStateOf(0L) }
+    val enabledState = rememberUpdatedState(enabled)
 
     LaunchedEffect(fftBytes) {
         fftBytes?.let { painter.setFftData(it) }
     }
 
     LaunchedEffect(Unit) {
+        var wasActive = false
         while (isActive) {
             val ms = withFrameMillis { it }
             painter.tickGravity()
-            if (painter.isActive) renderTick.longValue = ms
+            // Always render when enabled so the static base disc stays visible;
+            // fall back to wasActive pattern when disabled (disc fades out with gravity).
+            if (enabledState.value || painter.isActive || wasActive) renderTick.longValue = ms
+            wasActive = painter.isActive
         }
     }
 
     Spacer(modifier = modifier.drawBehind {
         renderTick.longValue  // subscribe to draw-phase frame ticks
         drawIntoCanvas { canvas ->
-            painter.draw(canvas.nativeCanvas, paint, size.width, size.height)
+            painter.draw(canvas.nativeCanvas, paint, size.width, size.height, enabledState.value)
         }
     })
 }

@@ -5,25 +5,21 @@ import kotlin.math.hypot
 import kotlin.math.sin
 
 class GravityModel(
-    var height: Float = 0f,
-    var dy    : Float = 0f,
-    val ay    : Float = 2f,
+    val attack  : Float = 0.35f,
+    val release : Float = 0.06f,
 ) {
+    var height: Float = 0f
+        private set
+    private var target: Float = 0f
+
     fun update(h: Float) {
-        if (h > height) {
-            height = h
-            dy = 0f
-        }
-        height -= dy
-        dy += ay
-        if (height < 0f) { height = 0f; dy = 0f }
+        target = h
     }
 
     fun tickDecay() {
-        if (height <= 0f) return
-        height -= dy
-        dy += ay
-        if (height < 0f) { height = 0f; dy = 0f }
+        if (target == 0f && height == 0f) return
+        height += (target - height) * if (target > height) attack else release
+        if (height < 0.5f) height = 0f
     }
 }
 
@@ -62,6 +58,12 @@ fun getCircleFft(fft: DoubleArray): DoubleArray {
 
 fun getPowerFft(fft: DoubleArray, param: Double = 100.0) =
     fft.map { it * it / param }.toDoubleArray()
+
+fun applyFrequencyTilt(fft: DoubleArray, tiltFactor: Double = 4.0): DoubleArray {
+    val n = fft.size
+    if (n <= 1) return fft
+    return DoubleArray(n) { i -> fft[i] * (1.0 + tiltFactor * i / (n - 1)) }
+}
 
 fun toCartesian(radius: Float, theta: Float) =
     floatArrayOf(radius * cos(theta), radius * sin(theta))

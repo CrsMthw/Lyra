@@ -80,6 +80,8 @@ import com.crsmthw.lyra.ui.components.TrackRow
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import com.crsmthw.lyra.ui.screens.player.RepeatMode
 import com.crsmthw.lyra.util.toTimeString
+import com.crsmthw.lyra.util.visualizer.FftWaveCanvas
+import com.crsmthw.lyra.util.visualizer.LocalVisualizerAccentColor
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
@@ -227,6 +229,14 @@ private fun SinglePaneLayout(
                             colors = listOf(Color.Transparent, MaterialTheme.colorScheme.background),
                         )
                     )
+            )
+            FftWaveCanvas(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(140.dp)
+                    .align(Alignment.BottomCenter),
+                color    = LocalVisualizerAccentColor.current,
+                alpha    = 0.20f,
             )
         }
 
@@ -681,6 +691,14 @@ private fun TwoPaneLayout(
                 }
             }
         }
+        FftWaveCanvas(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(140.dp)
+                .align(Alignment.BottomCenter),
+            color    = LocalVisualizerAccentColor.current,
+            alpha    = 0.20f,
+        )
     }
 }
 
