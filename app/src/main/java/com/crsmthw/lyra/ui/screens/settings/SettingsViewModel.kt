@@ -7,7 +7,6 @@ import coil3.ImageLoader
 import com.crsmthw.lyra.data.local.EncryptedPrefs
 import com.crsmthw.lyra.data.local.LibraryCache
 import com.crsmthw.lyra.data.repository.SettingsRepository
-import com.crsmthw.lyra.data.repository.SpotifyRepository
 import com.crsmthw.lyra.di.AppContainer
 import com.crsmthw.lyra.util.MosaicGenerator
 import com.crsmthw.lyra.ui.theme.ThemeMode
@@ -17,15 +16,13 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 class SettingsViewModel(
-    private val settingsRepo     : SettingsRepository,
-    private val encryptedPrefs   : EncryptedPrefs,
-    private val imageLoader      : ImageLoader,
-    private val libraryCache     : LibraryCache,
-    private val mosaicGenerator  : MosaicGenerator,
-    private val spotifyRepository: SpotifyRepository,
+    private val settingsRepo    : SettingsRepository,
+    private val encryptedPrefs  : EncryptedPrefs,
+    private val imageLoader     : ImageLoader,
+    private val libraryCache    : LibraryCache,
+    private val mosaicGenerator : MosaicGenerator,
 ) : ViewModel() {
 
     val themeMode: StateFlow<ThemeMode> = settingsRepo.themeMode
@@ -79,31 +76,6 @@ class SettingsViewModel(
         }
     }
 
-    private val _isRefreshingLikedSongs = MutableStateFlow(false)
-    val isRefreshingLikedSongs: StateFlow<Boolean> = _isRefreshingLikedSongs
-
-    fun refreshLikedSongs() {
-        if (_isRefreshingLikedSongs.value) return
-        viewModelScope.launch {
-            _isRefreshingLikedSongs.value = true
-            // Re-fetch page 1 only — clears any stale subsequent pages from cache.
-            // User will paginate through the rest fresh when they scroll.
-            spotifyRepository.getLikedSongs(limit = 50, offset = 0).fold(
-                onSuccess = { resp ->
-                    val tracks = (resp.items ?: emptyList()).mapNotNull { it.track }.filter { it.isPlayable != false }
-                    withContext(Dispatchers.IO) {
-                        libraryCache.saveTrackList(LIKED_SONGS_KEY, resp.total.toString(), tracks)
-                    }
-                },
-                onFailure = { },
-            )
-            _isRefreshingLikedSongs.value = false
-        }
-    }
-
-    companion object {
-        private const val LIKED_SONGS_KEY = "liked_songs"
-    }
 }
 
 class SettingsViewModelFactory(private val container: AppContainer) : ViewModelProvider.Factory {
@@ -115,6 +87,5 @@ class SettingsViewModelFactory(private val container: AppContainer) : ViewModelP
             container.imageLoader,
             container.libraryCache,
             container.mosaicGenerator,
-            container.spotifyRepository,
         ) as T
 }

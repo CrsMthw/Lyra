@@ -3,6 +3,7 @@ package com.crsmthw.lyra.util.visualizer
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
+import androidx.core.graphics.withTranslation
 import org.apache.commons.math3.analysis.interpolation.AkimaSplineInterpolator
 import org.apache.commons.math3.analysis.polynomials.PolynomialSplineFunction
 
@@ -65,10 +66,9 @@ class FftWavePainter(
         path.lineTo(width, 1f)
         path.close()
 
-        canvas.save()
-        canvas.translate(0f, height)
-        canvas.drawPath(path, paint)
-        canvas.restore()
+        canvas.withTranslation(0f, height) {
+            drawPath(path, paint)
+        }
         path.reset()
     }
 }

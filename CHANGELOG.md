@@ -17,6 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Player media menu toggle behavior** — Lyrics and Visualizer items no longer dismiss the menu on tap; menu stays open so both can be toggled without reopening; only the Sleep Timer item dismisses (it opens a dialog)
 - **Player media menu checked state** — leading icon swaps to `Icons.Default.Check` when active (trailing checkmark was removed — it caused the menu width to expand on toggle, shifting the layout); `selectedContainerColor` is `surfaceAccentColor.copy(alpha = 0.15f)` for a subtle album-art-matched tint instead of a solid fill
 
+### Changed
+- **Secure storage** — `EncryptedPrefs` migrated from the deprecated `androidx.security.crypto.EncryptedSharedPreferences` to a direct Android Keystore implementation; each value encrypted with AES-256-GCM (randomised IV, 256-bit key, 128-bit GCM tag) and stored as Base64 in standard `SharedPreferences`; `security-crypto` dependency removed entirely; **note**: stored credentials (Client ID + tokens) are cleared on first launch after this update — re-enter your Spotify Client ID and reconnect once
+- **Dependency updates** — Material3 `1.5.0-alpha20` → `1.5.0-alpha21`; `core-ktx` `1.18.0` → `1.19.0`
+- **`PlayerPanelHost` screen height** now reads from `LocalWindowInfo.containerSize` instead of the deprecated `LocalConfiguration.screenHeightDp`, consistent with the window-size-class API used elsewhere for adaptive layout
+
+### Removed
+- **Liked Songs manual refresh** removed from Settings → Storage — pull-to-refresh on the track list covers this
+
 ### Fixed
 - **Bottom visualizer clipped to right pane on Album Detail and Artist Detail wide screens** — `FftWaveCanvas` was placed inside the right card's `Box`, so it only covered 58% of the screen width; moved to an outer `Box` wrapping the full `Row` so it spans both panes at full width, matching the Library screen layout; right-card scrim now fades to `surface` instead of `background` to match the Card's background color
 - **Shuffle and repeat buttons misaligned with skip buttons** — the dot indicator was placed in a `Column` below the `IconButton`, making the Column's layout height 53dp (48dp button + 5dp dot) vs the 48dp skip buttons; the Row's `verticalAlignment = Alignment.CenterVertically` was centering the Column's midpoint instead of the icon's midpoint, pushing shuffle/repeat ~2.5dp too high; fixed by wrapping in a `Box` instead — the dot overlays with `align(Alignment.BottomCenter).offset(y = (-5).dp)` outside the layout flow so the Box reports 48dp height, matching the skip buttons; applies to both `PlayerScreen` and `PlayerCardContent`

@@ -269,7 +269,7 @@ class PlayerViewModel(
     fun toggleLike() {
         val state    = _uiState.value
         val track    = state.currentTrack ?: return
-        val trackId  = track.id ?: return
+        val trackId  = track.id
         val newLiked = !state.isLiked
         _uiState.update { it.copy(isLiked = newLiked) }
         viewModelScope.launch {

@@ -48,8 +48,6 @@ fun SettingsScreen(
     val dynamicColor    by viewModel.dynamicColor.collectAsStateWithLifecycle()
     val imageCacheBytes        by viewModel.imageCacheBytes.collectAsStateWithLifecycle()
     val libraryCacheBytes      by viewModel.libraryCacheBytes.collectAsStateWithLifecycle()
-    val isRefreshingLikedSongs by viewModel.isRefreshingLikedSongs.collectAsStateWithLifecycle()
-
     var showLogoutDialog  by remember { mutableStateOf(false) }
     var showThemeDialog   by remember { mutableStateOf(false) }
 
@@ -267,21 +265,6 @@ fun SettingsScreen(
                     },
                 )
             }
-
-            ListItem(
-                leadingContent    = { Icon(Icons.Default.Favorite, contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant) },
-                headlineContent   = { Text("Liked Songs") },
-                supportingContent = { Text("Force re-fetch from Spotify",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant) },
-                trailingContent   = {
-                    if (isRefreshingLikedSongs) {
-                        CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
-                    } else {
-                        TextButton(onClick = viewModel::refreshLikedSongs) { Text("Refresh") }
-                    }
-                },
-            )
 
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
 

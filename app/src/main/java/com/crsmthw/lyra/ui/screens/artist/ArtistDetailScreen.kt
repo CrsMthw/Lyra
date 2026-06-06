@@ -229,7 +229,7 @@ fun ArtistDetailScreen(
                             contentPadding = PaddingValues(bottom = 100.dp + navBarBottomDp),
                         ) {
                             item(key = "header") {
-                                ArtistHeader(artist = artist)
+                                ArtistHeader(artist = artist, modifier = Modifier.fillMaxWidth().aspectRatio(1f))
                             }
                             artistContent(
                                 state         = state,
@@ -297,7 +297,7 @@ private fun LazyListScope.artistContent(
 @Composable
 private fun ArtistHeader(
     artist        : SpotifyArtistFull,
-    modifier      : Modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+    modifier      : Modifier = Modifier,
     compact       : Boolean  = false,
     showDivider   : Boolean  = true,
 ) {

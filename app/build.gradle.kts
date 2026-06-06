@@ -63,7 +63,6 @@ dependencies {
 
     // Persistence
     implementation(libs.androidx.datastore.preferences)
-    implementation(libs.androidx.security.crypto)
 
     // Adaptive / Window
     implementation(libs.androidx.window)

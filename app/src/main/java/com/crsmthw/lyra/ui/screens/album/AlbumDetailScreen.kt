@@ -234,7 +234,7 @@ fun AlbumDetailScreen(
                             contentPadding = PaddingValues(bottom = 100.dp + navBarBottomDp),
                         ) {
                             item(key = "header") {
-                                AlbumHeader(album = album, tracks = tracks, onPlayAll = onPlayAll, onOpenArtist = onOpenArtist)
+                                AlbumHeader(album = album, tracks = tracks, modifier = Modifier.fillMaxWidth().aspectRatio(1f), onPlayAll = onPlayAll, onOpenArtist = onOpenArtist)
                             }
                             itemsIndexed(tracks, key = { idx, t -> "track_${t.id}_$idx" }) { idx, track ->
                                 AlbumTrackRow(track = track, onClick = { onPlayTrack(track, idx) })
@@ -270,7 +270,7 @@ fun AlbumDetailScreen(
 private fun AlbumHeader(
     album        : SpotifyAlbumFull,
     tracks       : List<AlbumTrack>,
-    modifier     : Modifier = Modifier.fillMaxWidth().aspectRatio(1f),
+    modifier     : Modifier = Modifier,
     compact      : Boolean  = false,
     showDivider  : Boolean  = true,
     onPlayAll    : () -> Unit,

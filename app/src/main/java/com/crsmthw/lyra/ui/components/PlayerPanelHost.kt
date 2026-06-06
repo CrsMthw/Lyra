@@ -17,8 +17,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.dp
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 
@@ -37,14 +37,14 @@ fun PlayerPanelHost(
     navAnimatedContentScope : AnimatedContentScope? = null,
     content                 : @Composable BoxScope.(onRequestPlayer: () -> Unit) -> Unit,
 ) {
-    val config         = LocalConfiguration.current
+    val density        = LocalDensity.current
+    val screenHeightDp = with(density) { LocalWindowInfo.current.containerSize.height.toDp() }
     val isWideScreen   = currentWindowAdaptiveInfo().windowSizeClass.isWidthAtLeastBreakpoint(600)
-    val isShortScreen  = config.screenHeightDp < 500
+    val isShortScreen  = screenHeightDp < 500.dp
     val canShowPanel   = isWideScreen && !isShortScreen
-    val maxPanelHeight = (config.screenHeightDp * 0.8f).dp
+    val maxPanelHeight = screenHeightDp * 0.8f
 
     var showPlayerPanel by rememberSaveable { mutableStateOf(false) }
-    val density  = LocalDensity.current
 
     // Dismiss panel when folding — canShowPanel goes false on narrow screens
     LaunchedEffect(canShowPanel) {

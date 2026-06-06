@@ -3,6 +3,7 @@ package com.crsmthw.lyra.util.visualizer
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
+import androidx.core.graphics.withTranslation
 import org.apache.commons.math3.analysis.interpolation.AkimaSplineInterpolator
 import org.apache.commons.math3.analysis.polynomials.PolynomialSplineFunction
 import kotlin.math.PI
@@ -62,23 +63,20 @@ class FftCWavePainter(
         val radius = min(width, height) / 2f * radiusR
         val angle  = (2.0 * PI / numBands).toFloat()
 
-        canvas.save()
-        canvas.translate(width / 2f, height / 2f)
-
-        val currentPsf = psf
-        if (currentPsf != null) {
-            for (i in 0..numBands) {
-                val v  = currentPsf.value(i.toDouble()).toFloat().coerceAtLeast(0f)
-                val pt = toCartesian(radius + v, angle * i)
-                if (i == 0) path.moveTo(pt[0], pt[1]) else path.lineTo(pt[0], pt[1])
+        canvas.withTranslation(width / 2f, height / 2f) {
+            val currentPsf = psf
+            if (currentPsf != null) {
+                for (i in 0..numBands) {
+                    val v  = currentPsf.value(i.toDouble()).toFloat().coerceAtLeast(0f)
+                    val pt = toCartesian(radius + v, angle * i)
+                    if (i == 0) path.moveTo(pt[0], pt[1]) else path.lineTo(pt[0], pt[1])
+                }
+                path.close()
+                drawPath(path, paint)
+                path.reset()
+            } else if (enabled) {
+                drawCircle(0f, 0f, radius, paint)
             }
-            path.close()
-            canvas.drawPath(path, paint)
-            path.reset()
-        } else if (enabled) {
-            canvas.drawCircle(0f, 0f, radius, paint)
         }
-
-        canvas.restore()
     }
 }

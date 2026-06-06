@@ -43,12 +43,12 @@ import com.crsmthw.lyra.data.remote.model.SpotifyTrack
 fun MiniPlayer(
     currentTrack          : SpotifyTrack?,
     isPlaying             : Boolean,
-    isWakingUp            : Boolean = false,
     progress              : Float,
     onPlayPause           : () -> Unit,
     onSkipNext            : () -> Unit,
     onExpand              : () -> Unit,
     modifier              : Modifier = Modifier,
+    isWakingUp            : Boolean = false,
     visible               : Boolean = true,
     accentColor             : Color = Color.Unspecified,
     surfaceAccentColor      : Color = Color.Unspecified,
