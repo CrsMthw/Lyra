@@ -44,6 +44,7 @@ google-services.json
 # Claude Code
 CLAUDE.md
 .claude/
+docs/
 
 # macOS
 .DS_Store

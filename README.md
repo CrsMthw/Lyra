@@ -167,6 +167,14 @@ app/src/main/java/com/crsmthw/lyra/
 
 ---
 
+## Credits
+
+- **Lyrics** — [LRCLIB](https://github.com/tranxuanthang/lrclib), a free and open-source lyrics API
+- **Visualizer** — visual style inspired by [Nier-Visualizer](https://github.com/bogerchan/Nier-Visualizer) and [NextGenVisualizer](https://github.com/jeffshee/NextGenVisualizer)
+- **App icon** — designed by Shubbu
+
+---
+
 ## License
 
 MIT

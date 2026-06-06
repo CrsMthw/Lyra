@@ -99,6 +99,7 @@ fun PlayerScreen(
     var showSleepTimerDialog by remember { mutableStateOf(false) }
     var showPlaylistPicker   by rememberSaveable { mutableStateOf(false) }
     var showDevicePicker     by remember { mutableStateOf(false) }
+    var showMediaMenu        by remember { mutableStateOf(false) }
     val isLandscape = LocalConfiguration.current.let { it.screenWidthDp > it.screenHeightDp }
 
     // ── Dynamic color extraction ──────────────────────────────────────────────
@@ -166,6 +167,9 @@ fun PlayerScreen(
         animationSpec = tween(800),
         label         = "gradientTop",
     )
+    val fabIconColor = if (
+        0.299f * surfaceAccentColor.red + 0.587f * surfaceAccentColor.green + 0.114f * surfaceAccentColor.blue < 0.5f
+    ) Color.White else Color.Black
 
     // ── Art transition state ──────────────────────────────────────────────────
     val scope          = rememberCoroutineScope()
@@ -278,30 +282,75 @@ fun PlayerScreen(
                                 tint = onAccentColor)
                         }
                     }
-                    IconButton(onClick = { showSleepTimerDialog = true }) {
-                        if (state.sleepTimerMinutes > 0) {
-                            val timerProgress = state.sleepTimerMinutes.toFloat() /
-                                state.sleepTimerTotalMinutes.coerceAtLeast(1).toFloat()
-                            Box(
-                                modifier         = Modifier.size(32.dp),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                CircularProgressIndicator(
-                                    progress    = { timerProgress },
-                                    modifier    = Modifier.fillMaxSize(),
-                                    strokeWidth = 2.5.dp,
-                                    color       = onAccentColor,
-                                    trackColor  = onAccentColor.copy(alpha = 0.2f),
+                    Box {
+                        IconButton(onClick = { showMediaMenu = true }) {
+                            Icon(Icons.Default.Tune,
+                                contentDescription = stringResource(R.string.player_options),
+                                tint = onAccentColor)
+                        }
+                        DropdownMenu(
+                            expanded         = showMediaMenu,
+                            onDismissRequest  = { showMediaMenu = false },
+                            containerColor   = Color.Transparent,
+                            shadowElevation  = 0.dp,
+                        ) {
+                            val lyricsAvailable = state.lyricsState is LyricsState.Synced || state.lyricsState is LyricsState.Plain
+                            val lyricsShowing   = state.lyricsMode && lyricsAvailable
+                            val lyricsLoading   = state.lyricsState is LyricsState.Loading
+                            DropdownMenuGroup(shapes = MenuDefaults.groupShapes()) {
+                                DropdownMenuItem(
+                                    checked       = lyricsShowing,
+                                    onCheckedChange = {
+                                        viewModel.toggleLyricsMode()
+                                    },
+                                    text          = { Text(stringResource(R.string.player_lyrics)) },
+                                    shapes        = MenuDefaults.itemShape(0, 2),
+                                    leadingIcon   = {
+                                        Icon(if (lyricsShowing) Icons.Default.Check else Icons.Default.Lyrics, contentDescription = null)
+                                    },
+                                    supportingText = if (lyricsLoading) {
+                                        { Text(stringResource(R.string.player_lyrics_searching)) }
+                                    } else null,
+                                    enabled       = lyricsAvailable,
+                                    colors        = MenuDefaults.selectableItemColors(
+                                        selectedContainerColor = surfaceAccentColor.copy(alpha = 0.15f),
+                                    ),
                                 )
-                                Text(
-                                    text  = "${state.sleepTimerMinutes}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = onAccentColor,
+                                DropdownMenuItem(
+                                    checked       = state.visualizerEnabled,
+                                    onCheckedChange = { enable ->
+                                        if (enable) {
+                                            val hasPermission = ContextCompat.checkSelfPermission(
+                                                context, Manifest.permission.RECORD_AUDIO
+                                            ) == PackageManager.PERMISSION_GRANTED
+                                            if (hasPermission) viewModel.onRecordAudioGranted()
+                                            else recordAudioLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                        } else {
+                                            viewModel.setVisualizerEnabled(false)
+                                        }
+                                    },
+                                    text          = { Text(stringResource(R.string.player_visualizer)) },
+                                    shapes        = MenuDefaults.itemShape(1, 2),
+                                    leadingIcon   = {
+                                        Icon(if (state.visualizerEnabled) Icons.Default.Check else Icons.Default.Equalizer, contentDescription = null)
+                                    },
+                                    colors        = MenuDefaults.selectableItemColors(
+                                        selectedContainerColor = surfaceAccentColor.copy(alpha = 0.15f),
+                                    ),
                                 )
                             }
-                        } else {
-                            Icon(Icons.Default.Timer, contentDescription = stringResource(R.string.player_sleep_timer),
-                                tint = onAccentColor)
+                            Spacer(Modifier.height(MenuDefaults.GroupSpacing))
+                            DropdownMenuGroup(shapes = MenuDefaults.groupShapes()) {
+                                DropdownMenuItem(
+                                    onClick        = { showMediaMenu = false; showSleepTimerDialog = true },
+                                    text           = { Text(stringResource(R.string.player_sleep_timer)) },
+                                    shape          = MenuDefaults.standaloneItemShape,
+                                    leadingIcon    = { Icon(Icons.Default.Timer, contentDescription = null) },
+                                    supportingText = if (state.sleepTimerMinutes > 0) {
+                                        { Text(stringResource(R.string.player_timer_remaining, state.sleepTimerMinutes)) }
+                                    } else null,
+                                )
+                            }
                         }
                     }
                 },
@@ -338,7 +387,6 @@ fun PlayerScreen(
                         }
                     } else Modifier
 
-                    val artGapDp = (side - displaySide) / 2
                     val lyricsContentMod = Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp))
 
                     Box(Modifier.size(side)) {
@@ -420,26 +468,6 @@ fun PlayerScreen(
                                 }
                             }
                         }
-
-                        ArtFabMenu(
-                            lyricsState        = state.lyricsState,
-                            lyricsMode         = state.lyricsMode,
-                            visualizerEnabled  = state.visualizerEnabled,
-                            surfaceAccentColor = surfaceAccentColor,
-                            onToggleLyrics     = viewModel::toggleLyricsMode,
-                            onToggleVisualizer = {
-                                if (state.visualizerEnabled) {
-                                    viewModel.setVisualizerEnabled(false)
-                                } else {
-                                    val hasPermission = ContextCompat.checkSelfPermission(
-                                        context, Manifest.permission.RECORD_AUDIO
-                                    ) == PackageManager.PERMISSION_GRANTED
-                                    if (hasPermission) viewModel.onRecordAudioGranted()
-                                    else recordAudioLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                                }
-                            },
-                            modifier           = Modifier.align(Alignment.BottomEnd).offset(y = 32.dp - artGapDp),
-                        )
                     }
                 }
 
@@ -520,7 +548,6 @@ fun PlayerScreen(
                         }
                     } else Modifier
 
-                    val artGapDp = (side - displaySide) / 2
                     val lyricsContentMod = Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp))
 
                     Box(Modifier.size(side)) {
@@ -602,26 +629,6 @@ fun PlayerScreen(
                                 }
                             }
                         }
-
-                        ArtFabMenu(
-                            lyricsState        = state.lyricsState,
-                            lyricsMode         = state.lyricsMode,
-                            visualizerEnabled  = state.visualizerEnabled,
-                            surfaceAccentColor = surfaceAccentColor,
-                            onToggleLyrics     = viewModel::toggleLyricsMode,
-                            onToggleVisualizer = {
-                                if (state.visualizerEnabled) {
-                                    viewModel.setVisualizerEnabled(false)
-                                } else {
-                                    val hasPermission = ContextCompat.checkSelfPermission(
-                                        context, Manifest.permission.RECORD_AUDIO
-                                    ) == PackageManager.PERMISSION_GRANTED
-                                    if (hasPermission) viewModel.onRecordAudioGranted()
-                                    else recordAudioLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                                }
-                            },
-                            modifier           = Modifier.align(Alignment.BottomEnd).offset(y = 32.dp - artGapDp),
-                        )
                     }
                 }
 
@@ -1054,105 +1061,6 @@ private fun PlayerControls(
     }
 }
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
-@Composable
-private fun ArtFabMenu(
-    lyricsState        : LyricsState,
-    lyricsMode         : Boolean,
-    visualizerEnabled  : Boolean,
-    surfaceAccentColor : Color,
-    onToggleLyrics     : () -> Unit,
-    onToggleVisualizer : () -> Unit,
-    modifier           : Modifier = Modifier,
-) {
-    var expanded by remember { mutableStateOf(false) }
-    val lyricsAvailable  = lyricsState is LyricsState.Synced || lyricsState is LyricsState.Plain
-    val lyricsShowing    = lyricsMode && lyricsAvailable
-    val lyricsNone       = lyricsState is LyricsState.None
-    val lyricsLoading    = lyricsState is LyricsState.Loading
-    val lyricsLabel      = stringResource(if (lyricsNone) R.string.player_no_lyrics else R.string.player_lyrics)
-    val visualizerLabel  = stringResource(R.string.player_visualizer)
-    val surfaceContainer = MaterialTheme.colorScheme.surfaceContainerHigh
-    val onSurface        = MaterialTheme.colorScheme.onSurface
-    val outline          = MaterialTheme.colorScheme.outline
-    // Derive icon color from surfaceAccentColor's own luminance — onAccentColor uses the dominant
-    // color which can diverge from the surface-accent swatch used for the FAB container.
-    val fabIconColor = if (
-        0.299f * surfaceAccentColor.red + 0.587f * surfaceAccentColor.green + 0.114f * surfaceAccentColor.blue < 0.5f
-    ) Color.White else Color.Black
-
-    FloatingActionButtonMenu(
-        expanded = expanded,
-        modifier = modifier,
-        button   = {
-            ToggleFloatingActionButton(
-                checked               = expanded,
-                onCheckedChange       = { expanded = it },
-                containerColor        = { surfaceAccentColor },
-                containerSize         = ToggleFloatingActionButtonDefaults.containerSize(initialSize = 48.dp),
-                containerCornerRadius = ToggleFloatingActionButtonDefaults.containerCornerRadius(initialSize = 24.dp),
-            ) {
-                val scope = this
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector        = Icons.Default.GraphicEq,
-                        contentDescription = null,
-                        tint               = fabIconColor,
-                        modifier           = Modifier.size(24.dp).graphicsLayer { alpha = 1f - scope.checkedProgress },
-                    )
-                    Icon(
-                        imageVector        = Icons.Default.Close,
-                        contentDescription = null,
-                        tint               = fabIconColor,
-                        modifier           = Modifier.size(24.dp).graphicsLayer { alpha = scope.checkedProgress },
-                    )
-                }
-            }
-        },
-    ) {
-        // Visualizer — toggles on/off; requests RECORD_AUDIO if not yet granted
-        FloatingActionButtonMenuItem(
-            onClick        = {
-                onToggleVisualizer()
-                expanded = false
-            },
-            containerColor = if (visualizerEnabled) surfaceAccentColor else surfaceContainer,
-            contentColor   = if (visualizerEnabled) fabIconColor else surfaceAccentColor,
-            icon           = { Icon(Icons.Default.Equalizer, contentDescription = null, modifier = Modifier.size(24.dp)) },
-            text           = { Text(visualizerLabel) },
-        )
-        // Lyrics — three states: loading, none, available
-        FloatingActionButtonMenuItem(
-            onClick        = {
-                if (lyricsAvailable) {
-                    onToggleLyrics()
-                    expanded = false
-                }
-            },
-            containerColor = if (lyricsShowing) surfaceAccentColor else surfaceContainer,
-            contentColor   = when {
-                lyricsShowing  -> fabIconColor
-                lyricsNone     -> outline
-                else           -> surfaceAccentColor
-            },
-            icon           = {
-                if (lyricsLoading) {
-                    LoadingIndicator(
-                        modifier = Modifier.size(24.dp),
-                        color    = surfaceAccentColor,
-                    )
-                } else {
-                    Icon(
-                        imageVector        = Icons.Default.Lyrics,
-                        contentDescription = null,
-                        modifier           = Modifier.size(24.dp),
-                    )
-                }
-            },
-            text           = { Text(lyricsLabel) },
-        )
-    }
-}
 
 @Composable
 private fun SleepTimerDialog(
