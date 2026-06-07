@@ -44,8 +44,14 @@ class LyraForegroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_CANCEL_TIMER) {
-            (application as LyraApplication).container.playerStateManager.setSleepTimer(0)
+        val player = (application as LyraApplication).container.playerStateManager
+        when (intent?.action) {
+            ACTION_CANCEL_TIMER -> player.setSleepTimer(0)
+            ACTION_PLAY_PAUSE   -> player.playPause()
+            ACTION_NEXT         -> player.skipNext()
+            ACTION_PREV         -> player.skipPrevious()
+            ACTION_SHUFFLE      -> player.toggleShuffle()
+            ACTION_REPEAT       -> player.cycleRepeat()
         }
         return START_STICKY
     }
@@ -214,6 +220,11 @@ class LyraForegroundService : Service() {
         const val NOTIFICATION_ID             = 1
         const val SLEEP_TIMER_NOTIFICATION_ID = 2
         const val ACTION_CANCEL_TIMER         = "com.crsmthw.lyra.CANCEL_TIMER"
+        const val ACTION_PLAY_PAUSE           = "com.crsmthw.lyra.PLAY_PAUSE"
+        const val ACTION_NEXT                 = "com.crsmthw.lyra.NEXT"
+        const val ACTION_PREV                 = "com.crsmthw.lyra.PREV"
+        const val ACTION_SHUFFLE              = "com.crsmthw.lyra.SHUFFLE"
+        const val ACTION_REPEAT               = "com.crsmthw.lyra.REPEAT"
 
         fun createChannels(context: Context) {
             val nm = context.getSystemService(NotificationManager::class.java)

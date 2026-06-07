@@ -255,6 +255,13 @@ data class QueueResponse(
     @SerializedName("queue")             val queue            : List<SpotifyTrack> = emptyList(),
 )
 
+// ── Create playlist request ───────────────────────────────────────────────────
+data class CreatePlaylistRequest(
+    @SerializedName("name")        val name       : String,
+    @SerializedName("description") val description: String  = "",
+    @SerializedName("public")      val isPublic   : Boolean = false,
+)
+
 // ── Add / remove playlist items requests ─────────────────────────────────────
 data class AddTracksRequest(
     @SerializedName("uris") val uris: List<String>,

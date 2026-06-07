@@ -42,6 +42,9 @@ interface SpotifyApiService {
         @Query("offset") offset: Int = 0,
     ): PlaylistTracksResponse
 
+    @POST("me/playlists")
+    suspend fun createPlaylist(@Body body: CreatePlaylistRequest): SpotifyPlaylist
+
     @POST("playlists/{id}/items")
     suspend fun addTracksToPlaylist(
         @Path("id") id  : String,

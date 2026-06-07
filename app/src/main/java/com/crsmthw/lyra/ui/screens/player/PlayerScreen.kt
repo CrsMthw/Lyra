@@ -690,6 +690,7 @@ fun PlayerScreen(
         AddToPlaylistSheet(
             pickerState = pickerState,
             onSelect    = viewModel::togglePlaylistTrack,
+            onCreateNew = viewModel::createPlaylist,
             onDismiss   = { showPlaylistPicker = false },
         )
     }

@@ -104,4 +104,8 @@ class AppContainer(context: Context) {
 
     // ── Audio visualizer ─────────────────────────────────────────────────────
     val visualizerManager = VisualizerManager(context)
+
+    // ── Home-screen widget ────────────────────────────────────────────────────
+    val nowPlayingWidgetUpdater =
+        com.crsmthw.lyra.widget.NowPlayingWidgetUpdater(context, imageLoader, dataStore)
 }

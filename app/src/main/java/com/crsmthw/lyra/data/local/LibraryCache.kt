@@ -70,6 +70,14 @@ class LibraryCache(context: Context) {
         }
     }
 
+    fun prependPlaylist(playlist: SpotifyPlaylist) {
+        synchronized(lock) {
+            val current = loadLocked() ?: return
+            if (current.playlists.any { it.id == playlist.id }) return
+            saveLocked(current.copy(playlists = listOf(playlist) + current.playlists))
+        }
+    }
+
     fun clear() = synchronized(lock) { file.delete() }
 
     val sizeBytes: Long get() = if (file.exists()) file.length() else 0L

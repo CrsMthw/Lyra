@@ -41,6 +41,8 @@ data class PlaylistPickerState(
     val isLoading              : Boolean               = false,
     val containingPlaylistIds  : Set<String>           = emptySet(),
     val addResult              : AddToPlaylistResult?  = null,
+    val isCreatingPlaylist     : Boolean               = false,
+    val createPlaylistError    : String?               = null,
 )
 
 data class PlayerUiState(
@@ -362,6 +364,43 @@ class PlayerViewModel(
     private fun errorResult(e: Throwable): AddToPlaylistResult =
         if (e.message?.contains("403") == true) AddToPlaylistResult.NeedsReconnect
         else AddToPlaylistResult.Error(e.message)
+
+    fun createPlaylist(name: String, description: String, isPublic: Boolean) {
+        val track = _uiState.value.currentTrack ?: return
+        _pickerState.update { it.copy(isCreatingPlaylist = true, createPlaylistError = null) }
+        viewModelScope.launch {
+            repository.createPlaylist(name, description, isPublic).fold(
+                onSuccess = { playlist ->
+                    repository.addTrackToPlaylist(playlist.id, track.uri).fold(
+                        onSuccess = {
+                            libraryCache.prependPlaylist(playlist)
+                            _pickerState.update { s ->
+                                s.copy(
+                                    isCreatingPlaylist    = false,
+                                    playlists             = listOf(playlist) + s.playlists,
+                                    containingPlaylistIds = s.containingPlaylistIds + playlist.id,
+                                    addResult             = AddToPlaylistResult.Added(playlist.name),
+                                )
+                            }
+                        },
+                        onFailure = {
+                            libraryCache.prependPlaylist(playlist)
+                            _pickerState.update { s ->
+                                s.copy(
+                                    isCreatingPlaylist = false,
+                                    playlists          = listOf(playlist) + s.playlists,
+                                    addResult          = AddToPlaylistResult.Added(playlist.name),
+                                )
+                            }
+                        },
+                    )
+                },
+                onFailure = { e ->
+                    _pickerState.update { it.copy(isCreatingPlaylist = false, createPlaylistError = e.message) }
+                },
+            )
+        }
+    }
 
     fun clearPickerResult() {
         _pickerState.update { it.copy(addResult = null) }

@@ -5,17 +5,28 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
 import coil3.compose.AsyncImage
 import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.remote.model.SpotifyPlaylist
@@ -24,40 +35,127 @@ import com.crsmthw.lyra.ui.screens.player.PlaylistPickerState
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun AddToPlaylistSheet(
-    pickerState: PlaylistPickerState,
-    onSelect   : (SpotifyPlaylist) -> Unit,
-    onDismiss  : () -> Unit,
+    pickerState : PlaylistPickerState,
+    onSelect    : (SpotifyPlaylist) -> Unit,
+    onCreateNew : (name: String, description: String, isPublic: Boolean) -> Unit,
+    onDismiss   : () -> Unit,
 ) {
+    var showCreateDialog by remember { mutableStateOf(false) }
+    var newName          by remember { mutableStateOf("") }
+    var newDescription   by remember { mutableStateOf("") }
+    var newIsPublic      by remember { mutableStateOf(false) }
+    val nameFocusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(pickerState.addResult) {
+        if (showCreateDialog && pickerState.addResult != null) {
+            showCreateDialog = false
+        }
+    }
+
     ModalBottomSheet(onDismissRequest = onDismiss) {
-        Text(
-            text     = stringResource(R.string.player_add_to_playlist_title),
-            style    = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+        PlaylistList(
+            pickerState = pickerState,
+            onSelect    = onSelect,
+            onCreateNew = {
+                newName          = ""
+                newDescription   = ""
+                newIsPublic      = false
+                showCreateDialog = true
+            },
         )
-        HorizontalDivider(modifier = Modifier.padding(top = 8.dp))
-        when {
-            pickerState.isLoading -> {
-                Box(
-                    modifier         = Modifier.fillMaxWidth().height(200.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    ContainedLoadingIndicator()
-                }
+    }
+
+    if (showCreateDialog) {
+        BasicAlertDialog(
+            onDismissRequest = { if (!pickerState.isCreatingPlaylist) showCreateDialog = false },
+            properties       = DialogProperties(decorFitsSystemWindows = false),
+        ) {
+            Surface(
+                shape          = AlertDialogDefaults.shape,
+                color          = AlertDialogDefaults.containerColor,
+                tonalElevation = AlertDialogDefaults.TonalElevation,
+                modifier       = Modifier.fillMaxWidth().imePadding(),
+            ) {
+                CreateForm(
+                    name                = newName,
+                    onNameChange        = { newName = it },
+                    description         = newDescription,
+                    onDescriptionChange = { newDescription = it },
+                    isPublic            = newIsPublic,
+                    onIsPublicChange    = { newIsPublic = it },
+                    isCreating          = pickerState.isCreatingPlaylist,
+                    error               = pickerState.createPlaylistError,
+                    nameFocusRequester  = nameFocusRequester,
+                    onBack              = { showCreateDialog = false },
+                    onCreate            = { onCreateNew(newName.trim(), newDescription.trim(), newIsPublic) },
+                )
             }
-            pickerState.playlists.isEmpty() -> {
-                Box(
-                    modifier         = Modifier.fillMaxWidth().height(200.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text  = stringResource(R.string.player_add_to_playlist_empty),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun PlaylistList(
+    pickerState : PlaylistPickerState,
+    onSelect    : (SpotifyPlaylist) -> Unit,
+    onCreateNew : () -> Unit,
+) {
+    Text(
+        text     = stringResource(R.string.player_add_to_playlist_title),
+        style    = MaterialTheme.typography.titleMedium,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+    )
+    HorizontalDivider(modifier = Modifier.padding(top = 8.dp))
+    when {
+        pickerState.isLoading -> {
+            Box(
+                modifier         = Modifier.fillMaxWidth().height(200.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                ContainedLoadingIndicator()
+            }
+        }
+        else -> {
+            LazyColumn {
+                item {
+                    ListItem(
+                        leadingContent  = {
+                            Box(
+                                modifier         = Modifier
+                                    .size(44.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(MaterialTheme.colorScheme.primaryContainer),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    imageVector        = Icons.Default.Add,
+                                    contentDescription = null,
+                                    tint               = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier           = Modifier.size(22.dp),
+                                )
+                            }
+                        },
+                        headlineContent = {
+                            Text(stringResource(R.string.create_playlist_title))
+                        },
+                        modifier = Modifier.clickable(onClick = onCreateNew),
                     )
                 }
-            }
-            else -> {
-                LazyColumn {
+                if (pickerState.playlists.isEmpty()) {
+                    item {
+                        Box(
+                            modifier         = Modifier.fillMaxWidth().height(160.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text  = stringResource(R.string.player_add_to_playlist_empty),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                } else {
                     items(pickerState.playlists, key = { it.id }) { playlist ->
                         val isChecked = playlist.id in pickerState.containingPlaylistIds
                         ListItem(
@@ -78,10 +176,131 @@ fun AddToPlaylistSheet(
                             modifier = Modifier.clickable { onSelect(playlist) },
                         )
                     }
-                    item { Spacer(Modifier.navigationBarsPadding()) }
                 }
+                item { Spacer(Modifier.navigationBarsPadding()) }
             }
         }
+    }
+}
+
+@Composable
+private fun CreateForm(
+    name               : String,
+    onNameChange       : (String) -> Unit,
+    description        : String,
+    onDescriptionChange: (String) -> Unit,
+    isPublic           : Boolean,
+    onIsPublicChange   : (Boolean) -> Unit,
+    isCreating         : Boolean,
+    error              : String?,
+    nameFocusRequester : FocusRequester,
+    onBack             : () -> Unit,
+    onCreate           : () -> Unit,
+) {
+    LaunchedEffect(Unit) {
+        nameFocusRequester.requestFocus()
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier          = Modifier.fillMaxWidth(),
+        ) {
+            IconButton(onClick = onBack, enabled = !isCreating) {
+                Icon(
+                    imageVector        = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Back",
+                )
+            }
+            Text(
+                text  = stringResource(R.string.create_playlist_title),
+                style = MaterialTheme.typography.titleMedium,
+            )
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        OutlinedTextField(
+            value         = name,
+            onValueChange = onNameChange,
+            label         = { Text(stringResource(R.string.create_playlist_name_label)) },
+            placeholder   = { Text(stringResource(R.string.create_playlist_name_placeholder)) },
+            singleLine    = true,
+            enabled       = !isCreating,
+            keyboardOptions = KeyboardOptions(
+                capitalization = KeyboardCapitalization.Sentences,
+                imeAction      = ImeAction.Next,
+            ),
+            modifier      = Modifier
+                .fillMaxWidth()
+                .focusRequester(nameFocusRequester),
+        )
+
+        Spacer(Modifier.height(12.dp))
+
+        OutlinedTextField(
+            value         = description,
+            onValueChange = onDescriptionChange,
+            label         = { Text(stringResource(R.string.create_playlist_description_label)) },
+            placeholder   = { Text(stringResource(R.string.create_playlist_description_placeholder)) },
+            singleLine    = true,
+            enabled       = !isCreating,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { if (name.isNotBlank() && !isCreating) onCreate() }),
+            modifier      = Modifier.fillMaxWidth(),
+        )
+
+        Spacer(Modifier.height(8.dp))
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier          = Modifier.fillMaxWidth(),
+        ) {
+            Text(
+                text     = stringResource(R.string.create_playlist_public_label),
+                style    = MaterialTheme.typography.bodyLarge,
+                modifier = Modifier.weight(1f),
+            )
+            Switch(
+                checked         = isPublic,
+                onCheckedChange = onIsPublicChange,
+                enabled         = !isCreating,
+            )
+        }
+
+        if (error != null) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text  = stringResource(R.string.create_playlist_error),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        Button(
+            onClick  = onCreate,
+            enabled  = name.isNotBlank() && !isCreating,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            if (isCreating) {
+                CircularProgressIndicator(
+                    modifier    = Modifier.size(18.dp),
+                    strokeWidth = 2.dp,
+                    color       = MaterialTheme.colorScheme.onPrimary,
+                )
+            } else {
+                Text(stringResource(R.string.create_playlist_button))
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
     }
 }
 
@@ -112,4 +331,3 @@ private fun PlaylistThumbnail(url: String) {
         }
     }
 }
-

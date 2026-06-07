@@ -23,8 +23,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
@@ -43,9 +45,10 @@ fun SettingsScreen(
     onBack   : () -> Unit,
     onLogout : () -> Unit,
 ) {
-    val themeMode       by viewModel.themeMode.collectAsStateWithLifecycle()
-    val amoledBlack     by viewModel.amoledBlack.collectAsStateWithLifecycle()
-    val dynamicColor    by viewModel.dynamicColor.collectAsStateWithLifecycle()
+    val themeMode           by viewModel.themeMode.collectAsStateWithLifecycle()
+    val amoledBlack         by viewModel.amoledBlack.collectAsStateWithLifecycle()
+    val dynamicColor        by viewModel.dynamicColor.collectAsStateWithLifecycle()
+    val visualizerEnabled   by viewModel.visualizerEnabled.collectAsStateWithLifecycle()
     val imageCacheBytes        by viewModel.imageCacheBytes.collectAsStateWithLifecycle()
     val libraryCacheBytes      by viewModel.libraryCacheBytes.collectAsStateWithLifecycle()
     var showLogoutDialog  by remember { mutableStateOf(false) }
@@ -66,14 +69,21 @@ fun SettingsScreen(
             )
         },
     ) { paddingValues ->
+        val density        = LocalDensity.current
+        val navBarBottomDp = with(density) { WindowInsets.navigationBars.getBottom(this).toDp() }
+        val scrimHeight    = navBarBottomDp + 48.dp
+        val background     = MaterialTheme.colorScheme.background
 
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(paddingValues)
-                .navigationBarsPadding()
-                .verticalScroll(rememberScrollState()),
+                .padding(paddingValues),
         ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState()),
+            ) {
 
             // ── Spotify ───────────────────────────────────────────────────────
             SettingsSectionHeader(stringResource(R.string.settings_spotify))
@@ -117,6 +127,19 @@ fun SettingsScreen(
                 subtitle= stringResource(R.string.settings_dynamic_color_desc),
                 checked = dynamicColor,
                 onCheckedChange = viewModel::setDynamicColor,
+            )
+
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+
+            // ── Player ────────────────────────────────────────────────────────
+            SettingsSectionHeader(stringResource(R.string.settings_player))
+
+            SettingsToggleItem(
+                icon            = Icons.Default.Equalizer,
+                title           = stringResource(R.string.player_visualizer),
+                subtitle        = stringResource(R.string.settings_visualizer_desc),
+                checked         = visualizerEnabled,
+                onCheckedChange = viewModel::setVisualizerEnabled,
             )
 
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
@@ -282,7 +305,16 @@ fun SettingsScreen(
             // ── About ─────────────────────────────────────────────────────────────
             AboutSection()
 
-            Spacer(Modifier.height(32.dp))
+            Spacer(Modifier.height(scrimHeight))
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(scrimHeight)
+                    .align(Alignment.BottomCenter)
+                    .background(Brush.verticalGradient(listOf(Color.Transparent, background)))
+            )
         }
     }
 

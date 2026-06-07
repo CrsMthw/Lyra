@@ -86,6 +86,10 @@ dependencies {
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)
 
+    // Home-screen widgets (Glance + Material 3)
+    implementation(libs.glance.appwidget)
+    implementation(libs.glance.material3)
+
     // FFT interpolation for audio visualizer
     implementation(libs.commons.math3)
 

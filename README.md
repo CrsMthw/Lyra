@@ -10,8 +10,11 @@
 
 - Library browser with playlist and liked songs support
 - Full player with seek, shuffle, repeat, sleep timer, and queue-aware playback
-- Add to / remove from playlists directly from the player
-- **Spotify Connect device switching** — transfer playback to any device on your account; "This device" card wakes Spotify locally when it isn't running
+- Synchronized lyrics — time-synced, auto-scrolling lyrics on the player screen (via LRCLIB), with a plain-text fallback when synced lyrics aren't available
+- Audio visualizer — optional reactive visualizer that pulses behind the album art and along the bottom of other screens, coloured from the current album art
+- Add to / remove from playlists directly from the player, or create a new playlist on the spot
+- Spotify Connect device switching — transfer playback to any device on your account; "This device" card wakes Spotify locally when it isn't running
+- Home-screen widget — resizable Now Playing widget with playback controls; its layout and artwork scale to the size you choose, and its colours are drawn from the current album art
 - Album detail screen — full track list, play button, label/copyright footer
 - Artist detail screen — discography grouped by Albums / Singles / Compilations
 - Search for tracks, albums, and artists
@@ -19,7 +22,7 @@
 - Sleep timer with Live notification countdown on Android 16+
 - Pull-to-refresh on both the library and track lists
 - Adaptive two-pane layout for foldables and tablets
-- Material You dynamic colour + AMOLED black mode
+- Material 3 Expressive design, with Material You dynamic colour and AMOLED black mode
 - Tokens stored encrypted via AES-256-GCM (Android Keystore)
 
 ---
@@ -132,14 +135,15 @@ app/src/main/java/com/crsmthw/lyra/
 │   │   └── model/   Spotify API data models
 │   └── repository/  SpotifyRepository, SettingsRepository
 ├── di/              AppContainer — manual DI, no Hilt
-├── service/         LyraForegroundService (Now Playing + sleep timer notifications)
+├── service/         LyraForegroundService (Now Playing + sleep timer notifications, widget controls)
 ├── ui/
 │   ├── components/  MiniPlayer, PlayerCardContent, PlayerPopOutPanel, PlayerPanelHost,
 │   │                TrackRow, PlaylistCard, AddToPlaylistSheet, DevicePickerSheet
 │   ├── navigation/  LyraNavGraph, Screen
 │   ├── screens/     auth / library / player / search / settings / album / artist / queue
 │   └── theme/       Material You + static colour schemes, AMOLED overlay
-└── util/            Extensions
+├── util/            Extensions
+└── widget/          Home-screen widget (Jetpack Glance)
 ```
 
 **Auth**: PKCE via AppAuth — browser-based OAuth, no client secret ever stored.
@@ -156,11 +160,12 @@ app/src/main/java/com/crsmthw/lyra/
 
 | Layer | Library |
 |---|---|
-| UI | Jetpack Compose + Material3 1.5.0-alpha21 |
+| UI | Jetpack Compose + Material 3 Expressive (Material3 1.5.0-alpha21) |
 | Navigation | Navigation Compose 2.9.8 |
 | Auth | AppAuth 0.11.1 (PKCE) |
 | Network | Retrofit 3.0.0 + OkHttp 5.3.2 |
 | Images | Coil 3 |
+| Widgets | Jetpack Glance |
 | Secure storage | Android Keystore (AES-256-GCM) |
 | Settings | DataStore Preferences |
 | Build | AGP 9.2.1 · Kotlin 2.3.21 · KSP 2.3.8 |

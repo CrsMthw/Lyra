@@ -107,6 +107,14 @@ class SpotifyRepository(
         }
     }
 
+    suspend fun createPlaylist(
+        name       : String,
+        description: String,
+        isPublic   : Boolean,
+    ): Result<SpotifyPlaylist> = safeCall {
+        api.createPlaylist(CreatePlaylistRequest(name, description, isPublic))
+    }
+
     suspend fun addTrackToPlaylist(playlistId: String, trackUri: String): Result<Unit> = safeCall {
         api.addTracksToPlaylist(playlistId, AddTracksRequest(listOf(trackUri)))
         Unit

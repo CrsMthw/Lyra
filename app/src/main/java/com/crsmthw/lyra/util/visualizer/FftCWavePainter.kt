@@ -22,6 +22,11 @@ class FftCWavePainter(
     private var psf          : PolynomialSplineFunction? = null
     private var lastActiveMs : Long = 0L
 
+    // Beat-snap rotation: shifts which circle position receives the bass bulge
+    private var bandOffset    : Int   = 0
+    private var rollingEnergy : Float = 0f
+    private var lastBeatMs    : Long  = 0L
+
     var isActive: Boolean = false
         private set
 
@@ -29,12 +34,32 @@ class FftCWavePainter(
         var fft = getFftMagnitudeRange(fftBytes, startHz, endHz)
         if (fft.size < 3 || isQuiet(fft)) return
         lastActiveMs = System.currentTimeMillis()
+
+        // Beat detection on raw magnitudes
+        val energy = (fft.fold(0.0) { acc, v -> acc + v * v } / fft.size).toFloat()
+        rollingEnergy = rollingEnergy * 0.92f + energy * 0.08f
+        val now = System.currentTimeMillis()
+        if (energy > rollingEnergy * 1.6f && now - lastBeatMs > 300L) {
+            // Jump by a varying amount so consecutive beats land on distinct positions
+            val jump = kotlin.random.Random.nextInt(fft.size / 4, (fft.size * 2 / 3).coerceAtLeast(fft.size / 4 + 1))
+            bandOffset = (bandOffset + jump) % fft.size
+            lastBeatMs = now
+        }
+
         fft = getPowerFft(fft)
         fft = applyFrequencyTilt(fft)
+        // Rotate so the bass bulge blooms at a different circle position each beat
+        if (bandOffset > 0) fft = rotateBands(fft, bandOffset)
         fft = getCircleFft(fft)
         if (models.size != fft.size) models = Array(fft.size) { GravityModel() }
         models.forEachIndexed { i, m -> m.update(fft[i].toFloat() * ampR) }
         isActive = true
+    }
+
+    private fun rotateBands(fft: DoubleArray, by: Int): DoubleArray {
+        val n     = fft.size
+        val shift = ((by % n) + n) % n
+        return DoubleArray(n) { i -> fft[(i + shift) % n] }
     }
 
     fun tickGravity() {

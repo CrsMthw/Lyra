@@ -533,6 +533,7 @@ fun PlayerCardContent(
         AddToPlaylistSheet(
             pickerState = pickerState,
             onSelect    = playerViewModel::togglePlaylistTrack,
+            onCreateNew = playerViewModel::createPlaylist,
             onDismiss   = { showPlaylistPicker = false },
         )
     }
