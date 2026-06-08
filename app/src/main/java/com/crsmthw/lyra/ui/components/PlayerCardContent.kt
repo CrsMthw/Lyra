@@ -46,11 +46,13 @@ import coil3.SingletonImageLoader
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.SuccessResult
+import coil3.request.crossfade
 import coil3.toBitmap
 import com.crsmthw.lyra.R
 import com.crsmthw.lyra.ui.components.AddToPlaylistSheet
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import com.crsmthw.lyra.ui.screens.player.RepeatMode
+import com.crsmthw.lyra.util.rememberArtBoundsTransform
 import com.crsmthw.lyra.util.toTimeString
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -134,6 +136,13 @@ fun PlayerCardContent(
     var artDragX         by remember { mutableFloatStateOf(0f) }
     val density          = LocalDensity.current
     val swipeThresholdPx = remember(density) { with(density) { 80.dp.toPx() } }
+    // Expressive spring for the incoming art's settle on track change (the fling-OFF stays a tween).
+    val artSlideInSpec = MaterialTheme.motionScheme.defaultSpatialSpec<Float>()
+    // Crossfade so a cold art image fades up instead of popping in mid-slide; Coil skips the
+    // crossfade on memory-cache hits. Remembered on the URL so the per-second tick doesn't reload.
+    val artImageModel = remember(displayedTrack?.artUrl) {
+        ImageRequest.Builder(context).data(displayedTrack?.artUrl).crossfade(200).build()
+    }
 
     LaunchedEffect(state.currentTrack?.id) {
         val incoming = state.currentTrack
@@ -142,7 +151,7 @@ fun PlayerCardContent(
                 artOffsetX.snapTo(if (skipDirection >= 0) 1500f else -1500f)
             }
             displayedTrack = incoming
-            artOffsetX.animateTo(0f, tween(350, easing = FastOutSlowInEasing))
+            artOffsetX.animateTo(0f, artSlideInSpec)
         }
     }
 
@@ -210,6 +219,7 @@ fun PlayerCardContent(
                     Modifier.sharedElement(
                         sharedContentState      = rememberSharedContentState(key = "album-art"),
                         animatedVisibilityScope = animatedVisibilityScope,
+                        boundsTransform         = rememberArtBoundsTransform(),
                     )
                 }
             } else Modifier
@@ -218,12 +228,13 @@ fun PlayerCardContent(
                     Modifier.sharedElement(
                         sharedContentState      = rememberSharedContentState(key = "album-art"),
                         animatedVisibilityScope = navAnimatedContentScope,
+                        boundsTransform         = rememberArtBoundsTransform(),
                     )
                 }
             } else Modifier
             val artSharedMod = localArtMod.then(navArtMod)
             AsyncImage(
-                model              = displayedTrack?.artUrl,
+                model              = artImageModel,
                 contentDescription = "Album art",
                 contentScale       = ContentScale.Crop,
                 modifier           = artSharedMod
@@ -454,58 +465,46 @@ fun PlayerCardContent(
                     containerColor = surfaceAccentColor.copy(alpha = 0.12f),
                     contentColor   = surfaceAccentColor,
                 )
-                ButtonGroup(overflowIndicator = {}) {
-                    customItem(
-                        buttonGroupContent = @Composable {
-                            FilledTonalIconButton(
-                                onClick  = onOpenQueue,
-                                enabled  = enabled,
-                                modifier = Modifier.size(40.dp),
-                                shape    = ButtonGroupDefaults.connectedLeadingButtonShape,
-                                colors   = accentButtonColors,
-                            ) {
-                                Icon(Icons.AutoMirrored.Filled.QueueMusic, queueLabel, Modifier.size(18.dp))
+                // Plain Row, not M3 ButtonGroup: overflow was disabled here, and ButtonGroup's overflow
+                // MeasurePolicy crashes with an inverted Constraints when the column is tight (see the
+                // matching note + folded-landscape crash fix in PlayerScreen). A Row clips instead.
+                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                    FilledTonalIconButton(
+                        onClick  = onOpenQueue,
+                        enabled  = enabled,
+                        modifier = Modifier.size(40.dp),
+                        shape    = ButtonGroupDefaults.connectedLeadingButtonShape,
+                        colors   = accentButtonColors,
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.QueueMusic, queueLabel, Modifier.size(18.dp))
+                    }
+                    FilledTonalIconButton(
+                        onClick = {
+                            state.currentTrack?.id?.let { id ->
+                                context.startActivity(Intent.createChooser(
+                                    Intent(Intent.ACTION_SEND).apply {
+                                        putExtra(Intent.EXTRA_TEXT, "https://open.spotify.com/track/$id")
+                                        type = "text/plain"
+                                    }, null
+                                ))
                             }
                         },
-                        menuContent = @Composable { _ -> },
-                    )
-                    customItem(
-                        buttonGroupContent = @Composable {
-                            FilledTonalIconButton(
-                                onClick = {
-                                    state.currentTrack?.id?.let { id ->
-                                        context.startActivity(Intent.createChooser(
-                                            Intent(Intent.ACTION_SEND).apply {
-                                                putExtra(Intent.EXTRA_TEXT, "https://open.spotify.com/track/$id")
-                                                type = "text/plain"
-                                            }, null
-                                        ))
-                                    }
-                                },
-                                enabled  = enabled,
-                                modifier = Modifier.size(40.dp),
-                                shape    = RoundedCornerShape(2.dp),
-                                colors   = accentButtonColors,
-                            ) {
-                                Icon(Icons.Default.Share, shareLabel, Modifier.size(18.dp))
-                            }
-                        },
-                        menuContent = @Composable { _ -> },
-                    )
-                    customItem(
-                        buttonGroupContent = @Composable {
-                            FilledTonalIconButton(
-                                onClick  = { playerViewModel.loadOwnedPlaylists(); showPlaylistPicker = true },
-                                enabled  = enabled,
-                                modifier = Modifier.size(40.dp),
-                                shape    = ButtonGroupDefaults.connectedTrailingButtonShape,
-                                colors   = accentButtonColors,
-                            ) {
-                                Icon(Icons.Default.LibraryAdd, addToPlaylistLabel, Modifier.size(18.dp))
-                            }
-                        },
-                        menuContent = @Composable { _ -> },
-                    )
+                        enabled  = enabled,
+                        modifier = Modifier.size(40.dp),
+                        shape    = RoundedCornerShape(2.dp),
+                        colors   = accentButtonColors,
+                    ) {
+                        Icon(Icons.Default.Share, shareLabel, Modifier.size(18.dp))
+                    }
+                    FilledTonalIconButton(
+                        onClick  = { playerViewModel.loadOwnedPlaylists(); showPlaylistPicker = true },
+                        enabled  = enabled,
+                        modifier = Modifier.size(40.dp),
+                        shape    = ButtonGroupDefaults.connectedTrailingButtonShape,
+                        colors   = accentButtonColors,
+                    ) {
+                        Icon(Icons.Default.LibraryAdd, addToPlaylistLabel, Modifier.size(18.dp))
+                    }
                 }
             }
         }

@@ -8,6 +8,7 @@ import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -46,6 +47,12 @@ fun PlayerPanelHost(
 
     var showPlayerPanel by rememberSaveable { mutableStateOf(false) }
 
+    // Single source of truth for the pop-out panel's presence on screen. Drives both the panel's
+    // own AnimatedVisibility (so the gate below reads the SAME animation that's rendering) and the
+    // mini player's nav-scope gate. Using this Transition avoids the scrim-tween-vs-panel-spring
+    // desync that a separate timer would have.
+    val panelTransition = updateTransition(showPlayerPanel, label = "panelPresence")
+
     // Dismiss panel when folding — canShowPanel goes false on narrow screens
     LaunchedEffect(canShowPanel) {
         if (!canShowPanel) showPlayerPanel = false
@@ -79,15 +86,18 @@ fun PlayerPanelHost(
             // isShortScreen), full-width on narrow. This matches the two-pane layout used by Album/Artist
             // screens whenever screenWidthDp >= 600.
             //
-            // Nav scope on the mini player is active ONLY while a nav transition is running
-            // (PlayerScreen ↔ this screen). This avoids the conflict where both the mini player and
-            // the panel simultaneously hold key "album-art" in the nav scope:
-            // – Panel open/close (no nav transition): isRunning = false → mini player has local scope
-            //   only → local mini↔panel shared element runs without interference.
-            // – Nav transition active: isRunning = true → mini player gets nav scope → art morphs.
-            // – Narrow / folded landscape (canShowPanel = false): nav scope always active (no panel).
-            val navTransitionRunning = navAnimatedContentScope?.transition?.isRunning == true
-            val miniNeedsNavScope = !canShowPanel || navTransitionRunning
+            // The mini player's SECONDARY nav scope (wide screens only) is held CONTINUOUSLY while the
+            // pop-out panel is fully closed, and dropped only while it is open/animating. Continuous-
+            // when-closed is required for the morph to work on POP: a shared element added after a pop
+            // transition has already begun is too late to be captured as the EXIT participant (that is
+            // why an isRunning gate morphed on push but not back). Dropping it while the panel is present
+            // is the actual conflict window — it stops the mini and the panel from both claiming
+            // "album-art" in the nav scope and fighting the local mini↔panel morph.
+            // On NARROW screens the mini's PRIMARY scope (below) is ALREADY the nav scope, so this stays
+            // false to avoid a double-registration that breaks the morph asymmetrically.
+            val panelPresent = panelTransition.currentState || panelTransition.targetState ||
+                               panelTransition.isRunning
+            val miniNeedsNavScope = canShowPanel && !panelPresent
             val miniNavScope: SharedTransitionScope? = if (miniNeedsNavScope) navSharedTransitionScope else null
             val miniNavVisScope: AnimatedVisibilityScope? = if (miniNeedsNavScope) navAnimatedContentScope as? AnimatedVisibilityScope else null
             MiniPlayerHolder(
@@ -107,7 +117,7 @@ fun PlayerPanelHost(
             // Pop-out panel (wide non-short screens only)
             if (canShowPanel) {
                 PlayerPopOutPanel(
-                    showPanel                  = showPlayerPanel,
+                    panelTransition            = panelTransition,
                     playerViewModel            = playerViewModel,
                     onClose                    = { showPlayerPanel = false },
                     onFullScreen               = onOpenPlayer,

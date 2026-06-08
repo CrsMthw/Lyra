@@ -6,6 +6,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedContentScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
@@ -79,6 +80,7 @@ import com.crsmthw.lyra.ui.components.PlaylistCard
 import com.crsmthw.lyra.ui.components.TrackRow
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import com.crsmthw.lyra.ui.screens.player.RepeatMode
+import com.crsmthw.lyra.util.rememberArtBoundsTransform
 import com.crsmthw.lyra.util.toTimeString
 import com.crsmthw.lyra.util.visualizer.FftWaveCanvas
 import com.crsmthw.lyra.util.visualizer.LocalVisualizerAccentColor
@@ -139,7 +141,7 @@ fun LibraryScreen(
 
 // ── Single pane (phone / folded) ─────────────────────────────────────────────
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class, ExperimentalSharedTransitionApi::class)
 @Composable
 private fun SinglePaneLayout(
     state           : LibraryUiState,
@@ -165,54 +167,66 @@ private fun SinglePaneLayout(
         .fillMaxSize()
         .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal))
     ) {
-        AnimatedContent(
-            targetState  = state,
-            contentKey   = { s ->
-                val isDetail = s.currentPlaylist != null || s.isLoadingTracks || s.currentTracks.isNotEmpty()
-                if (isDetail) (s.currentPlaylist?.id ?: "liked") else null
-            },
-            modifier     = Modifier.fillMaxSize(),
-            transitionSpec = {
-                val enteringDetail = targetState.currentPlaylist != null ||
-                                     targetState.isLoadingTracks ||
-                                     targetState.currentTracks.isNotEmpty()
-                if (enteringDetail) {
-                    (slideInHorizontally { it } + fadeIn(tween(200))) togetherWith
-                    (slideOutHorizontally { -it / 4 } + fadeOut(tween(200)))
+        // SharedTransitionLayout wraps the browser ↔ detail swap so the selected card's art
+        // container-transforms into the detail hero (and back). Keys are namespaced "lib-art-*"
+        // so they never collide with the nav-level "album-art" shared element. The pane swap is a
+        // gentle slide+fade (proven flash-free here in single pane over `background`) — the slide
+        // is intentionally small so the overlaid morphing art carries the motion, not the panes.
+        SharedTransitionLayout(modifier = Modifier.fillMaxSize()) {
+            AnimatedContent(
+                targetState  = state,
+                contentKey   = { s ->
+                    val isDetail = s.currentPlaylist != null || s.isLoadingTracks || s.currentTracks.isNotEmpty()
+                    if (isDetail) (s.currentPlaylist?.id ?: "liked") else null
+                },
+                modifier     = Modifier.fillMaxSize(),
+                transitionSpec = {
+                    val enteringDetail = targetState.currentPlaylist != null ||
+                                         targetState.isLoadingTracks ||
+                                         targetState.currentTracks.isNotEmpty()
+                    if (enteringDetail) {
+                        (slideInHorizontally { it / 6 } + fadeIn(tween(220))) togetherWith
+                        (slideOutHorizontally { -it / 8 } + fadeOut(tween(220)))
+                    } else {
+                        (slideInHorizontally { -it / 6 } + fadeIn(tween(220))) togetherWith
+                        (slideOutHorizontally { it / 8 } + fadeOut(tween(220)))
+                    }
+                },
+                label = "library_detail_transition",
+            ) { snapshot ->
+                val acScope = this
+                val isDetailSnapshot = snapshot.currentPlaylist != null ||
+                                       snapshot.isLoadingTracks ||
+                                       snapshot.currentTracks.isNotEmpty()
+                if (isDetailSnapshot) {
+                    RightPaneContent(
+                        state           = snapshot,
+                        viewModel       = viewModel,
+                        playerViewModel = playerViewModel,
+                        mosaicDir       = mosaicDir,
+                        onTrackClick    = onRequestPlayer,
+                        onRefresh       = viewModel::refreshCurrentTracks,
+                        onBack          = { viewModel.clearSelection() },
+                        barWindowInsets = WindowInsets.statusBars,
+                        sharedScope     = this@SharedTransitionLayout,
+                        animScope       = acScope,
+                    )
                 } else {
-                    (slideInHorizontally { -it } + fadeIn(tween(200))) togetherWith
-                    (slideOutHorizontally { it / 4 } + fadeOut(tween(200)))
+                    LibraryBrowserPane(
+                        state          = snapshot,
+                        viewModel      = viewModel,
+                        onOpenSettings = onOpenSettings,
+                        isLandscape    = isLandscape,
+                        sharedScope    = this@SharedTransitionLayout,
+                        animScope      = acScope,
+                    )
                 }
-            },
-            label = "library_detail_transition",
-        ) { snapshot ->
-            val isDetailSnapshot = snapshot.currentPlaylist != null ||
-                                   snapshot.isLoadingTracks ||
-                                   snapshot.currentTracks.isNotEmpty()
-            if (isDetailSnapshot) {
-                RightPaneContent(
-                    state           = snapshot,
-                    viewModel       = viewModel,
-                    playerViewModel = playerViewModel,
-                    mosaicDir       = mosaicDir,
-                    onTrackClick    = onRequestPlayer,
-                    onRefresh       = viewModel::refreshCurrentTracks,
-                    onBack          = { viewModel.clearSelection() },
-                    barWindowInsets = WindowInsets.statusBars,
-                )
-            } else {
-                LibraryBrowserPane(
-                    state          = snapshot,
-                    viewModel      = viewModel,
-                    onOpenSettings = onOpenSettings,
-                    isLandscape    = isLandscape,
-                )
             }
         }
 
         val fabBottomPadding by animateDpAsState(
             targetValue   = if (hasCurrentTrack) 90.dp else 16.dp,
-            animationSpec = tween(300),
+            animationSpec = MaterialTheme.motionScheme.fastSpatialSpec(),
             label         = "fabBottom",
         )
 
@@ -265,6 +279,8 @@ private fun LibraryBrowserPane(
     isLandscape           : Boolean,
     modifier              : Modifier = Modifier,
     applyStatusBarPadding : Boolean = true,   // false when parent already applied statusBarsPadding
+    sharedScope           : SharedTransitionScope? = null,   // non-null only in single pane (container transform)
+    animScope             : AnimatedContentScope? = null,
 ) {
     var showRefreshErrorDialog by remember { mutableStateOf(false) }
     val listState      = rememberLazyListState()
@@ -285,10 +301,12 @@ private fun LibraryBrowserPane(
     val listBody: LazyListScope.() -> Unit = {
         item(key = "liked") {
             LikedSongsCard(
-                count      = state.likedSongCount,
-                isSelected = likedSongsSelected,
-                onOpen     = { viewModel.selectLikedSongs() },
-                onPlay     = { viewModel.playPlaylist("spotify:user:${state.user?.id}:collection") },
+                count       = state.likedSongCount,
+                isSelected  = likedSongsSelected,
+                onOpen      = { viewModel.selectLikedSongs() },
+                onPlay      = { viewModel.playPlaylist("spotify:user:${state.user?.id}:collection") },
+                sharedScope = sharedScope,
+                animScope   = animScope,
             )
         }
         if (state.featuredPlaylists.isNotEmpty()) {
@@ -301,10 +319,12 @@ private fun LibraryBrowserPane(
                     horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     items(state.featuredPlaylists, key = { it.id }) { playlist ->
                         PlaylistCard(
-                            playlist   = playlist,
-                            mosaicFile = if (playlist.id in state.playlistsWithMosaics)
+                            playlist    = playlist,
+                            mosaicFile  = if (playlist.id in state.playlistsWithMosaics)
                                 File(mosaicDir, "${playlist.id}.png") else null,
-                            onClick    = { viewModel.selectPlaylist(playlist) },
+                            onClick     = { viewModel.selectPlaylist(playlist) },
+                            sharedScope = sharedScope,
+                            animScope   = animScope,
                         )
                     }
                 }
@@ -317,12 +337,14 @@ private fun LibraryBrowserPane(
             }
             items(myPlaylists, key = { it.id }) { playlist ->
                 PlaylistListCard(
-                    playlist   = playlist,
-                    mosaicFile = if (playlist.id in state.playlistsWithMosaics)
+                    playlist    = playlist,
+                    mosaicFile  = if (playlist.id in state.playlistsWithMosaics)
                         File(mosaicDir, "${playlist.id}.png") else null,
-                    isSelected = playlist.id == selectedPlaylistId,
-                    onClick    = { viewModel.selectPlaylist(playlist) },
-                    onPlay     = { viewModel.playPlaylist(playlist.uri) },
+                    isSelected  = playlist.id == selectedPlaylistId,
+                    onClick     = { viewModel.selectPlaylist(playlist) },
+                    onPlay      = { viewModel.playPlaylist(playlist.uri) },
+                    sharedScope = sharedScope,
+                    animScope   = animScope,
                 )
             }
         }
@@ -333,12 +355,14 @@ private fun LibraryBrowserPane(
             }
             items(following, key = { it.id }) { playlist ->
                 PlaylistListCard(
-                    playlist   = playlist,
-                    mosaicFile = if (playlist.id in state.playlistsWithMosaics)
+                    playlist    = playlist,
+                    mosaicFile  = if (playlist.id in state.playlistsWithMosaics)
                         File(mosaicDir, "${playlist.id}.png") else null,
-                    isSelected = playlist.id == selectedPlaylistId,
-                    onClick    = { viewModel.selectPlaylist(playlist) },
-                    onPlay     = { viewModel.playPlaylist(playlist.uri) },
+                    isSelected  = playlist.id == selectedPlaylistId,
+                    onClick     = { viewModel.selectPlaylist(playlist) },
+                    onPlay      = { viewModel.playPlaylist(playlist.uri) },
+                    sharedScope = sharedScope,
+                    animScope   = animScope,
                 )
             }
         }
@@ -713,6 +737,8 @@ private fun RightPaneContent(
     onRefresh       : () -> Unit,
     onBack          : (() -> Unit)? = null,
     barWindowInsets : WindowInsets = WindowInsets(0),
+    sharedScope     : SharedTransitionScope? = null,   // non-null only in single pane (container transform)
+    animScope       : AnimatedContentScope? = null,
 ) {
     val currentTrackId by remember {
         playerViewModel.uiState.map { it.currentTrack?.id }.distinctUntilChanged()
@@ -722,6 +748,8 @@ private fun RightPaneContent(
     }.collectAsStateWithLifecycle(false)
     val playlist     = state.currentPlaylist
     val isLikedSongs = playlist == null
+    // Hero art shared-element key — matches the source card's key so only the selected pair morphs.
+    val artKey       = if (isLikedSongs) "lib-art-liked" else "lib-art-${playlist.id}"
     val mosaicFile   = playlist?.let { p ->
         if (p.id in state.playlistsWithMosaics) File(mosaicDir, "${p.id}.png") else null
     }
@@ -857,6 +885,9 @@ private fun RightPaneContent(
                     trackCount   = trackCount,
                     onPlay       = { viewModel.playPlaylist(playUri) },
                     onShuffle    = { viewModel.shufflePlaylist(playUri) },
+                    artKey       = artKey,
+                    sharedScope  = sharedScope,
+                    animScope    = animScope,
                 )
             },
             emptyContent = when {
@@ -908,6 +939,7 @@ private fun RightPaneContent(
 
 // ── Right pane header (square art, scrollable) ────────────────────────────────
 
+@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 private fun RightPaneHeader(
     artUrl      : String?,
@@ -916,6 +948,9 @@ private fun RightPaneHeader(
     trackCount  : Int,
     onPlay      : () -> Unit,
     onShuffle   : () -> Unit,
+    artKey      : String? = null,
+    sharedScope : SharedTransitionScope? = null,
+    animScope   : AnimatedContentScope? = null,
 ) {
     Column(
         modifier = Modifier
@@ -926,10 +961,22 @@ private fun RightPaneHeader(
         // Square album art — capped at 200dp so it doesn't grow huge in wide landscape panes
         BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
         val artSize = (maxWidth * 0.65f).coerceAtMost(200.dp)
+        // Container-transform destination: morphs from the selected card's art. Only built when
+        // single-pane scopes are present; two-pane passes null and renders the art statically.
+        val artMod = if (sharedScope != null && animScope != null && artKey != null) {
+            with(sharedScope) {
+                Modifier.sharedElement(
+                    sharedContentState      = rememberSharedContentState(key = artKey),
+                    animatedVisibilityScope = animScope,
+                    boundsTransform         = rememberArtBoundsTransform(),
+                )
+            }
+        } else Modifier
         Box(
             modifier = Modifier
                 .size(artSize)
                 .align(Alignment.Center)
+                .then(artMod)
                 .clip(RoundedCornerShape(16.dp)),
         ) {
             if (!artUrl.isNullOrBlank()) {
@@ -995,13 +1042,25 @@ private fun RightPaneHeader(
 
 // ── Liked Songs card ──────────────────────────────────────────────────────────
 
+@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 private fun LikedSongsCard(
-    count      : Int,
-    onOpen     : () -> Unit,
-    onPlay     : () -> Unit,
-    isSelected : Boolean = false,
+    count       : Int,
+    onOpen      : () -> Unit,
+    onPlay      : () -> Unit,
+    isSelected  : Boolean = false,
+    sharedScope : SharedTransitionScope? = null,
+    animScope   : AnimatedContentScope? = null,
 ) {
+    val artMod = if (sharedScope != null && animScope != null) {
+        with(sharedScope) {
+            Modifier.sharedElement(
+                sharedContentState      = rememberSharedContentState(key = "lib-art-liked"),
+                animatedVisibilityScope = animScope,
+                boundsTransform         = rememberArtBoundsTransform(),
+            )
+        }
+    } else Modifier
     Card(
         onClick   = onOpen,
         modifier  = Modifier
@@ -1021,6 +1080,7 @@ private fun LikedSongsCard(
             Box(
                 modifier = Modifier
                     .size(56.dp)
+                    .then(artMod)
                     .clip(RoundedCornerShape(12.dp))
                     .background(Brush.linearGradient(listOf(Color(0xFF6A11CB), Color(0xFF2575FC)))),
                 contentAlignment = Alignment.Center,
@@ -1053,14 +1113,26 @@ private fun LikedSongsCard(
 
 // ── Playlist list card ────────────────────────────────────────────────────────
 
+@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 private fun PlaylistListCard(
-    playlist   : SpotifyPlaylist,
-    mosaicFile : File?,
-    isSelected : Boolean = false,
-    onClick    : () -> Unit,
-    onPlay     : () -> Unit,
+    playlist    : SpotifyPlaylist,
+    mosaicFile  : File?,
+    isSelected  : Boolean = false,
+    onClick     : () -> Unit,
+    onPlay      : () -> Unit,
+    sharedScope : SharedTransitionScope? = null,
+    animScope   : AnimatedContentScope? = null,
 ) {
+    val artMod = if (sharedScope != null && animScope != null) {
+        with(sharedScope) {
+            Modifier.sharedElement(
+                sharedContentState      = rememberSharedContentState(key = "lib-art-${playlist.id}"),
+                animatedVisibilityScope = animScope,
+                boundsTransform         = rememberArtBoundsTransform(),
+            )
+        }
+    } else Modifier
     Card(
         onClick   = onClick,
         modifier  = Modifier
@@ -1084,12 +1156,13 @@ private fun PlaylistListCard(
                     model              = thumbModel,
                     contentDescription = playlist.name,
                     contentScale       = ContentScale.Crop,
-                    modifier           = Modifier.size(56.dp).clip(thumbShape),
+                    modifier           = Modifier.size(56.dp).then(artMod).clip(thumbShape),
                 )
             } else {
                 Box(
                     modifier = Modifier
                         .size(56.dp)
+                        .then(artMod)
                         .clip(thumbShape)
                         .background(MaterialTheme.colorScheme.surfaceVariant),
                     contentAlignment = Alignment.Center,

@@ -34,9 +34,11 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import com.crsmthw.lyra.R
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.crsmthw.lyra.data.remote.model.SpotifyTrack
+import com.crsmthw.lyra.util.rememberArtBoundsTransform
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalSharedTransitionApi::class)
 @Composable
@@ -62,10 +64,11 @@ fun MiniPlayer(
     val resolvedSurfaceAccent = if (surfaceAccentColor == Color.Unspecified) resolvedAccent else surfaceAccentColor
     val density    = LocalDensity.current
     val navBarPx   = WindowInsets.navigationBars.getBottom(density)
+    val miniSlideSpec = MaterialTheme.motionScheme.defaultSpatialSpec<IntOffset>()
     AnimatedVisibility(
         visible  = visible && currentTrack != null,
-        enter    = slideInVertically  { it + navBarPx },
-        exit     = slideOutVertically { it + navBarPx },
+        enter    = slideInVertically(miniSlideSpec)  { it + navBarPx },
+        exit     = slideOutVertically(miniSlideSpec) { it + navBarPx },
         modifier = modifier,
     ) {
         // Use inner scope when no external scope is provided (two-pane case).
@@ -98,6 +101,7 @@ fun MiniPlayer(
                         Modifier.sharedElement(
                             sharedContentState      = rememberSharedContentState(key = "album-art"),
                             animatedVisibilityScope = effectiveScope,
+                            boundsTransform         = rememberArtBoundsTransform(),
                         )
                     }
                 } else Modifier
@@ -106,6 +110,7 @@ fun MiniPlayer(
                         Modifier.sharedElement(
                             sharedContentState      = rememberSharedContentState(key = "album-art"),
                             animatedVisibilityScope = navAnimatedVisibilityScope,
+                            boundsTransform         = rememberArtBoundsTransform(),
                         )
                     }
                 } else Modifier

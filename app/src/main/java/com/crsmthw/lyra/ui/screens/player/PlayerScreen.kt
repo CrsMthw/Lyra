@@ -65,12 +65,14 @@ import coil3.SingletonImageLoader
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.SuccessResult
+import coil3.request.crossfade
 import coil3.toBitmap
 import com.crsmthw.lyra.data.repository.LyricsState
 import com.crsmthw.lyra.ui.components.AddToPlaylistSheet
 import com.crsmthw.lyra.ui.components.DevicePickerSheet
 import com.crsmthw.lyra.ui.components.PlainLyricsView
 import com.crsmthw.lyra.ui.components.SyncedLyricsView
+import com.crsmthw.lyra.util.rememberArtBoundsTransform
 import com.crsmthw.lyra.util.toTimeString
 import com.crsmthw.lyra.util.visualizer.FftCWaveCanvas
 import com.crsmthw.lyra.util.visualizer.FftWaveCanvas
@@ -179,6 +181,14 @@ fun PlayerScreen(
     var artDragX       by remember { mutableFloatStateOf(0f) }
     val density        = LocalDensity.current
     val swipeThresholdPx = remember(density) { with(density) { 80.dp.toPx() } }
+    // Expressive spring for the incoming art's settle on track change (the fling-OFF stays a tween).
+    val artSlideInSpec = MaterialTheme.motionScheme.defaultSpatialSpec<Float>()
+    // Crossfade the art so a cold (non-memory-cached) image fades up instead of popping in mid-slide.
+    // Coil skips the crossfade on memory-cache hits, so already-loaded art still shows instantly.
+    // Remembered on the URL so the per-second progress tick doesn't rebuild the request / reload.
+    val artImageModel = remember(displayedTrack?.artUrl) {
+        ImageRequest.Builder(context).data(displayedTrack?.artUrl).crossfade(200).build()
+    }
 
     LaunchedEffect(state.currentTrack?.id) {
         state.currentTrack?.id?.let { viewModel.recheckLiked(it) }
@@ -188,7 +198,7 @@ fun PlayerScreen(
                 artOffsetX.snapTo(if (skipDirection >= 0) 1500f else -1500f)
             }
             displayedTrack = incoming
-            artOffsetX.animateTo(0f, animationSpec = tween(350, easing = FastOutSlowInEasing))
+            artOffsetX.animateTo(0f, animationSpec = artSlideInSpec)
         }
     }
 
@@ -236,7 +246,7 @@ fun PlayerScreen(
     // ── Art shrink when visualizer is on ─────────────────────────────────────
     val artScale by animateFloatAsState(
         targetValue   = if (state.visualizerEnabled) 0.8f else 1.0f,
-        animationSpec = tween(400),
+        animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
         label         = "artScale",
     )
 
@@ -383,6 +393,7 @@ fun PlayerScreen(
                             Modifier.sharedElement(
                                 sharedContentState      = rememberSharedContentState("album-art"),
                                 animatedVisibilityScope = animatedContentScope,
+                                boundsTransform         = rememberArtBoundsTransform(),
                             )
                         }
                     } else Modifier
@@ -425,7 +436,7 @@ fun PlayerScreen(
                             } else {
                                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                     AsyncImage(
-                                        model              = displayedTrack?.artUrl,
+                                        model              = artImageModel,
                                         contentDescription = "Album art",
                                         contentScale       = ContentScale.Crop,
                                         modifier           = artMod
@@ -544,6 +555,7 @@ fun PlayerScreen(
                             Modifier.sharedElement(
                                 sharedContentState      = rememberSharedContentState("album-art"),
                                 animatedVisibilityScope = animatedContentScope,
+                                boundsTransform         = rememberArtBoundsTransform(),
                             )
                         }
                     } else Modifier
@@ -586,7 +598,7 @@ fun PlayerScreen(
                             } else {
                                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                     AsyncImage(
-                                        model              = displayedTrack?.artUrl,
+                                        model              = artImageModel,
                                         contentDescription = "Album art",
                                         contentScale       = ContentScale.Crop,
                                         modifier           = artMod
@@ -1015,49 +1027,38 @@ private fun PlayerControls(
             containerColor = surfaceAccentColor.copy(alpha = 0.12f),
             contentColor   = surfaceAccentColor,
         )
-        ButtonGroup(overflowIndicator = {}) {
-            customItem(
-                buttonGroupContent = @Composable {
-                    FilledTonalIconButton(
-                        onClick  = onOpenQueue,
-                        enabled  = state.currentTrack != null,
-                        modifier = Modifier.size(40.dp),
-                        shape    = ButtonGroupDefaults.connectedLeadingButtonShape,
-                        colors   = accentButtonColors,
-                    ) {
-                        Icon(Icons.AutoMirrored.Filled.QueueMusic, queueLabel, Modifier.size(18.dp))
-                    }
-                },
-                menuContent = @Composable { _ -> },
-            )
-            customItem(
-                buttonGroupContent = @Composable {
-                    FilledTonalIconButton(
-                        onClick  = onShare,
-                        enabled  = state.currentTrack != null,
-                        modifier = Modifier.size(40.dp),
-                        shape    = RoundedCornerShape(2.dp),
-                        colors   = accentButtonColors,
-                    ) {
-                        Icon(Icons.Default.Share, shareLabel, Modifier.size(18.dp))
-                    }
-                },
-                menuContent = @Composable { _ -> },
-            )
-            customItem(
-                buttonGroupContent = @Composable {
-                    FilledTonalIconButton(
-                        onClick  = onAddToPlaylist,
-                        enabled  = state.currentTrack != null,
-                        modifier = Modifier.size(40.dp),
-                        shape    = ButtonGroupDefaults.connectedTrailingButtonShape,
-                        colors   = accentButtonColors,
-                    ) {
-                        Icon(Icons.Default.LibraryAdd, addToPlaylistLabel, Modifier.size(18.dp))
-                    }
-                },
-                menuContent = @Composable { _ -> },
-            )
+        // Connected icon buttons. A plain Row (not M3 ButtonGroup) is used deliberately: the overflow
+        // feature was disabled (empty overflowIndicator/menuContent), and ButtonGroup's overflow
+        // MeasurePolicy crashes with an inverted Constraints when the folded-landscape controls column
+        // is tight (IllegalArgumentException: maxWidth must be >= minWidth). A Row clips instead.
+        Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            FilledTonalIconButton(
+                onClick  = onOpenQueue,
+                enabled  = state.currentTrack != null,
+                modifier = Modifier.size(40.dp),
+                shape    = ButtonGroupDefaults.connectedLeadingButtonShape,
+                colors   = accentButtonColors,
+            ) {
+                Icon(Icons.AutoMirrored.Filled.QueueMusic, queueLabel, Modifier.size(18.dp))
+            }
+            FilledTonalIconButton(
+                onClick  = onShare,
+                enabled  = state.currentTrack != null,
+                modifier = Modifier.size(40.dp),
+                shape    = RoundedCornerShape(2.dp),
+                colors   = accentButtonColors,
+            ) {
+                Icon(Icons.Default.Share, shareLabel, Modifier.size(18.dp))
+            }
+            FilledTonalIconButton(
+                onClick  = onAddToPlaylist,
+                enabled  = state.currentTrack != null,
+                modifier = Modifier.size(40.dp),
+                shape    = ButtonGroupDefaults.connectedTrailingButtonShape,
+                colors   = accentButtonColors,
+            ) {
+                Icon(Icons.Default.LibraryAdd, addToPlaylistLabel, Modifier.size(18.dp))
+            }
         }
     }
 }

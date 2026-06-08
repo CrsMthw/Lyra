@@ -1,5 +1,8 @@
 package com.crsmthw.lyra.ui.components
 
+import androidx.compose.animation.AnimatedContentScope
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -15,16 +18,29 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.crsmthw.lyra.data.remote.model.SpotifyPlaylist
+import com.crsmthw.lyra.util.rememberArtBoundsTransform
 import java.io.File
 
+@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 fun PlaylistCard(
-    playlist   : SpotifyPlaylist,
-    mosaicFile : File?,
-    onClick    : () -> Unit,
-    modifier   : Modifier = Modifier,
+    playlist    : SpotifyPlaylist,
+    mosaicFile  : File?,
+    onClick     : () -> Unit,
+    modifier    : Modifier = Modifier,
+    sharedScope : SharedTransitionScope? = null,   // non-null only in single-pane library (container transform)
+    animScope   : AnimatedContentScope? = null,
 ) {
     val imageShape = RoundedCornerShape(8.dp)
+    val artMod = if (sharedScope != null && animScope != null) {
+        with(sharedScope) {
+            Modifier.sharedElement(
+                sharedContentState      = rememberSharedContentState(key = "lib-art-${playlist.id}"),
+                animatedVisibilityScope = animScope,
+                boundsTransform         = rememberArtBoundsTransform(),
+            )
+        }
+    } else Modifier
 
     Column(
         modifier = modifier
@@ -41,6 +57,7 @@ fun PlaylistCard(
                 modifier           = Modifier
                     .fillMaxWidth()
                     .aspectRatio(1f)
+                    .then(artMod)
                     .clip(imageShape),
             )
         } else {
@@ -48,6 +65,7 @@ fun PlaylistCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(1f)
+                    .then(artMod)
                     .clip(imageShape),
                 color = MaterialTheme.colorScheme.surfaceVariant,
             ) {

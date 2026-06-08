@@ -22,7 +22,7 @@
 - Sleep timer with Live notification countdown on Android 16+
 - Pull-to-refresh on both the library and track lists
 - Adaptive two-pane layout for foldables and tablets
-- Material 3 Expressive design, with Material You dynamic colour and AMOLED black mode
+- Material 3 Expressive design — spring-based motion and seamless album-art transitions, with Material You dynamic colour and AMOLED black mode
 - Tokens stored encrypted via AES-256-GCM (Android Keystore)
 
 ---
