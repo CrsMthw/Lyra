@@ -32,12 +32,27 @@ val LocalFftData: ProvidableCompositionLocal<StateFlow<ByteArray?>> =
 val LocalVisualizerAccentColor: ProvidableCompositionLocal<Color> =
     compositionLocalOf { Color.Unspecified }
 
+// Whether the bottom wave should render. Provided once in LyraNavGraph from the
+// master toggle + the chosen VisualizerStyle, so every FftWaveCanvas across all
+// screens (which read LocalFftData) is gated uniformly without per-call-site wiring.
+// Dynamic so only FftWaveCanvas readers recompose when the setting flips.
+val LocalVisualizerBottomEnabled: ProvidableCompositionLocal<Boolean> =
+    compositionLocalOf { true }
+
 @Composable
 fun FftWaveCanvas(
     modifier : Modifier = Modifier,
     color    : Color    = Color.White,
     alpha    : Float    = 0.25f,
 ) {
+    // Bottom wave disabled (style is CIRCLE only, or visualizer off): keep the same
+    // layout footprint via the caller's modifier but skip the data subscription,
+    // per-frame loop, and draw entirely.
+    if (!LocalVisualizerBottomEnabled.current) {
+        Spacer(modifier = modifier)
+        return
+    }
+
     val fftBytes by LocalFftData.current.collectAsStateWithLifecycle(null)
     val painter  = remember { FftWavePainter() }
     val paint    = remember(color, alpha) {

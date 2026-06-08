@@ -243,9 +243,12 @@ fun PlayerScreen(
         }
     }
 
-    // ── Art shrink when visualizer is on ─────────────────────────────────────
+    // Circle visualizer shows only when enabled AND the chosen style includes it.
+    val circleVisible = state.visualizerEnabled && state.visualizerStyle.showCircle
+
+    // ── Art shrink when the circle visualizer is on ──────────────────────────
     val artScale by animateFloatAsState(
-        targetValue   = if (state.visualizerEnabled) 0.8f else 1.0f,
+        targetValue   = if (circleVisible) 0.8f else 1.0f,
         animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
         label         = "artScale",
     )
@@ -401,12 +404,14 @@ fun PlayerScreen(
                     val lyricsContentMod = Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp))
 
                     Box(Modifier.size(side)) {
-                        FftCWaveCanvas(
-                            modifier = Modifier.fillMaxSize(),
-                            color    = surfaceAccentColor,
-                            alpha    = 0.40f,
-                            enabled  = state.visualizerEnabled,
-                        )
+                        if (circleVisible) {
+                            FftCWaveCanvas(
+                                modifier = Modifier.fillMaxSize(),
+                                color    = surfaceAccentColor,
+                                alpha    = 0.40f,
+                                enabled  = true,
+                            )
+                        }
                         AnimatedContent(
                             targetState  = state,
                             contentKey   = { s ->
@@ -563,12 +568,14 @@ fun PlayerScreen(
                     val lyricsContentMod = Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp))
 
                     Box(Modifier.size(side)) {
-                        FftCWaveCanvas(
-                            modifier = Modifier.fillMaxSize(),
-                            color    = surfaceAccentColor,
-                            alpha    = 0.40f,
-                            enabled  = state.visualizerEnabled,
-                        )
+                        if (circleVisible) {
+                            FftCWaveCanvas(
+                                modifier = Modifier.fillMaxSize(),
+                                color    = surfaceAccentColor,
+                                alpha    = 0.40f,
+                                enabled  = true,
+                            )
+                        }
                         AnimatedContent(
                             targetState  = state,
                             contentKey   = { s ->

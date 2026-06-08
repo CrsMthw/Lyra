@@ -5,6 +5,7 @@ import android.content.Intent
 import android.os.Build
 import android.provider.Settings
 import androidx.core.net.toUri
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -37,6 +38,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.crsmthw.lyra.BuildConfig
 import com.crsmthw.lyra.R
 import com.crsmthw.lyra.ui.theme.ThemeMode
+import com.crsmthw.lyra.util.visualizer.VisualizerStyle
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -49,6 +51,7 @@ fun SettingsScreen(
     val amoledBlack         by viewModel.amoledBlack.collectAsStateWithLifecycle()
     val dynamicColor        by viewModel.dynamicColor.collectAsStateWithLifecycle()
     val visualizerEnabled   by viewModel.visualizerEnabled.collectAsStateWithLifecycle()
+    val visualizerStyle     by viewModel.visualizerStyle.collectAsStateWithLifecycle()
     val imageCacheBytes        by viewModel.imageCacheBytes.collectAsStateWithLifecycle()
     val libraryCacheBytes      by viewModel.libraryCacheBytes.collectAsStateWithLifecycle()
     var showLogoutDialog  by remember { mutableStateOf(false) }
@@ -141,6 +144,31 @@ fun SettingsScreen(
                 checked         = visualizerEnabled,
                 onCheckedChange = viewModel::setVisualizerEnabled,
             )
+
+            // Style picker — which surface(s) the visualizer renders on. Only
+            // meaningful when the visualizer is enabled.
+            AnimatedVisibility(visible = visualizerEnabled) {
+                val styleOptions = listOf(
+                    VisualizerStyle.CIRCLE to R.string.settings_visualizer_style_circle,
+                    VisualizerStyle.BOTTOM to R.string.settings_visualizer_style_bottom,
+                    VisualizerStyle.BOTH   to R.string.settings_visualizer_style_both,
+                )
+                SingleChoiceSegmentedButtonRow(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 8.dp),
+                ) {
+                    styleOptions.forEachIndexed { index, (style, labelRes) ->
+                        SegmentedButton(
+                            selected = visualizerStyle == style,
+                            onClick  = { viewModel.setVisualizerStyle(style) },
+                            shape    = SegmentedButtonDefaults.itemShape(index, styleOptions.size),
+                        ) {
+                            Text(stringResource(labelRes))
+                        }
+                    }
+                }
+            }
 
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
 

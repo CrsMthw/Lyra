@@ -69,6 +69,10 @@
     <string name="settings_dynamic_color_desc">Extract accent color from your wallpaper</string>
     <string name="settings_player">Player</string>
     <string name="settings_visualizer_desc">Show audio wave animation while music is playing</string>
+    <string name="settings_visualizer_style">Visualizer style</string>
+    <string name="settings_visualizer_style_circle">Circle</string>
+    <string name="settings_visualizer_style_bottom">Bottom</string>
+    <string name="settings_visualizer_style_both">Both</string>
     <string name="settings_logout">Disconnect Spotify</string>
     <string name="settings_version">Version %1$s</string>
     <string name="about_tagline">Listen beautifully.</string>

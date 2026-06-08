@@ -18,13 +18,16 @@ class FftWavePainter(
     private var models       = Array(0) { GravityModel() }
     private var psf          : PolynomialSplineFunction? = null
     private var lastActiveMs : Long = 0L
+    private val agc          = Agc()
 
     var isActive: Boolean = false
         private set
 
     fun setFftData(fftBytes: ByteArray) {
-        var fft = getFftMagnitudeRange(fftBytes, startHz, endHz)
-        if (fft.size < 3 || isQuiet(fft)) return
+        val raw = getFftMagnitudeRange(fftBytes, startHz, endHz)
+        if (raw.size < 3) return
+        // AGC + silence gate: volume-independent liveliness; true silence → null → decay.
+        var fft = agc.process(raw) ?: return
         lastActiveMs = System.currentTimeMillis()
         fft = applyFrequencyTilt(fft)
         fft = getMirrorFft(fft)

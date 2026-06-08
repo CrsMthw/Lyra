@@ -4,6 +4,47 @@ import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.sin
 
+/**
+ * Automatic gain control + silence gate for the visualizer (à la ProjectM/Milkdrop).
+ *
+ * The `Visualizer` runs in `SCALING_MODE_AS_PLAYED`, so the raw magnitudes track the
+ * actual output level — quiet at 100% volume, louder at 150%, ~zero at silence. Used
+ * directly that makes the visualizer volume-dependent (dead when you turn it down).
+ * This normalizes each frame against a slowly-released rolling peak so it looks equally
+ * lively at any volume, while a soft gate keyed on the *true* level keeps genuine
+ * silence flat (the gate runs on raw AS_PLAYED magnitudes, so AGC can't amplify the
+ * noise floor back into motion).
+ *
+ * One instance per painter (independent state). All constants are tunable on-device.
+ */
+class Agc(
+    private val target  : Double = 130.0, // normalized peak each frame is scaled toward — the brightness knob
+    private val minRef  : Double = 6.0,   // floor on the rolling reference; stops soft-but-present frames exploding
+    private val attack  : Double = 0.6,   // how fast the reference rises to a louder peak (per FFT frame)
+    private val release : Double = 0.10,  // how fast it falls when things quiet down (~1s at the 10 Hz FFT rate)
+    private val gateLow : Double = 2.5,   // true level at/below which the frame is treated as silence (gain 0); silence measured at 0.0
+    private val gateHigh: Double = 6.0,   // true level at/above which the soft gate is fully open (quietest real music measured ~6)
+) {
+    private var ref = minRef
+
+    /**
+     * Returns the volume-normalized magnitudes for [raw], or `null` if the frame is
+     * below the noise floor (caller should skip the update and let the bars decay).
+     */
+    fun process(raw: DoubleArray): DoubleArray? {
+        val peak = raw.maxOrNull() ?: 0.0
+        if (peak <= gateLow) return null
+        ref = if (peak > ref) ref + (peak - ref) * attack
+              else            ref + (peak - ref) * release
+        if (ref < minRef) ref = minRef
+        // Smoothstep soft gate over [gateLow, gateHigh] so onsets/decays fade instead of snapping.
+        val t    = ((peak - gateLow) / (gateHigh - gateLow)).coerceIn(0.0, 1.0)
+        val gate = t * t * (3.0 - 2.0 * t)
+        val g    = (target / ref) * gate
+        return DoubleArray(raw.size) { raw[it] * g }
+    }
+}
+
 class GravityModel(
     val attack  : Float = 0.35f,
     val release : Float = 0.06f,
@@ -41,8 +82,6 @@ fun getFftMagnitudeRange(fftBytes: ByteArray, startHz: Int, endHz: Int): DoubleA
     val e = hzToFftIndex(endHz).coerceIn(s + 1, mag.size)
     return mag.copyOfRange(s, e)
 }
-
-fun isQuiet(fft: DoubleArray, threshold: Double = 5.0) = fft.none { it > threshold }
 
 fun getMirrorFft(fft: DoubleArray): DoubleArray = fft.reversedArray() + fft
 

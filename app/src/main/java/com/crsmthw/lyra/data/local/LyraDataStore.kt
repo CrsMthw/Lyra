@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.crsmthw.lyra.ui.theme.ThemeMode
+import com.crsmthw.lyra.util.visualizer.VisualizerStyle
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -39,6 +40,11 @@ class LyraDataStore(private val context: Context) {
         prefs[Keys.VISUALIZER_ENABLED] ?: false
     }
 
+    val visualizerStyle: Flow<VisualizerStyle> = context.dataStore.data.map { prefs ->
+        val raw = prefs[Keys.VISUALIZER_STYLE] ?: VisualizerStyle.BOTH.name
+        runCatching { VisualizerStyle.valueOf(raw) }.getOrDefault(VisualizerStyle.BOTH)
+    }
+
     // ── Writes ──────────────────────────────────────────────────────────────
 
     suspend fun setThemeMode(mode: ThemeMode) {
@@ -61,6 +67,10 @@ class LyraDataStore(private val context: Context) {
         context.dataStore.edit { it[Keys.VISUALIZER_ENABLED] = enabled }
     }
 
+    suspend fun setVisualizerStyle(style: VisualizerStyle) {
+        context.dataStore.edit { it[Keys.VISUALIZER_STYLE] = style.name }
+    }
+
     // ── Keys ────────────────────────────────────────────────────────────────
 
     private object Keys {
@@ -69,5 +79,6 @@ class LyraDataStore(private val context: Context) {
         val DYNAMIC_COLOR       = booleanPreferencesKey("dynamic_color")
         val LYRICS_MODE         = booleanPreferencesKey("lyrics_mode")
         val VISUALIZER_ENABLED  = booleanPreferencesKey("visualizer_enabled")
+        val VISUALIZER_STYLE    = stringPreferencesKey("visualizer_style")
     }
 }

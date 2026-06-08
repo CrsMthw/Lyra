@@ -15,6 +15,7 @@ import com.crsmthw.lyra.data.repository.SettingsRepository
 import com.crsmthw.lyra.data.repository.SpotifyRepository
 import com.crsmthw.lyra.util.LyricLine
 import com.crsmthw.lyra.util.visualizer.VisualizerManager
+import com.crsmthw.lyra.util.visualizer.VisualizerStyle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -66,6 +67,7 @@ data class PlayerUiState(
     val lyricsState           : LyricsState    = LyricsState.None,
     val currentLyricLineIndex : Int            = -1,
     val visualizerEnabled     : Boolean        = false,
+    val visualizerStyle       : VisualizerStyle = VisualizerStyle.BOTH,
 ) {
     val progress: Float
         get() = if (durationMs > 0L) (progressMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
@@ -144,8 +146,15 @@ class PlayerViewModel(
                 _uiState.update { it.copy(visualizerEnabled = enabled) }
             }
         }
-        // Gate visualizer capture on isPlaying && visualizerEnabled to avoid the
-        // microphone privacy indicator showing when the user hasn't enabled it.
+        viewModelScope.launch {
+            settingsRepository.visualizerStyle.collect { style ->
+                _uiState.update { it.copy(visualizerStyle = style) }
+            }
+        }
+        // Gate visualizer capture on isPlaying && visualizerEnabled so the capture
+        // (and its RECORD_AUDIO usage + CPU) only runs when actually needed. Note:
+        // Visualizer(0) taps the output mix, not the microphone, so it does NOT raise
+        // the mic privacy indicator despite requiring the RECORD_AUDIO permission.
         viewModelScope.launch {
             combine(
                 playerStateManager.state.map { it.isPlaying }.distinctUntilChanged(),

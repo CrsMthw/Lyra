@@ -21,6 +21,7 @@ class FftCWavePainter(
     private var models       = Array(0) { GravityModel() }
     private var psf          : PolynomialSplineFunction? = null
     private var lastActiveMs : Long = 0L
+    private val agc          = Agc()
 
     // Beat-snap rotation: shifts which circle position receives the bass bulge
     private var bandOffset    : Int   = 0
@@ -31,20 +32,23 @@ class FftCWavePainter(
         private set
 
     fun setFftData(fftBytes: ByteArray) {
-        var fft = getFftMagnitudeRange(fftBytes, startHz, endHz)
-        if (fft.size < 3 || isQuiet(fft)) return
-        lastActiveMs = System.currentTimeMillis()
+        val raw = getFftMagnitudeRange(fftBytes, startHz, endHz)
+        if (raw.size < 3) return
 
-        // Beat detection on raw magnitudes
-        val energy = (fft.fold(0.0) { acc, v -> acc + v * v } / fft.size).toFloat()
+        // Beat detection on raw magnitudes (ratio-based, so volume-invariant).
+        val energy = (raw.fold(0.0) { acc, v -> acc + v * v } / raw.size).toFloat()
         rollingEnergy = rollingEnergy * 0.92f + energy * 0.08f
         val now = System.currentTimeMillis()
         if (energy > rollingEnergy * 1.6f && now - lastBeatMs > 300L) {
             // Jump by a varying amount so consecutive beats land on distinct positions
-            val jump = kotlin.random.Random.nextInt(fft.size / 4, (fft.size * 2 / 3).coerceAtLeast(fft.size / 4 + 1))
-            bandOffset = (bandOffset + jump) % fft.size
+            val jump = kotlin.random.Random.nextInt(raw.size / 4, (raw.size * 2 / 3).coerceAtLeast(raw.size / 4 + 1))
+            bandOffset = (bandOffset + jump) % raw.size
             lastBeatMs = now
         }
+
+        // AGC + silence gate: volume-independent liveliness; true silence → null → decay.
+        var fft = agc.process(raw) ?: return
+        lastActiveMs = System.currentTimeMillis()
 
         fft = getPowerFft(fft)
         fft = applyFrequencyTilt(fft)

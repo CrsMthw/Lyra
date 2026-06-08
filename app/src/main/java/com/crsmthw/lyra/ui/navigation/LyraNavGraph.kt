@@ -28,8 +28,10 @@ import coil3.request.SuccessResult
 import coil3.toBitmap
 import com.crsmthw.lyra.util.visualizer.LocalFftData
 import com.crsmthw.lyra.util.visualizer.LocalVisualizerAccentColor
+import com.crsmthw.lyra.util.visualizer.LocalVisualizerBottomEnabled
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
@@ -140,9 +142,19 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
         label         = "visualizerAccent",
     )
 
+    // Gate every bottom FftWaveCanvas (across all screens) from one place: shown only
+    // when the visualizer is enabled and the chosen style includes the bottom wave.
+    val bottomVisualizerEnabled by remember {
+        combine(
+            container.settingsRepository.visualizerEnabled,
+            container.settingsRepository.visualizerStyle,
+        ) { enabled, style -> enabled && style.showBottom }.distinctUntilChanged()
+    }.collectAsStateWithLifecycle(false)
+
     CompositionLocalProvider(
         LocalFftData provides container.visualizerManager.fftData,
         LocalVisualizerAccentColor provides visualizerAccentColor,
+        LocalVisualizerBottomEnabled provides bottomVisualizerEnabled,
     ) {
     SharedTransitionLayout {
         NavHost(

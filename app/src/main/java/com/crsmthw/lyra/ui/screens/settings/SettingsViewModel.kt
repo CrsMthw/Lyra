@@ -10,6 +10,7 @@ import com.crsmthw.lyra.data.repository.SettingsRepository
 import com.crsmthw.lyra.di.AppContainer
 import com.crsmthw.lyra.util.MosaicGenerator
 import com.crsmthw.lyra.ui.theme.ThemeMode
+import com.crsmthw.lyra.util.visualizer.VisualizerStyle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -37,6 +38,9 @@ class SettingsViewModel(
     val visualizerEnabled: StateFlow<Boolean> = settingsRepo.visualizerEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
+    val visualizerStyle: StateFlow<VisualizerStyle> = settingsRepo.visualizerStyle
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), VisualizerStyle.BOTH)
+
     private val _imageCacheBytes   = MutableStateFlow(0L)
     val imageCacheBytes: StateFlow<Long> = _imageCacheBytes
 
@@ -49,6 +53,7 @@ class SettingsViewModel(
     fun setAmoledBlack     (enabled: Boolean)   { viewModelScope.launch { settingsRepo.setAmoledBlack(enabled)        } }
     fun setDynamicColor    (enabled: Boolean)   { viewModelScope.launch { settingsRepo.setDynamicColor(enabled)       } }
     fun setVisualizerEnabled(enabled: Boolean)  { viewModelScope.launch { settingsRepo.setVisualizerEnabled(enabled)  } }
+    fun setVisualizerStyle (style  : VisualizerStyle) { viewModelScope.launch { settingsRepo.setVisualizerStyle(style) } }
 
     fun clientIdMasked(): String {
         val id = encryptedPrefs.clientId
