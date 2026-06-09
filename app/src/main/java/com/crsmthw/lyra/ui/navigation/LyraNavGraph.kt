@@ -188,6 +188,8 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
                     onOpenSearch          = { safePush(Screen.Search.route) },
                     onOpenSettings        = { safePush(Screen.Settings.route) },
                     onOpenQueue           = { safePush(Screen.Queue.route) },
+                    onOpenAlbum           = { albumId -> safePush(Screen.AlbumDetail.createRoute(albumId)) },
+                    onOpenArtist          = { artistId -> safePush(Screen.ArtistDetail.createRoute(artistId)) },
                     sharedTransitionScope = this@SharedTransitionLayout,
                     animatedContentScope  = this@composable,
                 )
@@ -208,8 +210,10 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
             composable(Screen.Queue.route) {
                 val vm = viewModel<QueueViewModel>(factory = QueueViewModelFactory(container))
                 QueueScreen(
-                    viewModel = vm,
-                    onBack    = ::safeNavigateUp,
+                    viewModel    = vm,
+                    onBack       = ::safeNavigateUp,
+                    onOpenAlbum  = { albumId -> safePush(Screen.AlbumDetail.createRoute(albumId)) },
+                    onOpenArtist = { artistId -> safePush(Screen.ArtistDetail.createRoute(artistId)) },
                 )
             }
 

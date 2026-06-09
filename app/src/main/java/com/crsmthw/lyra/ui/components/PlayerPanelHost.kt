@@ -19,7 +19,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalWindowInfo
+import com.crsmthw.lyra.util.confirm
 import androidx.compose.ui.unit.dp
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 
@@ -39,6 +41,7 @@ fun PlayerPanelHost(
     content                 : @Composable BoxScope.(onRequestPlayer: () -> Unit) -> Unit,
 ) {
     val density        = LocalDensity.current
+    val haptics        = LocalHapticFeedback.current
     val screenHeightDp = with(density) { LocalWindowInfo.current.containerSize.height.toDp() }
     val isWideScreen   = currentWindowAdaptiveInfo().windowSizeClass.isWidthAtLeastBreakpoint(600)
     val isShortScreen  = screenHeightDp < 500.dp
@@ -78,7 +81,7 @@ fun PlayerPanelHost(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(Color.Black.copy(alpha = scrimAlpha))
-                        .clickable(enabled = showPlayerPanel) { showPlayerPanel = false }
+                        .clickable(enabled = showPlayerPanel) { haptics.confirm(); showPlayerPanel = false }
                 )
             }
 

@@ -463,6 +463,25 @@ class PlayerViewModel(
         }
     }
 
+    // Debounced so a slider drag-release or a burst of ± taps coalesces into one PUT,
+    // keeping us well under the Web API rate limit. Controls whichever device is active.
+    private var volumeJob: Job? = null
+
+    fun setVolume(volumePercent: Int) {
+        val clamped = volumePercent.coerceIn(0, 100)
+        volumeJob?.cancel()
+        volumeJob = viewModelScope.launch {
+            delay(250L)
+            repository.setVolume(clamped).fold(
+                onSuccess = {},
+                onFailure = { e ->
+                    if (e.message?.contains("429") == true) playerStateManager.noteRateLimited()
+                    _uiState.update { it.copy(deviceTransferError = e.message) }
+                },
+            )
+        }
+    }
+
     // ── Play track (keeps SDK fallback logic, always user-initiated) ──────────
 
     fun playTrack(uri: String, contextUri: String? = null, uris: List<String>? = null, index: Int? = null) {

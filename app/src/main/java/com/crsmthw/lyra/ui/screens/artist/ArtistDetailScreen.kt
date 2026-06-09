@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -29,6 +30,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -39,6 +41,9 @@ import com.crsmthw.lyra.data.remote.model.SpotifyAlbum
 import com.crsmthw.lyra.data.remote.model.SpotifyArtistFull
 import com.crsmthw.lyra.ui.components.PlayerPanelHost
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
+import com.crsmthw.lyra.util.ListScrollHaptics
+import com.crsmthw.lyra.util.confirm
+import com.crsmthw.lyra.util.press
 import com.crsmthw.lyra.util.visualizer.FftWaveCanvas
 import com.crsmthw.lyra.util.visualizer.LocalVisualizerAccentColor
 
@@ -56,6 +61,7 @@ fun ArtistDetailScreen(
 ) {
     val state         by viewModel.uiState.collectAsStateWithLifecycle()
     val context        = LocalContext.current
+    val haptics        = LocalHapticFeedback.current
     val density        = LocalDensity.current
     val navBarBottomDp = with(density) { WindowInsets.navigationBars.getBottom(this).toDp() }
     val scrimHeight    = 140.dp
@@ -85,7 +91,7 @@ fun ArtistDetailScreen(
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = { haptics.confirm(); onBack() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(R.string.nav_back))
                     }
@@ -93,6 +99,7 @@ fun ArtistDetailScreen(
                 actions = {
                     IconButton(
                         onClick = {
+                            haptics.press()
                             state.artist?.id?.let { id ->
                                 context.startActivity(Intent.createChooser(
                                     Intent(Intent.ACTION_SEND).apply {
@@ -187,7 +194,10 @@ fun ArtistDetailScreen(
                                 elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                             ) {
                                 Box(modifier = Modifier.fillMaxSize()) {
+                                    val albumsListState = rememberLazyListState()
+                                    ListScrollHaptics(albumsListState)
                                     LazyColumn(
+                                        state          = albumsListState,
                                         modifier       = Modifier.fillMaxSize(),
                                         contentPadding = PaddingValues(bottom = 100.dp + navBarBottomDp),
                                     ) {
@@ -224,7 +234,10 @@ fun ArtistDetailScreen(
                             .padding(paddingValues)
                             .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal)),
                     ) {
+                        val albumsListState = rememberLazyListState()
+                        ListScrollHaptics(albumsListState)
                         LazyColumn(
+                            state          = albumsListState,
                             modifier       = Modifier.fillMaxSize(),
                             contentPadding = PaddingValues(bottom = 100.dp + navBarBottomDp),
                         ) {

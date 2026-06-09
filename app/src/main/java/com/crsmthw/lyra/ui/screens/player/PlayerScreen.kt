@@ -72,8 +72,14 @@ import com.crsmthw.lyra.ui.components.AddToPlaylistSheet
 import com.crsmthw.lyra.ui.components.DevicePickerSheet
 import com.crsmthw.lyra.ui.components.PlainLyricsView
 import com.crsmthw.lyra.ui.components.SyncedLyricsView
+import androidx.compose.ui.platform.LocalHapticFeedback
+import com.crsmthw.lyra.util.confirm
+import com.crsmthw.lyra.util.press
+import com.crsmthw.lyra.util.reject
 import com.crsmthw.lyra.util.rememberArtBoundsTransform
+import com.crsmthw.lyra.util.tick
 import com.crsmthw.lyra.util.toTimeString
+import com.crsmthw.lyra.util.toggle
 import com.crsmthw.lyra.util.visualizer.FftCWaveCanvas
 import com.crsmthw.lyra.util.visualizer.FftWaveCanvas
 import kotlinx.coroutines.Dispatchers
@@ -98,6 +104,7 @@ fun PlayerScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val pickerState by viewModel.pickerState.collectAsStateWithLifecycle()
+    val haptics = LocalHapticFeedback.current
     var showSleepTimerDialog by remember { mutableStateOf(false) }
     var showPlaylistPicker   by rememberSaveable { mutableStateOf(false) }
     var showDevicePicker     by remember { mutableStateOf(false) }
@@ -206,7 +213,10 @@ fun PlayerScreen(
         state.error?.let { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
     }
     LaunchedEffect(state.deviceTransferError) {
-        state.deviceTransferError?.let { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
+        state.deviceTransferError?.let {
+            haptics.reject()
+            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+        }
     }
 
     val addResult = pickerState.addResult
@@ -219,6 +229,10 @@ fun PlayerScreen(
     }
     LaunchedEffect(addResult) {
         addResultToastMsg?.let {
+            when (addResult) {
+                is AddToPlaylistResult.Added, is AddToPlaylistResult.Removed -> haptics.confirm()
+                else -> haptics.reject()
+            }
             Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
             viewModel.clearPickerResult()
         }
@@ -283,7 +297,7 @@ fun PlayerScreen(
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = { haptics.confirm(); onBack() }) {
                         Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Close",
                             tint = onAccentColor)
                     }
@@ -296,7 +310,7 @@ fun PlayerScreen(
                         }
                     }
                     Box {
-                        IconButton(onClick = { showMediaMenu = true }) {
+                        IconButton(onClick = { haptics.press(); showMediaMenu = true }) {
                             Icon(Icons.Default.Tune,
                                 contentDescription = stringResource(R.string.player_options),
                                 tint = onAccentColor)
@@ -314,6 +328,7 @@ fun PlayerScreen(
                                 DropdownMenuItem(
                                     checked       = lyricsShowing,
                                     onCheckedChange = {
+                                        haptics.toggle(!lyricsShowing)
                                         viewModel.toggleLyricsMode()
                                     },
                                     text          = { Text(stringResource(R.string.player_lyrics)) },
@@ -332,6 +347,7 @@ fun PlayerScreen(
                                 DropdownMenuItem(
                                     checked       = state.visualizerEnabled,
                                     onCheckedChange = { enable ->
+                                        haptics.toggle(enable)
                                         if (enable) {
                                             val hasPermission = ContextCompat.checkSelfPermission(
                                                 context, Manifest.permission.RECORD_AUDIO
@@ -462,6 +478,7 @@ fun PlayerScreen(
                                                                     artOffsetX.snapTo(s)
                                                                     artOffsetX.animateTo(-1500f, tween(250, easing = FastOutLinearInEasing))
                                                                 }
+                                                                haptics.press()
                                                                 viewModel.skipNext()
                                                             }
                                                             artDragX > swipeThresholdPx -> {
@@ -471,6 +488,7 @@ fun PlayerScreen(
                                                                     artOffsetX.snapTo(s)
                                                                     artOffsetX.animateTo(1500f, tween(250, easing = FastOutLinearInEasing))
                                                                 }
+                                                                haptics.press()
                                                                 viewModel.skipPrevious()
                                                             }
                                                             else -> artDragX = 0f
@@ -626,6 +644,7 @@ fun PlayerScreen(
                                                                     artOffsetX.snapTo(s)
                                                                     artOffsetX.animateTo(-1500f, tween(250, easing = FastOutLinearInEasing))
                                                                 }
+                                                                haptics.press()
                                                                 viewModel.skipNext()
                                                             }
                                                             artDragX > swipeThresholdPx -> {
@@ -635,6 +654,7 @@ fun PlayerScreen(
                                                                     artOffsetX.snapTo(s)
                                                                     artOffsetX.animateTo(1500f, tween(250, easing = FastOutLinearInEasing))
                                                                 }
+                                                                haptics.press()
                                                                 viewModel.skipPrevious()
                                                             }
                                                             else -> artDragX = 0f
@@ -721,21 +741,24 @@ fun PlayerScreen(
             error          = state.devicePickerError,
             onSelectDevice = { deviceId ->
                 showDevicePicker = false
+                haptics.confirm()
                 viewModel.transferToDevice(deviceId)
             },
             onThisDevice   = {
                 showDevicePicker = false
+                haptics.confirm()
                 viewModel.transferToThisDevice()
             },
             onDismiss      = { showDevicePicker = false },
             onRetry        = { viewModel.loadAvailableDevices() },
+            onSetVolume    = viewModel::setVolume,
         )
     }
 
     if (showSleepTimerDialog) {
         SleepTimerDialog(
             currentMinutes = state.sleepTimerMinutes,
-            onSelect       = { minutes -> viewModel.setSleepTimer(minutes); showSleepTimerDialog = false },
+            onSelect       = { minutes -> haptics.confirm(); viewModel.setSleepTimer(minutes); showSleepTimerDialog = false },
             onDismiss      = { showSleepTimerDialog = false },
         )
     }
@@ -767,6 +790,7 @@ private fun PlayerControls(
     spacingLarge       : Dp = 16.dp,
     spacingSmall       : Dp = 12.dp,
 ) {
+    val haptics = LocalHapticFeedback.current
     // Track name + like
     Row(
         modifier          = Modifier.fillMaxWidth(),
@@ -823,7 +847,7 @@ private fun PlayerControls(
                 )
             }
         }
-        IconButton(onClick = onToggleLike) {
+        IconButton(onClick = { haptics.toggle(!state.isLiked); onToggleLike() }) {
             Icon(
                 imageVector        = if (state.isLiked) Icons.Default.Favorite else Icons.Outlined.FavoriteBorder,
                 contentDescription = "Like",
@@ -866,9 +890,14 @@ private fun PlayerControls(
                 amplitude  = { p -> if (state.isPlaying) WavyProgressIndicatorDefaults.indicatorAmplitude(p) else 0f },
             )
         }
+        var lastSeekNotch by remember { mutableIntStateOf(-1) }
         Slider(
             value                 = if (isDragging) dragValue else state.progress,
-            onValueChange         = { isDragging = true; dragValue = it },
+            onValueChange         = {
+                isDragging = true; dragValue = it
+                val notch = (it / 0.05f).toInt()           // tick every 5% of the track
+                if (notch != lastSeekNotch) { lastSeekNotch = notch; haptics.tick() }
+            },
             onValueChangeFinished = { onSeek(dragValue); isDragging = false },
             modifier              = Modifier.fillMaxWidth().align(Alignment.Center),
             colors                = SliderDefaults.colors(
@@ -900,7 +929,7 @@ private fun PlayerControls(
         verticalAlignment     = Alignment.CenterVertically,
     ) {
         Box(contentAlignment = Alignment.Center) {
-            IconButton(onClick = onToggleShuffle) {
+            IconButton(onClick = { haptics.toggle(!state.shuffleEnabled); onToggleShuffle() }) {
                 Icon(Icons.Default.Shuffle, contentDescription = stringResource(R.string.player_shuffle),
                     tint = if (state.shuffleEnabled) surfaceAccentColor
                            else MaterialTheme.colorScheme.onSurfaceVariant)
@@ -917,7 +946,7 @@ private fun PlayerControls(
             )
         }
 
-        IconButton(onClick = onSkipPrev, modifier = Modifier.size(48.dp)) {
+        IconButton(onClick = { haptics.press(); onSkipPrev() }, modifier = Modifier.size(48.dp)) {
             Icon(Icons.Default.SkipPrevious, contentDescription = stringResource(R.string.player_previous),
                 modifier = Modifier.size(36.dp))
         }
@@ -933,7 +962,7 @@ private fun PlayerControls(
             }
         }
         FilledIconButton(
-            onClick  = onPlayPause,
+            onClick  = { haptics.press(); onPlayPause() },
             modifier = Modifier.size(68.dp).graphicsLayer { rotationZ = cookieRotation.value },
             shape    = squigglyShape,
             colors   = IconButtonDefaults.filledIconButtonColors(
@@ -955,13 +984,20 @@ private fun PlayerControls(
             }
         }
 
-        IconButton(onClick = onSkipNext, modifier = Modifier.size(48.dp)) {
+        IconButton(onClick = { haptics.press(); onSkipNext() }, modifier = Modifier.size(48.dp)) {
             Icon(Icons.Default.SkipNext, contentDescription = stringResource(R.string.player_next),
                 modifier = Modifier.size(36.dp))
         }
 
         Box(contentAlignment = Alignment.Center) {
-            IconButton(onClick = onCycleRepeat) {
+            IconButton(onClick = {
+                when (state.repeatMode) {
+                    RepeatMode.OFF   -> haptics.toggle(true)    // turning repeat on
+                    RepeatMode.TRACK -> haptics.toggle(false)   // cycling back to off
+                    else             -> haptics.press()         // context → track
+                }
+                onCycleRepeat()
+            }) {
                 Icon(
                     imageVector = when (state.repeatMode) {
                         RepeatMode.TRACK -> Icons.Default.RepeatOne
@@ -1002,7 +1038,7 @@ private fun PlayerControls(
             else                     -> Icons.Default.Cast
         }
         AssistChip(
-            onClick    = onOpenDevicePicker,
+            onClick    = { haptics.press(); onOpenDevicePicker() },
             enabled    = state.currentTrack != null,
             label      = {
                 Text(
@@ -1040,7 +1076,7 @@ private fun PlayerControls(
         // is tight (IllegalArgumentException: maxWidth must be >= minWidth). A Row clips instead.
         Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
             FilledTonalIconButton(
-                onClick  = onOpenQueue,
+                onClick  = { haptics.press(); onOpenQueue() },
                 enabled  = state.currentTrack != null,
                 modifier = Modifier.size(40.dp),
                 shape    = ButtonGroupDefaults.connectedLeadingButtonShape,
@@ -1049,7 +1085,7 @@ private fun PlayerControls(
                 Icon(Icons.AutoMirrored.Filled.QueueMusic, queueLabel, Modifier.size(18.dp))
             }
             FilledTonalIconButton(
-                onClick  = onShare,
+                onClick  = { haptics.press(); onShare() },
                 enabled  = state.currentTrack != null,
                 modifier = Modifier.size(40.dp),
                 shape    = RoundedCornerShape(2.dp),
@@ -1058,7 +1094,7 @@ private fun PlayerControls(
                 Icon(Icons.Default.Share, shareLabel, Modifier.size(18.dp))
             }
             FilledTonalIconButton(
-                onClick  = onAddToPlaylist,
+                onClick  = { haptics.press(); onAddToPlaylist() },
                 enabled  = state.currentTrack != null,
                 modifier = Modifier.size(40.dp),
                 shape    = ButtonGroupDefaults.connectedTrailingButtonShape,

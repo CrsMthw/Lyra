@@ -309,7 +309,14 @@ class NowPlayingWidget : GlanceAppWidget() {
 
     companion object {
         // Thresholds for picking a layout from the actual widget size (SizeMode.Exact).
-        private val MEDIUM = DpSize(220.dp, 96.dp)
+        // MEDIUM.width is set above MediumLayout's fixed horizontal footprint (~232dp: 24
+        // padding + 64 art + 16 spacers + three 40/48/40 buttons) plus a readable text budget
+        // (~88dp). Below this, CompactLayout (single play-pause button) is used so the
+        // title/artist is never squeezed out — on a dense/unfolded home-grid a widget can
+        // report a width that previously fell into Medium and crushed the text column to zero.
+        // Only MEDIUM.width and LARGE.height are read by the selector; the other components
+        // are placeholders.
+        private val MEDIUM = DpSize(320.dp, 96.dp)
         private val LARGE  = DpSize(260.dp, 200.dp)
 
         private val PREVIEW_SNAPSHOT = WidgetSnapshot(

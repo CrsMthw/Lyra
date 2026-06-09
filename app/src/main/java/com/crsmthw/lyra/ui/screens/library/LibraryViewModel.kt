@@ -11,6 +11,7 @@ import com.crsmthw.lyra.data.remote.SpotifyRemoteManager
 import com.crsmthw.lyra.data.remote.model.*
 import com.crsmthw.lyra.data.repository.SpotifyRepository
 import com.crsmthw.lyra.di.AppContainer
+import com.crsmthw.lyra.ui.components.TrackActionsController
 import com.crsmthw.lyra.util.MosaicGenerator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -48,6 +49,59 @@ class LibraryViewModel(
 
     private val _uiState = MutableStateFlow(LibraryUiState())
     val uiState: StateFlow<LibraryUiState> = _uiState
+
+    /** Backs the song touch-and-hold menu for every track list this screen shows. */
+    val trackActions = TrackActionsController(repository, cache, viewModelScope)
+
+    /**
+     * Removes the long-pressed track from the playlist it's currently shown in (only reachable
+     * when that playlist is owned). Drops the row immediately and keeps the cached track list in
+     * sync so re-opening the playlist doesn't resurrect it.
+     */
+    fun removeTrackFromCurrentPlaylist() {
+        val target   = trackActions.state.value.target ?: return
+        val playlist = target.removable ?: return
+        viewModelScope.launch {
+            repository.removeTrackFromPlaylist(playlist.id, target.uri).onSuccess {
+                _uiState.update { s ->
+                    s.copy(currentTracks = s.currentTracks.filterNot { it.uri == target.uri })
+                }
+                cache.loadTrackList(playlist.id)?.let { cached ->
+                    cache.saveTrackList(
+                        playlist.id,
+                        cached.snapshotId,
+                        cached.tracks.filterNot { it.uri == target.uri },
+                    )
+                }
+                trackActions.dismiss()
+            }
+        }
+    }
+
+    /**
+     * Deletes an owned playlist (Spotify unfollow). On success removes it from the in-memory list
+     * and cache, and closes the detail view if it was the one open. Caller guards that the playlist
+     * is owned (never Liked Songs / followed).
+     */
+    fun deletePlaylist(playlist: SpotifyPlaylist) {
+        viewModelScope.launch {
+            repository.deletePlaylist(playlist.id).fold(
+                onSuccess = {
+                    cache.removePlaylist(playlist.id)
+                    _uiState.update { s ->
+                        val wasOpen = s.currentPlaylist?.id == playlist.id
+                        s.copy(
+                            playlists       = s.playlists.filterNot { it.id == playlist.id },
+                            currentPlaylist = if (wasOpen) null else s.currentPlaylist,
+                            currentTracks   = if (wasOpen) emptyList() else s.currentTracks,
+                            refreshError    = null,
+                        )
+                    }
+                },
+                onFailure = { e -> _uiState.update { it.copy(refreshError = e.message) } },
+            )
+        }
+    }
 
     init {
         _uiState.update { it.copy(playlistsWithMosaics = mosaicGenerator.existingIds()) }

@@ -120,6 +120,11 @@ class SpotifyRepository(
         Unit
     }
 
+    /** Deletes an owned playlist (Spotify models this as unfollowing it). */
+    suspend fun deletePlaylist(playlistId: String): Result<Unit> = safeCall {
+        api.unfollowPlaylist(playlistId)
+    }
+
     suspend fun removeTrackFromPlaylist(playlistId: String, trackUri: String): Result<Unit> = safeCall {
         api.removeItemsFromPlaylist(playlistId, RemoveItemsRequest(listOf(RemoveItemEntry(trackUri))))
         Unit
@@ -143,6 +148,7 @@ class SpotifyRepository(
     suspend fun seek(positionMs: Long): Result<Unit>           = safeCall { api.seek(positionMs) }
     suspend fun setShuffle(state: Boolean): Result<Unit>       = safeCall { api.setShuffle(state) }
     suspend fun setRepeat(state: String): Result<Unit>         = safeCall { api.setRepeat(state) }
+    suspend fun setVolume(volumePercent: Int): Result<Unit>    = safeCall { api.setVolume(volumePercent) }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 

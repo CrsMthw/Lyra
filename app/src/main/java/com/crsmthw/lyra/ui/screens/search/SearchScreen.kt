@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -24,6 +25,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -39,7 +41,11 @@ import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.remote.model.SpotifyAlbum
 import com.crsmthw.lyra.data.remote.model.SpotifyArtist
 import com.crsmthw.lyra.data.remote.model.SpotifyPlaylist
+import com.crsmthw.lyra.ui.components.TrackActionsHost
 import com.crsmthw.lyra.ui.components.TrackRow
+import com.crsmthw.lyra.ui.components.toTrackActionTarget
+import com.crsmthw.lyra.util.ListScrollHaptics
+import com.crsmthw.lyra.util.confirm
 import com.crsmthw.lyra.util.visualizer.FftWaveCanvas
 import com.crsmthw.lyra.util.visualizer.LocalVisualizerAccentColor
 
@@ -56,6 +62,7 @@ fun SearchScreen(
     val state          by viewModel.uiState.collectAsStateWithLifecycle()
     val keyboard        = LocalSoftwareKeyboardController.current
     val focusRequester  = remember { FocusRequester() }
+    val haptics         = LocalHapticFeedback.current
 
     Scaffold(
         contentWindowInsets = WindowInsets(0),
@@ -64,7 +71,7 @@ fun SearchScreen(
                 SearchBar(
                     query          = state.query,
                     onQueryChange  = viewModel::onQueryChange,
-                    onBack         = onBack,
+                    onBack         = { haptics.confirm(); onBack() },
                     onClear        = viewModel::clearQuery,
                     focusRequester = focusRequester,
                     keyboard       = keyboard,
@@ -110,7 +117,10 @@ fun SearchScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     } else {
+                        val resultsListState = rememberLazyListState()
+                        ListScrollHaptics(resultsListState)
                         LazyColumn(
+                            state          = resultsListState,
                             modifier       = Modifier.fillMaxSize(),
                             contentPadding = PaddingValues(bottom = navBarBottomDp + 16.dp),
                         ) {
@@ -146,6 +156,7 @@ fun SearchScreen(
                                             val idx = tracks.indexOfFirst { it.uri == track.uri }.coerceAtLeast(0)
                                             onTrackClick(track.uri, tracks.drop(idx).map { it.uri })
                                         },
+                                        onLongClick = { viewModel.trackActions.open(track.toTrackActionTarget()) },
                                     )
                                 }
                             }
@@ -211,6 +222,12 @@ fun SearchScreen(
             )
         }
     }
+
+    TrackActionsHost(
+        controller   = viewModel.trackActions,
+        onGoToAlbum  = onAlbumClick,
+        onGoToArtist = onArtistClick,
+    )
 
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
 }

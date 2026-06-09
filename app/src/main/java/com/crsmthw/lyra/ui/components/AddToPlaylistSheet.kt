@@ -22,6 +22,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -31,6 +32,7 @@ import coil3.compose.AsyncImage
 import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.remote.model.SpotifyPlaylist
 import com.crsmthw.lyra.ui.screens.player.PlaylistPickerState
+import com.crsmthw.lyra.util.toggle
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -266,9 +268,10 @@ private fun CreateForm(
                 style    = MaterialTheme.typography.bodyLarge,
                 modifier = Modifier.weight(1f),
             )
+            val haptics = LocalHapticFeedback.current
             Switch(
                 checked         = isPublic,
-                onCheckedChange = onIsPublicChange,
+                onCheckedChange = { enabled -> haptics.toggle(enabled); onIsPublicChange(enabled) },
                 enabled         = !isCreating,
             )
         }

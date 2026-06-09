@@ -3,9 +3,11 @@ package com.crsmthw.lyra.ui.screens.search
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.crsmthw.lyra.data.local.LibraryCache
 import com.crsmthw.lyra.data.remote.model.SearchResponse
 import com.crsmthw.lyra.data.repository.SpotifyRepository
 import com.crsmthw.lyra.di.AppContainer
+import com.crsmthw.lyra.ui.components.TrackActionsController
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -18,11 +20,17 @@ data class SearchUiState(
 )
 
 @OptIn(FlowPreview::class)
-class SearchViewModel(private val repository: SpotifyRepository) : ViewModel() {
+class SearchViewModel(
+    private val repository  : SpotifyRepository,
+    libraryCache            : LibraryCache,
+) : ViewModel() {
 
     private val _query   = MutableStateFlow("")
     private val _state   = MutableStateFlow(SearchUiState())
     val uiState: StateFlow<SearchUiState> = _state
+
+    /** Backs the song touch-and-hold menu for search result rows. */
+    val trackActions = TrackActionsController(repository, libraryCache, viewModelScope)
 
     init {
         // Debounce search input: wait 400 ms after last keystroke before hitting API
@@ -63,5 +71,5 @@ class SearchViewModel(private val repository: SpotifyRepository) : ViewModel() {
 class SearchViewModelFactory(private val container: AppContainer) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T =
-        SearchViewModel(container.spotifyRepository) as T
+        SearchViewModel(container.spotifyRepository, container.libraryCache) as T
 }

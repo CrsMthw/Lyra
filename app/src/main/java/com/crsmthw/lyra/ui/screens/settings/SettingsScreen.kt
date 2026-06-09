@@ -28,6 +28,10 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import com.crsmthw.lyra.util.confirm
+import com.crsmthw.lyra.util.press
+import com.crsmthw.lyra.util.toggle
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
@@ -52,6 +56,8 @@ fun SettingsScreen(
     val dynamicColor        by viewModel.dynamicColor.collectAsStateWithLifecycle()
     val visualizerEnabled   by viewModel.visualizerEnabled.collectAsStateWithLifecycle()
     val visualizerStyle     by viewModel.visualizerStyle.collectAsStateWithLifecycle()
+    val hapticsEnabled      by viewModel.hapticsEnabled.collectAsStateWithLifecycle()
+    val haptics              = LocalHapticFeedback.current
     val imageCacheBytes        by viewModel.imageCacheBytes.collectAsStateWithLifecycle()
     val libraryCacheBytes      by viewModel.libraryCacheBytes.collectAsStateWithLifecycle()
     var showLogoutDialog  by remember { mutableStateOf(false) }
@@ -65,7 +71,7 @@ fun SettingsScreen(
                 windowInsets = WindowInsets(0),
                 title        = { Text(stringResource(R.string.settings_title)) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = { haptics.confirm(); onBack() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
@@ -132,6 +138,15 @@ fun SettingsScreen(
                 onCheckedChange = viewModel::setDynamicColor,
             )
 
+            // Haptic feedback toggle (app-wide)
+            SettingsToggleItem(
+                icon    = Icons.Default.Vibration,
+                title   = stringResource(R.string.settings_haptics),
+                subtitle= stringResource(R.string.settings_haptics_desc),
+                checked = hapticsEnabled,
+                onCheckedChange = viewModel::setHapticsEnabled,
+            )
+
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
 
             // ── Player ────────────────────────────────────────────────────────
@@ -161,7 +176,7 @@ fun SettingsScreen(
                     styleOptions.forEachIndexed { index, (style, labelRes) ->
                         SegmentedButton(
                             selected = visualizerStyle == style,
-                            onClick  = { viewModel.setVisualizerStyle(style) },
+                            onClick  = { haptics.press(); viewModel.setVisualizerStyle(style) },
                             shape    = SegmentedButtonDefaults.itemShape(index, styleOptions.size),
                         ) {
                             Text(stringResource(labelRes))
@@ -608,15 +623,17 @@ private fun SettingsToggleItem(
     checked        : Boolean,
     onCheckedChange: (Boolean) -> Unit,
 ) {
+    val haptics = LocalHapticFeedback.current
+    val toggleWithHaptic: (Boolean) -> Unit = { enabled -> haptics.toggle(enabled); onCheckedChange(enabled) }
     ListItem(
         leadingContent   = { Icon(icon, contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurfaceVariant) },
         headlineContent  = { Text(title) },
         supportingContent= subtitle?.let { { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) } },
         trailingContent  = {
-            Switch(checked = checked, onCheckedChange = onCheckedChange)
+            Switch(checked = checked, onCheckedChange = toggleWithHaptic)
         },
-        modifier = Modifier.clickable { onCheckedChange(!checked) },
+        modifier = Modifier.clickable { toggleWithHaptic(!checked) },
     )
 }
 

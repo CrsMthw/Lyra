@@ -5,17 +5,27 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeDown
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.remote.model.SpotifyDevice
+import com.crsmthw.lyra.util.tick
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -27,7 +37,16 @@ fun DevicePickerSheet(
     onThisDevice  : () -> Unit,
     onDismiss     : () -> Unit,
     onRetry       : () -> Unit,
+    onSetVolume   : (Int) -> Unit,
 ) {
+    // The slider controls whichever device is active (see CLAUDE.md decision: we can't
+    // reliably detect "this device", so always show it). Enable unless the active device
+    // positively reports it doesn't support volume — that way local playback isn't wrongly
+    // greyed out. Re-seeds when the active device identity changes (e.g. once devices load).
+    val active = devices.firstOrNull { it.isActive }
+    val volumeEnabled = active?.supportsVolume != false
+    var volume by remember(active?.id) { mutableFloatStateOf((active?.volumePercent ?: 50).toFloat()) }
+
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Text(
             text     = stringResource(R.string.player_connect_device),
@@ -123,8 +142,72 @@ fun DevicePickerSheet(
                             )
                         }
                     }
+                    item(key = "volume") {
+                        HorizontalDivider(modifier = Modifier.padding(top = 8.dp))
+                        VolumeControl(
+                            volume           = volume,
+                            enabled          = volumeEnabled,
+                            onChange         = { volume = it },
+                            onChangeFinished = { onSetVolume(volume.roundToInt()) },
+                            onStep           = { delta ->
+                                volume = (volume + delta).coerceIn(0f, 100f)
+                                onSetVolume(volume.roundToInt())
+                            },
+                        )
+                    }
                     item { Spacer(Modifier.navigationBarsPadding()) }
                 }
+            }
+        }
+    }
+}
+
+private const val VOLUME_STEP = 5f
+
+@Composable
+private fun VolumeControl(
+    volume          : Float,
+    enabled         : Boolean,
+    onChange        : (Float) -> Unit,
+    onChangeFinished: () -> Unit,
+    onStep          : (Float) -> Unit,
+) {
+    val haptics = LocalHapticFeedback.current
+    var lastNotch by remember { mutableIntStateOf((volume / VOLUME_STEP).toInt()) }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+    ) {
+        Text(
+            text  = stringResource(R.string.player_device_volume),
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = { haptics.tick(); onStep(-VOLUME_STEP) }, enabled = enabled) {
+                Icon(
+                    imageVector        = Icons.AutoMirrored.Filled.VolumeDown,
+                    contentDescription = stringResource(R.string.player_volume_down),
+                )
+            }
+            Slider(
+                value                 = volume,
+                onValueChange         = {
+                    val notch = (it / VOLUME_STEP).toInt()   // tick every 5%
+                    if (notch != lastNotch) { lastNotch = notch; haptics.tick() }
+                    onChange(it)
+                },
+                onValueChangeFinished = onChangeFinished,
+                valueRange            = 0f..100f,
+                enabled               = enabled,
+                modifier              = Modifier.weight(1f),
+            )
+            IconButton(onClick = { haptics.tick(); onStep(VOLUME_STEP) }, enabled = enabled) {
+                Icon(
+                    imageVector        = Icons.AutoMirrored.Filled.VolumeUp,
+                    contentDescription = stringResource(R.string.player_volume_up),
+                )
             }
         }
     }

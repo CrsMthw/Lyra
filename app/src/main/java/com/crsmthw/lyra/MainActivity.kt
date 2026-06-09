@@ -12,6 +12,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -22,6 +23,7 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.crsmthw.lyra.ui.navigation.LyraNavGraph
 import com.crsmthw.lyra.ui.theme.LyraTheme
 import com.crsmthw.lyra.ui.theme.ThemeMode
+import com.crsmthw.lyra.util.HapticsConfig
 
 class MainActivity : ComponentActivity() {
 
@@ -50,6 +52,10 @@ class MainActivity : ComponentActivity() {
             val themeMode    by container.dataStore.themeMode.collectAsState(initial = ThemeMode.SYSTEM)
             val amoledBlack  by container.dataStore.amoledBlack.collectAsState(initial = false)
             val dynamicColor by container.dataStore.dynamicColor.collectAsState(initial = true)
+
+            // Mirror the haptics preference into the process-wide gate read by all haptic helpers.
+            val hapticsEnabled by container.dataStore.hapticsEnabled.collectAsState(initial = true)
+            LaunchedEffect(hapticsEnabled) { HapticsConfig.enabled = hapticsEnabled }
 
             val systemDark = isSystemInDarkTheme()
             val isDark = when (themeMode) {

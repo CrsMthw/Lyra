@@ -45,6 +45,10 @@ class LyraDataStore(private val context: Context) {
         runCatching { VisualizerStyle.valueOf(raw) }.getOrDefault(VisualizerStyle.BOTH)
     }
 
+    val hapticsEnabled: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[Keys.HAPTICS_ENABLED] ?: true
+    }
+
     // ── Writes ──────────────────────────────────────────────────────────────
 
     suspend fun setThemeMode(mode: ThemeMode) {
@@ -71,6 +75,10 @@ class LyraDataStore(private val context: Context) {
         context.dataStore.edit { it[Keys.VISUALIZER_STYLE] = style.name }
     }
 
+    suspend fun setHapticsEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.HAPTICS_ENABLED] = enabled }
+    }
+
     // ── Keys ────────────────────────────────────────────────────────────────
 
     private object Keys {
@@ -80,5 +88,6 @@ class LyraDataStore(private val context: Context) {
         val LYRICS_MODE         = booleanPreferencesKey("lyrics_mode")
         val VISUALIZER_ENABLED  = booleanPreferencesKey("visualizer_enabled")
         val VISUALIZER_STYLE    = stringPreferencesKey("visualizer_style")
+        val HAPTICS_ENABLED     = booleanPreferencesKey("haptics_enabled")
     }
 }

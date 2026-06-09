@@ -32,6 +32,12 @@
     <string name="player_remove_from_playlist_success">Removed from %1$s</string>
     <string name="player_add_to_playlist_403">Reconnect Spotify in Settings to add to playlists</string>
     <string name="create_playlist_title">New playlist</string>
+    <!-- Track touch-and-hold menu -->
+    <string name="track_action_like">Add to Liked Songs</string>
+    <string name="track_action_unlike">Remove from Liked Songs</string>
+    <string name="track_action_remove_from_playlist">Remove from %1$s</string>
+    <string name="track_action_go_to_album">Go to album</string>
+    <string name="track_action_go_to_artist">Go to artist</string>
     <string name="create_playlist_name_label">Name</string>
     <string name="create_playlist_name_placeholder">My playlist</string>
     <string name="create_playlist_description_label">Description</string>
@@ -39,12 +45,22 @@
     <string name="create_playlist_public_label">Public</string>
     <string name="create_playlist_button">Create</string>
     <string name="create_playlist_error">Couldn\'t create playlist</string>
+    <!-- Delete playlist -->
+    <string name="more_options">More options</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="delete_playlist">Delete playlist</string>
+    <string name="delete_playlist_confirm_title">Delete playlist?</string>
+    <string name="delete_playlist_confirm_message">“%1$s” will be permanently deleted. This can’t be undone.</string>
+    <string name="delete_playlist_confirm_button">Delete</string>
     <string name="player_connect_device">Connect to a device</string>
     <string name="player_this_device">This device</string>
     <string name="player_this_device_hint">Use this if your device isn\'t in the list below — wakes Spotify up and transfers playback here.</string>
     <string name="player_no_device">No device</string>
     <string name="player_device_picker_empty">No devices found</string>
     <string name="player_device_picker_retry">Retry</string>
+    <string name="player_device_volume">Device volume</string>
+    <string name="player_volume_down">Volume down</string>
+    <string name="player_volume_up">Volume up</string>
 
     <!-- Queue -->
     <string name="player_queue">Queue</string>
@@ -67,6 +83,8 @@
     <string name="settings_amoled_desc">Ultra-dark background in dark mode</string>
     <string name="settings_dynamic_color">Material You Colors</string>
     <string name="settings_dynamic_color_desc">Extract accent color from your wallpaper</string>
+    <string name="settings_haptics">Haptic feedback</string>
+    <string name="settings_haptics_desc">Vibrate on taps, toggles, and gestures</string>
     <string name="settings_player">Player</string>
     <string name="settings_visualizer_desc">Show audio wave animation while music is playing</string>
     <string name="settings_visualizer_style">Visualizer style</string>

@@ -78,6 +78,16 @@ class LibraryCache(context: Context) {
         }
     }
 
+    fun removePlaylist(playlistId: String) {
+        synchronized(lock) {
+            val current = loadLocked() ?: return
+            saveLocked(current.copy(
+                playlists  = current.playlists.filterNot { it.id == playlistId },
+                trackLists = current.trackLists - playlistId,
+            ))
+        }
+    }
+
     fun clear() = synchronized(lock) { file.delete() }
 
     val sizeBytes: Long get() = if (file.exists()) file.length() else 0L

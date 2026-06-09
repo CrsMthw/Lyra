@@ -25,6 +25,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import com.crsmthw.lyra.util.confirm
+import com.crsmthw.lyra.util.press
 import androidx.compose.ui.Modifier
 import kotlin.math.abs
 import androidx.compose.ui.graphics.Color
@@ -60,6 +63,7 @@ fun MiniPlayer(
     navSharedTransitionScope   : SharedTransitionScope? = null,
     navAnimatedVisibilityScope : AnimatedVisibilityScope? = null,
 ) {
+    val haptics               = LocalHapticFeedback.current
     val resolvedAccent        = if (accentColor == Color.Unspecified) MaterialTheme.colorScheme.primary else accentColor
     val resolvedSurfaceAccent = if (surfaceAccentColor == Color.Unspecified) resolvedAccent else surfaceAccentColor
     val density    = LocalDensity.current
@@ -87,7 +91,7 @@ fun MiniPlayer(
                 .clip(shape)
                 .background(bgColor)
                 .background(resolvedAccent.copy(alpha = 0.10f))
-                .clickable(onClick = onExpand),
+                .clickable(onClick = { haptics.confirm(); onExpand() }),
         ) {
             Row(
                 modifier          = Modifier
@@ -170,7 +174,7 @@ fun MiniPlayer(
                         )
                     }
                     IconButton(
-                        onClick  = onPlayPause,
+                        onClick  = { haptics.press(); onPlayPause() },
                         modifier = Modifier.size(40.dp),
                     ) {
                         Icon(
@@ -182,7 +186,7 @@ fun MiniPlayer(
                 }
 
                 IconButton(
-                    onClick  = onSkipNext,
+                    onClick  = { haptics.press(); onSkipNext() },
                     modifier = Modifier.size(40.dp),
                 ) {
                     Icon(

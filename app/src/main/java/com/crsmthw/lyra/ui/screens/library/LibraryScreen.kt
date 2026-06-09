@@ -58,6 +58,7 @@ import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -73,14 +74,22 @@ import androidx.compose.ui.res.stringResource
 import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.remote.model.SpotifyPlaylist
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshState
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import com.crsmthw.lyra.ui.components.PlayerPanelHost
 import com.crsmthw.lyra.ui.components.PlaylistCard
+import com.crsmthw.lyra.ui.components.RemovablePlaylist
+import com.crsmthw.lyra.ui.components.TrackActionsHost
 import com.crsmthw.lyra.ui.components.TrackRow
+import com.crsmthw.lyra.ui.components.toTrackActionTarget
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import com.crsmthw.lyra.ui.screens.player.RepeatMode
+import com.crsmthw.lyra.util.ListScrollHaptics
+import com.crsmthw.lyra.util.confirm
+import com.crsmthw.lyra.util.press
 import com.crsmthw.lyra.util.rememberArtBoundsTransform
+import com.crsmthw.lyra.util.threshold
 import com.crsmthw.lyra.util.toTimeString
 import com.crsmthw.lyra.util.visualizer.FftWaveCanvas
 import com.crsmthw.lyra.util.visualizer.LocalVisualizerAccentColor
@@ -104,11 +113,15 @@ fun LibraryScreen(
     onOpenSearch          : () -> Unit,
     onOpenSettings        : () -> Unit,
     onOpenQueue           : () -> Unit = {},
+    onOpenAlbum           : (String) -> Unit = {},
+    onOpenArtist          : (String) -> Unit = {},
     sharedTransitionScope : SharedTransitionScope? = null,
     animatedContentScope  : AnimatedContentScope? = null,
 ) {
     val state        by viewModel.uiState.collectAsStateWithLifecycle()
     val isWideScreen  = currentWindowAdaptiveInfo().windowSizeClass.isWidthAtLeastBreakpoint(600)
+    val haptics       = LocalHapticFeedback.current
+    val onOpenSearchHaptic = { haptics.confirm(); onOpenSearch() }
 
     PlayerPanelHost(
         playerViewModel          = playerViewModel,
@@ -122,7 +135,7 @@ fun LibraryScreen(
                 state           = state,
                 viewModel       = viewModel,
                 playerViewModel = playerViewModel,
-                onOpenSearch    = onOpenSearch,
+                onOpenSearch    = onOpenSearchHaptic,
                 onOpenSettings  = onOpenSettings,
                 onRequestPlayer = onRequestPlayer,
             )
@@ -131,10 +144,33 @@ fun LibraryScreen(
                 state           = state,
                 viewModel       = viewModel,
                 playerViewModel = playerViewModel,
-                onOpenSearch    = onOpenSearch,
+                onOpenSearch    = onOpenSearchHaptic,
                 onOpenSettings  = onOpenSettings,
                 onRequestPlayer = onRequestPlayer,
             )
+        }
+    }
+
+    TrackActionsHost(
+        controller           = viewModel.trackActions,
+        onGoToAlbum          = onOpenAlbum,
+        onGoToArtist         = onOpenArtist,
+        onRemoveFromPlaylist = viewModel::removeTrackFromCurrentPlaylist,
+    )
+}
+
+/** Fires a one-shot threshold haptic each time a pull-to-refresh drag crosses the trigger point. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PullThresholdHaptics(state: PullToRefreshState) {
+    val haptics = LocalHapticFeedback.current
+    var armed by remember { mutableStateOf(false) }
+    LaunchedEffect(state) {
+        snapshotFlow { state.distanceFraction }.collect { fraction ->
+            when {
+                fraction >= 1f && !armed -> { armed = true; haptics.threshold() }
+                fraction < 1f && armed   -> armed = false
+            }
         }
     }
 }
@@ -283,7 +319,9 @@ private fun LibraryBrowserPane(
     animScope             : AnimatedContentScope? = null,
 ) {
     var showRefreshErrorDialog by remember { mutableStateOf(false) }
+    val haptics        = LocalHapticFeedback.current
     val listState      = rememberLazyListState()
+    ListScrollHaptics(listState)
     val density        = LocalDensity.current
     val navBarBottomDp = with(density) { WindowInsets.navigationBars.getBottom(this).toDp() }
     val context        = LocalContext.current
@@ -303,7 +341,7 @@ private fun LibraryBrowserPane(
             LikedSongsCard(
                 count       = state.likedSongCount,
                 isSelected  = likedSongsSelected,
-                onOpen      = { viewModel.selectLikedSongs() },
+                onOpen      = { haptics.confirm(); viewModel.selectLikedSongs() },
                 onPlay      = { viewModel.playPlaylist("spotify:user:${state.user?.id}:collection") },
                 sharedScope = sharedScope,
                 animScope   = animScope,
@@ -322,7 +360,7 @@ private fun LibraryBrowserPane(
                             playlist    = playlist,
                             mosaicFile  = if (playlist.id in state.playlistsWithMosaics)
                                 File(mosaicDir, "${playlist.id}.png") else null,
-                            onClick     = { viewModel.selectPlaylist(playlist) },
+                            onClick     = { haptics.confirm(); viewModel.selectPlaylist(playlist) },
                             sharedScope = sharedScope,
                             animScope   = animScope,
                         )
@@ -341,7 +379,7 @@ private fun LibraryBrowserPane(
                     mosaicFile  = if (playlist.id in state.playlistsWithMosaics)
                         File(mosaicDir, "${playlist.id}.png") else null,
                     isSelected  = playlist.id == selectedPlaylistId,
-                    onClick     = { viewModel.selectPlaylist(playlist) },
+                    onClick     = { haptics.confirm(); viewModel.selectPlaylist(playlist) },
                     onPlay      = { viewModel.playPlaylist(playlist.uri) },
                     sharedScope = sharedScope,
                     animScope   = animScope,
@@ -359,7 +397,7 @@ private fun LibraryBrowserPane(
                     mosaicFile  = if (playlist.id in state.playlistsWithMosaics)
                         File(mosaicDir, "${playlist.id}.png") else null,
                     isSelected  = playlist.id == selectedPlaylistId,
-                    onClick     = { viewModel.selectPlaylist(playlist) },
+                    onClick     = { haptics.confirm(); viewModel.selectPlaylist(playlist) },
                     onPlay      = { viewModel.playPlaylist(playlist.uri) },
                     sharedScope = sharedScope,
                     animScope   = animScope,
@@ -375,7 +413,7 @@ private fun LibraryBrowserPane(
                     tint = MaterialTheme.colorScheme.error)
             }
         }
-        IconButton(onClick = onOpenSettings) {
+        IconButton(onClick = { haptics.press(); onOpenSettings() }) {
             Icon(Icons.Default.Settings, contentDescription = "Settings")
         }
     }
@@ -420,6 +458,7 @@ private fun LibraryBrowserPane(
                 }
             } else {
                 val landscapePtrState = rememberPullToRefreshState()
+                PullThresholdHaptics(landscapePtrState)
                 PullToRefreshBox(
                     isRefreshing = state.isLibraryRefreshing,
                     onRefresh    = viewModel::refreshLibrary,
@@ -528,6 +567,7 @@ private fun LibraryBrowserPane(
                     }
                 } else {
                     val portraitPtrState = rememberPullToRefreshState()
+                    PullThresholdHaptics(portraitPtrState)
                     PullToRefreshBox(
                         isRefreshing = state.isLibraryRefreshing,
                         onRefresh    = viewModel::refreshLibrary,
@@ -748,6 +788,11 @@ private fun RightPaneContent(
     }.collectAsStateWithLifecycle(false)
     val playlist     = state.currentPlaylist
     val isLikedSongs = playlist == null
+    // Owned playlists only (never Liked Songs / followed) get the delete action.
+    val canDelete    = playlist != null && playlist.owner.id == state.user?.id
+    val haptics      = LocalHapticFeedback.current
+    var showOverflowMenu  by remember { mutableStateOf(false) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
     // Hero art shared-element key — matches the source card's key so only the selected pair morphs.
     val artKey       = if (isLikedSongs) "lib-art-liked" else "lib-art-${playlist.id}"
     val mosaicFile   = playlist?.let { p ->
@@ -785,6 +830,7 @@ private fun RightPaneContent(
     val snapThreshold    = thresholdPx / 2f
     val listState        = rememberLazyListState()
     val pullToRefreshState   = rememberPullToRefreshState()
+    PullThresholdHaptics(pullToRefreshState)
     var barHeightPx   by remember { mutableIntStateOf(0) }
     val collapseProgress = remember(listState) {
         derivedStateOf {
@@ -873,6 +919,11 @@ private fun RightPaneContent(
                 }
                 onTrackClick()
             },
+            onTrackLongClick = { track ->
+                val removable = playlist?.takeIf { it.owner.id == state.user?.id }
+                    ?.let { RemovablePlaylist(it.id, it.name) }
+                viewModel.trackActions.open(track.toTrackActionTarget(removable))
+            },
             modifier       = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = 100.dp + navBarBottomDp),
             listState      = listState,
@@ -883,8 +934,8 @@ private fun RightPaneContent(
                     isLikedSongs = isLikedSongs,
                     name         = playlistName,
                     trackCount   = trackCount,
-                    onPlay       = { viewModel.playPlaylist(playUri) },
-                    onShuffle    = { viewModel.shufflePlaylist(playUri) },
+                    onPlay       = { haptics.press(); viewModel.playPlaylist(playUri) },
+                    onShuffle    = { haptics.press(); viewModel.shufflePlaylist(playUri) },
                     artKey       = artKey,
                     sharedScope  = sharedScope,
                     animScope    = animScope,
@@ -933,6 +984,51 @@ private fun RightPaneContent(
             ) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
+        }
+        if (canDelete && playlist != null) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = headerTopPadding, end = 4.dp),
+            ) {
+                IconButton(onClick = { haptics.press(); showOverflowMenu = true }) {
+                    Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.more_options))
+                }
+                DropdownMenu(
+                    expanded         = showOverflowMenu,
+                    onDismissRequest = { showOverflowMenu = false },
+                ) {
+                    DropdownMenuItem(
+                        text        = { Text(stringResource(R.string.delete_playlist)) },
+                        leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
+                        onClick     = { showOverflowMenu = false; showDeleteConfirm = true },
+                    )
+                }
+            }
+        }
+        if (showDeleteConfirm && playlist != null) {
+            AlertDialog(
+                onDismissRequest = { showDeleteConfirm = false },
+                title   = { Text(stringResource(R.string.delete_playlist_confirm_title)) },
+                text    = { Text(stringResource(R.string.delete_playlist_confirm_message, playlist.name)) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showDeleteConfirm = false
+                        haptics.confirm()
+                        viewModel.deletePlaylist(playlist)   // closes the detail view on success
+                    }) {
+                        Text(
+                            text  = stringResource(R.string.delete_playlist_confirm_button),
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDeleteConfirm = false }) {
+                        Text(stringResource(R.string.action_cancel))
+                    }
+                },
+            )
         }
     }
 }
@@ -1216,11 +1312,14 @@ private fun TrackList(
     onLoadMore     : () -> Unit,
     onTrackClick   : (com.crsmthw.lyra.data.remote.model.SpotifyTrack) -> Unit,
     modifier       : Modifier = Modifier,
+    onTrackLongClick: ((com.crsmthw.lyra.data.remote.model.SpotifyTrack) -> Unit)? = null,
     contentPadding : PaddingValues = PaddingValues(bottom = 100.dp),
     listState      : androidx.compose.foundation.lazy.LazyListState = rememberLazyListState(),
     headerContent  : (@Composable () -> Unit)? = null,
     emptyContent   : (@Composable () -> Unit)? = null,
 ) {
+
+    ListScrollHaptics(listState)
 
     val reachedBottom by remember {
         derivedStateOf {
@@ -1247,9 +1346,10 @@ private fun TrackList(
         }
         itemsIndexed(tracks, key = { i, t -> "${i}_${t.id}" }) { _, track ->
             TrackRow(
-                track     = track,
-                isPlaying = currentTrackId == track.id && isPlaying,
-                onClick   = { onTrackClick(track) },
+                track       = track,
+                isPlaying   = currentTrackId == track.id && isPlaying,
+                onClick     = { onTrackClick(track) },
+                onLongClick = onTrackLongClick?.let { handler -> { handler(track) } },
             )
         }
         if (isLoadingMore) {

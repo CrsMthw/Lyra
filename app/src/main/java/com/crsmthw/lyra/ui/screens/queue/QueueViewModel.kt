@@ -3,10 +3,12 @@ package com.crsmthw.lyra.ui.screens.queue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.crsmthw.lyra.data.local.LibraryCache
 import com.crsmthw.lyra.data.player.PlayerStateManager
 import com.crsmthw.lyra.data.remote.model.SpotifyTrack
 import com.crsmthw.lyra.data.repository.SpotifyRepository
 import com.crsmthw.lyra.di.AppContainer
+import com.crsmthw.lyra.ui.components.TrackActionsController
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -25,10 +27,14 @@ data class QueueUiState(
 class QueueViewModel(
     private val repository        : SpotifyRepository,
     private val playerStateManager: PlayerStateManager,
+    libraryCache                  : LibraryCache,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(QueueUiState())
     val uiState: StateFlow<QueueUiState> = _uiState
+
+    /** Backs the song touch-and-hold menu for queue rows. */
+    val trackActions = TrackActionsController(repository, libraryCache, viewModelScope)
 
     init {
         // Initial fetch on screen open
@@ -77,5 +83,5 @@ class QueueViewModel(
 class QueueViewModelFactory(private val container: AppContainer) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T =
-        QueueViewModel(container.spotifyRepository, container.playerStateManager) as T
+        QueueViewModel(container.spotifyRepository, container.playerStateManager, container.libraryCache) as T
 }

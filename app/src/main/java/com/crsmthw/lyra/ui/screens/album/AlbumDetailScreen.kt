@@ -3,11 +3,14 @@ package com.crsmthw.lyra.ui.screens.album
 import androidx.compose.animation.AnimatedContentScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -27,6 +30,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -37,7 +41,13 @@ import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.remote.model.AlbumTrack
 import com.crsmthw.lyra.data.remote.model.SpotifyAlbumFull
 import com.crsmthw.lyra.ui.components.PlayerPanelHost
+import com.crsmthw.lyra.ui.components.TrackActionTarget
+import com.crsmthw.lyra.ui.components.TrackActionsHost
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
+import com.crsmthw.lyra.util.ListScrollHaptics
+import com.crsmthw.lyra.util.confirm
+import com.crsmthw.lyra.util.longPress
+import com.crsmthw.lyra.util.press
 import com.crsmthw.lyra.util.toDurationString
 import com.crsmthw.lyra.util.toTimeString
 import com.crsmthw.lyra.util.visualizer.FftWaveCanvas
@@ -57,6 +67,7 @@ fun AlbumDetailScreen(
 ) {
     val state         by viewModel.uiState.collectAsStateWithLifecycle()
     val context        = LocalContext.current
+    val haptics        = LocalHapticFeedback.current
     val density        = LocalDensity.current
     val navBarBottomDp = with(density) { WindowInsets.navigationBars.getBottom(this).toDp() }
     val scrimHeight    = 140.dp
@@ -86,7 +97,7 @@ fun AlbumDetailScreen(
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = { haptics.confirm(); onBack() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(R.string.nav_back))
                     }
@@ -94,6 +105,7 @@ fun AlbumDetailScreen(
                 actions = {
                     IconButton(
                         onClick = {
+                            haptics.press()
                             state.album?.id?.let { id ->
                                 context.startActivity(Intent.createChooser(
                                     Intent(Intent.ACTION_SEND).apply {
@@ -131,6 +143,7 @@ fun AlbumDetailScreen(
 
                 val onPlayAll: () -> Unit = {
                     if (tracks.isNotEmpty()) {
+                        haptics.press()
                         playerViewModel.playTrack(uri = tracks[0].uri, contextUri = albumUri, index = 0)
                         onRequestPlayer()
                     }
@@ -138,6 +151,20 @@ fun AlbumDetailScreen(
                 val onPlayTrack = { track: AlbumTrack, idx: Int ->
                     playerViewModel.playTrack(uri = track.uri, contextUri = albumUri, index = idx)
                     onRequestPlayer()
+                }
+                val onTrackLongPress = { track: AlbumTrack ->
+                    // No "Go to album" — we're already on it. Art comes from the album (AlbumTrack has none).
+                    viewModel.trackActions.open(
+                        TrackActionTarget(
+                            id       = track.id,
+                            uri      = track.uri,
+                            name     = track.name,
+                            subtitle = track.allArtists,
+                            artUrl   = album.artUrl,
+                            albumId  = null,
+                            artistId = track.artists?.firstOrNull()?.id,
+                        )
+                    )
                 }
 
                 if (isWideScreen) {
@@ -192,12 +219,15 @@ fun AlbumDetailScreen(
                                 elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                             ) {
                                 Box(modifier = Modifier.fillMaxSize()) {
+                                    val tracksListState = rememberLazyListState()
+                                    ListScrollHaptics(tracksListState)
                                     LazyColumn(
+                                        state          = tracksListState,
                                         modifier       = Modifier.fillMaxSize(),
                                         contentPadding = PaddingValues(bottom = 100.dp + navBarBottomDp),
                                     ) {
                                         itemsIndexed(tracks, key = { idx, t -> "track_${t.id}_$idx" }) { idx, track ->
-                                            AlbumTrackRow(track = track, onClick = { onPlayTrack(track, idx) })
+                                            AlbumTrackRow(track = track, onClick = { onPlayTrack(track, idx) }, onLongClick = { onTrackLongPress(track) })
                                         }
                                         if (!album.label.isNullOrBlank() || album.copyrights?.isNotEmpty() == true) {
                                             item(key = "footer") { AlbumFooter(album = album) }
@@ -229,7 +259,10 @@ fun AlbumDetailScreen(
                             .padding(paddingValues)
                             .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal)),
                     ) {
+                        val tracksListState = rememberLazyListState()
+                        ListScrollHaptics(tracksListState)
                         LazyColumn(
+                            state          = tracksListState,
                             modifier       = Modifier.fillMaxSize(),
                             contentPadding = PaddingValues(bottom = 100.dp + navBarBottomDp),
                         ) {
@@ -237,7 +270,7 @@ fun AlbumDetailScreen(
                                 AlbumHeader(album = album, tracks = tracks, modifier = Modifier.fillMaxWidth().aspectRatio(1f), onPlayAll = onPlayAll, onOpenArtist = onOpenArtist)
                             }
                             itemsIndexed(tracks, key = { idx, t -> "track_${t.id}_$idx" }) { idx, track ->
-                                AlbumTrackRow(track = track, onClick = { onPlayTrack(track, idx) })
+                                AlbumTrackRow(track = track, onClick = { onPlayTrack(track, idx) }, onLongClick = { onTrackLongPress(track) })
                             }
                             if (!album.label.isNullOrBlank() || album.copyrights?.isNotEmpty() == true) {
                                 item(key = "footer") { AlbumFooter(album = album) }
@@ -264,6 +297,12 @@ fun AlbumDetailScreen(
         }
     }
     } // PlayerPanelHost
+
+    TrackActionsHost(
+        controller   = viewModel.trackActions,
+        onGoToAlbum  = {},   // album rows never expose this — we're already on the album
+        onGoToArtist = { id -> onOpenArtist?.invoke(id) },
+    )
 }
 
 @Composable
@@ -328,11 +367,14 @@ private fun AlbumHeader(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun AlbumTrackRow(
-    track  : AlbumTrack,
-    onClick: () -> Unit,
+    track      : AlbumTrack,
+    onClick    : () -> Unit,
+    onLongClick: (() -> Unit)? = null,
 ) {
+    val haptics = LocalHapticFeedback.current
     ListItem(
         leadingContent = {
             Text(
@@ -372,7 +414,13 @@ private fun AlbumTrackRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         },
-        modifier = Modifier.clickable(onClick = onClick),
+        modifier = Modifier.combinedClickable(
+            onClick     = { haptics.confirm(); onClick() },
+            onLongClick = onLongClick?.let { handler -> {
+                haptics.longPress()
+                handler()
+            } },
+        ),
     )
 }
 

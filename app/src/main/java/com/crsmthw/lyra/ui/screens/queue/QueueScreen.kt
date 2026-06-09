@@ -1,9 +1,12 @@
 package com.crsmthw.lyra.ui.screens.queue
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -17,6 +20,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -24,6 +28,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.remote.model.SpotifyTrack
+import com.crsmthw.lyra.ui.components.TrackActionsHost
+import com.crsmthw.lyra.ui.components.toTrackActionTarget
+import com.crsmthw.lyra.util.ListScrollHaptics
+import com.crsmthw.lyra.util.longPress
 import com.crsmthw.lyra.util.toTimeString
 import com.crsmthw.lyra.util.visualizer.FftWaveCanvas
 import com.crsmthw.lyra.util.visualizer.LocalVisualizerAccentColor
@@ -32,8 +40,10 @@ import kotlinx.coroutines.delay
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun QueueScreen(
-    viewModel: QueueViewModel,
-    onBack   : () -> Unit,
+    viewModel   : QueueViewModel,
+    onBack      : () -> Unit,
+    onOpenAlbum : (String) -> Unit = {},
+    onOpenArtist: (String) -> Unit = {},
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
@@ -116,7 +126,10 @@ fun QueueScreen(
                     }
                 }
                 else -> {
+                    val queueListState = rememberLazyListState()
+                    ListScrollHaptics(queueListState)
                     LazyColumn(
+                        state          = queueListState,
                         modifier       = Modifier.fillMaxSize(),
                         contentPadding = listBottomPad,
                     ) {
@@ -131,7 +144,10 @@ fun QueueScreen(
                                 )
                             }
                             item(key = "now_playing_${track.id}") {
-                                NowPlayingCard(track)
+                                NowPlayingCard(
+                                    track       = track,
+                                    onLongClick = { viewModel.trackActions.open(track.toTrackActionTarget()) },
+                                )
                             }
                         }
 
@@ -178,7 +194,10 @@ fun QueueScreen(
                                 items = state.queue,
                                 key   = { "${it.uri}_${it.id}" },
                             ) { track ->
-                                QueueTrackItem(track)
+                                QueueTrackItem(
+                                    track       = track,
+                                    onLongClick = { viewModel.trackActions.open(track.toTrackActionTarget()) },
+                                )
                             }
                         }
 
@@ -205,14 +224,29 @@ fun QueueScreen(
             )
         }
     }
+
+    TrackActionsHost(
+        controller   = viewModel.trackActions,
+        onGoToAlbum  = onOpenAlbum,
+        onGoToArtist = onOpenArtist,
+    )
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun NowPlayingCard(track: SpotifyTrack) {
+private fun NowPlayingCard(track: SpotifyTrack, onLongClick: (() -> Unit)? = null) {
+    val haptics = LocalHapticFeedback.current
     ElevatedCard(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp),
+            .padding(horizontal = 16.dp)
+            .combinedClickable(
+                onClick     = {},
+                onLongClick = onLongClick?.let { handler -> {
+                    haptics.longPress()
+                    handler()
+                } },
+            ),
     ) {
         Row(
             modifier          = Modifier.padding(16.dp),
@@ -255,11 +289,20 @@ private fun NowPlayingCard(track: SpotifyTrack) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun QueueTrackItem(track: SpotifyTrack) {
+private fun QueueTrackItem(track: SpotifyTrack, onLongClick: (() -> Unit)? = null) {
+    val haptics = LocalHapticFeedback.current
     Row(
         modifier          = Modifier
             .fillMaxWidth()
+            .combinedClickable(
+                onClick     = {},
+                onLongClick = onLongClick?.let { handler -> {
+                    haptics.longPress()
+                    handler()
+                } },
+            )
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

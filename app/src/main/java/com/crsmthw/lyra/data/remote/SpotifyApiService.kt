@@ -45,6 +45,10 @@ interface SpotifyApiService {
     @POST("me/playlists")
     suspend fun createPlaylist(@Body body: CreatePlaylistRequest): SpotifyPlaylist
 
+    // Spotify has no "delete playlist" — you unfollow your own playlist, which removes it.
+    @DELETE("playlists/{id}/followers")
+    suspend fun unfollowPlaylist(@Path("id") id: String)
+
     @POST("playlists/{id}/items")
     suspend fun addTracksToPlaylist(
         @Path("id") id  : String,

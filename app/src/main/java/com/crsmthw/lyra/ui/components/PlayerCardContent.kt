@@ -37,6 +37,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -52,8 +53,12 @@ import com.crsmthw.lyra.R
 import com.crsmthw.lyra.ui.components.AddToPlaylistSheet
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import com.crsmthw.lyra.ui.screens.player.RepeatMode
+import com.crsmthw.lyra.util.confirm
+import com.crsmthw.lyra.util.press
 import com.crsmthw.lyra.util.rememberArtBoundsTransform
+import com.crsmthw.lyra.util.tick
 import com.crsmthw.lyra.util.toTimeString
+import com.crsmthw.lyra.util.toggle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -155,12 +160,15 @@ fun PlayerCardContent(
         }
     }
 
+    val haptics = LocalHapticFeedback.current
     val onSkipNext: () -> Unit = {
+        haptics.press()
         skipDirection = 1
         scope.launch { artOffsetX.animateTo(-1500f, tween(250, easing = FastOutLinearInEasing)) }
         playerViewModel.skipNext()
     }
     val onSkipPrev: () -> Unit = {
+        haptics.press()
         if (state.progressMs > 3_000L) {
             playerViewModel.seekTo(0f)
         } else {
@@ -201,12 +209,12 @@ fun PlayerCardContent(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment     = Alignment.CenterVertically,
             ) {
-                IconButton(onClick = onClose) {
+                IconButton(onClick = { haptics.confirm(); onClose() }) {
                     Icon(Icons.Default.KeyboardArrowDown, "Close", tint = onAccentColor)
                 }
                 Text("NOW PLAYING", style = MaterialTheme.typography.labelSmall,
                     color = onAccentColor)
-                IconButton(onClick = onFullScreen) {
+                IconButton(onClick = { haptics.confirm(); onFullScreen() }) {
                     Icon(Icons.Default.OpenInFull, "Full screen", tint = onAccentColor)
                 }
             }
@@ -277,7 +285,7 @@ fun PlayerCardContent(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
                 }
-                IconButton(onClick = playerViewModel::toggleLike) {
+                IconButton(onClick = { haptics.toggle(!state.isLiked); playerViewModel.toggleLike() }) {
                     Icon(
                         imageVector        = if (state.isLiked) Icons.Default.Favorite else Icons.Outlined.FavoriteBorder,
                         contentDescription = "Like",
@@ -318,9 +326,14 @@ fun PlayerCardContent(
                         amplitude  = { p -> if (state.isPlaying) WavyProgressIndicatorDefaults.indicatorAmplitude(p) else 0f },
                     )
                 }
+                var lastSeekNotch by remember { mutableIntStateOf(-1) }
                 Slider(
                     value                 = if (isDragging) dragValue else state.progress,
-                    onValueChange         = { isDragging = true; dragValue = it },
+                    onValueChange         = {
+                        isDragging = true; dragValue = it
+                        val notch = (it / 0.05f).toInt()
+                        if (notch != lastSeekNotch) { lastSeekNotch = notch; haptics.tick() }
+                    },
                     onValueChangeFinished = { playerViewModel.seekTo(dragValue); isDragging = false },
                     modifier              = Modifier.fillMaxWidth().align(Alignment.Center),
                     colors                = SliderDefaults.colors(thumbColor = Color.Transparent,
@@ -340,7 +353,7 @@ fun PlayerCardContent(
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically) {
                 Box(contentAlignment = Alignment.Center) {
-                    IconButton(onClick = playerViewModel::toggleShuffle) {
+                    IconButton(onClick = { haptics.toggle(!state.shuffleEnabled); playerViewModel.toggleShuffle() }) {
                         Icon(Icons.Default.Shuffle, stringResource(R.string.player_shuffle),
                             tint = if (state.shuffleEnabled) surfaceAccentColor else MaterialTheme.colorScheme.onSurfaceVariant)
                     }
@@ -368,7 +381,7 @@ fun PlayerCardContent(
                     }
                 }
                 FilledIconButton(
-                    onClick  = playerViewModel::playPause,
+                    onClick  = { haptics.press(); playerViewModel.playPause() },
                     modifier = Modifier.size(60.dp).graphicsLayer { rotationZ = cookieRotation.value },
                     shape    = squigglyShape,
                     colors   = IconButtonDefaults.filledIconButtonColors(
@@ -391,7 +404,14 @@ fun PlayerCardContent(
                     Icon(Icons.Default.SkipNext, stringResource(R.string.player_next), modifier = Modifier.size(36.dp))
                 }
                 Box(contentAlignment = Alignment.Center) {
-                    IconButton(onClick = playerViewModel::cycleRepeat) {
+                    IconButton(onClick = {
+                        when (state.repeatMode) {
+                            RepeatMode.OFF   -> haptics.toggle(true)
+                            RepeatMode.TRACK -> haptics.toggle(false)
+                            else             -> haptics.press()
+                        }
+                        playerViewModel.cycleRepeat()
+                    }) {
                         Icon(
                             imageVector = when (state.repeatMode) {
                                 RepeatMode.TRACK -> Icons.Default.RepeatOne else -> Icons.Default.Repeat
@@ -433,7 +453,7 @@ fun PlayerCardContent(
                 verticalAlignment     = Alignment.CenterVertically,
             ) {
                 AssistChip(
-                    onClick    = { playerViewModel.loadAvailableDevices(); showDevicePicker = true },
+                    onClick    = { haptics.press(); playerViewModel.loadAvailableDevices(); showDevicePicker = true },
                     enabled    = enabled,
                     label      = {
                         Text(
@@ -470,7 +490,7 @@ fun PlayerCardContent(
                 // matching note + folded-landscape crash fix in PlayerScreen). A Row clips instead.
                 Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                     FilledTonalIconButton(
-                        onClick  = onOpenQueue,
+                        onClick  = { haptics.press(); onOpenQueue() },
                         enabled  = enabled,
                         modifier = Modifier.size(40.dp),
                         shape    = ButtonGroupDefaults.connectedLeadingButtonShape,
@@ -480,6 +500,7 @@ fun PlayerCardContent(
                     }
                     FilledTonalIconButton(
                         onClick = {
+                            haptics.press()
                             state.currentTrack?.id?.let { id ->
                                 context.startActivity(Intent.createChooser(
                                     Intent(Intent.ACTION_SEND).apply {
@@ -497,7 +518,7 @@ fun PlayerCardContent(
                         Icon(Icons.Default.Share, shareLabel, Modifier.size(18.dp))
                     }
                     FilledTonalIconButton(
-                        onClick  = { playerViewModel.loadOwnedPlaylists(); showPlaylistPicker = true },
+                        onClick  = { haptics.press(); playerViewModel.loadOwnedPlaylists(); showPlaylistPicker = true },
                         enabled  = enabled,
                         modifier = Modifier.size(40.dp),
                         shape    = ButtonGroupDefaults.connectedTrailingButtonShape,
@@ -517,14 +538,17 @@ fun PlayerCardContent(
             error          = state.devicePickerError,
             onSelectDevice = { deviceId ->
                 showDevicePicker = false
+                haptics.confirm()
                 playerViewModel.transferToDevice(deviceId)
             },
             onThisDevice   = {
                 showDevicePicker = false
+                haptics.confirm()
                 playerViewModel.transferToThisDevice()
             },
             onDismiss      = { showDevicePicker = false },
             onRetry        = { playerViewModel.loadAvailableDevices() },
+            onSetVolume    = playerViewModel::setVolume,
         )
     }
 
