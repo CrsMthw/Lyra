@@ -12,8 +12,8 @@
 - Full player with seek, shuffle, repeat, sleep timer, and queue-aware playback
 - Synchronized lyrics — time-synced, auto-scrolling lyrics on the player screen (via LRCLIB), with a plain-text fallback when synced lyrics aren't available
 - Audio visualizer — optional reactive visualizer coloured from the current album art; choose the circular pulse behind the album art, the wave along the bottom of other screens, or both, in Settings
-- Add to / remove from playlists directly from the player, or create a new playlist on the spot
-- Spotify Connect device switching — transfer playback to any device on your account; "This device" card wakes Spotify locally when it isn't running
+- Add to / remove from playlists, like a song, or jump to its album/artist — from the player or any track's touch-and-hold menu; create a new playlist on the spot
+- Spotify Connect device switching — transfer playback to any device on your account, with a volume slider for the active device; "This device" card wakes Spotify locally when it isn't running
 - Home-screen widget — resizable Now Playing widget with playback controls; its layout and artwork scale to the size you choose, and its colours are drawn from the current album art
 - Album detail screen — full track list, play button, label/copyright footer
 - Artist detail screen — discography grouped by Albums / Singles / Compilations
@@ -23,6 +23,7 @@
 - Pull-to-refresh on both the library and track lists
 - Adaptive two-pane layout for foldables and tablets
 - Material 3 Expressive design — spring-based motion and seamless album-art transitions, with Material You dynamic colour and AMOLED black mode
+- Haptic feedback — subtle Material 3 Expressive haptics throughout the UI, toggleable in Settings
 - Tokens stored encrypted via AES-256-GCM (Android Keystore)
 
 ---

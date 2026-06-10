@@ -319,15 +319,10 @@ class LibraryViewModel(
                         withContext(Dispatchers.IO) { mosaicGenerator.generate(playlist.id, cached.tracks) }
                         _uiState.update { s -> s.copy(playlistsWithMosaics = s.playlistsWithMosaics + playlist.id) }
                     }
-                    // The cached playlist's track-count metadata can be stale or truncated (older app
-                    // versions only ever cached the first 50), which would wrongly disable paging.
-                    // Confirm the authoritative total cheaply (limit=1 still returns the full `total`)
-                    // so lazy-loading works on first open without needing a manual refresh.
-                    repository.getPlaylistTracks(playlist.id, limit = 1, offset = 0).onSuccess { resp ->
-                        if (_uiState.value.currentPlaylist?.id == playlist.id) {
-                            _uiState.update { it.copy(playlistTracksTotal = resp.total) }
-                        }
-                    }
+                    // No network "confirm the total" call needed: playlist.trackCount is the real
+                    // total now that the metadata parses (SpotifyPlaylist.tracksMeta maps "items"),
+                    // so the maxOf above already seeds the authoritative total — saves one API call
+                    // per playlist open.
                     return@launch
                 }
             }

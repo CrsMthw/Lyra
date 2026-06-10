@@ -100,7 +100,9 @@ data class SpotifyPlaylist(
     val uri           : String,
     val owner         : PlaylistOwner,
     val collaborative : Boolean              = false,
-    @SerializedName("tracks")      val tracksMeta : PlaylistTracksMeta?,
+    // Spotify renamed this from "tracks" to "items" in the simplified playlist object; keep "tracks"
+    // as a legacy fallback so older/other endpoints still parse. Null here = trackCount reads 0.
+    @SerializedName(value = "items", alternate = ["tracks"]) val tracksMeta : PlaylistTracksMeta?,
     @SerializedName("snapshot_id") val snapshotId : String?             = null,
 ) {
     val thumbnailUrl: String get() = images?.firstOrNull()?.url ?: ""

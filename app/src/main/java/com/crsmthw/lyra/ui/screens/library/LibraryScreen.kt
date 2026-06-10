@@ -379,6 +379,7 @@ private fun LibraryBrowserPane(
                     mosaicFile  = if (playlist.id in state.playlistsWithMosaics)
                         File(mosaicDir, "${playlist.id}.png") else null,
                     isSelected  = playlist.id == selectedPlaylistId,
+                    isMine      = true,
                     onClick     = { haptics.confirm(); viewModel.selectPlaylist(playlist) },
                     onPlay      = { viewModel.playPlaylist(playlist.uri) },
                     sharedScope = sharedScope,
@@ -1218,6 +1219,7 @@ private fun PlaylistListCard(
     playlist    : SpotifyPlaylist,
     mosaicFile  : File?,
     isSelected  : Boolean = false,
+    isMine      : Boolean = false,   // own playlist → count only (owner name is the user, redundant)
     onClick     : () -> Unit,
     onPlay      : () -> Unit,
     sharedScope : SharedTransitionScope? = null,
@@ -1276,10 +1278,13 @@ private fun PlaylistListCard(
             Column(modifier = Modifier.weight(1f)) {
                 Text(playlist.name, style = MaterialTheme.typography.titleMedium,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
-                val subtitle = when {
-                    playlist.trackCount > 0 -> "${playlist.trackCount} tracks"
-                    playlist.owner.displayName != null -> playlist.owner.displayName
-                    else -> ""
+                val subtitle = if (isMine) {
+                    // Own playlist — the owner is the user, so show just the count.
+                    "${playlist.trackCount} tracks"
+                } else {
+                    // Following — show whose it is and the count together when both are known.
+                    val countText = if (playlist.trackCount > 0) "${playlist.trackCount} tracks" else null
+                    listOfNotNull(playlist.owner.displayName, countText).joinToString(" · ").ifBlank { "Playlist" }
                 }
                 Text(subtitle, style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
