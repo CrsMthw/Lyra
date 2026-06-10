@@ -97,8 +97,8 @@
     <string name="about_credits_section">Credits</string>
     <string name="about_credit_app">Made by CrsMthw and Claude</string>
     <string name="about_credit_app_desc">App design &amp; development</string>
-    <string name="about_credit_icon">Icon by Shubbu</string>
-    <string name="about_credit_icon_desc">App icon design</string>
+    <string name="about_credit_icon">Icon by BambiD &amp; Shubbu</string>
+    <string name="about_credit_icon_desc">Idea by BambiD, drawn up by Shubbu</string>
     <string name="about_github">GitHub</string>
     <string name="about_github_url">github.com/CrsMthw</string>
     <string name="about_bmac_desc">Buy me a coffee</string>
