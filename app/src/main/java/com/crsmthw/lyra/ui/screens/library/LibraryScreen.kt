@@ -805,8 +805,9 @@ private fun RightPaneContent(
     val trackCount   = when {
         isLikedSongs && state.likedSongsTotal > 0 -> state.likedSongsTotal
         isLikedSongs                              -> state.likedSongCount
+        state.playlistTracksTotal > 0             -> state.playlistTracksTotal   // authoritative total, not the loaded count
         state.currentTracks.isNotEmpty()          -> state.currentTracks.size
-        else                                      -> playlist.trackCount   // metadata fallback — avoids layout shift
+        else                                      -> playlist.trackCount         // metadata fallback — avoids layout shift
     }
     val playUri      = playlist?.uri ?: "spotify:user:${state.user?.id}:collection"
 
@@ -875,8 +876,10 @@ private fun RightPaneContent(
             }
     }
 
-    val canLoadMore          = isLikedSongs && state.likedSongsTotal > 0 &&
-                               state.likedSongsOffset < state.likedSongsTotal
+    val canLoadMore          = if (isLikedSongs)
+                                   state.likedSongsTotal > 0 && state.likedSongsOffset < state.likedSongsTotal
+                               else
+                                   state.playlistTracksTotal > 0 && state.playlistTracksOffset < state.playlistTracksTotal
 
     Box(modifier = Modifier.fillMaxSize()) {
         PullToRefreshBox(
@@ -909,7 +912,7 @@ private fun RightPaneContent(
             isPlaying      = isPlayingState,
             isLoadingMore  = state.isLoadingMoreTracks,
             canLoadMore    = canLoadMore,
-            onLoadMore     = viewModel::loadMoreLikedSongs,
+            onLoadMore     = if (isLikedSongs) viewModel::loadMoreLikedSongs else viewModel::loadMorePlaylistTracks,
             onTrackClick   = { track ->
                 if (playlist != null) {
                     val idx = state.currentTracks.indexOfFirst { it.uri == track.uri }.coerceAtLeast(0)

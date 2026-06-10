@@ -33,6 +33,8 @@ data class LibraryUiState(
     val isLibraryRefreshing   : Boolean                = false,
     val likedSongsOffset      : Int                    = 0,
     val likedSongsTotal       : Int                    = 0,
+    val playlistTracksOffset  : Int                    = 0,
+    val playlistTracksTotal   : Int                    = 0,
     val error                 : String?                = null,  // blocking — shown when no cache
     val refreshError          : String?                = null,  // non-blocking — shown as icon when cache is visible
     val user                  : SpotifyUser?           = null,
@@ -245,28 +247,58 @@ class LibraryViewModel(
 
     fun selectPlaylist(playlist: SpotifyPlaylist) {
         if (_uiState.value.currentPlaylist?.id == playlist.id) return
-        _uiState.update { it.copy(currentPlaylist = playlist, isLoadingTracks = true, currentTracks = emptyList(), error = null) }
+        _uiState.update { it.copy(
+            currentPlaylist      = playlist,
+            isLoadingTracks      = true,
+            currentTracks        = emptyList(),
+            playlistTracksOffset = 0,
+            playlistTracksTotal  = playlist.trackCount,   // metadata total; refined from the response
+            error                = null,
+        ) }
         viewModelScope.launch {
             val snapshotId = playlist.snapshotId
-            var cacheHit   = false
             if (snapshotId != null) {
                 val cached = withContext(Dispatchers.IO) { cache.loadTrackList(playlist.id) }
                 if (cached != null && cached.snapshotId == snapshotId) {
-                    _uiState.update { it.copy(currentTracks = cached.tracks, isLoadingTracks = false) }
+                    // Snapshot matches → cache is current. Show it and seed pagination from it; whatever
+                    // pages were loaded+cached before are preserved (no page-0 refetch that would clobber).
+                    _uiState.update { it.copy(
+                        currentTracks        = cached.tracks,
+                        isLoadingTracks      = false,
+                        playlistTracksOffset = cached.tracks.size,
+                        playlistTracksTotal  = maxOf(playlist.trackCount, cached.tracks.size),
+                    ) }
                     if (playlist.id !in _uiState.value.playlistsWithMosaics && playlist.thumbnailUrl.isBlank()) {
                         withContext(Dispatchers.IO) { mosaicGenerator.generate(playlist.id, cached.tracks) }
                         _uiState.update { s -> s.copy(playlistsWithMosaics = s.playlistsWithMosaics + playlist.id) }
                     }
-                    cacheHit = true
+                    // The cached playlist's track-count metadata can be stale or truncated (older app
+                    // versions only ever cached the first 50), which would wrongly disable paging.
+                    // Confirm the authoritative total cheaply (limit=1 still returns the full `total`)
+                    // so lazy-loading works on first open without needing a manual refresh.
+                    repository.getPlaylistTracks(playlist.id, limit = 1, offset = 0).onSuccess { resp ->
+                        if (_uiState.value.currentPlaylist?.id == playlist.id) {
+                            _uiState.update { it.copy(playlistTracksTotal = resp.total) }
+                        }
+                    }
+                    return@launch
                 }
             }
 
-            // Always fetch from network — foreground load if no cache, silent background refresh if cache hit
+            // No cache or stale snapshot — fetch the first page with the loading indicator
             repository.getPlaylistTracks(playlist.id).fold(
                 onSuccess = { resp ->
                     if (_uiState.value.currentPlaylist?.id != playlist.id) return@fold
                     val tracks = (resp.items ?: emptyList()).mapNotNull { it.resolvedTrack }.filter { it.isPlayable != false }
-                    _uiState.update { it.copy(currentTracks = tracks, isLoadingTracks = false) }
+                    _uiState.update { it.copy(
+                        currentTracks        = tracks,
+                        isLoadingTracks      = false,
+                        // Offset advances by the RAW page size (incl. filtered-out items) so the next
+                        // page picks up where the API left off — avoids re-fetch/duplicates when a
+                        // playlist contains unplayable tracks.
+                        playlistTracksOffset = resp.items?.size ?: 0,
+                        playlistTracksTotal  = resp.total,
+                    ) }
                     if (snapshotId != null) {
                         withContext(Dispatchers.IO) { cache.saveTrackList(playlist.id, snapshotId, tracks) }
                     }
@@ -276,12 +308,11 @@ class LibraryViewModel(
                     }
                 },
                 onFailure = { e ->
-                    if (!cacheHit) {
-                        val msg = if (e.message?.contains("403") == true)
-                            "Track list unavailable for this playlist. You can still play it with the ▶ button."
-                        else e.message
-                        _uiState.update { it.copy(error = msg, isLoadingTracks = false) }
-                    }
+                    // Only reached when there was no usable cache (cache hit returns early above).
+                    val msg = if (e.message?.contains("403") == true)
+                        "Track list unavailable for this playlist. You can still play it with the ▶ button."
+                    else e.message
+                    _uiState.update { it.copy(error = msg, isLoadingTracks = false) }
                 },
             )
         }
@@ -436,6 +467,38 @@ class LibraryViewModel(
         }
     }
 
+    /** Lazy-loads the next page of the open playlist's tracks (mirrors [loadMoreLikedSongs]). */
+    fun loadMorePlaylistTracks() {
+        val s = _uiState.value
+        val playlist = s.currentPlaylist ?: return
+        if (s.isLoadingMoreTracks || s.playlistTracksOffset >= s.playlistTracksTotal) return
+        _uiState.update { it.copy(isLoadingMoreTracks = true) }
+        viewModelScope.launch {
+            repository.getPlaylistTracks(playlist.id, limit = 50, offset = s.playlistTracksOffset).fold(
+                onSuccess = { resp ->
+                    if (_uiState.value.currentPlaylist?.id != playlist.id) {
+                        _uiState.update { it.copy(isLoadingMoreTracks = false) }
+                        return@fold
+                    }
+                    val newTracks = (resp.items ?: emptyList()).mapNotNull { it.resolvedTrack }.filter { it.isPlayable != false }
+                    val allTracks = _uiState.value.currentTracks + newTracks
+                    _uiState.update { it.copy(
+                        currentTracks        = allTracks,
+                        isLoadingMoreTracks  = false,
+                        playlistTracksOffset = s.playlistTracksOffset + (resp.items?.size ?: 0),
+                        playlistTracksTotal  = resp.total,
+                    ) }
+                    playlist.snapshotId?.let { snap ->
+                        withContext(Dispatchers.IO) { cache.saveTrackList(playlist.id, snap, allTracks) }
+                    }
+                },
+                onFailure = {
+                    _uiState.update { it.copy(isLoadingMoreTracks = false) }
+                },
+            )
+        }
+    }
+
     fun refreshCurrentTracks() {
         if (_uiState.value.isRefreshing) return
         _uiState.update { it.copy(isRefreshing = true) }
@@ -464,7 +527,11 @@ class LibraryViewModel(
                 repository.getPlaylistTracks(playlist.id).fold(
                     onSuccess = { resp ->
                         val tracks = (resp.items ?: emptyList()).mapNotNull { it.resolvedTrack }.filter { it.isPlayable != false }
-                        _uiState.update { it.copy(currentTracks = tracks) }
+                        _uiState.update { it.copy(
+                            currentTracks        = tracks,
+                            playlistTracksOffset = resp.items?.size ?: 0,   // reset paging to page 0
+                            playlistTracksTotal  = resp.total,
+                        ) }
                         if (playlist.snapshotId != null) {
                             withContext(Dispatchers.IO) { cache.saveTrackList(playlist.id, playlist.snapshotId, tracks) }
                         }
