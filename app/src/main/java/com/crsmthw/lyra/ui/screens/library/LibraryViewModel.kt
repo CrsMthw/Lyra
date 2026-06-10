@@ -16,6 +16,7 @@ import com.crsmthw.lyra.util.MosaicGenerator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -108,6 +109,52 @@ class LibraryViewModel(
     init {
         _uiState.update { it.copy(playlistsWithMosaics = mosaicGenerator.existingIds()) }
         loadLibrary()
+        observeCacheRevision()
+        observeTrackListChanges()
+    }
+
+    /**
+     * Live-refreshes the OPEN playlist's track list when its cached list changes from elsewhere —
+     * e.g. adding/removing the current track via the full player or pop-out add-to-playlist sheet,
+     * or the song-menu picker on another screen. Re-reads the (already surgically updated) cache so
+     * the change shows without a manual pull-to-refresh. No-op unless the changed playlist is open.
+     */
+    private fun observeTrackListChanges() {
+        viewModelScope.launch {
+            cache.trackListChanges.collect { playlistId ->
+                if (_uiState.value.currentPlaylist?.id != playlistId) return@collect
+                val cached = withContext(Dispatchers.IO) { cache.loadTrackList(playlistId) } ?: return@collect
+                _uiState.update { s ->
+                    if (s.currentPlaylist?.id != playlistId) return@update s
+                    // When the list was fully loaded, the cache size IS the new authoritative total
+                    // (covers both add +1 and remove −1); for a partially-paged list keep the larger
+                    // value so lazy-loading isn't cut short.
+                    val wasFullyLoaded = s.playlistTracksOffset >= s.playlistTracksTotal
+                    s.copy(
+                        currentTracks        = cached.tracks,
+                        playlistTracksOffset = cached.tracks.size,
+                        playlistTracksTotal  = if (wasFullyLoaded) cached.tracks.size
+                                               else maxOf(s.playlistTracksTotal, cached.tracks.size),
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Re-syncs the in-memory playlist list from the cache whenever a playlist is created (or
+     * deleted) from elsewhere — e.g. creating a new playlist from the song touch-and-hold menu or
+     * the player's add-to-playlist sheet while this screen is already in memory. Without this the
+     * new playlist only appears after a manual pull-to-refresh. The cache revision never fires on a
+     * plain library save, so a normal refresh doesn't double-load.
+     */
+    private fun observeCacheRevision() {
+        viewModelScope.launch {
+            cache.revision.drop(1).collect {
+                val cached = withContext(Dispatchers.IO) { cache.load() } ?: return@collect
+                _uiState.update { it.copy(playlists = cached.playlists) }
+            }
+        }
     }
 
     fun loadLibrary() {

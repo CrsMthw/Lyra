@@ -1,12 +1,17 @@
 package com.crsmthw.lyra.ui.components
 
 import com.crsmthw.lyra.data.local.LibraryCache
+import com.crsmthw.lyra.data.remote.model.AlbumTrack
+import com.crsmthw.lyra.data.remote.model.SpotifyAlbum
+import com.crsmthw.lyra.data.remote.model.SpotifyAlbumFull
 import com.crsmthw.lyra.data.remote.model.SpotifyPlaylist
 import com.crsmthw.lyra.data.remote.model.SpotifyTrack
 import com.crsmthw.lyra.data.repository.SpotifyRepository
 import com.crsmthw.lyra.ui.screens.player.AddToPlaylistResult
 import com.crsmthw.lyra.ui.screens.player.PlaylistPickerState
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -22,6 +27,8 @@ data class TrackActionTarget(
     val albumId   : String?  = null,   // "Go to album" shown only when non-null
     val artistId  : String?  = null,   // "Go to artist" shown only when non-null
     val removable : RemovablePlaylist? = null, // "Remove from <name>" shown only when non-null
+    val track     : SpotifyTrack? = null,      // full track, when known — lets add-to-playlist
+                                               // surgically append to the playlist's cached list
 )
 
 /** The owned playlist the long-pressed row currently lives in, if any. */
@@ -37,6 +44,32 @@ fun SpotifyTrack.toTrackActionTarget(removable: RemovablePlaylist? = null) = Tra
     albumId   = album?.id,
     artistId  = primaryArtistId,
     removable = removable,
+    track     = this,
+)
+
+/**
+ * Maps an [AlbumTrack] (album-detail rows carry no nested album) to a menu target, reconstructing a
+ * full [SpotifyTrack] from the row + the album so add-to-playlist can surgically refresh the cached
+ * playlist list. No "Go to album" — the user is already on it.
+ */
+fun AlbumTrack.toTrackActionTarget(album: SpotifyAlbumFull) = TrackActionTarget(
+    id        = id,
+    uri       = uri,
+    name      = name,
+    subtitle  = allArtists,
+    artUrl    = album.artUrl,
+    albumId   = null,
+    artistId  = artists?.firstOrNull()?.id,
+    track     = SpotifyTrack(
+        id         = id,
+        name       = name,
+        uri        = uri,
+        artists    = artists,
+        album      = SpotifyAlbum(id = album.id, name = album.name, images = album.images, artists = album.artists),
+        durationMs = durationMs,
+        explicit   = explicit,
+        isPlayable = isPlayable,
+    ),
 )
 
 data class TrackActionsState(
@@ -95,6 +128,15 @@ class TrackActionsController(
 
     // ── Add-to-playlist picker (generalised from PlayerViewModel, targeting `state.target`) ──
 
+    /**
+     * Opens the add-to-playlist picker directly for [target], skipping the full actions sheet — used
+     * by the player, which only wants add-to-playlist for the current track (no like / go-to / remove).
+     */
+    fun openPlaylistPickerFor(target: TrackActionTarget) {
+        _state.value = TrackActionsState(target = target)
+        openPlaylistPicker()
+    }
+
     fun openPlaylistPicker() {
         val t = _state.value.target ?: return
         _state.update { it.copy(showPlaylistPicker = true) }
@@ -133,6 +175,9 @@ class TrackActionsController(
                                 addResult             = AddToPlaylistResult.Removed(playlist.name),
                             )
                         }
+                        withContext(Dispatchers.IO) {
+                            libraryCache.removeFromPlaylistTrackList(playlist.id, t.uri)
+                        }
                     },
                     onFailure = { e -> _pickerState.update { it.copy(addResult = errorResult(e)) } },
                 )
@@ -144,6 +189,11 @@ class TrackActionsController(
                                 containingPlaylistIds = s.containingPlaylistIds + playlist.id,
                                 addResult             = AddToPlaylistResult.Added(playlist.name),
                             )
+                        }
+                        t.track?.let { full ->
+                            withContext(Dispatchers.IO) {
+                                libraryCache.appendToPlaylistTrackList(playlist.id, playlist.trackCount, full)
+                            }
                         }
                     },
                     onFailure = { e -> _pickerState.update { it.copy(addResult = errorResult(e)) } },

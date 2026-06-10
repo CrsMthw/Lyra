@@ -37,6 +37,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import android.widget.Toast
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -51,10 +52,12 @@ import coil3.request.crossfade
 import coil3.toBitmap
 import com.crsmthw.lyra.R
 import com.crsmthw.lyra.ui.components.AddToPlaylistSheet
+import com.crsmthw.lyra.ui.screens.player.AddToPlaylistResult
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import com.crsmthw.lyra.ui.screens.player.RepeatMode
 import com.crsmthw.lyra.util.confirm
 import com.crsmthw.lyra.util.press
+import com.crsmthw.lyra.util.reject
 import com.crsmthw.lyra.util.rememberArtBoundsTransform
 import com.crsmthw.lyra.util.tick
 import com.crsmthw.lyra.util.toTimeString
@@ -161,6 +164,38 @@ fun PlayerCardContent(
     }
 
     val haptics = LocalHapticFeedback.current
+
+    // Toasts for actions taken from this pop-out panel. PlayerScreen (the full player) has its own
+    // copy, but on wide/unfolded screens this panel is shown *instead of* it — without these, no
+    // add-to-playlist / device / error toast would appear while the panel is up.
+    LaunchedEffect(state.error) {
+        state.error?.let { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
+    }
+    LaunchedEffect(state.deviceTransferError) {
+        state.deviceTransferError?.let {
+            haptics.reject()
+            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+        }
+    }
+    val addResult = pickerState.addResult
+    val addResultToastMsg = when (addResult) {
+        is AddToPlaylistResult.Added          -> stringResource(R.string.player_add_to_playlist_success, addResult.playlistName)
+        is AddToPlaylistResult.Removed        -> stringResource(R.string.player_remove_from_playlist_success, addResult.playlistName)
+        is AddToPlaylistResult.NeedsReconnect -> stringResource(R.string.player_add_to_playlist_403)
+        is AddToPlaylistResult.Error          -> addResult.message ?: stringResource(R.string.error_generic)
+        null                                  -> null
+    }
+    LaunchedEffect(addResult) {
+        addResultToastMsg?.let {
+            when (addResult) {
+                is AddToPlaylistResult.Added, is AddToPlaylistResult.Removed -> haptics.confirm()
+                else -> haptics.reject()
+            }
+            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+            playerViewModel.clearPickerResult()
+        }
+    }
+
     val onSkipNext: () -> Unit = {
         haptics.press()
         skipDirection = 1

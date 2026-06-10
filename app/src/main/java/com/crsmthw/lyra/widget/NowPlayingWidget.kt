@@ -83,7 +83,7 @@ class NowPlayingWidget : GlanceAppWidget() {
     /** Reads the live Glance state; recomposes automatically when [NowPlayingWidgetUpdater] writes it. */
     @Composable
     private fun WidgetContent(context: Context) {
-        val snapshot = currentState<Preferences>()?.toWidgetSnapshot() ?: WidgetSnapshot()
+        val snapshot = currentState<Preferences>().toWidgetSnapshot()
         val art = remember(snapshot.artFile) {
             snapshot.artFile?.let { runCatching { BitmapFactory.decodeFile(it) }.getOrNull() }
         }
@@ -119,6 +119,9 @@ class NowPlayingWidget : GlanceAppWidget() {
                 val artDim = minOf(size.width - 32.dp, size.height - 168.dp).coerceIn(120.dp, 320.dp)
                 LargeLayout(context, snapshot, art, root, artDim)
             }
+            size.height >= SQUARE_MIN_HEIGHT && size.height >= size.width * SQUARE_RATIO ->
+                // Square-ish but below the large hero: album art + prev / play-pause / next, no text.
+                SmallSquareLayout(context, snapshot, art, root)
             size.width >= MEDIUM.width -> MediumLayout(context, snapshot, art, root)
             else                       -> CompactLayout(context, snapshot, art, root)
         }
@@ -162,6 +165,9 @@ class NowPlayingWidget : GlanceAppWidget() {
         root: GlanceModifier,
         artDim: androidx.compose.ui.unit.Dp,
     ) {
+        // Drop shuffle/repeat (show just prev/play/next) when the widget is too narrow for all five
+        // buttons — otherwise a tall-but-narrow widget clips the outer two.
+        val showExtraControls = LocalSize.current.width >= LARGE_FULL_CONTROLS_WIDTH
         Column(
             modifier = root.padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -178,18 +184,52 @@ class NowPlayingWidget : GlanceAppWidget() {
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                ToggleControl(context, R.drawable.ic_widget_shuffle,
-                    R.string.widget_cd_shuffle, LyraForegroundService.ACTION_SHUFFLE, active = s.shuffle, sizeDp = 40.dp)
-                Spacer(GlanceModifier.width(8.dp))
+                if (showExtraControls) {
+                    ToggleControl(context, R.drawable.ic_widget_shuffle,
+                        R.string.widget_cd_shuffle, LyraForegroundService.ACTION_SHUFFLE, active = s.shuffle, sizeDp = 40.dp)
+                    Spacer(GlanceModifier.width(8.dp))
+                }
                 IconControl(context, R.drawable.ic_widget_skip_previous, R.string.widget_cd_previous, LyraForegroundService.ACTION_PREV, 48.dp)
                 Spacer(GlanceModifier.width(8.dp))
                 PlayPause(context, s.isPlaying, 60.dp)
                 Spacer(GlanceModifier.width(8.dp))
                 IconControl(context, R.drawable.ic_widget_skip_next, R.string.widget_cd_next, LyraForegroundService.ACTION_NEXT, 48.dp)
-                Spacer(GlanceModifier.width(8.dp))
-                ToggleControl(context,
-                    if (s.repeat == "track") R.drawable.ic_widget_repeat_one else R.drawable.ic_widget_repeat,
-                    R.string.widget_cd_repeat, LyraForegroundService.ACTION_REPEAT, active = s.repeat != "off", sizeDp = 40.dp)
+                if (showExtraControls) {
+                    Spacer(GlanceModifier.width(8.dp))
+                    ToggleControl(context,
+                        if (s.repeat == "track") R.drawable.ic_widget_repeat_one else R.drawable.ic_widget_repeat,
+                        R.string.widget_cd_repeat, LyraForegroundService.ACTION_REPEAT, active = s.repeat != "off", sizeDp = 40.dp)
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun SmallSquareLayout(context: Context, s: WidgetSnapshot, art: Bitmap?, root: GlanceModifier) {
+        val size     = LocalSize.current
+        // Square art above a single transport row. Buttons scale with width (with sane min/max) and
+        // are separated by weighted spacers, so they spread evenly and never overflow a small cell.
+        val artDim   = minOf(size.width - 16.dp, size.height - 64.dp).coerceIn(48.dp, 240.dp)
+        val playSize = (size.width * 0.32f).coerceIn(36.dp, 52.dp)
+        val sideSize = (size.width * 0.24f).coerceIn(28.dp, 40.dp)
+        Column(
+            modifier = root.padding(6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Box(
+                modifier = GlanceModifier.defaultWeight().fillMaxWidth(),
+                contentAlignment = Alignment.Center,
+            ) { Art(art, artDim) }
+            Spacer(GlanceModifier.height(6.dp))
+            Row(
+                modifier = GlanceModifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconControl(context, R.drawable.ic_widget_skip_previous, R.string.widget_cd_previous, LyraForegroundService.ACTION_PREV, sideSize)
+                Spacer(GlanceModifier.defaultWeight())
+                PlayPause(context, s.isPlaying, playSize)
+                Spacer(GlanceModifier.defaultWeight())
+                IconControl(context, R.drawable.ic_widget_skip_next, R.string.widget_cd_next, LyraForegroundService.ACTION_NEXT, sideSize)
             }
         }
     }
@@ -318,6 +358,16 @@ class NowPlayingWidget : GlanceAppWidget() {
         // are placeholders.
         private val MEDIUM = DpSize(320.dp, 96.dp)
         private val LARGE  = DpSize(260.dp, 200.dp)
+
+        // Square-ish widgets below the large hero get the minimal art + 3-button layout (no text):
+        // at least SQUARE_MIN_HEIGHT tall AND roughly square or taller (height >= SQUARE_RATIO ×
+        // width), so wide short bars still fall through to Medium/Compact.
+        private val SQUARE_MIN_HEIGHT = 110.dp
+        private const val SQUARE_RATIO = 0.8f
+
+        // Below this width the large (tall) layout shows only prev/play/next; at or above it the
+        // shuffle + repeat toggles are added (the full 5-button row needs ~300dp to not clip).
+        private val LARGE_FULL_CONTROLS_WIDTH = 320.dp
 
         private val PREVIEW_SNAPSHOT = WidgetSnapshot(
             hasTrack = true,

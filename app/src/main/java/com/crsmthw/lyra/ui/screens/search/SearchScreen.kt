@@ -67,7 +67,11 @@ fun SearchScreen(
     Scaffold(
         contentWindowInsets = WindowInsets(0),
         topBar = {
-            Column(modifier = Modifier.statusBarsPadding()) {
+            Column(
+                modifier = Modifier
+                    .statusBarsPadding()
+                    .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal)),
+            ) {
                 SearchBar(
                     query          = state.query,
                     onQueryChange  = viewModel::onQueryChange,
@@ -88,6 +92,7 @@ fun SearchScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
+                .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal))
                 .imePadding(),
         ) {
             when {

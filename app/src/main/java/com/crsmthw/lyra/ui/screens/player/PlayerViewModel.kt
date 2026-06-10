@@ -13,6 +13,8 @@ import com.crsmthw.lyra.data.repository.LyricsRepository
 import com.crsmthw.lyra.data.repository.LyricsState
 import com.crsmthw.lyra.data.repository.SettingsRepository
 import com.crsmthw.lyra.data.repository.SpotifyRepository
+import com.crsmthw.lyra.ui.components.TrackActionsController
+import com.crsmthw.lyra.ui.components.toTrackActionTarget
 import com.crsmthw.lyra.util.LyricLine
 import com.crsmthw.lyra.util.visualizer.VisualizerManager
 import com.crsmthw.lyra.util.visualizer.VisualizerStyle
@@ -86,8 +88,10 @@ class PlayerViewModel(
     private val _uiState = MutableStateFlow(PlayerUiState())
     val uiState: StateFlow<PlayerUiState> = _uiState
 
-    private val _pickerState = MutableStateFlow(PlaylistPickerState())
-    val pickerState: StateFlow<PlaylistPickerState> = _pickerState
+    /** Shared add-to-playlist implementation (the same one the song touch-and-hold menu uses),
+     *  targeting the current track. The picker methods below are thin delegations to it. */
+    val trackActions = TrackActionsController(repository, libraryCache, viewModelScope)
+    val pickerState: StateFlow<PlaylistPickerState> get() = trackActions.pickerState
 
     // Fallback timer used when the wake path goes through LibraryViewModel (no callback available).
     // playTrack / playPause / skip paths cancel this job and clear explicitly via clearIsWakingUp().
@@ -308,112 +312,19 @@ class PlayerViewModel(
         }
     }
 
-    // ── Playlist picker ───────────────────────────────────────────────────────
+    // ── Playlist picker (thin delegations to the shared TrackActionsController) ──
 
     fun loadOwnedPlaylists() {
-        val currentTrackId = _uiState.value.currentTrack?.id ?: return
-        _pickerState.update { it.copy(isLoading = true, playlists = emptyList(), containingPlaylistIds = emptySet(), addResult = null) }
-        viewModelScope.launch {
-            val userId = libraryCache.load()?.user?.id
-                ?: repository.getCurrentUser().getOrNull()?.id
-                ?: run { _pickerState.update { it.copy(isLoading = false) }; return@launch }
-
-            val playlists = libraryCache.load()?.playlists
-                ?.takeIf { it.isNotEmpty() }
-                ?: repository.getUserPlaylists().getOrNull()?.items
-                ?: emptyList()
-
-            val owned = playlists.filter { it.owner.id == userId }
-
-            val cacheData = libraryCache.load()
-            val containing = owned.filter { playlist ->
-                cacheData?.trackLists?.get(playlist.id)?.tracks?.any { it.id == currentTrackId } == true
-            }.map { it.id }.toSet()
-
-            _pickerState.update { it.copy(isLoading = false, playlists = owned, containingPlaylistIds = containing) }
-        }
-    }
-
-    fun togglePlaylistTrack(playlist: SpotifyPlaylist) {
-        val trackUri = _uiState.value.currentTrack?.uri ?: return
-        val isContained = playlist.id in _pickerState.value.containingPlaylistIds
-        viewModelScope.launch {
-            if (isContained) {
-                repository.removeTrackFromPlaylist(playlist.id, trackUri).fold(
-                    onSuccess = {
-                        _pickerState.update { s ->
-                            s.copy(
-                                containingPlaylistIds = s.containingPlaylistIds - playlist.id,
-                                addResult             = AddToPlaylistResult.Removed(playlist.name),
-                            )
-                        }
-                    },
-                    onFailure = { e ->
-                        _pickerState.update { it.copy(addResult = errorResult(e)) }
-                    },
-                )
-            } else {
-                repository.addTrackToPlaylist(playlist.id, trackUri).fold(
-                    onSuccess = {
-                        _pickerState.update { s ->
-                            s.copy(
-                                containingPlaylistIds = s.containingPlaylistIds + playlist.id,
-                                addResult             = AddToPlaylistResult.Added(playlist.name),
-                            )
-                        }
-                    },
-                    onFailure = { e ->
-                        _pickerState.update { it.copy(addResult = errorResult(e)) }
-                    },
-                )
-            }
-        }
-    }
-
-    private fun errorResult(e: Throwable): AddToPlaylistResult =
-        if (e.message?.contains("403") == true) AddToPlaylistResult.NeedsReconnect
-        else AddToPlaylistResult.Error(e.message)
-
-    fun createPlaylist(name: String, description: String, isPublic: Boolean) {
         val track = _uiState.value.currentTrack ?: return
-        _pickerState.update { it.copy(isCreatingPlaylist = true, createPlaylistError = null) }
-        viewModelScope.launch {
-            repository.createPlaylist(name, description, isPublic).fold(
-                onSuccess = { playlist ->
-                    repository.addTrackToPlaylist(playlist.id, track.uri).fold(
-                        onSuccess = {
-                            libraryCache.prependPlaylist(playlist)
-                            _pickerState.update { s ->
-                                s.copy(
-                                    isCreatingPlaylist    = false,
-                                    playlists             = listOf(playlist) + s.playlists,
-                                    containingPlaylistIds = s.containingPlaylistIds + playlist.id,
-                                    addResult             = AddToPlaylistResult.Added(playlist.name),
-                                )
-                            }
-                        },
-                        onFailure = {
-                            libraryCache.prependPlaylist(playlist)
-                            _pickerState.update { s ->
-                                s.copy(
-                                    isCreatingPlaylist = false,
-                                    playlists          = listOf(playlist) + s.playlists,
-                                    addResult          = AddToPlaylistResult.Added(playlist.name),
-                                )
-                            }
-                        },
-                    )
-                },
-                onFailure = { e ->
-                    _pickerState.update { it.copy(isCreatingPlaylist = false, createPlaylistError = e.message) }
-                },
-            )
-        }
+        trackActions.openPlaylistPickerFor(track.toTrackActionTarget())
     }
 
-    fun clearPickerResult() {
-        _pickerState.update { it.copy(addResult = null) }
-    }
+    fun togglePlaylistTrack(playlist: SpotifyPlaylist) = trackActions.togglePlaylistTrack(playlist)
+
+    fun createPlaylist(name: String, description: String, isPublic: Boolean) =
+        trackActions.createPlaylist(name, description, isPublic)
+
+    fun clearPickerResult() = trackActions.clearPickerResult()
 
     // ── Device picker ──────────────────────────────────────────────────────────
 

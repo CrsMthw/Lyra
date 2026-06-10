@@ -46,8 +46,15 @@ fun DevicePickerSheet(
     val active = devices.firstOrNull { it.isActive }
     val volumeEnabled = active?.supportsVolume != false
     var volume by remember(active?.id) { mutableFloatStateOf((active?.volumePercent ?: 50).toFloat()) }
+    // Hidden ↔ Expanded only (no half-height partial detent) — otherwise the sheet settles into
+    // its partial detent shortly after opening, clipping the bottom of a device list that just
+    // barely fit and hiding controls below the fold. (positional args: initialValue, sheetValues)
+    val sheetState = rememberBottomSheetState(
+        SheetValue.Hidden,
+        setOf(SheetValue.Hidden, SheetValue.Expanded),
+    )
 
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Text(
             text     = stringResource(R.string.player_connect_device),
             style    = MaterialTheme.typography.titleMedium,
@@ -118,6 +125,22 @@ fun DevicePickerSheet(
                         }
                     }
 
+                    // Volume sits directly under the "This device" card (controls the active
+                    // device) so it's always visible regardless of how long the device list is.
+                    item(key = "volume") {
+                        VolumeControl(
+                            volume           = volume,
+                            enabled          = volumeEnabled,
+                            onChange         = { volume = it },
+                            onChangeFinished = { onSetVolume(volume.roundToInt()) },
+                            onStep           = { delta ->
+                                volume = (volume + delta).coerceIn(0f, 100f)
+                                onSetVolume(volume.roundToInt())
+                            },
+                        )
+                        HorizontalDivider(modifier = Modifier.padding(top = 8.dp))
+                    }
+
                     if (devices.isEmpty()) {
                         item(key = "empty") {
                             Box(
@@ -141,19 +164,6 @@ fun DevicePickerSheet(
                                 onClick  = { device.id?.let { onSelectDevice(it) } },
                             )
                         }
-                    }
-                    item(key = "volume") {
-                        HorizontalDivider(modifier = Modifier.padding(top = 8.dp))
-                        VolumeControl(
-                            volume           = volume,
-                            enabled          = volumeEnabled,
-                            onChange         = { volume = it },
-                            onChangeFinished = { onSetVolume(volume.roundToInt()) },
-                            onStep           = { delta ->
-                                volume = (volume + delta).coerceIn(0f, 100f)
-                                onSetVolume(volume.roundToInt())
-                            },
-                        )
                     }
                     item { Spacer(Modifier.navigationBarsPadding()) }
                 }

@@ -988,7 +988,7 @@ private fun RightPaneContent(
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
         }
-        if (canDelete && playlist != null) {
+        if (canDelete) {
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
@@ -1004,7 +1004,7 @@ private fun RightPaneContent(
                     DropdownMenuItem(
                         text        = { Text(stringResource(R.string.delete_playlist)) },
                         leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
-                        onClick     = { showOverflowMenu = false; showDeleteConfirm = true },
+                        onClick     = { haptics.press(); showOverflowMenu = false; showDeleteConfirm = true },
                     )
                 }
             }
@@ -1027,7 +1027,7 @@ private fun RightPaneContent(
                     }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showDeleteConfirm = false }) {
+                    TextButton(onClick = { haptics.press(); showDeleteConfirm = false }) {
                         Text(stringResource(R.string.action_cancel))
                     }
                 },

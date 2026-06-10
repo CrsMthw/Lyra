@@ -371,7 +371,7 @@ fun PlayerScreen(
                             Spacer(Modifier.height(MenuDefaults.GroupSpacing))
                             DropdownMenuGroup(shapes = MenuDefaults.groupShapes()) {
                                 DropdownMenuItem(
-                                    onClick        = { showMediaMenu = false; showSleepTimerDialog = true },
+                                    onClick        = { haptics.press(); showMediaMenu = false; showSleepTimerDialog = true },
                                     text           = { Text(stringResource(R.string.player_sleep_timer)) },
                                     shape          = MenuDefaults.standaloneItemShape,
                                     leadingIcon    = { Icon(Icons.Default.Timer, contentDescription = null) },
@@ -1113,6 +1113,7 @@ private fun SleepTimerDialog(
     onSelect      : (Int) -> Unit,
     onDismiss     : () -> Unit,
 ) {
+    val haptics = LocalHapticFeedback.current
     val options = listOf(0, 5, 15, 30, 45, 60)
     val labels  = listOf(
         stringResource(R.string.sleep_timer_off),
@@ -1142,6 +1143,6 @@ private fun SleepTimerDialog(
             }
         },
         confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = { TextButton(onClick = { haptics.press(); onDismiss() }) { Text("Cancel") } },
     )
 }

@@ -41,8 +41,8 @@ import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.remote.model.AlbumTrack
 import com.crsmthw.lyra.data.remote.model.SpotifyAlbumFull
 import com.crsmthw.lyra.ui.components.PlayerPanelHost
-import com.crsmthw.lyra.ui.components.TrackActionTarget
 import com.crsmthw.lyra.ui.components.TrackActionsHost
+import com.crsmthw.lyra.ui.components.toTrackActionTarget
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import com.crsmthw.lyra.util.ListScrollHaptics
 import com.crsmthw.lyra.util.confirm
@@ -153,18 +153,7 @@ fun AlbumDetailScreen(
                     onRequestPlayer()
                 }
                 val onTrackLongPress = { track: AlbumTrack ->
-                    // No "Go to album" — we're already on it. Art comes from the album (AlbumTrack has none).
-                    viewModel.trackActions.open(
-                        TrackActionTarget(
-                            id       = track.id,
-                            uri      = track.uri,
-                            name     = track.name,
-                            subtitle = track.allArtists,
-                            artUrl   = album.artUrl,
-                            albumId  = null,
-                            artistId = track.artists?.firstOrNull()?.id,
-                        )
-                    )
+                    viewModel.trackActions.open(track.toTrackActionTarget(album))
                 }
 
                 if (isWideScreen) {
