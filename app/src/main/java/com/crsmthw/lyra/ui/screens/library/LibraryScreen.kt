@@ -85,6 +85,7 @@ import com.crsmthw.lyra.ui.components.TrackRow
 import com.crsmthw.lyra.ui.components.toTrackActionTarget
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import com.crsmthw.lyra.ui.screens.player.RepeatMode
+import com.crsmthw.lyra.util.CollapsingListScrollHaptics
 import com.crsmthw.lyra.util.ListScrollHaptics
 import com.crsmthw.lyra.util.confirm
 import com.crsmthw.lyra.util.press
@@ -321,7 +322,9 @@ private fun LibraryBrowserPane(
     var showRefreshErrorDialog by remember { mutableStateOf(false) }
     val haptics        = LocalHapticFeedback.current
     val listState      = rememberLazyListState()
-    ListScrollHaptics(listState)
+    // Scroll haptics are wired per-branch below: landscape's bar is always-on (plain
+    // ListScrollHaptics), portrait's collapsing LargeTopAppBar needs the combined helper so the
+    // collapse and the list share one continuous tick cadence (CollapsingListScrollHaptics).
     val density        = LocalDensity.current
     val navBarBottomDp = with(density) { WindowInsets.navigationBars.getBottom(this).toDp() }
     val context        = LocalContext.current
@@ -420,7 +423,9 @@ private fun LibraryBrowserPane(
     }
 
     if (isLandscape) {
-        // Landscape: overlay TopAppBar over scrollable content (always-on bar)
+        // Landscape: overlay TopAppBar over scrollable content (always-on bar — no collapse, so
+        // the plain list haptics suffice)
+        ListScrollHaptics(listState)
         val statusBarTopDp     = with(density) { WindowInsets.statusBars.getTop(this).toDp() }
         val listTopPadding     = statusBarTopDp + 64.dp
         val listContentPadding = remember(listTopPadding, navBarBottomDp) { PaddingValues(top = listTopPadding, bottom = 100.dp + navBarBottomDp) }
@@ -508,6 +513,10 @@ private fun LibraryBrowserPane(
     } else {
         // Portrait: LargeTopAppBar physically moves "Lyra" title from hero into the bar
         val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+        // The hero collapse is consumed by the bar (not the list). The combined helper counts the
+        // bar's heightOffset + the list's offset as one continuous distance, so ticks stay evenly
+        // ~80dp-spaced across the collapse→scroll handoff (no dead zone, no clustered burst).
+        CollapsingListScrollHaptics(listState, scrollBehavior.state)
 
         Column(modifier = modifier
             .fillMaxSize()

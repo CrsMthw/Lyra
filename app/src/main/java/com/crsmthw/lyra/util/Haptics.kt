@@ -1,6 +1,8 @@
 package com.crsmthw.lyra.util
 
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.TopAppBarState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.snapshotFlow
@@ -73,6 +75,38 @@ fun ListScrollHaptics(listState: LazyListState) {
             .drop(1)
             .collect { (index, offset) ->
                 val notch = (offset / notchPx).toInt()
+                if (index != lastIndex || notch != lastNotch) haptics.scrollTick()
+                lastIndex = index
+                lastNotch = notch
+            }
+    }
+}
+
+/**
+ * [ListScrollHaptics] for a screen whose hero is a separate `LargeTopAppBar` driven by
+ * `exitUntilCollapsedScrollBehavior` (the Library browser pane's collapsing "Lyra" hero), rather
+ * than an item inside the list. While that bar collapses, its nested-scroll connection consumes
+ * the scroll delta into [TopAppBarState.heightOffset] (1:1 with the finger) and the list stays
+ * pinned at offset 0; once fully collapsed, the list consumes the delta instead (also 1:1). So
+ * `(-heightOffset) + firstVisibleItemScrollOffset` is *total finger travel* across the whole
+ * gesture — one continuous counter with no dead zone at the collapse→scroll handoff. Ticking off
+ * that combined distance (plus item-boundary crossings, as in [ListScrollHaptics]) keeps an even
+ * ~80dp cadence through the handoff in both directions. Use this *instead of* [ListScrollHaptics]
+ * on such a screen — never both, or the post-collapse list phase double-buzzes. The initial state
+ * is captured before collecting so entering the screen doesn't buzz.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CollapsingListScrollHaptics(listState: LazyListState, barState: TopAppBarState) {
+    val haptics = LocalHapticFeedback.current
+    val notchPx = with(LocalDensity.current) { 80.dp.toPx() }
+    LaunchedEffect(listState, barState, notchPx) {
+        var lastIndex = listState.firstVisibleItemIndex
+        var lastNotch = ((-barState.heightOffset + listState.firstVisibleItemScrollOffset) / notchPx).toInt()
+        snapshotFlow { Triple(barState.heightOffset, listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset) }
+            .drop(1)
+            .collect { (h, index, offset) ->
+                val notch = ((-h + offset) / notchPx).toInt()
                 if (index != lastIndex || notch != lastNotch) haptics.scrollTick()
                 lastIndex = index
                 lastNotch = notch
