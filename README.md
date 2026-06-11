@@ -15,7 +15,7 @@
 - Add to / remove from playlists, like a song, or jump to its album/artist — from the player or any track's touch-and-hold menu; create a new playlist on the spot
 - Spotify Connect device switching — transfer playback to any device on your account, with a volume slider for the active device; "This device" card wakes Spotify locally when it isn't running
 - Home-screen widget — resizable Now Playing widget with playback controls; its layout and artwork scale to the size you choose, and its colours are drawn from the current album art
-- Album detail screen — full track list, play button, label/copyright footer
+- Album detail screen — full track list, play + shuffle, label/copyright footer
 - Artist detail screen — discography grouped by Albums / Singles / Compilations
 - Search for tracks, albums, and artists
 - Open Spotify share links directly in Lyra (`open.spotify.com/track/…`, `/album/…`, `/artist/…`)
