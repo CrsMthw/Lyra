@@ -23,6 +23,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
@@ -50,7 +51,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
@@ -62,7 +62,6 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.palette.graphics.Palette
 import coil3.SingletonImageLoader
@@ -77,15 +76,21 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.PullToRefreshState
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import com.crsmthw.lyra.ui.components.DetailArtHero
 import com.crsmthw.lyra.ui.components.PlayerPanelHost
 import com.crsmthw.lyra.ui.components.PlaylistCard
+import com.crsmthw.lyra.ui.components.HeroBandHeight
 import com.crsmthw.lyra.ui.components.RemovablePlaylist
+import com.crsmthw.lyra.ui.components.rememberHeroScrollProgress
+import com.crsmthw.lyra.ui.components.TitlePill
+import com.crsmthw.lyra.ui.components.TopActionPill
+import com.crsmthw.lyra.ui.components.TopPillHeight
+import com.crsmthw.lyra.ui.components.TopScrim
 import com.crsmthw.lyra.ui.components.TrackActionsHost
 import com.crsmthw.lyra.ui.components.TrackRow
 import com.crsmthw.lyra.ui.components.toTrackActionTarget
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import com.crsmthw.lyra.ui.screens.player.RepeatMode
-import com.crsmthw.lyra.util.CollapsingListScrollHaptics
 import com.crsmthw.lyra.util.ListScrollHaptics
 import com.crsmthw.lyra.util.confirm
 import com.crsmthw.lyra.util.press
@@ -102,8 +107,6 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-
-private val HERO_HEIGHT = 220.dp
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalSharedTransitionApi::class)
 @Composable
@@ -322,9 +325,7 @@ private fun LibraryBrowserPane(
     var showRefreshErrorDialog by remember { mutableStateOf(false) }
     val haptics        = LocalHapticFeedback.current
     val listState      = rememberLazyListState()
-    // Scroll haptics are wired per-branch below: landscape's bar is always-on (plain
-    // ListScrollHaptics), portrait's collapsing LargeTopAppBar needs the combined helper so the
-    // collapse and the list share one continuous tick cadence (CollapsingListScrollHaptics).
+    ListScrollHaptics(listState)
     val density        = LocalDensity.current
     val navBarBottomDp = with(density) { WindowInsets.navigationBars.getBottom(this).toDp() }
     val context        = LocalContext.current
@@ -423,9 +424,7 @@ private fun LibraryBrowserPane(
     }
 
     if (isLandscape) {
-        // Landscape: overlay TopAppBar over scrollable content (always-on bar — no collapse, so
-        // the plain list haptics suffice)
-        ListScrollHaptics(listState)
+        // Landscape: overlay TopAppBar over scrollable content (always-on bar)
         val statusBarTopDp     = with(density) { WindowInsets.statusBars.getTop(this).toDp() }
         val listTopPadding     = statusBarTopDp + 64.dp
         val listContentPadding = remember(listTopPadding, navBarBottomDp) { PaddingValues(top = listTopPadding, bottom = 100.dp + navBarBottomDp) }
@@ -511,102 +510,125 @@ private fun LibraryBrowserPane(
             )
         }
     } else {
-        // Portrait: LargeTopAppBar physically moves "Lyra" title from hero into the bar
-        val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
-        // The hero collapse is consumed by the bar (not the list). The combined helper counts the
-        // bar's heightOffset + the list's offset as one continuous distance, so ticks stay evenly
-        // ~80dp-spaced across the collapse→scroll handoff (no dead zone, no clustered burst).
-        CollapsingListScrollHaptics(listState, scrollBehavior.state)
+        // Portrait: no solid top app bar (OneUI 8.5 style). The "Lyra" hero is the first list item
+        // and scrolls away; a top scrim fades content under the status bar, a floating action pill
+        // carries the settings/error actions, and a small title pill fades in once the hero is gone.
+        val titlePillAlpha = rememberHeroScrollProgress(listState)
+        val listContentPadding = remember(navBarBottomDp) {
+            PaddingValues(bottom = 100.dp + navBarBottomDp)
+        }
 
-        Column(modifier = modifier
-            .fillMaxSize()
-            .nestedScroll(scrollBehavior.nestedScrollConnection)) {
-            LargeTopAppBar(
-                title          = {
-                    val fraction     = scrollBehavior.state.collapsedFraction
-                    val expandedSp   = MaterialTheme.typography.displayLarge.fontSize.value
-                    val collapsedSp  = MaterialTheme.typography.titleLarge.fontSize.value
-                    Text(
-                        text     = "Lyra",
-                        fontSize = (expandedSp + (collapsedSp - expandedSp) * fraction).sp,
-                    )
-                },
-                actions        = actionsBar,
-                scrollBehavior = scrollBehavior,
-                expandedHeight = HERO_HEIGHT,
-                windowInsets   = if (applyStatusBarPadding) WindowInsets.statusBars else WindowInsets(0),
-                colors         = TopAppBarDefaults.topAppBarColors(
-                    containerColor         = MaterialTheme.colorScheme.background,
-                    scrolledContainerColor = MaterialTheme.colorScheme.surface,
-                ),
-            )
-
-            Box(modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()) {
-                if (state.isLoading) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { ContainedLoadingIndicator() }
-                } else if (state.error != null && state.playlists.isEmpty() && !state.isLoadingTracks) {
-                    val isRateLimit   = state.error.contains("429")
-                    val retryAfterSec = if (isRateLimit)
-                        Regex("Retry-After=(\\d+)").find(state.error)?.groupValues?.get(1)?.toLongOrNull()
-                    else null
-                    val retryDisplay  = when {
-                        retryAfterSec == null -> null
-                        retryAfterSec >= 3600 -> "${retryAfterSec / 3600}h ${(retryAfterSec % 3600) / 60}m"
-                        retryAfterSec >= 60   -> "${retryAfterSec / 60}m ${retryAfterSec % 60}s"
-                        else                  -> "${retryAfterSec}s"
+        Box(modifier = modifier.fillMaxSize()) {
+            if (state.isLoading) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { ContainedLoadingIndicator() }
+            } else if (state.error != null && state.playlists.isEmpty() && !state.isLoadingTracks) {
+                val isRateLimit   = state.error.contains("429")
+                val retryAfterSec = if (isRateLimit)
+                    Regex("Retry-After=(\\d+)").find(state.error)?.groupValues?.get(1)?.toLongOrNull()
+                else null
+                val retryDisplay  = when {
+                    retryAfterSec == null -> null
+                    retryAfterSec >= 3600 -> "${retryAfterSec / 3600}h ${(retryAfterSec % 3600) / 60}m"
+                    retryAfterSec >= 60   -> "${retryAfterSec / 60}m ${retryAfterSec % 60}s"
+                    else                  -> "${retryAfterSec}s"
+                }
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(horizontal = 32.dp)) {
+                        Text(
+                            text = if (isRateLimit) buildString {
+                                append("Spotify is rate limiting requests.")
+                                if (retryDisplay != null) append("\n\nRetry-After: $retryDisplay")
+                                append("\n\nWait, then reopen.")
+                            } else state.error,
+                            color     = if (isRateLimit) MaterialTheme.colorScheme.onSurfaceVariant
+                                        else MaterialTheme.colorScheme.error,
+                            style     = MaterialTheme.typography.bodyMedium,
+                            textAlign = TextAlign.Center,
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Button(onClick = viewModel::loadLibrary) { Text("Retry") }
                     }
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.padding(horizontal = 32.dp)) {
-                            Text(
-                                text = if (isRateLimit) buildString {
-                                    append("Spotify is rate limiting requests.")
-                                    if (retryDisplay != null) append("\n\nRetry-After: $retryDisplay")
-                                    append("\n\nWait, then reopen.")
-                                } else state.error,
-                                color     = if (isRateLimit) MaterialTheme.colorScheme.onSurfaceVariant
-                                            else MaterialTheme.colorScheme.error,
-                                style     = MaterialTheme.typography.bodyMedium,
-                                textAlign = TextAlign.Center,
+                }
+            } else {
+                val portraitPtrState = rememberPullToRefreshState()
+                PullThresholdHaptics(portraitPtrState)
+                PullToRefreshBox(
+                    isRefreshing = state.isLibraryRefreshing,
+                    onRefresh    = viewModel::refreshLibrary,
+                    state        = portraitPtrState,
+                    modifier     = Modifier.fillMaxSize(),
+                    indicator    = {
+                        if (state.isLibraryRefreshing) {
+                            ContainedLoadingIndicator(
+                                modifier = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .statusBarsPadding()
+                                    .padding(top = 12.dp),
                             )
-                            Spacer(Modifier.height(12.dp))
-                            Button(onClick = viewModel::loadLibrary) { Text("Retry") }
+                        } else {
+                            PullToRefreshDefaults.Indicator(
+                                state        = portraitPtrState,
+                                isRefreshing = false,
+                                modifier     = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .statusBarsPadding(),
+                            )
                         }
-                    }
-                } else {
-                    val portraitPtrState = rememberPullToRefreshState()
-                    PullThresholdHaptics(portraitPtrState)
-                    PullToRefreshBox(
-                        isRefreshing = state.isLibraryRefreshing,
-                        onRefresh    = viewModel::refreshLibrary,
-                        state        = portraitPtrState,
-                        modifier     = Modifier.fillMaxSize(),
-                        indicator    = {
-                            if (state.isLibraryRefreshing) {
-                                ContainedLoadingIndicator(
-                                    modifier = Modifier
-                                        .align(Alignment.TopCenter)
-                                        .padding(top = 12.dp),
-                                )
-                            } else {
-                                PullToRefreshDefaults.Indicator(
-                                    state        = portraitPtrState,
-                                    isRefreshing = false,
-                                    modifier     = Modifier.align(Alignment.TopCenter),
+                    },
+                ) {
+                    LazyColumn(
+                        state          = listState,
+                        modifier       = Modifier.fillMaxSize(),
+                        contentPadding = listContentPadding,
+                    ) {
+                        item(key = "hero") {
+                            // Spacious hero (OneUI Phone-app style): the title sits centred in a
+                            // tall band with room above (where the action pill floats) and below.
+                            // Boundary-only haptics mean its height adds no extra ticks.
+                            Box(
+                                modifier         = Modifier
+                                    .fillMaxWidth()
+                                    .statusBarsPadding()
+                                    .height(HeroBandHeight),
+                                contentAlignment = Alignment.BottomStart,
+                            ) {
+                                Text(
+                                    text     = "Lyra",
+                                    style    = MaterialTheme.typography.displayMedium,
+                                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
                                 )
                             }
-                        },
-                    ) {
-                        LazyColumn(
-                            state          = listState,
-                            modifier       = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(bottom = 100.dp + navBarBottomDp),
-                        ) { listBody() }
+                        }
+                        listBody()
                     }
                 }
             }
+
+            // Top scrim — fades content under the status bar (vertical mirror of the bottom scrim).
+            TopScrim(
+                color    = MaterialTheme.colorScheme.background,
+                modifier = Modifier.align(Alignment.TopCenter),
+            )
+
+            // Small title pill — fades in once the hero title has scrolled away.
+            TitlePill(
+                text     = "Lyra",
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .statusBarsPadding()
+                    .padding(start = 16.dp, top = 8.dp)
+                    .graphicsLayer { alpha = titlePillAlpha.value },
+            )
+
+            // Floating action pill — settings (+ refresh-error warning when present).
+            TopActionPill(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .statusBarsPadding()
+                    .padding(end = 16.dp, top = 8.dp),
+                content  = actionsBar,
+            )
         }
     }
 
@@ -800,6 +822,7 @@ private fun RightPaneContent(
     val isLikedSongs = playlist == null
     // Owned playlists only (never Liked Songs / followed) get the delete action.
     val canDelete    = playlist != null && playlist.owner.id == state.user?.id
+    val singlePane   = onBack != null   // single-pane → floating controls; two-pane keeps the bar
     val haptics      = LocalHapticFeedback.current
     var showOverflowMenu  by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
@@ -843,6 +866,7 @@ private fun RightPaneContent(
     val thresholdPx      = with(density) { 80.dp.toPx() }
     val snapThreshold    = thresholdPx / 2f
     val listState        = rememberLazyListState()
+    val titlePillAlpha   = rememberHeroScrollProgress(listState)
     val pullToRefreshState   = rememberPullToRefreshState()
     PullThresholdHaptics(pullToRefreshState)
     var barHeightPx   by remember { mutableIntStateOf(0) }
@@ -858,6 +882,7 @@ private fun RightPaneContent(
     LaunchedEffect(listState, pullToRefreshState) {
         snapshotFlow { listState.isScrollInProgress to pullToRefreshState.distanceFraction }
             .collect { (isScrolling, ptrFraction) ->
+                if (singlePane) return@collect   // no collapsing bar to snap in single-pane
                 if (isScrolling) return@collect
                 if (ptrFraction > 0f) return@collect
                 if (state.isRefreshing) return@collect
@@ -944,18 +969,31 @@ private fun RightPaneContent(
             contentPadding = PaddingValues(bottom = 100.dp + navBarBottomDp),
             listState      = listState,
             headerContent  = {
-                if (headerTopPadding > 0.dp) Spacer(Modifier.height(headerTopPadding))
-                RightPaneHeader(
-                    artUrl       = artUrl,
-                    isLikedSongs = isLikedSongs,
-                    name         = playlistName,
-                    trackCount   = trackCount,
-                    onPlay       = { haptics.press(); viewModel.playPlaylist(playUri) },
-                    onShuffle    = { haptics.press(); viewModel.shufflePlaylist(playUri) },
-                    artKey       = artKey,
-                    sharedScope  = sharedScope,
-                    animScope    = animScope,
-                )
+                if (!singlePane && headerTopPadding > 0.dp) Spacer(Modifier.height(headerTopPadding))
+                if (singlePane) {
+                    // No container transform here: the hero art no longer matches the card, and the
+                    // morph rendered over the floating controls. Plain slide+fade instead.
+                    TrackListHero(
+                        artUrl       = artUrl,
+                        isLikedSongs = isLikedSongs,
+                        name         = playlistName,
+                        trackCount   = trackCount,
+                        onPlay       = { haptics.press(); viewModel.playPlaylist(playUri) },
+                        onShuffle    = { haptics.press(); viewModel.shufflePlaylist(playUri) },
+                    )
+                } else {
+                    RightPaneHeader(
+                        artUrl       = artUrl,
+                        isLikedSongs = isLikedSongs,
+                        name         = playlistName,
+                        trackCount   = trackCount,
+                        onPlay       = { haptics.press(); viewModel.playPlaylist(playUri) },
+                        onShuffle    = { haptics.press(); viewModel.shufflePlaylist(playUri) },
+                        artKey       = artKey,
+                        sharedScope  = sharedScope,
+                        animScope    = animScope,
+                    )
+                }
             },
             emptyContent = when {
                 showLoadingIndicator && state.currentTracks.isEmpty() -> { {
@@ -983,42 +1021,81 @@ private fun RightPaneContent(
             },
         )
         } // PullToRefreshBox
-        CollapsingDetailBar(
-            name             = playlistName,
-            collapseProgress = collapseProgress,
-            onBack           = onBack,
-            windowInsets     = barWindowInsets,
-            modifier         = Modifier.onSizeChanged { barHeightPx = it.height },
-        )
-        if (onBack != null) {
-            IconButton(
-                onClick  = onBack,
+        if (!singlePane) {
+            // Two-pane: the collapsing detail bar + its back/overflow buttons (unchanged).
+            CollapsingDetailBar(
+                name             = playlistName,
+                collapseProgress = collapseProgress,
+                onBack           = onBack,
+                windowInsets     = barWindowInsets,
+                modifier         = Modifier.onSizeChanged { barHeightPx = it.height },
+            )
+            // (no separate back button in two-pane — onBack is null there; the bar handles it)
+            if (canDelete) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = headerTopPadding, end = 4.dp),
+                ) {
+                    IconButton(onClick = { haptics.press(); showOverflowMenu = true }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.more_options))
+                    }
+                    DropdownMenu(
+                        expanded         = showOverflowMenu,
+                        onDismissRequest = { showOverflowMenu = false },
+                    ) {
+                        DropdownMenuItem(
+                            text        = { Text(stringResource(R.string.delete_playlist)) },
+                            leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
+                            onClick     = { haptics.press(); showOverflowMenu = false; showDeleteConfirm = true },
+                        )
+                    }
+                }
+            }
+        } else {
+            // Single-pane: floating controls (mirror of Album/Artist).
+            TopScrim(color = MaterialTheme.colorScheme.background, modifier = Modifier.align(Alignment.TopCenter))
+            TopActionPill(
                 modifier = Modifier
                     .align(Alignment.TopStart)
-                    .padding(top = headerTopPadding, start = 4.dp)
-                    .graphicsLayer { alpha = 1f - collapseProgress.value },
+                    .statusBarsPadding()
+                    .padding(start = 16.dp, top = 8.dp),
             ) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-            }
-        }
-        if (canDelete) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(top = headerTopPadding, end = 4.dp),
-            ) {
-                IconButton(onClick = { haptics.press(); showOverflowMenu = true }) {
-                    Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.more_options))
+                IconButton(onClick = { haptics.confirm(); onBack() }) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                 }
-                DropdownMenu(
-                    expanded         = showOverflowMenu,
-                    onDismissRequest = { showOverflowMenu = false },
+            }
+            TitlePill(
+                text     = playlistName,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .statusBarsPadding()
+                    .padding(start = 16.dp + TopPillHeight + 8.dp, top = 8.dp)
+                    .widthIn(max = 220.dp)
+                    .graphicsLayer { alpha = titlePillAlpha.value },
+            )
+            if (canDelete) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .statusBarsPadding()
+                        .padding(end = 16.dp, top = 8.dp),
                 ) {
-                    DropdownMenuItem(
-                        text        = { Text(stringResource(R.string.delete_playlist)) },
-                        leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
-                        onClick     = { haptics.press(); showOverflowMenu = false; showDeleteConfirm = true },
-                    )
+                    TopActionPill {
+                        IconButton(onClick = { haptics.press(); showOverflowMenu = true }) {
+                            Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.more_options))
+                        }
+                    }
+                    DropdownMenu(
+                        expanded         = showOverflowMenu,
+                        onDismissRequest = { showOverflowMenu = false },
+                    ) {
+                        DropdownMenuItem(
+                            text        = { Text(stringResource(R.string.delete_playlist)) },
+                            leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
+                            onClick     = { haptics.press(); showOverflowMenu = false; showDeleteConfirm = true },
+                        )
+                    }
                 }
             }
         }
@@ -1045,6 +1122,55 @@ private fun RightPaneContent(
                     }
                 },
             )
+        }
+    }
+}
+
+// ── Track-list hero (single-pane) ─────────────────────────────────────────────
+// The shared DetailArtHero with the playlist/Liked art (real cover, else the Liked gradient or a
+// music-note fallback) and an "N tracks" subtitle.
+
+@Composable
+private fun TrackListHero(
+    artUrl      : String?,
+    isLikedSongs: Boolean,
+    name        : String,
+    trackCount  : Int,
+    onPlay      : () -> Unit,
+    onShuffle   : () -> Unit,
+) {
+    DetailArtHero(
+        title     = name,
+        subtitle  = if (trackCount > 0) "$trackCount tracks" else null,
+        onPlay    = onPlay,
+        onShuffle = onShuffle,
+    ) {
+        if (!artUrl.isNullOrBlank()) {
+            AsyncImage(
+                model              = artUrl,
+                contentDescription = name,
+                contentScale       = ContentScale.Crop,
+                modifier           = Modifier.fillMaxSize(),
+            )
+        } else if (isLikedSongs) {
+            Box(
+                modifier = Modifier.fillMaxSize().background(
+                    Brush.linearGradient(listOf(Color(0xFF6A11CB), Color(0xFF2575FC)))
+                ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Default.Favorite, null, tint = Color.White.copy(0.5f),
+                    modifier = Modifier.size(84.dp))
+            }
+        } else {
+            Box(
+                modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Default.MusicNote, null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                    modifier = Modifier.size(64.dp))
+            }
         }
     }
 }

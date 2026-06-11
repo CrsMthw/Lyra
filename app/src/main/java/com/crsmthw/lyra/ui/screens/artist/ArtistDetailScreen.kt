@@ -26,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.ui.platform.LocalContext
@@ -39,7 +40,13 @@ import coil3.compose.AsyncImage
 import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.remote.model.SpotifyAlbum
 import com.crsmthw.lyra.data.remote.model.SpotifyArtistFull
+import com.crsmthw.lyra.ui.components.DetailArtHero
 import com.crsmthw.lyra.ui.components.PlayerPanelHost
+import com.crsmthw.lyra.ui.components.TitlePill
+import com.crsmthw.lyra.ui.components.TopActionPill
+import com.crsmthw.lyra.ui.components.TopPillHeight
+import com.crsmthw.lyra.ui.components.TopScrim
+import com.crsmthw.lyra.ui.components.rememberHeroScrollProgress
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import com.crsmthw.lyra.util.ListScrollHaptics
 import com.crsmthw.lyra.util.confirm
@@ -78,7 +85,8 @@ fun ArtistDetailScreen(
     Scaffold(
         contentWindowInsets = WindowInsets(0),
         topBar = {
-            TopAppBar(
+            // Two-pane (unfolded) keeps the solid bar for now; single-pane floats its controls.
+            if (isWideScreen) TopAppBar(
                 modifier     = Modifier
                     .statusBarsPadding()
                     .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal)),
@@ -117,6 +125,7 @@ fun ArtistDetailScreen(
             )
         },
     ) { paddingValues ->
+        Box(Modifier.fillMaxSize()) {
         when {
             state.isLoading -> {
                 Box(
@@ -236,13 +245,35 @@ fun ArtistDetailScreen(
                     ) {
                         val albumsListState = rememberLazyListState()
                         ListScrollHaptics(albumsListState)
+                        val titlePillAlpha = rememberHeroScrollProgress(albumsListState)
                         LazyColumn(
                             state          = albumsListState,
                             modifier       = Modifier.fillMaxSize(),
                             contentPadding = PaddingValues(bottom = 100.dp + navBarBottomDp),
                         ) {
                             item(key = "header") {
-                                ArtistHeader(artist = artist, modifier = Modifier.fillMaxWidth().aspectRatio(1f))
+                                DetailArtHero(
+                                    title    = artist.name,
+                                    subtitle = artist.formattedFollowers.takeIf { it.isNotBlank() },
+                                ) {
+                                    if (artist.imageUrl.isNotBlank()) {
+                                        AsyncImage(
+                                            model              = artist.imageUrl,
+                                            contentDescription = artist.name,
+                                            contentScale       = ContentScale.Crop,
+                                            modifier           = Modifier.fillMaxSize(),
+                                        )
+                                    } else {
+                                        Box(
+                                            modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            Icon(Icons.Default.Person, null,
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.fillMaxSize(0.4f))
+                                        }
+                                    }
+                                }
                             }
                             artistContent(
                                 state         = state,
@@ -266,6 +297,58 @@ fun ArtistDetailScreen(
                             color    = LocalVisualizerAccentColor.current,
                             alpha    = 0.20f,
                         )
+
+                        // Top scrim — fades the artist art under the status bar.
+                        TopScrim(color = background, modifier = Modifier.align(Alignment.TopCenter))
+
+                        // Artist-name title pill — fades in as the art scrolls away, sitting just
+                        // right of the screen-level back pill.
+                        TitlePill(
+                            text     = artist.name,
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .statusBarsPadding()
+                                .padding(start = 16.dp + TopPillHeight + 8.dp, top = 8.dp)
+                                .widthIn(max = 220.dp)
+                                .graphicsLayer { alpha = titlePillAlpha.value },
+                        )
+
+                        // Share pill (top-right).
+                        TopActionPill(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .statusBarsPadding()
+                                .padding(end = 16.dp, top = 8.dp),
+                        ) {
+                            IconButton(onClick = {
+                                haptics.press()
+                                context.startActivity(Intent.createChooser(
+                                    Intent(Intent.ACTION_SEND).apply {
+                                        putExtra(Intent.EXTRA_TEXT, "https://open.spotify.com/artist/${artist.id}")
+                                        type = "text/plain"
+                                    }, null
+                                ))
+                            }) {
+                                Icon(Icons.Default.Share, contentDescription = stringResource(R.string.player_share))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+            // Screen-level back pill — single-pane only; visible in loading/error/content states.
+            if (!isWideScreen) {
+                TopActionPill(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .statusBarsPadding()
+                        .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal))
+                        .padding(start = 16.dp, top = 8.dp),
+                ) {
+                    IconButton(onClick = { haptics.confirm(); onBack() }) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.nav_back))
                     }
                 }
             }

@@ -18,6 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -28,9 +29,15 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.remote.model.SpotifyTrack
+import com.crsmthw.lyra.ui.components.HeroBandHeight
+import com.crsmthw.lyra.ui.components.TitlePill
+import com.crsmthw.lyra.ui.components.TopActionPill
+import com.crsmthw.lyra.ui.components.TopScrim
 import com.crsmthw.lyra.ui.components.TrackActionsHost
+import com.crsmthw.lyra.ui.components.rememberHeroScrollProgress
 import com.crsmthw.lyra.ui.components.toTrackActionTarget
 import com.crsmthw.lyra.util.ListScrollHaptics
+import com.crsmthw.lyra.util.confirm
 import com.crsmthw.lyra.util.longPress
 import com.crsmthw.lyra.util.toTimeString
 import com.crsmthw.lyra.util.visualizer.FftWaveCanvas
@@ -57,26 +64,15 @@ fun QueueScreen(
 
     Scaffold(
         contentWindowInsets = WindowInsets(0),
-        topBar = {
-            TopAppBar(
-                modifier     = Modifier.statusBarsPadding(),
-                windowInsets = WindowInsets(0),
-                title        = { Text(stringResource(R.string.queue_title)) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            imageVector        = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(R.string.queue_title),
-                        )
-                    }
-                },
-            )
-        },
     ) { paddingValues ->
         val density       = LocalDensity.current
         val navBarBottomDp = with(density) { WindowInsets.navigationBars.getBottom(this).toDp() }
         val scrimHeight    = navBarBottomDp + 48.dp
         val listBottomPad  = remember(navBarBottomDp) { PaddingValues(bottom = navBarBottomDp + 16.dp) }
+        val haptics        = LocalHapticFeedback.current
+        val queueListState = rememberLazyListState()
+        ListScrollHaptics(queueListState)
+        val titlePillAlpha = rememberHeroScrollProgress(queueListState)
 
         Box(
             modifier = Modifier
@@ -126,13 +122,26 @@ fun QueueScreen(
                     }
                 }
                 else -> {
-                    val queueListState = rememberLazyListState()
-                    ListScrollHaptics(queueListState)
                     LazyColumn(
                         state          = queueListState,
                         modifier       = Modifier.fillMaxSize(),
                         contentPadding = listBottomPad,
                     ) {
+                        item(key = "hero") {
+                            Box(
+                                modifier         = Modifier
+                                    .fillMaxWidth()
+                                    .statusBarsPadding()
+                                    .height(HeroBandHeight),
+                                contentAlignment = Alignment.BottomStart,
+                            ) {
+                                Text(
+                                    text     = stringResource(R.string.queue_title),
+                                    style    = MaterialTheme.typography.displayMedium,
+                                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+                                )
+                            }
+                        }
                         // ── Now Playing ──────────────────────────────────────────
                         state.currentlyPlaying?.let { track ->
                             item(key = "header_now_playing") {
@@ -222,6 +231,33 @@ fun QueueScreen(
                 color    = LocalVisualizerAccentColor.current,
                 alpha    = 0.20f,
             )
+
+            // Top scrim — fades content under the status bar (mirror of the bottom scrim).
+            TopScrim(
+                color    = MaterialTheme.colorScheme.background,
+                modifier = Modifier.align(Alignment.TopCenter),
+            )
+
+            // Floating back pill + title pill (fades in once the hero scrolls away) — top-left cluster.
+            Row(
+                modifier              = Modifier
+                    .align(Alignment.TopStart)
+                    .statusBarsPadding()
+                    .padding(start = 16.dp, top = 8.dp),
+                verticalAlignment     = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                TopActionPill {
+                    IconButton(onClick = { haptics.confirm(); onBack() }) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.nav_back))
+                    }
+                }
+                TitlePill(
+                    text     = stringResource(R.string.queue_title),
+                    modifier = Modifier.graphicsLayer { alpha = titlePillAlpha.value },
+                )
+            }
         }
     }
 

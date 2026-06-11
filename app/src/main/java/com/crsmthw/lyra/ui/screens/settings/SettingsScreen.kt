@@ -26,6 +26,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -41,6 +42,11 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.crsmthw.lyra.BuildConfig
 import com.crsmthw.lyra.R
+import com.crsmthw.lyra.ui.components.HeroBandHeight
+import com.crsmthw.lyra.ui.components.TitlePill
+import com.crsmthw.lyra.ui.components.TopActionPill
+import com.crsmthw.lyra.ui.components.TopScrim
+import com.crsmthw.lyra.ui.components.rememberHeroScrollProgress
 import com.crsmthw.lyra.ui.theme.ThemeMode
 import com.crsmthw.lyra.util.visualizer.VisualizerStyle
 
@@ -65,23 +71,14 @@ fun SettingsScreen(
 
     Scaffold(
         contentWindowInsets = WindowInsets(0),
-        topBar = {
-            TopAppBar(
-                modifier     = Modifier.statusBarsPadding(),
-                windowInsets = WindowInsets(0),
-                title        = { Text(stringResource(R.string.settings_title)) },
-                navigationIcon = {
-                    IconButton(onClick = { haptics.confirm(); onBack() }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-            )
-        },
     ) { paddingValues ->
         val density        = LocalDensity.current
         val navBarBottomDp = with(density) { WindowInsets.navigationBars.getBottom(this).toDp() }
         val scrimHeight    = navBarBottomDp + 48.dp
         val background     = MaterialTheme.colorScheme.background
+        val scrollState    = rememberScrollState()
+        val heroHeight     = HeroBandHeight
+        val titlePillAlpha = rememberHeroScrollProgress(scrollState, heroHeight)
 
         Box(
             modifier = Modifier
@@ -91,8 +88,23 @@ fun SettingsScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .verticalScroll(rememberScrollState()),
+                    .verticalScroll(scrollState),
             ) {
+
+            // ── Settings hero ──────────────────────────────────────────────────
+            Box(
+                modifier         = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .height(heroHeight),
+                contentAlignment = Alignment.BottomStart,
+            ) {
+                Text(
+                    text     = stringResource(R.string.settings_title),
+                    style    = MaterialTheme.typography.displayMedium,
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+                )
+            }
 
             // ── Spotify ───────────────────────────────────────────────────────
             SettingsSectionHeader(stringResource(R.string.settings_spotify))
@@ -358,6 +370,33 @@ fun SettingsScreen(
                     .align(Alignment.BottomCenter)
                     .background(Brush.verticalGradient(listOf(Color.Transparent, background)))
             )
+
+            // Top scrim — fades content under the status bar (mirror of the bottom scrim).
+            TopScrim(
+                color    = background,
+                modifier = Modifier.align(Alignment.TopCenter),
+            )
+
+            // Floating back pill + title pill (fades in once the hero scrolls away) — top-left cluster.
+            Row(
+                modifier              = Modifier
+                    .align(Alignment.TopStart)
+                    .statusBarsPadding()
+                    .padding(start = 16.dp, top = 8.dp),
+                verticalAlignment     = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                TopActionPill {
+                    IconButton(onClick = { haptics.confirm(); onBack() }) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.nav_back))
+                    }
+                }
+                TitlePill(
+                    text     = stringResource(R.string.settings_title),
+                    modifier = Modifier.graphicsLayer { alpha = titlePillAlpha.value },
+                )
+            }
         }
     }
 

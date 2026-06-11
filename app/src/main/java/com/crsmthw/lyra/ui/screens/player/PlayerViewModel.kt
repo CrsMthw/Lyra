@@ -456,6 +456,21 @@ class PlayerViewModel(
             )
         }
     }
+
+    /** Play a context (album/playlist) with shuffle enabled — mirrors LibraryViewModel.shufflePlaylist. */
+    fun shuffleContext(contextUri: String) {
+        playerStateManager.setOptimisticallyPlaying()
+        viewModelScope.launch {
+            repository.setShuffle(true)
+            repository.play(contextUri = contextUri).onFailure { e ->
+                if (e.message?.contains("404") == true) {
+                    remoteManager.connectAndPlay(contextUri)
+                } else {
+                    playerStateManager.releasePlayingOptimism()
+                }
+            }
+        }
+    }
 }
 
 class PlayerViewModelFactory(private val container: com.crsmthw.lyra.di.AppContainer) :
