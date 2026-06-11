@@ -799,8 +799,11 @@ private fun RightPaneContent(
     val mosaicFile   = playlist?.let { p ->
         if (p.id in state.playlistsWithMosaics) File(mosaicDir, "${p.id}.png") else null
     }
-    val artUrl       = mosaicFile?.absolutePath
-        ?: playlist?.thumbnailUrl?.takeIf { it.isNotBlank() }
+    // Spotify's own cover wins; the locally-generated mosaic is only a fallback for when Spotify
+    // hasn't provided art yet (e.g. a just-created playlist). Once Spotify fills it in, a library
+    // refresh picks up the real URL and it replaces the stale mosaic.
+    val artUrl       = playlist?.thumbnailUrl?.takeIf { it.isNotBlank() }
+        ?: mosaicFile?.absolutePath
     val likedSongsStr = stringResource(R.string.liked_songs)
     val playlistName  = playlist?.name ?: likedSongsStr
     val trackCount   = when {
@@ -1251,7 +1254,8 @@ private fun PlaylistListCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             val thumbShape = RoundedCornerShape(12.dp)
-            val thumbModel = mosaicFile ?: playlist.thumbnailUrl.takeIf { it.isNotBlank() }
+            // Spotify cover first; the local mosaic is only a fallback when Spotify has no art yet.
+            val thumbModel = playlist.thumbnailUrl.takeIf { it.isNotBlank() } ?: mosaicFile
             if (thumbModel != null) {
                 AsyncImage(
                     model              = thumbModel,

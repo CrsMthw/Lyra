@@ -212,6 +212,9 @@ class TrackActionsController(
                     // playlist exists either way; mirror PlayerViewModel's behaviour.
                     val added = repository.addTrackToPlaylist(playlist.id, t.uri).isSuccess
                     libraryCache.prependPlaylist(playlist)
+                    // createPlaylist returns trackCount 0; if we added the track, reflect it so the
+                    // new playlist shows "1 track" in the list instead of 0 before it's opened.
+                    if (added) libraryCache.setPlaylistTrackCount(playlist.id, 1)
                     _pickerState.update { s ->
                         s.copy(
                             isCreatingPlaylist    = false,

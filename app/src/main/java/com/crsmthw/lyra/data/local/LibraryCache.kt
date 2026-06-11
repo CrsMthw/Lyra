@@ -1,6 +1,7 @@
 package com.crsmthw.lyra.data.local
 
 import android.content.Context
+import com.crsmthw.lyra.data.remote.model.PlaylistTracksMeta
 import com.crsmthw.lyra.data.remote.model.SpotifyPlaylist
 import com.crsmthw.lyra.data.remote.model.SpotifyTrack
 import com.crsmthw.lyra.data.remote.model.SpotifyUser
@@ -112,11 +113,17 @@ class LibraryCache(context: Context) {
             val existing = current.trackLists[playlistId] ?: return
             if (existing.tracks.any { it.id == track.id }) return
             if (existing.tracks.size < knownTotal) return
+            val newTracks = existing.tracks + track
             saveLocked(current.copy(
-                trackLists = current.trackLists + (playlistId to
-                    CachedTrackList(existing.snapshotId, existing.tracks + track)),
+                trackLists = current.trackLists + (playlistId to CachedTrackList(existing.snapshotId, newTracks)),
+                // Keep the My Playlists metadata count in lockstep with the cached list. The guard
+                // above guarantees the cache holds the full list, so newTracks.size IS the new
+                // authoritative total — an absolute value, never a ±1 delta (which would compound any
+                // pre-existing drift). Fixes the left-pane count lagging the header after an in-app add.
+                playlists  = current.playlists.withTrackCount(playlistId, newTracks.size),
             ))
-            _trackListChanges.tryEmit(playlistId)
+            _trackListChanges.tryEmit(playlistId)   // refresh the open playlist's track list
+            _revision.value++                        // refresh the My Playlists list count
         }
     }
 
@@ -126,11 +133,33 @@ class LibraryCache(context: Context) {
             val current  = loadLocked() ?: return
             val existing = current.trackLists[playlistId] ?: return
             if (existing.tracks.none { it.uri == trackUri }) return
+            val newTracks = existing.tracks.filterNot { it.uri == trackUri }
+            // Mirror the metadata count to the cache only when the cache held the full list; for a
+            // partial cache its size isn't the total, so best-effort decrement and let the per-open
+            // reconcile settle it.
+            val metaNow  = current.playlists.firstOrNull { it.id == playlistId }?.trackCount ?: 0
+            val newTotal = if (existing.tracks.size >= metaNow) newTracks.size else (metaNow - 1).coerceAtLeast(0)
             saveLocked(current.copy(
-                trackLists = current.trackLists + (playlistId to
-                    CachedTrackList(existing.snapshotId, existing.tracks.filterNot { it.uri == trackUri })),
+                trackLists = current.trackLists + (playlistId to CachedTrackList(existing.snapshotId, newTracks)),
+                playlists  = current.playlists.withTrackCount(playlistId, newTotal),
             ))
             _trackListChanges.tryEmit(playlistId)
+            _revision.value++
+        }
+    }
+
+    /**
+     * Sets a playlist's cached metadata track count to an absolute [total] — used by the per-open
+     * reconcile to heal drift or pick up an external change. Pings the revision so the My Playlists
+     * list re-syncs. No-op when the playlist isn't cached or the count is already [total].
+     */
+    fun setPlaylistTrackCount(playlistId: String, total: Int) {
+        synchronized(lock) {
+            val current = loadLocked() ?: return
+            val pl = current.playlists.firstOrNull { it.id == playlistId } ?: return
+            if (pl.trackCount == total) return
+            saveLocked(current.copy(playlists = current.playlists.withTrackCount(playlistId, total)))
+            _revision.value++
         }
     }
 
@@ -165,6 +194,14 @@ class LibraryCache(context: Context) {
 
     private fun saveLocked(data: LibraryCacheData) =
         runCatching { file.writeText(gson.toJson(data)) }
+
+    /** Returns a copy of the list with [playlistId]'s metadata track count set to [total]. */
+    private fun List<SpotifyPlaylist>.withTrackCount(playlistId: String, total: Int): List<SpotifyPlaylist> =
+        map {
+            if (it.id == playlistId)
+                it.copy(tracksMeta = (it.tracksMeta ?: PlaylistTracksMeta(0, null)).copy(total = total))
+            else it
+        }
 
     companion object {
         const val LIKED_SONGS_KEY = "liked_songs"

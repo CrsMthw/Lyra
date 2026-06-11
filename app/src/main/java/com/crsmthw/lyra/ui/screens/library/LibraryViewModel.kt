@@ -66,15 +66,12 @@ class LibraryViewModel(
         val playlist = target.removable ?: return
         viewModelScope.launch {
             repository.removeTrackFromPlaylist(playlist.id, target.uri).onSuccess {
-                _uiState.update { s ->
-                    s.copy(currentTracks = s.currentTracks.filterNot { it.uri == target.uri })
-                }
-                cache.loadTrackList(playlist.id)?.let { cached ->
-                    cache.saveTrackList(
-                        playlist.id,
-                        cached.snapshotId,
-                        cached.tracks.filterNot { it.uri == target.uri },
-                    )
+                // Route through the single surgical cache method — same path as the picker toggle-off
+                // and the player add — so the metadata count and both panes stay in sync. It emits
+                // trackListChanges, which refreshes currentTracks via observeTrackListChanges, so no
+                // manual list edit is needed here (one path, not two).
+                withContext(Dispatchers.IO) {
+                    cache.removeFromPlaylistTrackList(playlist.id, target.uri)
                 }
                 trackActions.dismiss()
             }
@@ -319,10 +316,18 @@ class LibraryViewModel(
                         withContext(Dispatchers.IO) { mosaicGenerator.generate(playlist.id, cached.tracks) }
                         _uiState.update { s -> s.copy(playlistsWithMosaics = s.playlistsWithMosaics + playlist.id) }
                     }
-                    // No network "confirm the total" call needed: playlist.trackCount is the real
-                    // total now that the metadata parses (SpotifyPlaylist.tracksMeta maps "items"),
-                    // so the maxOf above already seeds the authoritative total — saves one API call
-                    // per playlist open.
+                    // Reconcile the authoritative total once per open (cheap limit=1): heals a
+                    // drifted count — an in-app add that Spotify's /me/playlists metadata hasn't
+                    // caught up on, or a change made on another device — without a manual refresh.
+                    // maxOf with the loaded size so a lagging server total can never drag the count
+                    // below what's actually cached. Updates the header total and, via the cache, the
+                    // My Playlists list count.
+                    repository.getPlaylistTracks(playlist.id, limit = 1, offset = 0).onSuccess { resp ->
+                        if (_uiState.value.currentPlaylist?.id != playlist.id) return@onSuccess
+                        val total = maxOf(resp.total, _uiState.value.currentTracks.size)
+                        _uiState.update { it.copy(playlistTracksTotal = total) }
+                        withContext(Dispatchers.IO) { cache.setPlaylistTrackCount(playlist.id, total) }
+                    }
                     return@launch
                 }
             }
@@ -485,7 +490,8 @@ class LibraryViewModel(
 
     fun loadMoreLikedSongs() {
         val s = _uiState.value
-        if (s.isLoadingMoreTracks || s.likedSongsOffset >= s.likedSongsTotal) return
+        // Same initial-load race guard as loadMorePlaylistTracks (see there).
+        if (s.isLoadingTracks || s.isLoadingMoreTracks || s.likedSongsOffset >= s.likedSongsTotal) return
         _uiState.update { it.copy(isLoadingMoreTracks = true) }
         viewModelScope.launch {
             repository.getLikedSongs(limit = 50, offset = s.likedSongsOffset).fold(
@@ -513,7 +519,12 @@ class LibraryViewModel(
     fun loadMorePlaylistTracks() {
         val s = _uiState.value
         val playlist = s.currentPlaylist ?: return
-        if (s.isLoadingMoreTracks || s.playlistTracksOffset >= s.playlistTracksTotal) return
+        // isLoadingTracks guard: the TrackList auto-fires onLoadMore as soon as the (briefly empty)
+        // list "reaches bottom", which collides with selectPlaylist's async cache load — loadMore
+        // would fetch page 0 and append it onto the just-loaded cached list, doubling it (and
+        // persisting the doubled list, so it compounds every open). Don't paginate until the initial
+        // load has settled.
+        if (s.isLoadingTracks || s.isLoadingMoreTracks || s.playlistTracksOffset >= s.playlistTracksTotal) return
         _uiState.update { it.copy(isLoadingMoreTracks = true) }
         viewModelScope.launch {
             repository.getPlaylistTracks(playlist.id, limit = 50, offset = s.playlistTracksOffset).fold(
