@@ -6,13 +6,13 @@ import androidx.core.graphics.scale
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.state.updateAppWidgetState
 import androidx.glance.appwidget.updateAll
-import androidx.palette.graphics.Palette
 import coil3.ImageLoader
 import coil3.request.ImageRequest
 import coil3.request.SuccessResult
 import coil3.toBitmap
 import com.crsmthw.lyra.data.local.LyraDataStore
 import com.crsmthw.lyra.data.player.PlayerState
+import com.crsmthw.lyra.util.albumArtColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -31,8 +31,9 @@ class NowPlayingWidgetUpdater(
 ) {
     @Volatile private var lastArtUrl  : String? = null
     @Volatile private var lastArtFile : String? = null
-    @Volatile private var lastAccent  : Int = SPOTIFY_GREEN
-    @Volatile private var lastDominant: Int = SPOTIFY_GREEN
+    @Volatile private var lastAccent: Int = SPOTIFY_GREEN
+    // Edge/perimeter tone the widget background blends toward (stored in the DOMINANT Glance key).
+    @Volatile private var lastBg    : Int = SPOTIFY_GREEN
 
     suspend fun update(state: PlayerState) {
         // No widget placed → do zero network/CPU. Without this, every track change would download
@@ -54,10 +55,10 @@ class NowPlayingWidgetUpdater(
         val artUrl = track.artUrl.takeIf { it.isNotBlank() }
         if (artUrl != null && artUrl != lastArtUrl) {
             loadArtAndPalette(artUrl)?.let { extracted ->
-                lastArtUrl   = artUrl
-                lastArtFile  = extracted.file
-                lastAccent   = extracted.accent
-                lastDominant = extracted.dominant
+                lastArtUrl  = artUrl
+                lastArtFile = extracted.file
+                lastAccent  = extracted.accent
+                lastBg      = extracted.bg
             }
         }
 
@@ -71,24 +72,24 @@ class NowPlayingWidgetUpdater(
                 p[WidgetKeys.SHUFFLE]   = state.shuffleEnabled
                 p[WidgetKeys.REPEAT]    = state.repeatState
                 p[WidgetKeys.ACCENT]    = lastAccent
-                p[WidgetKeys.DOMINANT]  = lastDominant
+                p[WidgetKeys.DOMINANT]  = lastBg
                 p[WidgetKeys.AMOLED]    = amoled
             }
         }
         NowPlayingWidget().updateAll(context)
     }
 
-    private data class Extracted(val file: String, val accent: Int, val dominant: Int)
+    private data class Extracted(val file: String, val accent: Int, val bg: Int)
 
     private suspend fun loadArtAndPalette(url: String): Extracted? = withContext(Dispatchers.IO) {
         try {
             val result = imageLoader.execute(ImageRequest.Builder(context).data(url).build())
             if (result !is SuccessResult) return@withContext null
-            val bitmap   = result.image.toBitmap().copy(Bitmap.Config.ARGB_8888, false)
-            val palette  = Palette.from(bitmap).generate()
-            val fallback = palette.getDominantColor(SPOTIFY_GREEN)
-            val accent   = palette.getVibrantColor(fallback)
-            val dominant = palette.getDominantColor(fallback)
+            val bitmap = result.image.toBitmap().copy(Bitmap.Config.ARGB_8888, false)
+            // Same recipe as the player (util/AlbumArtColor.kt): accent (Vibrant) for the buttons,
+            // edge (chroma-weighted border) for the background so the widget merges with the art.
+            // isDark is irrelevant here — the widget never uses the theme-aware surfaceAccent.
+            val colors = bitmap.albumArtColors(isDark = true)
 
             // Downsample before handing the bitmap to RemoteViews. The file name is keyed on the art
             // URL so the path CHANGES per track — otherwise the widget's `remember(artFile)` decode
@@ -101,7 +102,7 @@ class NowPlayingWidgetUpdater(
             tmpFile.renameTo(outFile)
             // Keep only the current art so the cache doesn't grow one file per track played.
             dir.listFiles()?.forEach { if (it != outFile) it.delete() }
-            Extracted(outFile.absolutePath, accent, dominant)
+            Extracted(outFile.absolutePath, colors.accent, colors.edge)
         } catch (_: Exception) {
             null
         }

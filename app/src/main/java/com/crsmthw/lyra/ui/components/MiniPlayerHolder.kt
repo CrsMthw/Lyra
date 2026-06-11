@@ -11,14 +11,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.palette.graphics.Palette
-import coil3.SingletonImageLoader
-import coil3.request.ImageRequest
-import coil3.request.SuccessResult
-import coil3.toBitmap
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import com.crsmthw.lyra.util.loadAlbumArtColors
 
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
@@ -38,36 +32,22 @@ fun MiniPlayerHolder(
         0.299f * it.red + 0.587f * it.green + 0.114f * it.blue < 0.5f
     }
 
-    var rawAccentColor        by remember { mutableStateOf<Color?>(null) }
+    // The mini-player's bar wash + shadow use the edge colour (so the bar "merges" with the art the
+    // way the full player background does); the progress ring uses the contrast-safe surface accent.
+    // See util/AlbumArtColor.kt.
+    var rawEdgeColor          by remember { mutableStateOf<Color?>(null) }
     var rawSurfaceAccentColor by remember { mutableStateOf<Color?>(null) }
 
     LaunchedEffect(playerState.currentTrack?.artUrl, isDarkTheme) {
-        val url = playerState.currentTrack?.artUrl.takeIf { !it.isNullOrBlank() }
+        val colors = loadAlbumArtColors(context, playerState.currentTrack?.artUrl, isDarkTheme)
             ?: return@LaunchedEffect
-        val palette = withContext(Dispatchers.IO) {
-            try {
-                val loader  = SingletonImageLoader.get(context)
-                val result  = loader.execute(ImageRequest.Builder(context).data(url).build())
-                if (result is SuccessResult) {
-                    val bitmap = result.image.toBitmap().copy(android.graphics.Bitmap.Config.ARGB_8888, false)
-                    Palette.from(bitmap).generate()
-                } else null
-            } catch (_: Exception) { null }
-        }
-        if (palette != null) {
-            val fallback = palette.getDominantColor(0xFF1DB954.toInt())
-            rawAccentColor = Color(palette.getVibrantColor(fallback))
-            rawSurfaceAccentColor = if (isDarkTheme) {
-                Color(palette.getLightVibrantColor(palette.getVibrantColor(palette.getLightMutedColor(fallback))))
-            } else {
-                Color(palette.getDarkVibrantColor(palette.getVibrantColor(palette.getDarkMutedColor(fallback))))
-            }
-        }
+        rawEdgeColor          = Color(colors.edge)
+        rawSurfaceAccentColor = Color(colors.surfaceAccent)
     }
 
     val primary = MaterialTheme.colorScheme.primary
     val accentColor by animateColorAsState(
-        targetValue   = rawAccentColor ?: primary,
+        targetValue   = rawEdgeColor ?: primary,
         animationSpec = tween(800),
         label         = "miniPlayerAccent",
     )

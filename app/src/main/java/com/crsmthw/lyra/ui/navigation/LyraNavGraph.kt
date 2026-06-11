@@ -21,20 +21,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.palette.graphics.Palette
-import coil3.SingletonImageLoader
-import coil3.request.ImageRequest
-import coil3.request.SuccessResult
-import coil3.toBitmap
+import com.crsmthw.lyra.util.loadAlbumArtColors
 import com.crsmthw.lyra.util.visualizer.LocalFftData
 import com.crsmthw.lyra.util.visualizer.LocalVisualizerAccentColor
 import com.crsmthw.lyra.util.visualizer.LocalVisualizerBottomEnabled
 import androidx.lifecycle.viewmodel.compose.viewModel
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.withContext
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -113,27 +107,12 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
     val artUrl by remember {
         playerVm.uiState.map { it.currentTrack?.artUrl }.distinctUntilChanged()
     }.collectAsStateWithLifecycle(null)
+    // The bottom visualizer wave must stay legible against the screen, so it uses the contrast-safe
+    // surface accent — NOT the edge colour the player backgrounds use. See util/AlbumArtColor.kt.
     var rawVisualizerAccentColor by remember { mutableStateOf<Color?>(null) }
     LaunchedEffect(artUrl, isDarkTheme) {
-        val url = artUrl.takeIf { !it.isNullOrBlank() } ?: return@LaunchedEffect
-        val palette = withContext(Dispatchers.IO) {
-            try {
-                val loader = SingletonImageLoader.get(context)
-                val result = loader.execute(ImageRequest.Builder(context).data(url).build())
-                if (result is SuccessResult) {
-                    val bitmap = result.image.toBitmap().copy(android.graphics.Bitmap.Config.ARGB_8888, false)
-                    Palette.from(bitmap).generate()
-                } else null
-            } catch (_: Exception) { null }
-        }
-        if (palette != null) {
-            val fallback = palette.getDominantColor(0xFF1DB954.toInt())
-            rawVisualizerAccentColor = if (isDarkTheme) {
-                Color(palette.getLightVibrantColor(palette.getVibrantColor(palette.getLightMutedColor(fallback))))
-            } else {
-                Color(palette.getDarkVibrantColor(palette.getVibrantColor(palette.getDarkMutedColor(fallback))))
-            }
-        }
+        val colors = loadAlbumArtColors(context, artUrl, isDarkTheme) ?: return@LaunchedEffect
+        rawVisualizerAccentColor = Color(colors.surfaceAccent)
     }
     val primary = MaterialTheme.colorScheme.primary
     val visualizerAccentColor by animateColorAsState(

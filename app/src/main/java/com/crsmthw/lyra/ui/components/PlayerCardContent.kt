@@ -43,28 +43,23 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.palette.graphics.Palette
-import coil3.SingletonImageLoader
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
-import coil3.request.SuccessResult
 import coil3.request.crossfade
-import coil3.toBitmap
 import com.crsmthw.lyra.R
 import com.crsmthw.lyra.ui.components.AddToPlaylistSheet
 import com.crsmthw.lyra.ui.screens.player.AddToPlaylistResult
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import com.crsmthw.lyra.ui.screens.player.RepeatMode
 import com.crsmthw.lyra.util.confirm
+import com.crsmthw.lyra.util.loadAlbumArtColors
 import com.crsmthw.lyra.util.press
 import com.crsmthw.lyra.util.reject
 import com.crsmthw.lyra.util.rememberArtBoundsTransform
 import com.crsmthw.lyra.util.tick
 import com.crsmthw.lyra.util.toTimeString
 import com.crsmthw.lyra.util.toggle
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class, ExperimentalSharedTransitionApi::class)
 @Composable
@@ -90,29 +85,17 @@ fun PlayerCardContent(
     val isDarkTheme = MaterialTheme.colorScheme.background.let {
         0.299f * it.red + 0.587f * it.green + 0.114f * it.blue < 0.5f
     }
+    // edge feeds only the background gradient (cover "dissolves" into the panel); rawDominantColor is
+    // the Vibrant accent; rawSurfaceAccentColor the contrast-safe tint. See util/AlbumArtColor.kt.
     var rawDominantColor      by remember { mutableStateOf<Color?>(null) }
     var rawSurfaceAccentColor by remember { mutableStateOf<Color?>(null) }
+    var rawEdgeColor          by remember { mutableStateOf<Color?>(null) }
     LaunchedEffect(state.currentTrack?.artUrl, isDarkTheme) {
-        val url = state.currentTrack?.artUrl.takeIf { !it.isNullOrBlank() } ?: return@LaunchedEffect
-        val palette = withContext(Dispatchers.IO) {
-            try {
-                val loader  = SingletonImageLoader.get(context)
-                val result  = loader.execute(ImageRequest.Builder(context).data(url).build())
-                if (result is SuccessResult) {
-                    val bmp = result.image.toBitmap().copy(android.graphics.Bitmap.Config.ARGB_8888, false)
-                    Palette.from(bmp).generate()
-                } else null
-            } catch (_: Exception) { null }
-        }
-        if (palette != null) {
-            val fallback = palette.getDominantColor(0xFF1DB954.toInt())
-            rawDominantColor = Color(palette.getVibrantColor(fallback))
-            rawSurfaceAccentColor = if (isDarkTheme) {
-                Color(palette.getLightVibrantColor(palette.getVibrantColor(palette.getLightMutedColor(fallback))))
-            } else {
-                Color(palette.getDarkVibrantColor(palette.getVibrantColor(palette.getDarkMutedColor(fallback))))
-            }
-        }
+        val colors = loadAlbumArtColors(context, state.currentTrack?.artUrl, isDarkTheme)
+            ?: return@LaunchedEffect
+        rawDominantColor      = Color(colors.accent)
+        rawEdgeColor          = Color(colors.edge)
+        rawSurfaceAccentColor = Color(colors.surfaceAccent)
     }
     val primary = MaterialTheme.colorScheme.primary
     val accentColor by animateColorAsState(
@@ -131,7 +114,7 @@ fun PlayerCardContent(
         animationSpec = tween(800), label = "cardOnAccent",
     )
     val gradientTop by animateColorAsState(
-        targetValue   = (rawDominantColor ?: MaterialTheme.colorScheme.surfaceContainer).copy(alpha = 0.7f),
+        targetValue   = (rawEdgeColor ?: MaterialTheme.colorScheme.surfaceContainer).copy(alpha = 0.7f),
         animationSpec = tween(800), label = "cardGradient",
     )
     val surfaceBg = MaterialTheme.colorScheme.surfaceContainerHigh

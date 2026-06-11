@@ -60,13 +60,9 @@ import com.crsmthw.lyra.R
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.palette.graphics.Palette
-import coil3.SingletonImageLoader
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
-import coil3.request.SuccessResult
 import coil3.request.crossfade
-import coil3.toBitmap
 import com.crsmthw.lyra.data.repository.LyricsState
 import com.crsmthw.lyra.ui.components.AddToPlaylistSheet
 import com.crsmthw.lyra.ui.components.DevicePickerSheet
@@ -74,6 +70,7 @@ import com.crsmthw.lyra.ui.components.PlainLyricsView
 import com.crsmthw.lyra.ui.components.SyncedLyricsView
 import androidx.compose.ui.platform.LocalHapticFeedback
 import com.crsmthw.lyra.util.confirm
+import com.crsmthw.lyra.util.loadAlbumArtColors
 import com.crsmthw.lyra.util.press
 import com.crsmthw.lyra.util.reject
 import com.crsmthw.lyra.util.rememberArtBoundsTransform
@@ -82,9 +79,7 @@ import com.crsmthw.lyra.util.toTimeString
 import com.crsmthw.lyra.util.toggle
 import com.crsmthw.lyra.util.visualizer.FftCWaveCanvas
 import com.crsmthw.lyra.util.visualizer.FftWaveCanvas
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 @OptIn(
     ExperimentalMaterial3Api::class,
@@ -121,33 +116,19 @@ fun PlayerScreen(
     val isDarkTheme = MaterialTheme.colorScheme.background.let {
         0.299f * it.red + 0.587f * it.green + 0.114f * it.blue < 0.5f
     }
+    // rawDominantColor holds the Vibrant accent (drives accentColor/onAccentColor); rawEdgeColor is
+    // the chroma-weighted border average and feeds only the background gradient so the cover
+    // "dissolves" into the screen; rawSurfaceAccentColor is the contrast-safe tint. See AlbumArtColor.kt.
     var rawDominantColor      by remember { mutableStateOf<Color?>(null) }
     var rawSurfaceAccentColor by remember { mutableStateOf<Color?>(null) }
+    var rawEdgeColor          by remember { mutableStateOf<Color?>(null) }
 
     LaunchedEffect(state.currentTrack?.artUrl, isDarkTheme) {
-        val url = state.currentTrack?.artUrl.takeIf { !it.isNullOrBlank() }
+        val colors = loadAlbumArtColors(context, state.currentTrack?.artUrl, isDarkTheme)
             ?: return@LaunchedEffect
-        val palette = withContext(Dispatchers.IO) {
-            try {
-                val loader  = SingletonImageLoader.get(context)
-                val request = ImageRequest.Builder(context).data(url).build()
-                val result  = loader.execute(request)
-                if (result is SuccessResult) {
-                    val raw    = result.image.toBitmap()
-                    val bitmap = raw.copy(android.graphics.Bitmap.Config.ARGB_8888, false)
-                    Palette.from(bitmap).generate()
-                } else null
-            } catch (_: Exception) { null }
-        }
-        if (palette != null) {
-            val fallback     = palette.getDominantColor(0xFF1DB954.toInt())
-            rawDominantColor = Color(palette.getVibrantColor(fallback))
-            rawSurfaceAccentColor = if (isDarkTheme) {
-                Color(palette.getLightVibrantColor(palette.getVibrantColor(palette.getLightMutedColor(fallback))))
-            } else {
-                Color(palette.getDarkVibrantColor(palette.getVibrantColor(palette.getDarkMutedColor(fallback))))
-            }
-        }
+        rawDominantColor      = Color(colors.accent)
+        rawEdgeColor          = Color(colors.edge)
+        rawSurfaceAccentColor = Color(colors.surfaceAccent)
     }
 
     val surfaceBg = MaterialTheme.colorScheme.background
@@ -171,7 +152,7 @@ fun PlayerScreen(
         label         = "onAccentColor",
     )
     val gradientTop by animateColorAsState(
-        targetValue   = (rawDominantColor ?: MaterialTheme.colorScheme.surfaceContainer)
+        targetValue   = (rawEdgeColor ?: MaterialTheme.colorScheme.surfaceContainer)
             .copy(alpha = 0.85f),
         animationSpec = tween(800),
         label         = "gradientTop",
