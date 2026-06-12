@@ -164,7 +164,7 @@ app/src/main/java/com/crsmthw/lyra/
 | UI | Jetpack Compose + Material 3 Expressive (Material3 1.5.0-alpha21) |
 | Navigation | Navigation Compose 2.9.8 |
 | Auth | AppAuth 0.11.1 (PKCE) |
-| Network | Retrofit 3.0.0 + OkHttp 5.3.2 |
+| Network | Retrofit 3.0.0 + OkHttp 5.4.0 |
 | Images | Coil 3 |
 | Widgets | Jetpack Glance |
 | Secure storage | Android Keystore (AES-256-GCM) |

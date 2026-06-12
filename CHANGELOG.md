@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [3.0.0] - 2026-06-13
 
 ### Added
 - **Material 3 Expressive haptics** — app-wide tactile feedback with a single semantic vocabulary (`util/Haptics.kt`): `toggle(on/off)` for switch-like controls (shuffle, repeat, like, lyrics/visualizer, settings switches), `confirm`/`reject` for action outcomes (add/remove playlist, device transfer, sleep timer, delete confirm) and for selections/navigation (open playlist/Liked Songs, play a track, mini-player tap, collapse/expand panel + scrim tap, back buttons), `press` (ContextClick) for transport (play/pause/skip, incl. swipe-to-skip), for opening menus/secondary buttons (player ⋮ menu, device list, playlist ⋮, queue/share/add-to-playlist, settings gear, share, search FAB), for the menu items that open the sleep-timer and delete-playlist dialogs, and for the **Cancel** button on each of those confirmation dialogs, `longPress` for the song menu, `tick` for slider/seek notches (seek bar + volume), `scrollTick` (`ListScrollHaptics`) for list scrolling, and `threshold` (`PullThresholdHaptics`) for pull-to-refresh. Scroll haptics are **bottom-anchored** — one tick each time an item is revealed/hidden at the bottom edge of the viewport (the last visible item's index changes), so a tall hero/header at the top never creates a silent dead zone and tall rows never double-buzz; gated on an in-progress scroll so lazy-loading/appending items stays silent. Wired across player (full + pop-out + mini), Library, Search, Album, Artist, Queue, and Settings. All helpers are gated on a process-wide flag mirrored from a new **Settings → Haptic feedback** toggle (DataStore-persisted, default on, applies live with no restart); turning it off silences every helper.
@@ -202,7 +202,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial release
 
-[Unreleased]: https://github.com/CrsMthw/Lyra/compare/v2.2.0...HEAD
+[Unreleased]: https://github.com/CrsMthw/Lyra/compare/v3.0.0...HEAD
+[3.0.0]: https://github.com/CrsMthw/Lyra/compare/v2.2.0...v3.0.0
 [2.2.0]: https://github.com/CrsMthw/Lyra/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/CrsMthw/Lyra/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/CrsMthw/Lyra/compare/v1.2.0...v2.0.0
