@@ -32,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -118,6 +119,17 @@ fun PlayerCardContent(
         animationSpec = tween(800), label = "cardGradient",
     )
     val surfaceBg = MaterialTheme.colorScheme.surfaceContainerHigh
+    // Black/white tint for the header row (chevron / NOW PLAYING / full-screen), which sits on the
+    // edge-derived gradient — NOT on accentColor. Decided against the actual top background
+    // (gradientTop composited over surfaceBg) so it stays legible when the cover's edge is dark but
+    // its Vibrant accent is bright. See PlayerScreen's topContentColor + util/AlbumArtColor.kt.
+    val topContentColor by animateColorAsState(
+        targetValue = run {
+            val bg = gradientTop.compositeOver(surfaceBg)
+            if (0.299f * bg.red + 0.587f * bg.green + 0.114f * bg.blue < 0.5f) Color.White else Color.Black
+        },
+        animationSpec = tween(800), label = "cardTopContent",
+    )
 
     // ── Art animation ──────────────────────────────────────────────────────
     val scope            = rememberCoroutineScope()
@@ -228,12 +240,12 @@ fun PlayerCardContent(
                 verticalAlignment     = Alignment.CenterVertically,
             ) {
                 IconButton(onClick = { haptics.confirm(); onClose() }) {
-                    Icon(Icons.Default.KeyboardArrowDown, "Close", tint = onAccentColor)
+                    Icon(Icons.Default.KeyboardArrowDown, "Close", tint = topContentColor)
                 }
                 Text("NOW PLAYING", style = MaterialTheme.typography.labelSmall,
-                    color = onAccentColor)
+                    color = topContentColor)
                 IconButton(onClick = { haptics.confirm(); onFullScreen() }) {
-                    Icon(Icons.Default.OpenInFull, "Full screen", tint = onAccentColor)
+                    Icon(Icons.Default.OpenInFull, "Full screen", tint = topContentColor)
                 }
             }
 

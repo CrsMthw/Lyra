@@ -40,6 +40,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -157,6 +158,18 @@ fun PlayerScreen(
         animationSpec = tween(800),
         label         = "gradientTop",
     )
+    // Black/white tint for the top-bar elements (chevron / NOW PLAYING / full-screen / options),
+    // which sit on the edge-derived gradient — NOT on accentColor. Decided against the *actual*
+    // top background (gradientTop composited over surfaceBg), so it stays legible when the cover's
+    // edge is dark but its Vibrant accent is bright (e.g. dark art with a neon-green title).
+    val topContentColor by animateColorAsState(
+        targetValue = run {
+            val bg = gradientTop.compositeOver(surfaceBg)
+            if (0.299f * bg.red + 0.587f * bg.green + 0.114f * bg.blue < 0.5f) Color.White else Color.Black
+        },
+        animationSpec = tween(800),
+        label         = "topContentColor",
+    )
     val fabIconColor = if (
         0.299f * surfaceAccentColor.red + 0.587f * surfaceAccentColor.green + 0.114f * surfaceAccentColor.blue < 0.5f
     ) Color.White else Color.Black
@@ -241,6 +254,12 @@ fun PlayerScreen(
     // Circle visualizer shows only when enabled AND the chosen style includes it.
     val circleVisible = state.visualizerEnabled && state.visualizerStyle.showCircle
 
+    // Lyrics text colour. With the circle visualizer behind them, the lyrics sit on its
+    // (contrast-safe) blob, so the accent-derived black/white still reads. Without a blob they sit
+    // directly on the dark gradient, where accent-derived black goes invisible — fall back to the
+    // theme's onSurface, which always contrasts the background (white on dark, black on light).
+    val lyricsTextColor = if (circleVisible) onAccentColor else MaterialTheme.colorScheme.onSurface
+
     // ── Art shrink when the circle visualizer is on ──────────────────────────
     val artScale by animateFloatAsState(
         targetValue   = if (circleVisible) 0.8f else 1.0f,
@@ -274,27 +293,27 @@ fun PlayerScreen(
                     ) {
                         Text("NOW PLAYING",
                             style = MaterialTheme.typography.labelSmall,
-                            color = onAccentColor)
+                            color = topContentColor)
                     }
                 },
                 navigationIcon = {
                     IconButton(onClick = { haptics.confirm(); onBack() }) {
                         Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Close",
-                            tint = onAccentColor)
+                            tint = topContentColor)
                     }
                 },
                 actions = {
                     if (onFullScreen != null) {
                         IconButton(onClick = onFullScreen) {
                             Icon(Icons.Default.OpenInFull, contentDescription = "Full screen",
-                                tint = onAccentColor)
+                                tint = topContentColor)
                         }
                     }
                     Box {
                         IconButton(onClick = { haptics.press(); showMediaMenu = true }) {
                             Icon(Icons.Default.Tune,
                                 contentDescription = stringResource(R.string.player_options),
-                                tint = onAccentColor)
+                                tint = topContentColor)
                         }
                         DropdownMenu(
                             expanded         = showMediaMenu,
@@ -426,12 +445,12 @@ fun PlayerScreen(
                                     is LyricsState.Synced -> SyncedLyricsView(
                                         lines            = ls.lines,
                                         currentLineIndex = snapshot.currentLyricLineIndex,
-                                        textColor        = onAccentColor,
+                                        textColor        = lyricsTextColor,
                                         modifier         = lyricsContentMod,
                                     )
                                     is LyricsState.Plain  -> PlainLyricsView(
                                         text      = ls.text,
-                                        textColor = onAccentColor,
+                                        textColor = lyricsTextColor,
                                         modifier  = lyricsContentMod,
                                     )
                                 }
@@ -592,12 +611,12 @@ fun PlayerScreen(
                                     is LyricsState.Synced -> SyncedLyricsView(
                                         lines            = ls.lines,
                                         currentLineIndex = snapshot.currentLyricLineIndex,
-                                        textColor        = onAccentColor,
+                                        textColor        = lyricsTextColor,
                                         modifier         = lyricsContentMod,
                                     )
                                     is LyricsState.Plain  -> PlainLyricsView(
                                         text      = ls.text,
-                                        textColor = onAccentColor,
+                                        textColor = lyricsTextColor,
                                         modifier  = lyricsContentMod,
                                     )
                                 }
