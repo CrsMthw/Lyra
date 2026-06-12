@@ -74,7 +74,6 @@
     <string name="settings_title">Settings</string>
     <string name="settings_spotify">Spotify</string>
     <string name="settings_client_id">Client ID</string>
-    <string name="settings_appearance">Appearance</string>
     <string name="settings_lyra">Lyra</string>
     <string name="settings_theme">Theme</string>
     <string name="settings_theme_display">Display theme</string>
@@ -89,9 +88,7 @@
     <string name="settings_dynamic_color_desc">Extract accent color from your wallpaper</string>
     <string name="settings_haptics">Haptic feedback</string>
     <string name="settings_haptics_desc">Vibrate on taps, toggles, and gestures</string>
-    <string name="settings_player">Player</string>
     <string name="settings_visualizer_desc">Show audio wave animation while music is playing</string>
-    <string name="settings_visualizer_style">Visualizer style</string>
     <string name="settings_visualizer_style_circle">Circle</string>
     <string name="settings_visualizer_style_bottom">Bottom</string>
     <string name="settings_visualizer_style_both">Both</string>
@@ -126,7 +123,6 @@
     <string name="notification_sleep_timer_title">Sleep Timer</string>
     <string name="notification_sleep_timer_stopping_at">Stopping at %s</string>
     <string name="notification_sleep_timer_cancel">Cancel</string>
-    <string name="settings_notifications">Notifications</string>
     <string name="settings_live_notifications">Live Notifications</string>
     <string name="settings_live_notifications_on">Sleep timer shows as a pinned Live notification</string>
     <string name="settings_live_notifications_off">Enable to show the sleep timer as a pinned Live notification</string>
@@ -135,9 +131,6 @@
     <string name="settings_live_notif_dialog_samsung">On Samsung devices (OneUI 8 and above), open Developer options and enable \"Live notifications for all apps\".\n\nThis is a Samsung limitation — regular sleep timer notifications work without this setting.</string>
     <string name="settings_live_notif_dialog_open_dev_options">Open Developer Options</string>
     <string name="settings_live_notif_dialog_got_it">Got it</string>
-
-    <!-- Album detail -->
-    <string name="album_play">Play</string>
 
     <!-- Artist detail -->
     <string name="artist_albums">Albums</string>

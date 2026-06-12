@@ -2,6 +2,7 @@ package com.crsmthw.lyra.util
 
 import android.content.Context
 import android.graphics.Bitmap
+import androidx.core.graphics.get
 import androidx.palette.graphics.Palette
 import coil3.SingletonImageLoader
 import coil3.request.ImageRequest
@@ -112,7 +113,7 @@ suspend fun loadAlbumArtColors(context: Context, url: String?, isDark: Boolean):
 fun Bitmap.perimeterColor(insetFraction: Float = 0.06f, step: Int = 4): Int {
     val w = width
     val h = height
-    if (w < 4 || h < 4) return getPixel(0, 0)
+    if (w < 4 || h < 4) return this[0, 0]
     val s = step.coerceAtLeast(1)
     val band = (minOf(w, h) * insetFraction).toInt().coerceIn(1, minOf(w, h) / 2)
 
@@ -129,7 +130,7 @@ fun Bitmap.perimeterColor(insetFraction: Float = 0.06f, step: Int = 4): Int {
     var wTot = 0.0
 
     fun sample(x: Int, y: Int) {
-        val p = getPixel(x, y)
+        val p = this[x, y]
         val r = (p shr 16) and 0xFF
         val g = (p shr 8) and 0xFF
         val b = p and 0xFF
@@ -169,7 +170,7 @@ fun Bitmap.perimeterColor(insetFraction: Float = 0.06f, step: Int = 4): Int {
         yy += s
     }
 
-    if (count == 0L) return getPixel(0, 0)
+    if (count == 0L) return this[0, 0]
 
     return if (chromaSum / count >= MIN_AVG_CHROMA && wTot > 0.0) {
         (0xFF shl 24) or
