@@ -75,7 +75,11 @@
     <string name="settings_spotify">Spotify</string>
     <string name="settings_client_id">Client ID</string>
     <string name="settings_appearance">Appearance</string>
+    <string name="settings_lyra">Lyra</string>
     <string name="settings_theme">Theme</string>
+    <string name="settings_theme_display">Display theme</string>
+    <string name="settings_theme_mode">Mode</string>
+    <string name="settings_theme_system_short">System</string>
     <string name="settings_theme_system">System default</string>
     <string name="settings_theme_light">Light</string>
     <string name="settings_theme_dark">Dark</string>
@@ -92,6 +96,7 @@
     <string name="settings_visualizer_style_bottom">Bottom</string>
     <string name="settings_visualizer_style_both">Both</string>
     <string name="settings_logout">Disconnect Spotify</string>
+    <string name="settings_logout_desc">Clears tokens and returns to login</string>
     <string name="settings_version">Version %1$s</string>
     <string name="about_tagline">Listen beautifully.</string>
     <string name="about_credits_section">Credits</string>

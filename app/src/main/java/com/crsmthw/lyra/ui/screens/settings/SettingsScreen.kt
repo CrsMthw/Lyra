@@ -72,7 +72,7 @@ fun SettingsScreen(
     val imageCacheBytes        by viewModel.imageCacheBytes.collectAsStateWithLifecycle()
     val libraryCacheBytes      by viewModel.libraryCacheBytes.collectAsStateWithLifecycle()
     var showLogoutDialog  by remember { mutableStateOf(false) }
-    var showThemeDialog   by remember { mutableStateOf(false) }
+    var showThemeSheet    by remember { mutableStateOf(false) }
 
     Scaffold(
         contentWindowInsets = WindowInsets(0),
@@ -120,12 +120,20 @@ fun SettingsScreen(
                 subtitle= viewModel.clientIdMasked(),
             )
 
+            SettingsItem(
+                icon      = Icons.AutoMirrored.Filled.Logout,
+                title     = stringResource(R.string.settings_logout),
+                subtitle  = stringResource(R.string.settings_logout_desc),
+                onClick   = { showLogoutDialog = true },
+                tintError = true,
+            )
+
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
 
-            // ── Appearance ────────────────────────────────────────────────────
-            SettingsSectionHeader(stringResource(R.string.settings_appearance))
+            // ── Lyra ──────────────────────────────────────────────────────────
+            SettingsSectionHeader(stringResource(R.string.settings_lyra))
 
-            // Theme picker
+            // Theme — opens the display-theme modal sheet (mode + AMOLED + Material You)
             SettingsItem(
                 icon     = Icons.Default.Palette,
                 title    = stringResource(R.string.settings_theme),
@@ -134,25 +142,7 @@ fun SettingsScreen(
                     ThemeMode.LIGHT  -> stringResource(R.string.settings_theme_light)
                     ThemeMode.DARK   -> stringResource(R.string.settings_theme_dark)
                 },
-                onClick  = { showThemeDialog = true },
-            )
-
-            // AMOLED toggle (only meaningful when dark is active)
-            SettingsToggleItem(
-                icon    = Icons.Default.DarkMode,
-                title   = stringResource(R.string.settings_amoled),
-                subtitle= stringResource(R.string.settings_amoled_desc),
-                checked = amoledBlack,
-                onCheckedChange = viewModel::setAmoledBlack,
-            )
-
-            // Material You toggle
-            SettingsToggleItem(
-                icon    = Icons.Default.ColorLens,
-                title   = stringResource(R.string.settings_dynamic_color),
-                subtitle= stringResource(R.string.settings_dynamic_color_desc),
-                checked = dynamicColor,
-                onCheckedChange = viewModel::setDynamicColor,
+                onClick  = { showThemeSheet = true },
             )
 
             // Haptic feedback toggle (app-wide)
@@ -164,11 +154,7 @@ fun SettingsScreen(
                 onCheckedChange = viewModel::setHapticsEnabled,
             )
 
-            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-
-            // ── Player ────────────────────────────────────────────────────────
-            SettingsSectionHeader(stringResource(R.string.settings_player))
-
+            // Visualizer toggle
             SettingsToggleItem(
                 icon            = Icons.Default.Equalizer,
                 title           = stringResource(R.string.player_visualizer),
@@ -185,31 +171,19 @@ fun SettingsScreen(
                 enter   = fadeIn() + expandVertically(MaterialTheme.motionScheme.defaultSpatialSpec<IntSize>()),
                 exit    = shrinkVertically(MaterialTheme.motionScheme.defaultSpatialSpec<IntSize>()) + fadeOut(),
             ) {
-                val styleOptions = listOf(
-                    VisualizerStyle.CIRCLE to R.string.settings_visualizer_style_circle,
-                    VisualizerStyle.BOTTOM to R.string.settings_visualizer_style_bottom,
-                    VisualizerStyle.BOTH   to R.string.settings_visualizer_style_both,
+                ConnectedChoiceRow(
+                    options  = listOf(
+                        VisualizerStyle.CIRCLE to stringResource(R.string.settings_visualizer_style_circle),
+                        VisualizerStyle.BOTTOM to stringResource(R.string.settings_visualizer_style_bottom),
+                        VisualizerStyle.BOTH   to stringResource(R.string.settings_visualizer_style_both),
+                    ),
+                    selected = visualizerStyle,
+                    onSelect = viewModel::setVisualizerStyle,
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 8.dp),
                 )
-                SingleChoiceSegmentedButtonRow(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 8.dp),
-                ) {
-                    styleOptions.forEachIndexed { index, (style, labelRes) ->
-                        SegmentedButton(
-                            selected = visualizerStyle == style,
-                            onClick  = { haptics.press(); viewModel.setVisualizerStyle(style) },
-                            shape    = SegmentedButtonDefaults.itemShape(index, styleOptions.size),
-                        ) {
-                            Text(stringResource(labelRes))
-                        }
-                    }
-                }
             }
 
-            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-
-            // ── Notifications ─────────────────────────────────────────────────
+            // Live notifications (Android 16+) — sleep timer as a pinned Live notification.
             if (Build.VERSION.SDK_INT >= 36) {
                 val context = LocalContext.current
                 val nm = context.getSystemService(NotificationManager::class.java)
@@ -219,7 +193,6 @@ fun SettingsScreen(
                 }
                 var showLiveNotifHelpDialog by remember { mutableStateOf(false) }
 
-                SettingsSectionHeader(stringResource(R.string.settings_notifications))
                 ListItem(
                     leadingContent   = {
                         Icon(Icons.Default.Timer, contentDescription = null,
@@ -241,6 +214,7 @@ fun SettingsScreen(
                                 tint = MaterialTheme.colorScheme.primary)
                         } else {
                             TextButton(onClick = {
+                                haptics.press()
                                 if (Build.MANUFACTURER.equals("samsung", ignoreCase = true)) {
                                     showLiveNotifHelpDialog = true
                                 } else {
@@ -272,20 +246,21 @@ fun SettingsScreen(
                         text   = { Text(stringResource(R.string.settings_live_notif_dialog_samsung)) },
                         confirmButton  = {
                             TextButton(onClick = {
+                                haptics.confirm()
                                 context.startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS))
                                 showLiveNotifHelpDialog = false
                             }) { Text(stringResource(R.string.settings_live_notif_dialog_open_dev_options)) }
                         },
                         dismissButton  = {
-                            TextButton(onClick = { showLiveNotifHelpDialog = false }) {
+                            TextButton(onClick = { haptics.press(); showLiveNotifHelpDialog = false }) {
                                 Text(stringResource(R.string.settings_live_notif_dialog_got_it))
                             }
                         },
                     )
                 }
-
-                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             }
+
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
 
             // ── Storage ───────────────────────────────────────────────────────
             SettingsSectionHeader("Storage")
@@ -299,7 +274,7 @@ fun SettingsScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant) },
                 trailingContent  = {
                     TextButton(
-                        onClick  = { showClearCacheDialog = true },
+                        onClick  = { haptics.press(); showClearCacheDialog = true },
                         enabled  = imageCacheBytes > 0L,
                     ) { Text("Clear") }
                 },
@@ -312,12 +287,13 @@ fun SettingsScreen(
                     text             = { Text("Playlist artwork will be re-downloaded next time it's needed.") },
                     confirmButton    = {
                         TextButton(onClick = {
+                            haptics.confirm()
                             viewModel.clearImageCache()
                             showClearCacheDialog = false
                         }) { Text("Clear") }
                     },
                     dismissButton    = {
-                        TextButton(onClick = { showClearCacheDialog = false }) { Text("Cancel") }
+                        TextButton(onClick = { haptics.press(); showClearCacheDialog = false }) { Text("Cancel") }
                     },
                 )
             }
@@ -331,7 +307,7 @@ fun SettingsScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant) },
                 trailingContent  = {
                     TextButton(
-                        onClick  = { showClearLibraryDialog = true },
+                        onClick  = { haptics.press(); showClearLibraryDialog = true },
                         enabled  = libraryCacheBytes > 0L,
                     ) { Text("Clear") }
                 },
@@ -344,28 +320,16 @@ fun SettingsScreen(
                     text             = { Text("Playlist and track data will be re-fetched from Spotify next time you open the library.") },
                     confirmButton    = {
                         TextButton(onClick = {
+                            haptics.confirm()
                             viewModel.clearLibraryCache()
                             showClearLibraryDialog = false
                         }) { Text("Clear") }
                     },
                     dismissButton    = {
-                        TextButton(onClick = { showClearLibraryDialog = false }) { Text("Cancel") }
+                        TextButton(onClick = { haptics.press(); showClearLibraryDialog = false }) { Text("Cancel") }
                     },
                 )
             }
-
-            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-
-            // ── Account ───────────────────────────────────────────────────────
-            SettingsSectionHeader("Account")
-
-            SettingsItem(
-                icon    = Icons.AutoMirrored.Filled.Logout,
-                title   = stringResource(R.string.settings_logout),
-                subtitle= "Clears tokens and returns to login",
-                onClick = { showLogoutDialog = true },
-                tintError = true,
-            )
 
             // ── About ─────────────────────────────────────────────────────────────
             AboutSection()
@@ -397,7 +361,7 @@ fun SettingsScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 TopActionPill {
-                    IconButton(onClick = { haptics.confirm(); onBack() }) {
+                    IconButton(onClick = { haptics.press(); onBack() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(R.string.nav_back))
                     }
@@ -410,41 +374,16 @@ fun SettingsScreen(
         }
     }
 
-    // ── Theme picker dialog ───────────────────────────────────────────────────
-    if (showThemeDialog) {
-        AlertDialog(
-            onDismissRequest = { showThemeDialog = false },
-            title            = { Text("Theme") },
-            text             = {
-                Column {
-                    ThemeMode.entries.forEach { mode ->
-                        Row(
-                            modifier          = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            RadioButton(
-                                selected = themeMode == mode,
-                                onClick  = {
-                                    viewModel.setThemeMode(mode)
-                                    showThemeDialog = false
-                                },
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text(when (mode) {
-                                ThemeMode.SYSTEM -> stringResource(R.string.settings_theme_system)
-                                ThemeMode.LIGHT  -> stringResource(R.string.settings_theme_light)
-                                ThemeMode.DARK   -> stringResource(R.string.settings_theme_dark)
-                            })
-                        }
-                    }
-                }
-            },
-            confirmButton = {},
-            dismissButton = {
-                TextButton(onClick = { showThemeDialog = false }) { Text("Cancel") }
-            },
+    // ── Display-theme modal sheet ─────────────────────────────────────────────
+    if (showThemeSheet) {
+        ThemeSheet(
+            themeMode    = themeMode,
+            amoledBlack  = amoledBlack,
+            dynamicColor = dynamicColor,
+            onThemeMode  = viewModel::setThemeMode,
+            onAmoled     = viewModel::setAmoledBlack,
+            onDynamic    = viewModel::setDynamicColor,
+            onDismiss    = { showThemeSheet = false },
         )
     }
 
@@ -455,16 +394,135 @@ fun SettingsScreen(
             title            = { Text("Disconnect Spotify?") },
             text             = { Text("This will clear your tokens. You'll need to reconnect your Client ID.") },
             confirmButton    = {
-                TextButton(onClick = { showLogoutDialog = false; onLogout() },
+                TextButton(onClick = { haptics.confirm(); showLogoutDialog = false; onLogout() },
                            colors  = ButtonDefaults.textButtonColors(
                                contentColor = MaterialTheme.colorScheme.error)) {
                     Text("Disconnect")
                 }
             },
             dismissButton    = {
-                TextButton(onClick = { showLogoutDialog = false }) { Text("Cancel") }
+                TextButton(onClick = { haptics.press(); showLogoutDialog = false }) { Text("Cancel") }
             },
         )
+    }
+}
+
+// ── Display-theme modal sheet ──────────────────────────────────────────────────
+
+/**
+ * All display-theme controls in one place: a connected mode picker (System / Light / Dark) plus the
+ * AMOLED and Material You toggles. The mode picker uses [ConnectedChoiceRow] so each segment
+ * spring-morphs its shape on selection / press. Toggles reuse [SettingsToggleItem] (inherits haptics).
+ */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun ThemeSheet(
+    themeMode   : ThemeMode,
+    amoledBlack : Boolean,
+    dynamicColor: Boolean,
+    onThemeMode : (ThemeMode) -> Unit,
+    onAmoled    : (Boolean) -> Unit,
+    onDynamic   : (Boolean) -> Unit,
+    onDismiss   : () -> Unit,
+) {
+    // Hidden ↔ Expanded only (no half-height partial detent) so the sheet doesn't settle into a
+    // partial detent shortly after opening and clip its lower toggles. (positional: initialValue, values)
+    val sheetState = rememberBottomSheetState(
+        SheetValue.Hidden,
+        setOf(SheetValue.Hidden, SheetValue.Expanded),
+    )
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState       = sheetState,
+    ) {
+        // Header
+        Row(
+            modifier          = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Default.Palette, contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.width(12.dp))
+            Text(
+                text  = stringResource(R.string.settings_theme_display),
+                style = MaterialTheme.typography.titleLarge,
+            )
+        }
+
+        // Mode label + connected segment picker
+        Text(
+            text     = stringResource(R.string.settings_theme_mode),
+            style    = MaterialTheme.typography.labelLarge,
+            color    = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 8.dp),
+        )
+        ConnectedChoiceRow(
+            options  = listOf(
+                ThemeMode.SYSTEM to stringResource(R.string.settings_theme_system_short),
+                ThemeMode.LIGHT  to stringResource(R.string.settings_theme_light),
+                ThemeMode.DARK   to stringResource(R.string.settings_theme_dark),
+            ),
+            selected = themeMode,
+            onSelect = onThemeMode,
+            modifier = Modifier.padding(horizontal = 16.dp),
+        )
+
+        Spacer(Modifier.height(12.dp))
+        HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+
+        SettingsToggleItem(
+            icon            = Icons.Default.DarkMode,
+            title           = stringResource(R.string.settings_amoled),
+            subtitle        = stringResource(R.string.settings_amoled_desc),
+            checked         = amoledBlack,
+            onCheckedChange = onAmoled,
+        )
+        SettingsToggleItem(
+            icon            = Icons.Default.ColorLens,
+            title           = stringResource(R.string.settings_dynamic_color),
+            subtitle        = stringResource(R.string.settings_dynamic_color_desc),
+            checked         = dynamicColor,
+            onCheckedChange = onDynamic,
+        )
+
+        Spacer(Modifier.navigationBarsPadding())
+        Spacer(Modifier.height(8.dp))
+    }
+}
+
+// ── Connected single-choice picker (M3 Expressive morph) ────────────────────────
+
+/**
+ * A connected single-choice picker (theme mode, visualizer style) built on the full M3 Expressive
+ * [ButtonGroup]: each `toggleableItem` segment gets the connected leading/middle/trailing shape morph
+ * (rounds → squircle on select, squish on press) AND the inter-button press-squeeze — pressing one
+ * segment expands it while compressing its neighbours, then springs back. A real overflow indicator
+ * is supplied so the measure pass always has a home for an item that can't fit, never the
+ * empty-overflow path that mis-measures in genuinely tight layouts. Picking fires a `press` haptic.
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun <T> ConnectedChoiceRow(
+    options : List<Pair<T, String>>,
+    selected: T,
+    onSelect: (T) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val haptics = LocalHapticFeedback.current
+    ButtonGroup(
+        overflowIndicator = { menuState -> ButtonGroupDefaults.OverflowIndicator(menuState) },
+        modifier          = modifier.fillMaxWidth(),
+    ) {
+        options.forEach { (value, label) ->
+            toggleableItem(
+                checked         = selected == value,
+                label           = label,
+                onCheckedChange = { isChecked ->
+                    if (isChecked && selected != value) { haptics.press(); onSelect(value) }
+                },
+                weight          = 1f,
+            )
+        }
     }
 }
 
@@ -473,6 +531,7 @@ fun SettingsScreen(
 @Composable
 private fun AboutSection() {
     val context = LocalContext.current
+    val haptics = LocalHapticFeedback.current
 
     Column(
         modifier            = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
@@ -560,6 +619,7 @@ private fun AboutSection() {
             modifier  = Modifier
                 .fillMaxWidth()
                 .clickable {
+                    haptics.press()
                     context.startActivity(Intent(Intent.ACTION_VIEW, "https://github.com/CrsMthw".toUri()))
                 },
             shape     = RoundedCornerShape(16.dp),
@@ -602,6 +662,7 @@ private fun AboutSection() {
             modifier           = Modifier
                 .fillMaxWidth(0.7f)
                 .clickable {
+                    haptics.press()
                     context.startActivity(Intent(Intent.ACTION_VIEW, "https://buymeacoffee.com/crsmthw".toUri()))
                 },
         )
@@ -650,6 +711,7 @@ private fun SettingsItem(
     onClick   : (() -> Unit)? = null,
     tintError : Boolean = false,
 ) {
+    val haptics = LocalHapticFeedback.current
     val iconTint = if (tintError) MaterialTheme.colorScheme.error
                    else MaterialTheme.colorScheme.onSurfaceVariant
 
@@ -660,7 +722,7 @@ private fun SettingsItem(
                                 else MaterialTheme.colorScheme.onSurface)
         },
         supportingContent= subtitle?.let { { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) } },
-        modifier         = if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier,
+        modifier         = if (onClick != null) Modifier.clickable { haptics.press(); onClick() } else Modifier,
     )
 }
 
@@ -685,5 +747,3 @@ private fun SettingsToggleItem(
         modifier = Modifier.clickable { toggleWithHaptic(!checked) },
     )
 }
-
-
