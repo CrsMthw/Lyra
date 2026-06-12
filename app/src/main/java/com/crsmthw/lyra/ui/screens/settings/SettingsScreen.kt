@@ -6,6 +6,10 @@ import android.os.Build
 import android.provider.Settings
 import androidx.core.net.toUri
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -36,6 +40,7 @@ import com.crsmthw.lyra.util.toggle
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -50,7 +55,7 @@ import com.crsmthw.lyra.ui.components.rememberHeroScrollProgress
 import com.crsmthw.lyra.ui.theme.ThemeMode
 import com.crsmthw.lyra.util.visualizer.VisualizerStyle
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun SettingsScreen(
     viewModel: SettingsViewModel,
@@ -173,8 +178,13 @@ fun SettingsScreen(
             )
 
             // Style picker — which surface(s) the visualizer renders on. Only
-            // meaningful when the visualizer is enabled.
-            AnimatedVisibility(visible = visualizerEnabled) {
+            // meaningful when the visualizer is enabled. The expand/shrink settles via the
+            // expressive `motionScheme` so the reveal springs (the fade stays linear — alpha).
+            AnimatedVisibility(
+                visible = visualizerEnabled,
+                enter   = fadeIn() + expandVertically(MaterialTheme.motionScheme.defaultSpatialSpec<IntSize>()),
+                exit    = shrinkVertically(MaterialTheme.motionScheme.defaultSpatialSpec<IntSize>()) + fadeOut(),
+            ) {
                 val styleOptions = listOf(
                     VisualizerStyle.CIRCLE to R.string.settings_visualizer_style_circle,
                     VisualizerStyle.BOTTOM to R.string.settings_visualizer_style_bottom,

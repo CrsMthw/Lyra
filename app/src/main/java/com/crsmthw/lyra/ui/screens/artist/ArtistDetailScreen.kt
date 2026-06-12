@@ -340,13 +340,18 @@ fun ArtistDetailScreen(
 
             // Screen-level back pill. Single-pane: always (loading/error/content). Two-pane: only
             // while loading/erroring — once the artist loads, the left-pane hero carries its own back.
+            // In two-pane it must land exactly where that left-pane pill will (inside the Row's 8dp
+            // inset + the pill's own 12/8dp) so it doesn't jump when the content loads in.
             if (!isWideScreen || state.artist == null) {
                 TopActionPill(
                     modifier = Modifier
                         .align(Alignment.TopStart)
                         .statusBarsPadding()
                         .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal))
-                        .padding(start = 16.dp, top = 8.dp),
+                        .padding(
+                            start = if (isWideScreen) 8.dp + 12.dp else 16.dp,
+                            top   = if (isWideScreen) 8.dp + 8.dp  else 8.dp,
+                        ),
                 ) {
                     IconButton(onClick = { haptics.confirm(); onBack() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack,

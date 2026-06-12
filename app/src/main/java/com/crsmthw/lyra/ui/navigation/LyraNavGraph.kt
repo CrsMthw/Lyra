@@ -9,6 +9,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -20,6 +21,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.IntOffset
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.crsmthw.lyra.util.loadAlbumArtColors
 import com.crsmthw.lyra.util.visualizer.LocalFftData
@@ -61,7 +63,7 @@ import com.crsmthw.lyra.ui.screens.settings.SettingsScreen
 import com.crsmthw.lyra.ui.screens.settings.SettingsViewModel
 import com.crsmthw.lyra.ui.screens.settings.SettingsViewModelFactory
 
-@OptIn(ExperimentalSharedTransitionApi::class)
+@OptIn(ExperimentalSharedTransitionApi::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null) {
     val navController: NavHostController = rememberNavController()
@@ -135,14 +137,18 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
         LocalVisualizerAccentColor provides visualizerAccentColor,
         LocalVisualizerBottomEnabled provides bottomVisualizerEnabled,
     ) {
+    // Screen push/pop slides settle via the expressive `motionScheme` so navigation springs in
+    // instead of the framework's flat default spring. Read here (composable scope) and captured —
+    // the transition lambdas below aren't composable contexts. Cross-fades stay default (alpha).
+    val navSlideSpec = MaterialTheme.motionScheme.defaultSpatialSpec<IntOffset>()
     SharedTransitionLayout {
         NavHost(
             navController        = navController,
             startDestination     = startDestination,
-            enterTransition      = { slideInHorizontally  { it / 4 } + fadeIn()  },
-            exitTransition       = { slideOutHorizontally { -(it / 4) } + fadeOut() },
-            popEnterTransition   = { slideInHorizontally  { -(it / 4) } + fadeIn()  },
-            popExitTransition    = { slideOutHorizontally { it / 4 } + fadeOut() },
+            enterTransition      = { slideInHorizontally(navSlideSpec)  { it / 4 } + fadeIn()  },
+            exitTransition       = { slideOutHorizontally(navSlideSpec) { -(it / 4) } + fadeOut() },
+            popEnterTransition   = { slideInHorizontally(navSlideSpec)  { -(it / 4) } + fadeIn()  },
+            popExitTransition    = { slideOutHorizontally(navSlideSpec) { it / 4 } + fadeOut() },
         ) {
 
             composable(Screen.Auth.route) {

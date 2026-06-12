@@ -6,13 +6,9 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedContentScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
-import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutLinearInEasing
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -60,6 +56,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.palette.graphics.Palette
@@ -93,7 +90,6 @@ import com.crsmthw.lyra.ui.screens.player.RepeatMode
 import com.crsmthw.lyra.util.ListScrollHaptics
 import com.crsmthw.lyra.util.confirm
 import com.crsmthw.lyra.util.press
-import com.crsmthw.lyra.util.rememberArtBoundsTransform
 import com.crsmthw.lyra.util.threshold
 import com.crsmthw.lyra.util.toTimeString
 import com.crsmthw.lyra.util.visualizer.FftWaveCanvas
@@ -179,7 +175,7 @@ private fun PullThresholdHaptics(state: PullToRefreshState) {
 
 // ── Single pane (phone / folded) ─────────────────────────────────────────────
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class, ExperimentalSharedTransitionApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun SinglePaneLayout(
     state           : LibraryUiState,
@@ -205,57 +201,52 @@ private fun SinglePaneLayout(
         .fillMaxSize()
         .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal))
     ) {
-        // SharedTransitionLayout wraps the browser ↔ detail swap so the selected card's art
-        // container-transforms into the detail hero (and back). Keys are namespaced "lib-art-*"
-        // so they never collide with the nav-level "album-art" shared element. The pane swap is a
-        // gentle slide+fade (proven flash-free here in single pane over `background`) — the slide
-        // is intentionally small so the overlaid morphing art carries the motion, not the panes.
-        SharedTransitionLayout(modifier = Modifier.fillMaxSize()) {
-            AnimatedContent(
-                targetState  = state,
-                contentKey   = { s ->
-                    val isDetail = s.currentPlaylist != null || s.isLoadingTracks || s.currentTracks.isNotEmpty()
-                    if (isDetail) (s.currentPlaylist?.id ?: "liked") else null
-                },
-                modifier     = Modifier.fillMaxSize(),
-                transitionSpec = {
-                    val enteringDetail = targetState.currentPlaylist != null ||
-                                         targetState.isLoadingTracks ||
-                                         targetState.currentTracks.isNotEmpty()
-                    if (enteringDetail) {
-                        (slideInHorizontally { it / 6 } + fadeIn(tween(220))) togetherWith
-                        (slideOutHorizontally { -it / 8 } + fadeOut(tween(220)))
-                    } else {
-                        (slideInHorizontally { -it / 6 } + fadeIn(tween(220))) togetherWith
-                        (slideOutHorizontally { it / 8 } + fadeOut(tween(220)))
-                    }
-                },
-                label = "library_detail_transition",
-            ) { snapshot ->
-                val acScope = this
-                val isDetailSnapshot = snapshot.currentPlaylist != null ||
-                                       snapshot.isLoadingTracks ||
-                                       snapshot.currentTracks.isNotEmpty()
-                if (isDetailSnapshot) {
-                    RightPaneContent(
-                        state           = snapshot,
-                        viewModel       = viewModel,
-                        playerViewModel = playerViewModel,
-                        mosaicDir       = mosaicDir,
-                        onTrackClick    = onRequestPlayer,
-                        onRefresh       = viewModel::refreshCurrentTracks,
-                        onBack          = { viewModel.clearSelection() },
-                    )
+        // Browser ↔ detail swap — a gentle slide + fade (flash-free over `background` in single
+        // pane). The spatial slide settles via the expressive `motionScheme` so it springs in; the
+        // cross-fade keeps a tween (alpha must not overshoot a valid range). The spec is read here
+        // (composable scope) and captured — `transitionSpec` itself is not a composable context.
+        val slideSpec = MaterialTheme.motionScheme.defaultSpatialSpec<IntOffset>()
+        AnimatedContent(
+            targetState  = state,
+            contentKey   = { s ->
+                val isDetail = s.currentPlaylist != null || s.isLoadingTracks || s.currentTracks.isNotEmpty()
+                if (isDetail) (s.currentPlaylist?.id ?: "liked") else null
+            },
+            modifier     = Modifier.fillMaxSize(),
+            transitionSpec = {
+                val enteringDetail = targetState.currentPlaylist != null ||
+                                     targetState.isLoadingTracks ||
+                                     targetState.currentTracks.isNotEmpty()
+                if (enteringDetail) {
+                    (slideInHorizontally(slideSpec) { it / 6 } + fadeIn(tween(220))) togetherWith
+                    (slideOutHorizontally(slideSpec) { -it / 8 } + fadeOut(tween(220)))
                 } else {
-                    LibraryBrowserPane(
-                        state          = snapshot,
-                        viewModel      = viewModel,
-                        onOpenSettings = onOpenSettings,
-                        isLandscape    = isLandscape,
-                        sharedScope    = this@SharedTransitionLayout,
-                        animScope      = acScope,
-                    )
+                    (slideInHorizontally(slideSpec) { -it / 6 } + fadeIn(tween(220))) togetherWith
+                    (slideOutHorizontally(slideSpec) { it / 8 } + fadeOut(tween(220)))
                 }
+            },
+            label = "library_detail_transition",
+        ) { snapshot ->
+            val isDetailSnapshot = snapshot.currentPlaylist != null ||
+                                   snapshot.isLoadingTracks ||
+                                   snapshot.currentTracks.isNotEmpty()
+            if (isDetailSnapshot) {
+                RightPaneContent(
+                    state           = snapshot,
+                    viewModel       = viewModel,
+                    playerViewModel = playerViewModel,
+                    mosaicDir       = mosaicDir,
+                    onTrackClick    = onRequestPlayer,
+                    onRefresh       = viewModel::refreshCurrentTracks,
+                    onBack          = { viewModel.clearSelection() },
+                )
+            } else {
+                LibraryBrowserPane(
+                    state          = snapshot,
+                    viewModel      = viewModel,
+                    onOpenSettings = onOpenSettings,
+                    isLandscape    = isLandscape,
+                )
             }
         }
 
@@ -314,8 +305,6 @@ private fun LibraryBrowserPane(
     isLandscape           : Boolean,
     modifier              : Modifier = Modifier,
     containerColor        : Color = Color.Unspecified,   // top-scrim target; defaults to background
-    sharedScope           : SharedTransitionScope? = null,   // non-null only in single pane (container transform)
-    animScope             : AnimatedContentScope? = null,
 ) {
     var showRefreshErrorDialog by remember { mutableStateOf(false) }
     val haptics        = LocalHapticFeedback.current
@@ -344,8 +333,6 @@ private fun LibraryBrowserPane(
                 isSelected  = likedSongsSelected,
                 onOpen      = { haptics.confirm(); viewModel.selectLikedSongs() },
                 onPlay      = { viewModel.playPlaylist("spotify:user:${state.user?.id}:collection") },
-                sharedScope = sharedScope,
-                animScope   = animScope,
             )
         }
         if (state.featuredPlaylists.isNotEmpty()) {
@@ -362,8 +349,6 @@ private fun LibraryBrowserPane(
                             mosaicFile  = if (playlist.id in state.playlistsWithMosaics)
                                 File(mosaicDir, "${playlist.id}.png") else null,
                             onClick     = { haptics.confirm(); viewModel.selectPlaylist(playlist) },
-                            sharedScope = sharedScope,
-                            animScope   = animScope,
                         )
                     }
                 }
@@ -383,8 +368,6 @@ private fun LibraryBrowserPane(
                     isMine      = true,
                     onClick     = { haptics.confirm(); viewModel.selectPlaylist(playlist) },
                     onPlay      = { viewModel.playPlaylist(playlist.uri) },
-                    sharedScope = sharedScope,
-                    animScope   = animScope,
                 )
             }
         }
@@ -401,8 +384,6 @@ private fun LibraryBrowserPane(
                     isSelected  = playlist.id == selectedPlaylistId,
                     onClick     = { haptics.confirm(); viewModel.selectPlaylist(playlist) },
                     onPlay      = { viewModel.playPlaylist(playlist.uri) },
-                    sharedScope = sharedScope,
-                    animScope   = animScope,
                 )
             }
         }
@@ -741,13 +722,16 @@ private fun TwoPaneLayout(
                     // outgoing holds old playlist data, incoming holds new playlist data.
                     // Slide-only (no alpha/fade) means neither scope ever becomes transparent —
                     // eliminating the white flash that alpha-based transitions cause in light mode.
+                    // The slide settles via the expressive `motionScheme` so the swap springs in
+                    // (read here, in composable scope; `transitionSpec` is not a composable context).
+                    val rightPaneSlideSpec = MaterialTheme.motionScheme.defaultSpatialSpec<IntOffset>()
                     AnimatedContent(
                         targetState    = state,
                         contentKey     = { s -> s.currentPlaylist?.id to (s.currentPlaylist == null) },
                         modifier       = Modifier.fillMaxSize(),
                         transitionSpec = {
-                            slideInHorizontally(tween(280, easing = FastOutSlowInEasing)) { it / 5 } togetherWith
-                            slideOutHorizontally(tween(200, easing = FastOutLinearInEasing)) { -it / 5 }
+                            slideInHorizontally(rightPaneSlideSpec) { it / 5 } togetherWith
+                            slideOutHorizontally(rightPaneSlideSpec) { -it / 5 }
                         },
                         label = "right_pane",
                     ) { snapshot ->
@@ -1092,25 +1076,13 @@ private fun TrackListHero(
 
 // ── Liked Songs card ──────────────────────────────────────────────────────────
 
-@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 private fun LikedSongsCard(
     count       : Int,
     onOpen      : () -> Unit,
     onPlay      : () -> Unit,
     isSelected  : Boolean = false,
-    sharedScope : SharedTransitionScope? = null,
-    animScope   : AnimatedContentScope? = null,
 ) {
-    val artMod = if (sharedScope != null && animScope != null) {
-        with(sharedScope) {
-            Modifier.sharedElement(
-                sharedContentState      = rememberSharedContentState(key = "lib-art-liked"),
-                animatedVisibilityScope = animScope,
-                boundsTransform         = rememberArtBoundsTransform(),
-            )
-        }
-    } else Modifier
     Card(
         onClick   = onOpen,
         modifier  = Modifier
@@ -1130,7 +1102,6 @@ private fun LikedSongsCard(
             Box(
                 modifier = Modifier
                     .size(56.dp)
-                    .then(artMod)
                     .clip(RoundedCornerShape(12.dp))
                     .background(Brush.linearGradient(listOf(Color(0xFF6A11CB), Color(0xFF2575FC)))),
                 contentAlignment = Alignment.Center,
@@ -1163,7 +1134,6 @@ private fun LikedSongsCard(
 
 // ── Playlist list card ────────────────────────────────────────────────────────
 
-@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 private fun PlaylistListCard(
     playlist    : SpotifyPlaylist,
@@ -1172,18 +1142,7 @@ private fun PlaylistListCard(
     isMine      : Boolean = false,   // own playlist → count only (owner name is the user, redundant)
     onClick     : () -> Unit,
     onPlay      : () -> Unit,
-    sharedScope : SharedTransitionScope? = null,
-    animScope   : AnimatedContentScope? = null,
 ) {
-    val artMod = if (sharedScope != null && animScope != null) {
-        with(sharedScope) {
-            Modifier.sharedElement(
-                sharedContentState      = rememberSharedContentState(key = "lib-art-${playlist.id}"),
-                animatedVisibilityScope = animScope,
-                boundsTransform         = rememberArtBoundsTransform(),
-            )
-        }
-    } else Modifier
     Card(
         onClick   = onClick,
         modifier  = Modifier
@@ -1208,13 +1167,12 @@ private fun PlaylistListCard(
                     model              = thumbModel,
                     contentDescription = playlist.name,
                     contentScale       = ContentScale.Crop,
-                    modifier           = Modifier.size(56.dp).then(artMod).clip(thumbShape),
+                    modifier           = Modifier.size(56.dp).clip(thumbShape),
                 )
             } else {
                 Box(
                     modifier = Modifier
                         .size(56.dp)
-                        .then(artMod)
                         .clip(thumbShape)
                         .background(MaterialTheme.colorScheme.surfaceVariant),
                     contentAlignment = Alignment.Center,
