@@ -301,7 +301,9 @@ class PlayerViewModel(
     fun playFromLikedSongs(trackUri: String) {
         viewModelScope.launch {
             val cached = withContext(Dispatchers.IO) {
-                libraryCache.loadTrackList(LibraryCache.LIKED_SONGS_KEY)?.tracks
+                // distinctBy { it.id }: guard the play queue against a not-yet-healed cache that may
+                // still hold duplicate liked songs (see LibraryViewModel pagination dedup).
+                libraryCache.loadTrackList(LibraryCache.LIKED_SONGS_KEY)?.tracks?.distinctBy { it.id }
             }
             if (cached != null) {
                 val idx = cached.indexOfFirst { it.uri == trackUri }.coerceAtLeast(0)

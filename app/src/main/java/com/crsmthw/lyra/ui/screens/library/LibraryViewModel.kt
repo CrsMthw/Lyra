@@ -417,14 +417,23 @@ class LibraryViewModel(
             val cached = withContext(Dispatchers.IO) { cache.loadTrackList(LibraryCache.LIKED_SONGS_KEY) }
 
             if (cached != null) {
-                // Show cached tracks immediately — no loading spinner for the user
-                val cachedCount = cached.snapshotId.toIntOrNull() ?: cached.tracks.size
+                // Show cached tracks immediately — no loading spinner for the user.
+                // distinctBy { it.id }: self-heal a cache that an older build corrupted with duplicate
+                // liked songs (the filtered-offset pagination bug). Re-persisted below so the dupes
+                // are gone on disk too — no clear-storage needed.
+                val cachedCount   = cached.snapshotId.toIntOrNull() ?: cached.tracks.size
+                val cachedTracks  = cached.tracks.distinctBy { it.id }
                 _uiState.update { it.copy(
-                    currentTracks    = cached.tracks,
+                    currentTracks    = cachedTracks,
                     isLoadingTracks  = false,
-                    likedSongsOffset = cached.tracks.size,
+                    likedSongsOffset = cachedTracks.size,
                     likedSongsTotal  = cachedCount,
                 )}
+                if (cachedTracks.size != cached.tracks.size) {
+                    withContext(Dispatchers.IO) {
+                        cache.saveTrackList(LibraryCache.LIKED_SONGS_KEY, cachedCount.toString(), cachedTracks)
+                    }
+                }
 
                 // Background count check — detects external likes/unlikes since last open.
                 repository.getLikedSongs(limit = 1).fold(
@@ -440,7 +449,9 @@ class LibraryViewModel(
                                         val newTracks = (newResp.items ?: emptyList())
                                             .mapNotNull { it.track }
                                             .filter { it.isPlayable != false }
-                                        val merged = newTracks + cached.tracks
+                                        // distinctBy guards against an "external add" that's actually
+                                        // a track already in the cache (e.g. re-like of an existing one).
+                                        val merged = (newTracks + cachedTracks).distinctBy { it.id }
                                         _uiState.update { s -> s.copy(
                                             currentTracks    = merged,
                                             likedSongsOffset = merged.size,
@@ -474,7 +485,9 @@ class LibraryViewModel(
                 _uiState.update { it.copy(
                     currentTracks    = tracks,
                     isLoadingTracks  = false,
-                    likedSongsOffset = tracks.size,
+                    // RAW page size, not filtered: see loadMoreLikedSongs. A null track on page 0
+                    // would otherwise short the offset and overlap the next page.
+                    likedSongsOffset = resp.items?.size ?: tracks.size,
                     likedSongsTotal  = resp.total,
                     likedSongCount   = resp.total,
                 )}
@@ -497,11 +510,16 @@ class LibraryViewModel(
             repository.getLikedSongs(limit = 50, offset = s.likedSongsOffset).fold(
                 onSuccess = { resp ->
                     val newTracks = (resp.items ?: emptyList()).mapNotNull { it.track }.filter { it.isPlayable != false }
-                    val allTracks = s.currentTracks + newTracks
+                    // Advance the offset by the RAW page size, not the post-filter size: Spotify's
+                    // offset indexes every saved item, including removed-from-Spotify tracks (null
+                    // track) that mapNotNull drops. Advancing by the filtered size under-counts and
+                    // makes the next page overlap → duplicate rows. distinctBy heals any overlap left
+                    // from a cache-resume start offset. (Playlists already do this — see loadMorePlaylistTracks.)
+                    val allTracks = (s.currentTracks + newTracks).distinctBy { it.id }
                     _uiState.update { it.copy(
                         currentTracks       = allTracks,
                         isLoadingMoreTracks = false,
-                        likedSongsOffset    = allTracks.size,
+                        likedSongsOffset    = s.likedSongsOffset + (resp.items?.size ?: 0),
                         likedSongsTotal     = resp.total,
                     )}
                     withContext(Dispatchers.IO) {
@@ -563,14 +581,16 @@ class LibraryViewModel(
                         val freshFirst50 = (resp.items ?: emptyList()).mapNotNull { it.track }.filter { it.isPlayable != false }
                         _uiState.update { it.copy(
                             currentTracks    = freshFirst50,
-                            likedSongsOffset = freshFirst50.size,
+                            // RAW page size, not filtered: see loadMoreLikedSongs.
+                            likedSongsOffset = resp.items?.size ?: freshFirst50.size,
                             likedSongsTotal  = resp.total,
                             likedSongCount   = resp.total,
                         )}
                         withContext(Dispatchers.IO) {
                             // Preserve tracks cached beyond page 0 so background-fetch progress isn't lost.
+                            // distinctBy heals any overlap between the fresh page 0 and the retained tail.
                             val beyond50 = cache.loadTrackList(LibraryCache.LIKED_SONGS_KEY)?.tracks?.drop(50) ?: emptyList()
-                            cache.saveTrackList(LibraryCache.LIKED_SONGS_KEY, resp.total.toString(), freshFirst50 + beyond50)
+                            cache.saveTrackList(LibraryCache.LIKED_SONGS_KEY, resp.total.toString(), (freshFirst50 + beyond50).distinctBy { it.id })
                         }
                     },
                     onFailure = { },
