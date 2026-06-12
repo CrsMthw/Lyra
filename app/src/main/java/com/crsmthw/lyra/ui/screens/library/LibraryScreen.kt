@@ -53,7 +53,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -100,7 +99,6 @@ import com.crsmthw.lyra.util.toTimeString
 import com.crsmthw.lyra.util.visualizer.FftWaveCanvas
 import com.crsmthw.lyra.util.visualizer.LocalVisualizerAccentColor
 import java.io.File
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -247,9 +245,6 @@ private fun SinglePaneLayout(
                         onTrackClick    = onRequestPlayer,
                         onRefresh       = viewModel::refreshCurrentTracks,
                         onBack          = { viewModel.clearSelection() },
-                        barWindowInsets = WindowInsets.statusBars,
-                        sharedScope     = this@SharedTransitionLayout,
-                        animScope       = acScope,
                     )
                 } else {
                     LibraryBrowserPane(
@@ -318,12 +313,14 @@ private fun LibraryBrowserPane(
     onOpenSettings        : () -> Unit,
     isLandscape           : Boolean,
     modifier              : Modifier = Modifier,
-    applyStatusBarPadding : Boolean = true,   // false when parent already applied statusBarsPadding
+    containerColor        : Color = Color.Unspecified,   // top-scrim target; defaults to background
     sharedScope           : SharedTransitionScope? = null,   // non-null only in single pane (container transform)
     animScope             : AnimatedContentScope? = null,
 ) {
     var showRefreshErrorDialog by remember { mutableStateOf(false) }
     val haptics        = LocalHapticFeedback.current
+    val scrimColor     = if (containerColor == Color.Unspecified)
+                             MaterialTheme.colorScheme.background else containerColor
     val listState      = rememberLazyListState()
     ListScrollHaptics(listState)
     val density        = LocalDensity.current
@@ -424,7 +421,7 @@ private fun LibraryBrowserPane(
     }
 
     if (isLandscape) {
-        // Landscape: overlay TopAppBar over scrollable content (always-on bar)
+        // Landscape: floating controls over scrollable content (no hero — title pill always shown)
         val statusBarTopDp     = with(density) { WindowInsets.statusBars.getTop(this).toDp() }
         val listTopPadding     = statusBarTopDp + 64.dp
         val listContentPadding = remember(listTopPadding, navBarBottomDp) { PaddingValues(top = listTopPadding, bottom = 100.dp + navBarBottomDp) }
@@ -497,16 +494,22 @@ private fun LibraryBrowserPane(
                 }
             }
 
-            TopAppBar(
-                modifier     = Modifier
-                    .then(if (applyStatusBarPadding) Modifier.statusBarsPadding() else Modifier)
-                    .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal)),
-                windowInsets = WindowInsets(0),
-                title        = { Text("Lyra") },
-                actions      = actionsBar,
-                colors       = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                ),
+            // Floating controls (matching portrait) — no solid bar. Landscape has no scroll-away
+            // hero (vertical space is tight), so the title pill is always shown rather than fading in.
+            TopScrim(color = scrimColor, modifier = Modifier.align(Alignment.TopCenter))
+            TitlePill(
+                text     = "Lyra",
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .statusBarsPadding()
+                    .padding(start = 16.dp, top = 8.dp),
+            )
+            TopActionPill(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .statusBarsPadding()
+                    .padding(end = 16.dp, top = 8.dp),
+                content  = actionsBar,
             )
         }
     } else {
@@ -607,7 +610,7 @@ private fun LibraryBrowserPane(
 
             // Top scrim — fades content under the status bar (vertical mirror of the bottom scrim).
             TopScrim(
-                color    = MaterialTheme.colorScheme.background,
+                color    = scrimColor,
                 modifier = Modifier.align(Alignment.TopCenter),
             )
 
@@ -664,10 +667,12 @@ private fun TwoPaneLayout(
         }
     }
 
+    // No statusBarsPadding here — the panes go edge-to-edge under a transparent status bar (like the
+    // single-pane screens). Each pane self-pads its top inset (hero `statusBarsPadding()` + TopScrim,
+    // floating pills) so content fades under the bar instead of leaving an opaque background band.
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .statusBarsPadding()
             .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal)),
     ) {
         Row(
@@ -694,7 +699,7 @@ private fun TwoPaneLayout(
                         onOpenSettings        = onOpenSettings,
                         isLandscape           = isLandscape,
                         modifier              = Modifier.fillMaxSize(),
-                        applyStatusBarPadding = false,
+                        containerColor        = MaterialTheme.colorScheme.surface,
                     )
                     // Bottom scrim — matches right pane, fades content toward surface
                     Box(
@@ -768,6 +773,7 @@ private fun TwoPaneLayout(
                                 mosaicDir       = mosaicDir,
                                 onTrackClick    = onRequestPlayer,
                                 onRefresh       = viewModel::refreshCurrentTracks,
+                                containerColor  = MaterialTheme.colorScheme.surface,
                             )
                         }
                     }
@@ -807,10 +813,8 @@ private fun RightPaneContent(
     mosaicDir       : File,
     onTrackClick    : () -> Unit,
     onRefresh       : () -> Unit,
-    onBack          : (() -> Unit)? = null,
-    barWindowInsets : WindowInsets = WindowInsets(0),
-    sharedScope     : SharedTransitionScope? = null,   // non-null only in single pane (container transform)
-    animScope       : AnimatedContentScope? = null,
+    onBack          : (() -> Unit)? = null,            // non-null → show the back pill (single-pane)
+    containerColor  : Color = Color.Unspecified,       // scrim target; defaults to background
 ) {
     val currentTrackId by remember {
         playerViewModel.uiState.map { it.currentTrack?.id }.distinctUntilChanged()
@@ -822,12 +826,9 @@ private fun RightPaneContent(
     val isLikedSongs = playlist == null
     // Owned playlists only (never Liked Songs / followed) get the delete action.
     val canDelete    = playlist != null && playlist.owner.id == state.user?.id
-    val singlePane   = onBack != null   // single-pane → floating controls; two-pane keeps the bar
     val haptics      = LocalHapticFeedback.current
     var showOverflowMenu  by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
-    // Hero art shared-element key — matches the source card's key so only the selected pair morphs.
-    val artKey       = if (isLikedSongs) "lib-art-liked" else "lib-art-${playlist.id}"
     val mosaicFile   = playlist?.let { p ->
         if (p.id in state.playlistsWithMosaics) File(mosaicDir, "${p.id}.png") else null
     }
@@ -862,57 +863,12 @@ private fun RightPaneContent(
 
     val density          = LocalDensity.current
     val navBarBottomDp   = with(density) { WindowInsets.navigationBars.getBottom(this).toDp() }
-    val headerTopPadding = with(density) { barWindowInsets.getTop(this).toDp() }
-    val thresholdPx      = with(density) { 80.dp.toPx() }
-    val snapThreshold    = thresholdPx / 2f
     val listState        = rememberLazyListState()
     val titlePillAlpha   = rememberHeroScrollProgress(listState)
     val pullToRefreshState   = rememberPullToRefreshState()
     PullThresholdHaptics(pullToRefreshState)
-    var barHeightPx   by remember { mutableIntStateOf(0) }
-    val collapseProgress = remember(listState) {
-        derivedStateOf {
-            when {
-                listState.firstVisibleItemIndex > 0 -> 1f
-                else -> (listState.firstVisibleItemScrollOffset.toFloat() / thresholdPx).coerceIn(0f, 1f)
-            }
-        }
-    }
-
-    LaunchedEffect(listState, pullToRefreshState) {
-        snapshotFlow { listState.isScrollInProgress to pullToRefreshState.distanceFraction }
-            .collect { (isScrolling, ptrFraction) ->
-                if (singlePane) return@collect   // no collapsing bar to snap in single-pane
-                if (isScrolling) return@collect
-                if (ptrFraction > 0f) return@collect
-                if (state.isRefreshing) return@collect
-                if (listState.firstVisibleItemIndex > 0) return@collect
-                val offset = listState.firstVisibleItemScrollOffset
-                if (offset == 0) return@collect
-                val headerInfo = listState.layoutInfo.visibleItemsInfo
-                    .firstOrNull { it.key == "playlist_header" }
-                val targetOffset = if (headerInfo != null)
-                    (headerInfo.size - barHeightPx).coerceAtLeast(0) else 0
-                if (offset.toFloat() >= snapThreshold) {
-                    val info        = listState.layoutInfo
-                    val lastVisible = info.visibleItemsInfo.lastOrNull()
-                    val canReachTarget = if (lastVisible == null || lastVisible.index < info.totalItemsCount - 1) {
-                        true // items below viewport — can still scroll
-                    } else {
-                        val remaining = (lastVisible.offset + lastVisible.size + info.afterContentPadding - info.viewportSize.height).coerceAtLeast(0)
-                        offset + remaining >= targetOffset
-                    }
-                    if (canReachTarget) {
-                        try { listState.animateScrollToItem(0, scrollOffset = targetOffset) }
-                        catch (_: CancellationException) { }
-                    }
-                    // else: list too short to collapse header — leave it wherever it settled
-                } else {
-                    try { listState.animateScrollToItem(0) }
-                    catch (_: CancellationException) { }
-                }
-            }
-    }
+    val scrimColor       = if (containerColor == Color.Unspecified)
+                               MaterialTheme.colorScheme.background else containerColor
 
     val canLoadMore          = if (isLikedSongs)
                                    state.likedSongsTotal > 0 && state.likedSongsOffset < state.likedSongsTotal
@@ -969,31 +925,16 @@ private fun RightPaneContent(
             contentPadding = PaddingValues(bottom = 100.dp + navBarBottomDp),
             listState      = listState,
             headerContent  = {
-                if (!singlePane && headerTopPadding > 0.dp) Spacer(Modifier.height(headerTopPadding))
-                if (singlePane) {
-                    // No container transform here: the hero art no longer matches the card, and the
-                    // morph rendered over the floating controls. Plain slide+fade instead.
-                    TrackListHero(
-                        artUrl       = artUrl,
-                        isLikedSongs = isLikedSongs,
-                        name         = playlistName,
-                        trackCount   = trackCount,
-                        onPlay       = { haptics.press(); viewModel.playPlaylist(playUri) },
-                        onShuffle    = { haptics.press(); viewModel.shufflePlaylist(playUri) },
-                    )
-                } else {
-                    RightPaneHeader(
-                        artUrl       = artUrl,
-                        isLikedSongs = isLikedSongs,
-                        name         = playlistName,
-                        trackCount   = trackCount,
-                        onPlay       = { haptics.press(); viewModel.playPlaylist(playUri) },
-                        onShuffle    = { haptics.press(); viewModel.shufflePlaylist(playUri) },
-                        artKey       = artKey,
-                        sharedScope  = sharedScope,
-                        animScope    = animScope,
-                    )
-                }
+                // The same cookie-art hero in both single- and two-pane (the two-pane right pane is
+                // the single-pane track list minus the back pill); its name fades into the title pill.
+                TrackListHero(
+                    artUrl       = artUrl,
+                    isLikedSongs = isLikedSongs,
+                    name         = playlistName,
+                    trackCount   = trackCount,
+                    onPlay       = { haptics.press(); viewModel.playPlaylist(playUri) },
+                    onShuffle    = { haptics.press(); viewModel.shufflePlaylist(playUri) },
+                )
             },
             emptyContent = when {
                 showLoadingIndicator && state.currentTracks.isEmpty() -> { {
@@ -1021,40 +962,11 @@ private fun RightPaneContent(
             },
         )
         } // PullToRefreshBox
-        if (!singlePane) {
-            // Two-pane: the collapsing detail bar + its back/overflow buttons (unchanged).
-            CollapsingDetailBar(
-                name             = playlistName,
-                collapseProgress = collapseProgress,
-                onBack           = onBack,
-                windowInsets     = barWindowInsets,
-                modifier         = Modifier.onSizeChanged { barHeightPx = it.height },
-            )
-            // (no separate back button in two-pane — onBack is null there; the bar handles it)
-            if (canDelete) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(top = headerTopPadding, end = 4.dp),
-                ) {
-                    IconButton(onClick = { haptics.press(); showOverflowMenu = true }) {
-                        Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.more_options))
-                    }
-                    DropdownMenu(
-                        expanded         = showOverflowMenu,
-                        onDismissRequest = { showOverflowMenu = false },
-                    ) {
-                        DropdownMenuItem(
-                            text        = { Text(stringResource(R.string.delete_playlist)) },
-                            leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
-                            onClick     = { haptics.press(); showOverflowMenu = false; showDeleteConfirm = true },
-                        )
-                    }
-                }
-            }
-        } else {
-            // Single-pane: floating controls (mirror of Album/Artist).
-            TopScrim(color = MaterialTheme.colorScheme.background, modifier = Modifier.align(Alignment.TopCenter))
+
+        // Floating controls — shared by single- and two-pane. The back pill shows only in
+        // single-pane (the two-pane right pane sits beside the browser list, so no back is needed).
+        TopScrim(color = scrimColor, modifier = Modifier.align(Alignment.TopCenter))
+        if (onBack != null) {
             TopActionPill(
                 modifier = Modifier
                     .align(Alignment.TopStart)
@@ -1065,37 +977,40 @@ private fun RightPaneContent(
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                 }
             }
-            TitlePill(
-                text     = playlistName,
+        }
+        TitlePill(
+            text     = playlistName,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .statusBarsPadding()
+                .padding(
+                    start = if (onBack != null) 16.dp + TopPillHeight + 8.dp else 16.dp,
+                    top   = 8.dp,
+                )
+                .widthIn(max = 220.dp)
+                .graphicsLayer { alpha = titlePillAlpha.value },
+        )
+        if (canDelete) {
+            Box(
                 modifier = Modifier
-                    .align(Alignment.TopStart)
+                    .align(Alignment.TopEnd)
                     .statusBarsPadding()
-                    .padding(start = 16.dp + TopPillHeight + 8.dp, top = 8.dp)
-                    .widthIn(max = 220.dp)
-                    .graphicsLayer { alpha = titlePillAlpha.value },
-            )
-            if (canDelete) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .statusBarsPadding()
-                        .padding(end = 16.dp, top = 8.dp),
+                    .padding(end = 16.dp, top = 8.dp),
+            ) {
+                TopActionPill {
+                    IconButton(onClick = { haptics.press(); showOverflowMenu = true }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.more_options))
+                    }
+                }
+                DropdownMenu(
+                    expanded         = showOverflowMenu,
+                    onDismissRequest = { showOverflowMenu = false },
                 ) {
-                    TopActionPill {
-                        IconButton(onClick = { haptics.press(); showOverflowMenu = true }) {
-                            Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.more_options))
-                        }
-                    }
-                    DropdownMenu(
-                        expanded         = showOverflowMenu,
-                        onDismissRequest = { showOverflowMenu = false },
-                    ) {
-                        DropdownMenuItem(
-                            text        = { Text(stringResource(R.string.delete_playlist)) },
-                            leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
-                            onClick     = { haptics.press(); showOverflowMenu = false; showDeleteConfirm = true },
-                        )
-                    }
+                    DropdownMenuItem(
+                        text        = { Text(stringResource(R.string.delete_playlist)) },
+                        leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
+                        onClick     = { haptics.press(); showOverflowMenu = false; showDeleteConfirm = true },
+                    )
                 }
             }
         }
@@ -1172,109 +1087,6 @@ private fun TrackListHero(
                     modifier = Modifier.size(64.dp))
             }
         }
-    }
-}
-
-// ── Right pane header (square art, scrollable) ────────────────────────────────
-
-@OptIn(ExperimentalSharedTransitionApi::class)
-@Composable
-private fun RightPaneHeader(
-    artUrl      : String?,
-    isLikedSongs: Boolean,
-    name        : String,
-    trackCount  : Int,
-    onPlay      : () -> Unit,
-    onShuffle   : () -> Unit,
-    artKey      : String? = null,
-    sharedScope : SharedTransitionScope? = null,
-    animScope   : AnimatedContentScope? = null,
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        // Square album art — capped at 200dp so it doesn't grow huge in wide landscape panes
-        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-        val artSize = (maxWidth * 0.65f).coerceAtMost(200.dp)
-        // Container-transform destination: morphs from the selected card's art. Only built when
-        // single-pane scopes are present; two-pane passes null and renders the art statically.
-        val artMod = if (sharedScope != null && animScope != null && artKey != null) {
-            with(sharedScope) {
-                Modifier.sharedElement(
-                    sharedContentState      = rememberSharedContentState(key = artKey),
-                    animatedVisibilityScope = animScope,
-                    boundsTransform         = rememberArtBoundsTransform(),
-                )
-            }
-        } else Modifier
-        Box(
-            modifier = Modifier
-                .size(artSize)
-                .align(Alignment.Center)
-                .then(artMod)
-                .clip(RoundedCornerShape(16.dp)),
-        ) {
-            if (!artUrl.isNullOrBlank()) {
-                AsyncImage(
-                    model              = artUrl,
-                    contentDescription = name,
-                    contentScale       = ContentScale.Crop,
-                    modifier           = Modifier.fillMaxSize(),
-                )
-            } else if (isLikedSongs) {
-                Box(
-                    modifier = Modifier.fillMaxSize().background(
-                        Brush.linearGradient(listOf(Color(0xFF6A11CB), Color(0xFF2575FC)))
-                    ),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(Icons.Default.Favorite, null, tint = Color.White.copy(0.5f),
-                        modifier = Modifier.size(72.dp))
-                }
-            } else {
-                Box(
-                    modifier = Modifier.fillMaxSize()
-                        .background(MaterialTheme.colorScheme.surfaceVariant),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(Icons.Default.MusicNote, null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
-                        modifier = Modifier.size(64.dp))
-                }
-            }
-        }
-        } // BoxWithConstraints
-
-        Spacer(Modifier.height(12.dp))
-
-        Text(name, style = MaterialTheme.typography.titleLarge, maxLines = 1,
-            overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
-        Text(
-            text  = if (trackCount > 0) "$trackCount tracks" else "",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-
-        Spacer(Modifier.height(12.dp))
-
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilledTonalButton(onClick = onShuffle) {
-                Icon(Icons.Default.Shuffle, null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(4.dp))
-                Text(stringResource(R.string.player_shuffle))
-            }
-            Button(onClick = onPlay) {
-                Icon(Icons.Default.PlayArrow, null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(4.dp))
-                Text(stringResource(R.string.player_play))
-            }
-        }
-
-        HorizontalDivider(modifier = Modifier.padding(top = 12.dp), thickness = 0.5.dp,
-            color = MaterialTheme.colorScheme.outlineVariant)
     }
 }
 
@@ -1507,45 +1319,6 @@ private fun TrackList(
             }
         }
     }
-}
-
-// ── Collapsing detail top bar ─────────────────────────────────────────────────
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun CollapsingDetailBar(
-    name             : String,
-    collapseProgress : androidx.compose.runtime.State<Float>,
-    modifier         : Modifier = Modifier,
-    onBack           : (() -> Unit)? = null,
-    windowInsets     : WindowInsets = WindowInsets(0),
-) {
-    // Read in composition so recomposition (not just draw phase) drives the alpha update.
-    // The draw-phase-only graphicsLayer pattern fails inside AnimatedContent's slide layer
-    // at alpha=0 — the state observation never registers on the first render.
-    val progress by collapseProgress
-    TopAppBar(
-        modifier     = modifier.graphicsLayer { alpha = progress },
-        windowInsets = windowInsets,
-        navigationIcon = if (onBack != null) {
-            { IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-            } }
-        } else ({}),
-        title = {
-            Text(
-                text     = name,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.graphicsLayer {
-                    translationY = (1f - progress) * 24.dp.toPx()
-                },
-            )
-        },
-        colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-        ),
-    )
 }
 
 // ── Refresh-error dialog ──────────────────────────────────────────────────────

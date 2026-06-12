@@ -5,7 +5,6 @@ import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -78,6 +77,7 @@ fun AlbumDetailScreen(
     val haptics        = LocalHapticFeedback.current
     val density        = LocalDensity.current
     val navBarBottomDp = with(density) { WindowInsets.navigationBars.getBottom(this).toDp() }
+    val statusBarTopDp = with(density) { WindowInsets.statusBars.getTop(this).toDp() }
     val scrimHeight    = 140.dp
     val background     = MaterialTheme.colorScheme.background
     val isWideScreen   = currentWindowAdaptiveInfo().windowSizeClass.isWidthAtLeastBreakpoint(600)
@@ -91,46 +91,8 @@ fun AlbumDetailScreen(
     ) { onRequestPlayer ->
     Scaffold(
         contentWindowInsets = WindowInsets(0),
-        topBar = {
-            // Two-pane (unfolded) keeps the solid bar for now; single-pane floats its controls.
-            if (isWideScreen) TopAppBar(
-                modifier     = Modifier
-                    .statusBarsPadding()
-                    .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal)),
-                windowInsets = WindowInsets(0),
-                title = {
-                    Text(
-                        text     = state.album?.name ?: "",
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                },
-                navigationIcon = {
-                    IconButton(onClick = { haptics.confirm(); onBack() }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(R.string.nav_back))
-                    }
-                },
-                actions = {
-                    IconButton(
-                        onClick = {
-                            haptics.press()
-                            state.album?.id?.let { id ->
-                                context.startActivity(Intent.createChooser(
-                                    Intent(Intent.ACTION_SEND).apply {
-                                        putExtra(Intent.EXTRA_TEXT, "https://open.spotify.com/album/$id")
-                                        type = "text/plain"
-                                    }, null
-                                ))
-                            }
-                        },
-                        enabled = state.album != null,
-                    ) {
-                        Icon(Icons.Default.Share, contentDescription = stringResource(R.string.player_share))
-                    }
-                },
-            )
-        },
+        // No top app bar in either configuration — both single- and two-pane float their own back /
+        // share pills over the hero (a leftover bar here would cover those pills in two-pane).
     ) { paddingValues ->
         Box(Modifier.fillMaxSize()) {
         when {
@@ -166,11 +128,46 @@ fun AlbumDetailScreen(
                     viewModel.trackActions.open(track.toTrackActionTarget(album))
                 }
 
+                // Metadata line under the artist — year · type · N songs (plural-safe) · playtime.
+                // Same `tracks` (isPlayable-filtered) the two-pane list uses, so count/time match.
+                val totalMs   = tracks.sumOf { it.durationMs }
+                val albumMeta = listOfNotNull(
+                    album.releaseYear.takeIf { it.isNotBlank() },
+                    album.albumTypeDisplay.takeIf { it.isNotBlank() },
+                    if (tracks.isNotEmpty())
+                        pluralStringResource(R.plurals.album_tracks_count, tracks.size, tracks.size)
+                    else null,
+                    if (totalMs > 0L) totalMs.toDurationString() else null,
+                ).joinToString(" · ").takeIf { it.isNotBlank() }
+
+                // Shared album art (single-pane hero + two-pane left panel) — cover, else a fallback.
+                val albumArt: @Composable BoxScope.() -> Unit = {
+                    if (!album.artUrl.isNullOrBlank()) {
+                        AsyncImage(
+                            model              = album.artUrl,
+                            contentDescription = album.name,
+                            contentScale       = ContentScale.Crop,
+                            modifier           = Modifier.fillMaxSize(),
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(Icons.Default.MusicNote, null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                                modifier = Modifier.size(64.dp))
+                        }
+                    }
+                }
+
                 if (isWideScreen) {
+                    // Edge-to-edge under a transparent status bar (like single-pane). The hero's
+                    // own `statusBarsPadding()` + the pane TopScrims handle the top inset; no parent
+                    // statusBarsPadding (which would leave an opaque band where the bar sits).
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(paddingValues)
                             .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal)),
                     ) {
                         Row(
@@ -179,33 +176,66 @@ fun AlbumDetailScreen(
                                 .padding(8.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            // Left pane — art + info + play button
+                            // Left pane — the detail hero panel (art + name/meta + play/shuffle),
+                            // with floating back + share pills and a top scrim (no solid bar).
                             Card(
                                 modifier  = Modifier.weight(0.42f).fillMaxHeight(),
                                 shape     = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
                                 colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                                 elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                             ) {
-                                BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-                                    val artSize = maxWidth.coerceAtMost(maxHeight * 0.5f)
-                                    val compact = maxHeight < 500.dp
+                                Box(modifier = Modifier.fillMaxSize()) {
                                     Column(
                                         modifier = Modifier
                                             .fillMaxSize()
                                             .verticalScroll(rememberScrollState())
                                             .padding(bottom = navBarBottomDp),
                                     ) {
-                                        AlbumHeader(
-                                            album         = album,
-                                            tracks        = tracks,
-                                            modifier      = Modifier
-                                                .size(artSize)
-                                                .clip(RoundedCornerShape(8.dp)),
-                                            compact       = compact,
-                                            showDivider   = false,
-                                            onPlayAll     = onPlayAll,
-                                            onOpenArtist  = onOpenArtist,
+                                        DetailArtHero(
+                                            title      = album.name,
+                                            subtitle   = album.artists?.joinToString(", ") { it.name },
+                                            meta       = albumMeta,
+                                            onPlay     = onPlayAll,
+                                            onShuffle  = {
+                                                haptics.press()
+                                                playerViewModel.shuffleContext(albumUri)
+                                                onRequestPlayer()
+                                            },
+                                            artContent = albumArt,
                                         )
+                                    }
+                                    // Top scrim (drawn under the pills) — fades the hero toward the card.
+                                    TopScrim(color = MaterialTheme.colorScheme.surface, modifier = Modifier.align(Alignment.TopCenter))
+                                    // Back pill (top-left).
+                                    TopActionPill(
+                                        modifier = Modifier
+                                            .align(Alignment.TopStart)
+                                            .statusBarsPadding()
+                                            .padding(start = 12.dp, top = 8.dp),
+                                    ) {
+                                        IconButton(onClick = { haptics.confirm(); onBack() }) {
+                                            Icon(Icons.AutoMirrored.Filled.ArrowBack,
+                                                contentDescription = stringResource(R.string.nav_back))
+                                        }
+                                    }
+                                    // Share pill (top-right).
+                                    TopActionPill(
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .statusBarsPadding()
+                                            .padding(end = 12.dp, top = 8.dp),
+                                    ) {
+                                        IconButton(onClick = {
+                                            haptics.press()
+                                            context.startActivity(Intent.createChooser(
+                                                Intent(Intent.ACTION_SEND).apply {
+                                                    putExtra(Intent.EXTRA_TEXT, "https://open.spotify.com/album/${album.id}")
+                                                    type = "text/plain"
+                                                }, null
+                                            ))
+                                        }) {
+                                            Icon(Icons.Default.Share, contentDescription = stringResource(R.string.player_share))
+                                        }
                                     }
                                 }
                             }
@@ -223,7 +253,7 @@ fun AlbumDetailScreen(
                                     LazyColumn(
                                         state          = tracksListState,
                                         modifier       = Modifier.fillMaxSize(),
-                                        contentPadding = PaddingValues(bottom = 100.dp + navBarBottomDp),
+                                        contentPadding = PaddingValues(top = statusBarTopDp, bottom = 100.dp + navBarBottomDp),
                                     ) {
                                         itemsIndexed(tracks, key = { idx, t -> "track_${t.id}_$idx" }) { idx, track ->
                                             AlbumTrackRow(track = track, onClick = { onPlayTrack(track, idx) }, onLongClick = { onTrackLongPress(track) })
@@ -239,6 +269,8 @@ fun AlbumDetailScreen(
                                             .align(Alignment.BottomCenter)
                                             .background(Brush.verticalGradient(listOf(Color.Transparent, MaterialTheme.colorScheme.surface)))
                                     )
+                                    // Top scrim — fades tracks under the transparent status bar.
+                                    TopScrim(color = MaterialTheme.colorScheme.surface, modifier = Modifier.align(Alignment.TopCenter))
                                 }
                             }
                         }
@@ -268,33 +300,17 @@ fun AlbumDetailScreen(
                         ) {
                             item(key = "header") {
                                 DetailArtHero(
-                                    title     = album.name,
-                                    subtitle  = album.artists?.joinToString(", ") { it.name },
-                                    onPlay    = onPlayAll,
-                                    onShuffle = {
+                                    title      = album.name,
+                                    subtitle   = album.artists?.joinToString(", ") { it.name },
+                                    meta       = albumMeta,
+                                    onPlay     = onPlayAll,
+                                    onShuffle  = {
                                         haptics.press()
                                         playerViewModel.shuffleContext(albumUri)
                                         onRequestPlayer()
                                     },
-                                ) {
-                                    if (!album.artUrl.isNullOrBlank()) {
-                                        AsyncImage(
-                                            model              = album.artUrl,
-                                            contentDescription = album.name,
-                                            contentScale       = ContentScale.Crop,
-                                            modifier           = Modifier.fillMaxSize(),
-                                        )
-                                    } else {
-                                        Box(
-                                            modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant),
-                                            contentAlignment = Alignment.Center,
-                                        ) {
-                                            Icon(Icons.Default.MusicNote, null,
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
-                                                modifier = Modifier.size(64.dp))
-                                        }
-                                    }
-                                }
+                                    artContent = albumArt,
+                                )
                             }
                             itemsIndexed(tracks, key = { idx, t -> "track_${t.id}_$idx" }) { idx, track ->
                                 AlbumTrackRow(track = track, onClick = { onPlayTrack(track, idx) }, onLongClick = { onTrackLongPress(track) })
@@ -358,8 +374,9 @@ fun AlbumDetailScreen(
             }
         }
 
-            // Screen-level back pill — single-pane only; visible in loading/error/content states.
-            if (!isWideScreen) {
+            // Screen-level back pill. Single-pane: always (loading/error/content). Two-pane: only
+            // while loading/erroring — once the album loads, the left-pane hero carries its own back.
+            if (!isWideScreen || state.album == null) {
                 TopActionPill(
                     modifier = Modifier
                         .align(Alignment.TopStart)
@@ -382,68 +399,6 @@ fun AlbumDetailScreen(
         onGoToAlbum  = {},   // album rows never expose this — we're already on the album
         onGoToArtist = { id -> onOpenArtist?.invoke(id) },
     )
-}
-
-@Composable
-private fun AlbumHeader(
-    album        : SpotifyAlbumFull,
-    tracks       : List<AlbumTrack>,
-    modifier     : Modifier = Modifier,
-    compact      : Boolean  = false,
-    showDivider  : Boolean  = true,
-    onPlayAll    : () -> Unit,
-    onOpenArtist : ((artistId: String) -> Unit)? = null,
-) {
-    Column {
-        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-            AsyncImage(
-                model              = album.artUrl,
-                contentDescription = album.name,
-                contentScale       = ContentScale.Crop,
-                modifier           = modifier,
-            )
-        }
-        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-            Text(
-                text  = album.name,
-                style = if (compact) MaterialTheme.typography.titleMedium
-                        else MaterialTheme.typography.titleLarge,
-            )
-            if (!album.artists.isNullOrEmpty()) {
-                val firstArtistId = album.artists.firstOrNull()?.id
-                Text(
-                    text     = album.artists.joinToString(", ") { it.name },
-                    style    = MaterialTheme.typography.bodyMedium,
-                    color    = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = if (onOpenArtist != null && firstArtistId != null)
-                        Modifier.clickable { onOpenArtist(firstArtistId) }
-                    else Modifier,
-                )
-            }
-            Spacer(Modifier.height(4.dp))
-            val totalMs   = tracks.sumOf { it.durationMs }
-            val metaParts = listOfNotNull(
-                album.releaseYear.takeIf { it.isNotBlank() },
-                album.albumTypeDisplay.takeIf { it.isNotBlank() },
-                if (tracks.isNotEmpty()) pluralStringResource(R.plurals.album_tracks_count, tracks.size, tracks.size) else null,
-                if (totalMs > 0L) totalMs.toDurationString() else null,
-            )
-            Text(
-                text  = metaParts.joinToString(" · "),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(12.dp))
-            FilledTonalButton(onClick = onPlayAll, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text(stringResource(R.string.album_play))
-            }
-        }
-        if (showDivider) HorizontalDivider()
-    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)

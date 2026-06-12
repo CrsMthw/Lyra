@@ -35,11 +35,13 @@ import com.crsmthw.lyra.R
 
 /**
  * The shared OneUI-style detail hero used by the playlist/Liked, album, and artist detail screens
- * (single-pane): the art clipped to a 4-sided cookie shape (bordered, centred), then a row with the
- * [title] + [subtitle] on the left and optional shuffle/play cookie buttons on the right. Pass
- * `onShuffle`/`onPlay` = null to omit that button (the artist screen has neither). [artContent]
- * renders the art inside the cookie tile (a `fillMaxSize` `AsyncImage`, or a fallback). The title
- * crossfades into the floating title pill as the hero scrolls away (it's the list's item 0).
+ * (single-pane hero, and the two-pane left panel): the art clipped to a 4-sided cookie shape
+ * (bordered, centred), then a row with the [title] + [subtitle] (+ optional [meta] line) on the
+ * left and optional shuffle/play cookie buttons on the right. Pass `onShuffle`/`onPlay` = null to
+ * omit that button (the artist screen has neither). [meta] is a second, smaller line under the
+ * subtitle (the album screen's `year · type · N songs · playtime`). [artContent] renders the art
+ * inside the cookie tile (a `fillMaxSize` `AsyncImage`, or a fallback). The title crossfades into
+ * the floating title pill as the hero scrolls away (it's the list's item 0).
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -47,6 +49,7 @@ fun DetailArtHero(
     title      : String,
     modifier   : Modifier = Modifier,
     subtitle   : String? = null,
+    meta       : String? = null,
     onPlay     : (() -> Unit)? = null,
     onShuffle  : (() -> Unit)? = null,
     artSize    : Dp = 220.dp,
@@ -86,6 +89,16 @@ fun DetailArtHero(
                     Text(
                         text     = subtitle,
                         style    = MaterialTheme.typography.bodyMedium,
+                        color    = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
+                if (!meta.isNullOrBlank()) {
+                    Text(
+                        text     = meta,
+                        style    = MaterialTheme.typography.bodySmall,
                         color    = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,

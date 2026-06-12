@@ -39,7 +39,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.remote.model.SpotifyAlbum
-import com.crsmthw.lyra.data.remote.model.SpotifyArtistFull
 import com.crsmthw.lyra.ui.components.DetailArtHero
 import com.crsmthw.lyra.ui.components.PlayerPanelHost
 import com.crsmthw.lyra.ui.components.TitlePill
@@ -71,6 +70,7 @@ fun ArtistDetailScreen(
     val haptics        = LocalHapticFeedback.current
     val density        = LocalDensity.current
     val navBarBottomDp = with(density) { WindowInsets.navigationBars.getBottom(this).toDp() }
+    val statusBarTopDp = with(density) { WindowInsets.statusBars.getTop(this).toDp() }
     val scrimHeight    = 140.dp
     val background     = MaterialTheme.colorScheme.background
     val isWideScreen   = currentWindowAdaptiveInfo().windowSizeClass.isWidthAtLeastBreakpoint(600)
@@ -84,46 +84,8 @@ fun ArtistDetailScreen(
     ) { _ ->
     Scaffold(
         contentWindowInsets = WindowInsets(0),
-        topBar = {
-            // Two-pane (unfolded) keeps the solid bar for now; single-pane floats its controls.
-            if (isWideScreen) TopAppBar(
-                modifier     = Modifier
-                    .statusBarsPadding()
-                    .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal)),
-                windowInsets = WindowInsets(0),
-                title = {
-                    Text(
-                        text     = state.artist?.name ?: "",
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                },
-                navigationIcon = {
-                    IconButton(onClick = { haptics.confirm(); onBack() }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(R.string.nav_back))
-                    }
-                },
-                actions = {
-                    IconButton(
-                        onClick = {
-                            haptics.press()
-                            state.artist?.id?.let { id ->
-                                context.startActivity(Intent.createChooser(
-                                    Intent(Intent.ACTION_SEND).apply {
-                                        putExtra(Intent.EXTRA_TEXT, "https://open.spotify.com/artist/$id")
-                                        type = "text/plain"
-                                    }, null
-                                ))
-                            }
-                        },
-                        enabled = state.artist != null,
-                    ) {
-                        Icon(Icons.Default.Share, contentDescription = stringResource(R.string.player_share))
-                    }
-                },
-            )
-        },
+        // No top app bar in either configuration — both single- and two-pane float their own back /
+        // share pills over the hero (a leftover bar here would cover those pills in two-pane).
     ) { paddingValues ->
         Box(Modifier.fillMaxSize()) {
         when {
@@ -156,11 +118,34 @@ fun ArtistDetailScreen(
                     )
                 }
 
+                // Shared artist photo (single-pane hero + two-pane left panel) — image, else a fallback.
+                val artistArt: @Composable BoxScope.() -> Unit = {
+                    if (artist.imageUrl.isNotBlank()) {
+                        AsyncImage(
+                            model              = artist.imageUrl,
+                            contentDescription = artist.name,
+                            contentScale       = ContentScale.Crop,
+                            modifier           = Modifier.fillMaxSize(),
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(Icons.Default.Person, null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.fillMaxSize(0.4f))
+                        }
+                    }
+                }
+
                 if (isWideScreen) {
+                    // Edge-to-edge under a transparent status bar (like single-pane). The hero's
+                    // own `statusBarsPadding()` + the pane TopScrims handle the top inset; no parent
+                    // statusBarsPadding (which would leave an opaque band where the bar sits).
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(paddingValues)
                             .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal)),
                     ) {
                         Row(
@@ -169,28 +154,59 @@ fun ArtistDetailScreen(
                                 .padding(8.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            // Left pane — artist photo + info
+                            // Left pane — the detail hero panel (photo + name), with floating back
+                            // + share pills and a top scrim (no solid bar, no play/shuffle).
                             Card(
                                 modifier  = Modifier.weight(0.42f).fillMaxHeight(),
                                 shape     = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
                                 colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                                 elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                             ) {
-                                BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-                                    val photoSize = maxWidth.coerceAtMost(maxHeight * 0.5f)
-                                    val compact   = maxHeight < 500.dp
+                                Box(modifier = Modifier.fillMaxSize()) {
                                     Column(
                                         modifier = Modifier
                                             .fillMaxSize()
                                             .verticalScroll(rememberScrollState())
                                             .padding(bottom = navBarBottomDp),
                                     ) {
-                                        ArtistHeader(
-                                            artist        = artist,
-                                            modifier      = Modifier.size(photoSize).clip(RoundedCornerShape(12.dp)),
-                                            compact       = compact,
-                                            showDivider   = false,
+                                        DetailArtHero(
+                                            title      = artist.name,
+                                            subtitle   = artist.formattedFollowers.takeIf { it.isNotBlank() },
+                                            artContent = artistArt,
                                         )
+                                    }
+                                    // Top scrim (drawn under the pills) — fades the hero toward the card.
+                                    TopScrim(color = MaterialTheme.colorScheme.surface, modifier = Modifier.align(Alignment.TopCenter))
+                                    // Back pill (top-left).
+                                    TopActionPill(
+                                        modifier = Modifier
+                                            .align(Alignment.TopStart)
+                                            .statusBarsPadding()
+                                            .padding(start = 12.dp, top = 8.dp),
+                                    ) {
+                                        IconButton(onClick = { haptics.confirm(); onBack() }) {
+                                            Icon(Icons.AutoMirrored.Filled.ArrowBack,
+                                                contentDescription = stringResource(R.string.nav_back))
+                                        }
+                                    }
+                                    // Share pill (top-right).
+                                    TopActionPill(
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .statusBarsPadding()
+                                            .padding(end = 12.dp, top = 8.dp),
+                                    ) {
+                                        IconButton(onClick = {
+                                            haptics.press()
+                                            context.startActivity(Intent.createChooser(
+                                                Intent(Intent.ACTION_SEND).apply {
+                                                    putExtra(Intent.EXTRA_TEXT, "https://open.spotify.com/artist/${artist.id}")
+                                                    type = "text/plain"
+                                                }, null
+                                            ))
+                                        }) {
+                                            Icon(Icons.Default.Share, contentDescription = stringResource(R.string.player_share))
+                                        }
                                     }
                                 }
                             }
@@ -208,7 +224,7 @@ fun ArtistDetailScreen(
                                     LazyColumn(
                                         state          = albumsListState,
                                         modifier       = Modifier.fillMaxSize(),
-                                        contentPadding = PaddingValues(bottom = 100.dp + navBarBottomDp),
+                                        contentPadding = PaddingValues(top = statusBarTopDp, bottom = 100.dp + navBarBottomDp),
                                     ) {
                                         artistContent(
                                             state         = state,
@@ -224,6 +240,8 @@ fun ArtistDetailScreen(
                                             .align(Alignment.BottomCenter)
                                             .background(Brush.verticalGradient(listOf(Color.Transparent, MaterialTheme.colorScheme.surface)))
                                     )
+                                    // Top scrim — fades the discography under the transparent status bar.
+                                    TopScrim(color = MaterialTheme.colorScheme.surface, modifier = Modifier.align(Alignment.TopCenter))
                                 }
                             }
                         }
@@ -253,27 +271,10 @@ fun ArtistDetailScreen(
                         ) {
                             item(key = "header") {
                                 DetailArtHero(
-                                    title    = artist.name,
-                                    subtitle = artist.formattedFollowers.takeIf { it.isNotBlank() },
-                                ) {
-                                    if (artist.imageUrl.isNotBlank()) {
-                                        AsyncImage(
-                                            model              = artist.imageUrl,
-                                            contentDescription = artist.name,
-                                            contentScale       = ContentScale.Crop,
-                                            modifier           = Modifier.fillMaxSize(),
-                                        )
-                                    } else {
-                                        Box(
-                                            modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surfaceVariant),
-                                            contentAlignment = Alignment.Center,
-                                        ) {
-                                            Icon(Icons.Default.Person, null,
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.fillMaxSize(0.4f))
-                                        }
-                                    }
-                                }
+                                    title      = artist.name,
+                                    subtitle   = artist.formattedFollowers.takeIf { it.isNotBlank() },
+                                    artContent = artistArt,
+                                )
                             }
                             artistContent(
                                 state         = state,
@@ -337,8 +338,9 @@ fun ArtistDetailScreen(
             }
         }
 
-            // Screen-level back pill — single-pane only; visible in loading/error/content states.
-            if (!isWideScreen) {
+            // Screen-level back pill. Single-pane: always (loading/error/content). Two-pane: only
+            // while loading/erroring — once the artist loads, the left-pane hero carries its own back.
+            if (!isWideScreen || state.artist == null) {
                 TopActionPill(
                     modifier = Modifier
                         .align(Alignment.TopStart)
@@ -387,65 +389,6 @@ private fun LazyListScope.artistContent(
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun ArtistHeader(
-    artist        : SpotifyArtistFull,
-    modifier      : Modifier = Modifier,
-    compact       : Boolean  = false,
-    showDivider   : Boolean  = true,
-) {
-    Column {
-        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-            if (artist.imageUrl.isNotBlank()) {
-                AsyncImage(
-                    model              = artist.imageUrl,
-                    contentDescription = artist.name,
-                    contentScale       = ContentScale.Crop,
-                    modifier           = modifier,
-                )
-            } else {
-                Surface(
-                    modifier = modifier,
-                    color    = MaterialTheme.colorScheme.surfaceVariant,
-                    shape    = RoundedCornerShape(12.dp),
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.Default.Person, contentDescription = null,
-                            modifier = Modifier.fillMaxSize(0.4f),
-                            tint     = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-            }
-        }
-        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-            Text(
-                text  = artist.name,
-                style = if (compact) MaterialTheme.typography.titleMedium
-                        else MaterialTheme.typography.titleLarge,
-            )
-            val genres = artist.genres?.take(3)?.joinToString(" · ")
-            if (!genres.isNullOrBlank()) {
-                Text(
-                    text     = genres,
-                    style    = MaterialTheme.typography.bodySmall,
-                    color    = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            val followers = artist.formattedFollowers
-            if (followers.isNotBlank()) {
-                Text(
-                    text  = followers,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-        if (showDivider) HorizontalDivider()
     }
 }
 
