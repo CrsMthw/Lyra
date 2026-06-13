@@ -214,6 +214,8 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
                         playerVm.playTrack(uri, uris = uris)
                         safePush(Screen.Player.route)
                     },
+                    sharedTransitionScope = this@SharedTransitionLayout,
+                    animatedContentScope  = this@composable,
                 )
             }
 

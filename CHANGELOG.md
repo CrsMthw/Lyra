@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Search FAB → search-bar container transform** — tapping the Library search button now expands it into the Search screen's floating search bar via a cross-destination `sharedBounds` morph (shared key `"search-bar"`), springing through the same expressive `rememberArtBoundsTransform()` used by the album-art morphs, and reversing on Back. The Search screen's auto-focus is held until the morph settles so the keyboard pop doesn't stutter the transition. Works in both the folded single-pane and unfolded two-pane layouts (the two-pane FAB lives inside the left-pane card, but the morph renders in the shared-element overlay so the card clip doesn't truncate it).
+- **Recent searches** — the Search screen shows a "Recent" list (newest first, capped at 5) of results you've **tapped** — tracks, albums, artists, and playlists; merely typing a query never adds anything. Tapping a recent re-opens it and bumps it to the front. The list is top-anchored in the non-keyboard-padded area so the IME can't lift it, and it disappears the instant you type. Persisted to its own `recent_searches.json` via `LibraryCache`, so it survives restarts.
+
+### Changed
+- **Search FAB restyled** — the Library search FAB no longer reads as a clone of the playlist Play buttons sitting right behind it: it now uses a `tertiaryContainer` tone (vs the Play buttons' `primaryContainer`) and the M3 Expressive **SoftBurst** silhouette (vs the default FAB squircle), and is a `MediumFloatingActionButton` for a bit more presence. Applied to both the single-pane and unfolded two-pane FABs.
+- **Search screen → floating controls + M3 search bar** — the old opaque top bar with a plain `OutlinedTextField` is replaced by Lyra's edge-to-edge floating-controls pattern (transparent status bar, `TopScrim` fading into the top edge, results scrolling underneath). The bar itself is now a Material 3 `SearchBarDefaults.InputField` (transparent, inside a `surfaceContainerHigh` stadium with a soft shadow to match the other floating pills), with the **back arrow as its own leading icon** (no separate back pill) and a clear (✕) trailing icon. Placeholder reads "Songs/Artists/Albums". The empty-query state's centered search-icon graphic was removed — a blank query now just shows the floating bar over empty space.
+
 ## [3.0.0] - 2026-06-13
 
 ### Added
@@ -202,6 +212,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial release
 
+[Unreleased]: https://github.com/CrsMthw/Lyra/compare/v3.0.0...HEAD
 [Unreleased]: https://github.com/CrsMthw/Lyra/compare/v3.0.0...HEAD
 [3.0.0]: https://github.com/CrsMthw/Lyra/compare/v2.2.0...v3.0.0
 [2.2.0]: https://github.com/CrsMthw/Lyra/compare/v2.1.0...v2.2.0

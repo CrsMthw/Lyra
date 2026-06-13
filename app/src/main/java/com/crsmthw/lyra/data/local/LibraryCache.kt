@@ -17,6 +17,20 @@ data class CachedTrackList(
     val tracks     : List<SpotifyTrack>,
 )
 
+/**
+ * One tapped Search result, persisted for the Search screen's "Recent" section. Stores just enough
+ * to re-render the row and re-navigate: [type] is "track" | "album" | "artist" | "playlist";
+ * [uri] is only meaningful for tracks (to play) and playlists; albums/artists navigate by [id].
+ */
+data class RecentSearch(
+    val type     : String,
+    val id       : String,
+    val uri      : String,
+    val name     : String,
+    val subtitle : String,
+    val imageUrl : String?,
+)
+
 data class LibraryCacheData(
     val playlists         : List<SpotifyPlaylist>          = emptyList(),
     val featuredPlaylists : List<SpotifyPlaylist>          = emptyList(),
@@ -28,6 +42,7 @@ data class LibraryCacheData(
 class LibraryCache(context: Context) {
 
     private val file = File(context.filesDir, "library_cache.json")
+    private val recentsFile = File(context.filesDir, "recent_searches.json")
     private val gson = Gson()
     private val lock = Any()
 
@@ -184,6 +199,21 @@ class LibraryCache(context: Context) {
     }
 
     fun clear() = synchronized(lock) { file.delete() }
+
+    // ── Recent searches (Search screen) ─────────────────────────────────────────
+    // Stored in their own file so they're independent of the main library cache and its refresh /
+    // revision machinery. The list is small (capped by the caller), so a plain JSON array suffices.
+
+    fun loadRecentSearches(): List<RecentSearch> = synchronized(lock) {
+        runCatching {
+            if (!recentsFile.exists()) return@runCatching emptyList<RecentSearch>()
+            gson.fromJson(recentsFile.readText(), Array<RecentSearch>::class.java)?.toList().orEmpty()
+        }.getOrDefault(emptyList())
+    }
+
+    fun saveRecentSearches(list: List<RecentSearch>) = synchronized(lock) {
+        runCatching { recentsFile.writeText(gson.toJson(list)) }
+    }
 
     val sizeBytes: Long get() = if (file.exists()) file.length() else 0L
 

@@ -90,6 +90,7 @@ import com.crsmthw.lyra.ui.screens.player.RepeatMode
 import com.crsmthw.lyra.util.ListScrollHaptics
 import com.crsmthw.lyra.util.confirm
 import com.crsmthw.lyra.util.press
+import com.crsmthw.lyra.util.rememberArtBoundsTransform
 import com.crsmthw.lyra.util.threshold
 import com.crsmthw.lyra.util.toTimeString
 import com.crsmthw.lyra.util.visualizer.FftWaveCanvas
@@ -101,6 +102,10 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+/** Pairs the search FAB with the Search screen's bar for the container transform — must match the
+ *  identical key in `SearchScreen`. */
+private const val SEARCH_BAR_SHARED_KEY = "search-bar"
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalSharedTransitionApi::class)
 @Composable
@@ -130,21 +135,25 @@ fun LibraryScreen(
     ) { onRequestPlayer ->
         if (isWideScreen) {
             TwoPaneLayout(
-                state           = state,
-                viewModel       = viewModel,
-                playerViewModel = playerViewModel,
-                onOpenSearch    = onOpenSearchHaptic,
-                onOpenSettings  = onOpenSettings,
-                onRequestPlayer = onRequestPlayer,
+                state                 = state,
+                viewModel             = viewModel,
+                playerViewModel       = playerViewModel,
+                onOpenSearch          = onOpenSearchHaptic,
+                onOpenSettings        = onOpenSettings,
+                onRequestPlayer       = onRequestPlayer,
+                sharedTransitionScope = sharedTransitionScope,
+                animatedContentScope  = animatedContentScope,
             )
         } else {
             SinglePaneLayout(
-                state           = state,
-                viewModel       = viewModel,
-                playerViewModel = playerViewModel,
-                onOpenSearch    = onOpenSearchHaptic,
-                onOpenSettings  = onOpenSettings,
-                onRequestPlayer = onRequestPlayer,
+                state                 = state,
+                viewModel             = viewModel,
+                playerViewModel       = playerViewModel,
+                onOpenSearch          = onOpenSearchHaptic,
+                onOpenSettings        = onOpenSettings,
+                onRequestPlayer       = onRequestPlayer,
+                sharedTransitionScope = sharedTransitionScope,
+                animatedContentScope  = animatedContentScope,
             )
         }
     }
@@ -175,15 +184,18 @@ private fun PullThresholdHaptics(state: PullToRefreshState) {
 
 // ── Single pane (phone / folded) ─────────────────────────────────────────────
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class,
+       ExperimentalSharedTransitionApi::class)
 @Composable
 private fun SinglePaneLayout(
-    state           : LibraryUiState,
-    viewModel       : LibraryViewModel,
-    playerViewModel : PlayerViewModel,
-    onOpenSearch    : () -> Unit,
-    onOpenSettings  : () -> Unit,
-    onRequestPlayer : () -> Unit,
+    state                 : LibraryUiState,
+    viewModel             : LibraryViewModel,
+    playerViewModel       : PlayerViewModel,
+    onOpenSearch          : () -> Unit,
+    onOpenSettings        : () -> Unit,
+    onRequestPlayer       : () -> Unit,
+    sharedTransitionScope : SharedTransitionScope? = null,
+    animatedContentScope  : AnimatedContentScope? = null,
 ) {
     val isShowingDetail = state.currentPlaylist != null || state.isLoadingTracks || state.currentTracks.isNotEmpty()
     val isLandscape = LocalConfiguration.current.let { it.screenWidthDp > it.screenHeightDp }
@@ -281,14 +293,34 @@ private fun SinglePaneLayout(
         }
 
         if (!isShowingDetail) {
-            FloatingActionButton(
-                onClick  = onOpenSearch,
+            // Container transform: shares bounds with the Search screen's floating bar (same
+            // SEARCH_BAR_SHARED_KEY) so tapping expands the FAB into the bar. Null scopes → no morph.
+            val fabSharedModifier: Modifier =
+                if (sharedTransitionScope != null && animatedContentScope != null) {
+                    with(sharedTransitionScope) {
+                        Modifier.sharedBounds(
+                            sharedContentState      = rememberSharedContentState(key = SEARCH_BAR_SHARED_KEY),
+                            animatedVisibilityScope = animatedContentScope,
+                            boundsTransform         = rememberArtBoundsTransform(),
+                        )
+                    }
+                } else Modifier
+            MediumFloatingActionButton(
+                onClick        = onOpenSearch,
+                // Distinct from the playlist Play FABs (primaryContainer + default FAB squircle),
+                // which sit right behind it — a tertiary tone + the expressive SoftBurst silhouette
+                // so the two never read as the same control.
+                containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                contentColor   = MaterialTheme.colorScheme.onTertiaryContainer,
+                shape          = MaterialShapes.SoftBurst.toShape(),
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .navigationBarsPadding()
-                    .padding(end = 16.dp, bottom = fabBottomPadding),
+                    .padding(end = 16.dp, bottom = fabBottomPadding)
+                    .then(fabSharedModifier),
             ) {
-                Icon(Icons.Default.Search, contentDescription = "Search")
+                Icon(Icons.Default.Search, contentDescription = "Search",
+                    modifier = Modifier.size(FloatingActionButtonDefaults.MediumIconSize))
             }
         }
     }
@@ -623,15 +655,18 @@ private fun LibraryBrowserPane(
 
 // ── Two-pane (unfolded / tablet) ─────────────────────────────────────────────
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class,
+       ExperimentalSharedTransitionApi::class)
 @Composable
 private fun TwoPaneLayout(
-    state           : LibraryUiState,
-    viewModel       : LibraryViewModel,
-    playerViewModel : PlayerViewModel,
-    onOpenSearch    : () -> Unit,
-    onOpenSettings  : () -> Unit,
-    onRequestPlayer : () -> Unit,
+    state                 : LibraryUiState,
+    viewModel             : LibraryViewModel,
+    playerViewModel       : PlayerViewModel,
+    onOpenSearch          : () -> Unit,
+    onOpenSettings        : () -> Unit,
+    onRequestPlayer       : () -> Unit,
+    sharedTransitionScope : SharedTransitionScope? = null,
+    animatedContentScope  : AnimatedContentScope? = null,
 ) {
     val config    = LocalConfiguration.current
     val isLandscape = config.screenWidthDp > config.screenHeightDp
@@ -694,14 +729,32 @@ private fun TwoPaneLayout(
                                 )
                             )
                     )
-                    FloatingActionButton(
-                        onClick  = onOpenSearch,
+                    // Same FAB→search-bar container transform as single-pane (shared key). The FAB
+                    // sits inside the left-pane Card, but sharedBounds renders in the overlay during
+                    // the transition, so the Card clip doesn't truncate the morph.
+                    val fabSharedModifier: Modifier =
+                        if (sharedTransitionScope != null && animatedContentScope != null) {
+                            with(sharedTransitionScope) {
+                                Modifier.sharedBounds(
+                                    sharedContentState      = rememberSharedContentState(key = SEARCH_BAR_SHARED_KEY),
+                                    animatedVisibilityScope = animatedContentScope,
+                                    boundsTransform         = rememberArtBoundsTransform(),
+                                )
+                            }
+                        } else Modifier
+                    MediumFloatingActionButton(
+                        onClick        = onOpenSearch,
+                        containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                        contentColor   = MaterialTheme.colorScheme.onTertiaryContainer,
+                        shape          = MaterialShapes.SoftBurst.toShape(),
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
                             .navigationBarsPadding()
-                            .padding(16.dp),
+                            .padding(16.dp)
+                            .then(fabSharedModifier),
                     ) {
-                        Icon(Icons.Default.Search, contentDescription = "Search")
+                        Icon(Icons.Default.Search, contentDescription = "Search",
+                            modifier = Modifier.size(FloatingActionButtonDefaults.MediumIconSize))
                     }
                 }
             }

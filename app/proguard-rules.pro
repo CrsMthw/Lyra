@@ -9,6 +9,7 @@
 -keep class com.crsmthw.lyra.data.remote.model.** { *; }
 -keep class com.crsmthw.lyra.data.local.CachedTrackList { *; }
 -keep class com.crsmthw.lyra.data.local.LibraryCacheData { *; }
+-keep class com.crsmthw.lyra.data.local.RecentSearch { *; }
 
 # Spotify App Remote
 -keep class com.spotify.android.appremote.** { *; }

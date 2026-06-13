@@ -17,7 +17,7 @@
 - Home-screen widget — resizable Now Playing widget with playback controls; its layout and artwork scale to the size you choose, and its colours are drawn from the current album art
 - Album detail screen — full track list, play + shuffle, label/copyright footer
 - Artist detail screen — discography grouped by Albums / Singles / Compilations
-- Search for tracks, albums, and artists
+- Search for tracks, albums, artists, and playlists — with a Recent list of the results you last opened, and the search button expanding into the search bar as you open it
 - Open Spotify share links directly in Lyra (`open.spotify.com/track/…`, `/album/…`, `/artist/…`)
 - Sleep timer with Live notification countdown on Android 16+
 - Pull-to-refresh on both the library and track lists
