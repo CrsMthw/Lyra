@@ -9,16 +9,25 @@ import org.apache.commons.math3.analysis.polynomials.PolynomialSplineFunction
 
 class FftWavePainter(
     var startHz : Int   = 0,
-    var endHz   : Int   = 2000,
+    var endHz   : Int   = 6000,   // ProjectM-style: lower half of its 0..Fs/4 spectrum (~0-6 kHz @48k)
     var numBands: Int   = 128,
-    var ampR    : Float = 0.4f,
+    var ampR    : Float = 32f,
 ) {
     private val akima        = AkimaSplineInterpolator()
     private val path         = Path()
     private var models       = Array(0) { GravityModel() }
     private var psf          : PolynomialSplineFunction? = null
     private var lastActiveMs : Long = 0L
-    private val agc          = Agc()
+    private var binAvg       = DoubleArray(0)   // per-band slow running average (ProjectM normalization)
+
+    /** Frequency-band count the FFT is grouped into — the visualizer resolution (set from settings). */
+    var bandCount: Int = 24
+
+    /** true = RMS grouping (dramatic, larger spikes); false = mean (even, smooth). Set from settings. */
+    var useRms: Boolean = false
+
+    /** Multiplier on [ampR] from the user's gain-offset setting (1.0 = no change). */
+    var gainMul: Float = 1f
 
     var isActive: Boolean = false
         private set
@@ -26,13 +35,23 @@ class FftWavePainter(
     fun setFftData(fftBytes: ByteArray) {
         val raw = getFftMagnitudeRange(fftBytes, startHz, endHz)
         if (raw.size < 3) return
-        // AGC + silence gate: volume-independent liveliness; true silence → null → decay.
-        var fft = agc.process(raw) ?: return
+        // Group into the chosen resolution (RMS), THEN per-band volume-normalize — ProjectM:
+        // divide each band by its OWN slow running average (volume-independent + frequency-
+        // balanced; treble dances as hard as bass). Replaces AGC + tilt.
+        val grouped = if (useRms) groupRms(raw, bandCount) else groupMean(raw, bandCount)
+        if (binAvg.size != grouped.size) binAvg = DoubleArray(grouped.size) { grouped[it] }
+        var anyAbove = false
+        val norm = DoubleArray(grouped.size) { i ->
+            binAvg[i] = binAvg[i] * 0.99 + grouped[i] * 0.01    // slow long-average (ProjectM-like)
+            val v = (grouped[i] / binAvg[i].coerceAtLeast(6.0) - 0.5).coerceAtLeast(0.0)
+            if (v > 0.0) anyAbove = true
+            v
+        }
+        if (!anyAbove) return
         lastActiveMs = System.currentTimeMillis()
-        fft = applyFrequencyTilt(fft)
-        fft = getMirrorFft(fft)
+        val fft = getMirrorFft(applyMilkdropEqualize(norm, 1.6))   // ProjectM log treble-lift on top of normalization
         if (models.size != fft.size) models = Array(fft.size) { GravityModel() }
-        models.forEachIndexed { i, m -> m.update(fft[i].toFloat() * ampR) }
+        models.forEachIndexed { i, m -> m.update(fft[i].toFloat() * ampR * gainMul) }
         isActive = true
     }
 

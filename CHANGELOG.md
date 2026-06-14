@@ -7,13 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-06-14
+
 ### Added
 - **Search FAB → search-bar container transform** — tapping the Library search button now expands it into the Search screen's floating search bar via a cross-destination `sharedBounds` morph (shared key `"search-bar"`), springing through the same expressive `rememberArtBoundsTransform()` used by the album-art morphs, and reversing on Back. The Search screen's auto-focus is held until the morph settles so the keyboard pop doesn't stutter the transition. Works in both the folded single-pane and unfolded two-pane layouts (the two-pane FAB lives inside the left-pane card, but the morph renders in the shared-element overlay so the card clip doesn't truncate it).
 - **Recent searches** — the Search screen shows a "Recent" list (newest first, capped at 5) of results you've **tapped** — tracks, albums, artists, and playlists; merely typing a query never adds anything. Tapping a recent re-opens it and bumps it to the front. The list is top-anchored in the non-keyboard-padded area so the IME can't lift it, and it disappears the instant you type. Persisted to its own `recent_searches.json` via `LibraryCache`, so it survives restarts.
+- **Visualizer — advanced settings** — turning the visualizer on now reveals an **Advanced visualizer settings** row that opens an M3 modal bottom sheet with: **Surfaces** (Circle / Bottom / Both); **Resolution** — a 7-step slider (4 / 8 / 16 / 24 / 32 / 64 / 128 bands, default 24) setting how many frequency bands the FFT is grouped into (fewer = bigger, rounder waves; more = sharper peaks); a **Gain** offset (−3…+3, 0 = the built-in level) for when the wave moves too much or too little at your usual volume; and an **Averaging method** picker (**RMS** = more dramatic peaks / **Mean** = more even, ProjectM-style). Resolution and Gain each carry a **Sync circle & bottom** toggle (shown only when Surfaces = Both) — turn it off to size the circle and bottom independently. A **Reset visualizer settings** card (error-tinted, with a confirmation dialog) restores every visualizer option to its default. Sliders fire `SegmentTick` haptics per step; all values persist in DataStore.
 
 ### Changed
 - **Search FAB restyled** — the Library search FAB no longer reads as a clone of the playlist Play buttons sitting right behind it: it now uses a `tertiaryContainer` tone (vs the Play buttons' `primaryContainer`) and the M3 Expressive **SoftBurst** silhouette (vs the default FAB squircle), and is a `MediumFloatingActionButton` for a bit more presence. Applied to both the single-pane and unfolded two-pane FABs.
 - **Search screen → floating controls + M3 search bar** — the old opaque top bar with a plain `OutlinedTextField` is replaced by Lyra's edge-to-edge floating-controls pattern (transparent status bar, `TopScrim` fading into the top edge, results scrolling underneath). The bar itself is now a Material 3 `SearchBarDefaults.InputField` (transparent, inside a `surfaceContainerHigh` stadium with a soft shadow to match the other floating pills), with the **back arrow as its own leading icon** (no separate back pill) and a clear (✕) trailing icon. Placeholder reads "Songs/Artists/Albums". The empty-query state's centered search-icon graphic was removed — a blank query now just shows the floating bar over empty space.
+- **Visualizer rebuilt (ProjectM-style) — now tracks the full audible range and the beat** — the analysis pipeline was reworked end-to-end so the visualizer reacts across the whole spectrum, including the percussion the previous build couldn't show:
+  - **Range widened to ~0–6 kHz** (ProjectM's lower half of its 0–Fs/4 spectrum) from the previous ~0–1 kHz, so snares / hi-hats / cymbals finally drive the wave. The bin→frequency mapping (`hzToFftIndex`) was corrected — it was 2× off *and* assumed 44.1 kHz while this device's output mix runs at 48 kHz.
+  - **Per-band volume normalization** — each band is divided by its own slow running average (à la ProjectM's `Loudness`), replacing the global AGC, the linear frequency tilt, and the power step. The display is now volume-independent *and* frequency-balanced, so treble dances as hard as bass and no single peak dominates.
+  - **ProjectM logarithmic equalize** layered on top to lift the very top end.
+  - **RMS or mean band grouping** at the chosen resolution (user-selectable — see Added).
 
 ## [3.0.0] - 2026-06-13
 
@@ -212,8 +220,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial release
 
-[Unreleased]: https://github.com/CrsMthw/Lyra/compare/v3.0.0...HEAD
-[Unreleased]: https://github.com/CrsMthw/Lyra/compare/v3.0.0...HEAD
+[Unreleased]: https://github.com/CrsMthw/Lyra/compare/v3.1.0...HEAD
+[3.1.0]: https://github.com/CrsMthw/Lyra/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/CrsMthw/Lyra/compare/v2.2.0...v3.0.0
 [2.2.0]: https://github.com/CrsMthw/Lyra/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/CrsMthw/Lyra/compare/v2.0.0...v2.1.0

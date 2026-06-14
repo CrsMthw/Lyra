@@ -41,6 +41,23 @@ class SettingsViewModel(
     val visualizerStyle: StateFlow<VisualizerStyle> = settingsRepo.visualizerStyle
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), VisualizerStyle.BOTH)
 
+    val visualizerResolution: StateFlow<Int> = settingsRepo.visualizerResolution
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 24)
+
+    val visualizerDramatic: StateFlow<Boolean> = settingsRepo.visualizerDramatic
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    val visualizerResolutionBottom: StateFlow<Int> = settingsRepo.visualizerResolutionBottom
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 24)
+    val visualizerResolutionSync: StateFlow<Boolean> = settingsRepo.visualizerResolutionSync
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+    val visualizerGain: StateFlow<Int> = settingsRepo.visualizerGain
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
+    val visualizerGainBottom: StateFlow<Int> = settingsRepo.visualizerGainBottom
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
+    val visualizerGainSync: StateFlow<Boolean> = settingsRepo.visualizerGainSync
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
+
     val hapticsEnabled: StateFlow<Boolean> = settingsRepo.hapticsEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
 
@@ -57,7 +74,28 @@ class SettingsViewModel(
     fun setDynamicColor    (enabled: Boolean)   { viewModelScope.launch { settingsRepo.setDynamicColor(enabled)       } }
     fun setVisualizerEnabled(enabled: Boolean)  { viewModelScope.launch { settingsRepo.setVisualizerEnabled(enabled)  } }
     fun setVisualizerStyle (style  : VisualizerStyle) { viewModelScope.launch { settingsRepo.setVisualizerStyle(style) } }
+    fun setVisualizerResolution(bands: Int)     { viewModelScope.launch { settingsRepo.setVisualizerResolution(bands)  } }
+    fun setVisualizerDramatic(dramatic: Boolean){ viewModelScope.launch { settingsRepo.setVisualizerDramatic(dramatic) } }
+    fun setVisualizerResolutionBottom(bands: Int) { viewModelScope.launch { settingsRepo.setVisualizerResolutionBottom(bands) } }
+    fun setVisualizerResolutionSync(sync: Boolean) { viewModelScope.launch { settingsRepo.setVisualizerResolutionSync(sync) } }
+    fun setVisualizerGain(offset: Int)          { viewModelScope.launch { settingsRepo.setVisualizerGain(offset) } }
+    fun setVisualizerGainBottom(offset: Int)    { viewModelScope.launch { settingsRepo.setVisualizerGainBottom(offset) } }
+    fun setVisualizerGainSync(sync: Boolean)    { viewModelScope.launch { settingsRepo.setVisualizerGainSync(sync) } }
     fun setHapticsEnabled  (enabled: Boolean)   { viewModelScope.launch { settingsRepo.setHapticsEnabled(enabled)      } }
+
+    /** Reset every visualizer setting to its default (surfaces=Both, 24 bands, gain 0, synced, mean). */
+    fun resetVisualizerSettings() {
+        viewModelScope.launch {
+            settingsRepo.setVisualizerStyle(VisualizerStyle.BOTH)
+            settingsRepo.setVisualizerResolution(24)
+            settingsRepo.setVisualizerResolutionBottom(24)
+            settingsRepo.setVisualizerResolutionSync(true)
+            settingsRepo.setVisualizerGain(0)
+            settingsRepo.setVisualizerGainBottom(0)
+            settingsRepo.setVisualizerGainSync(true)
+            settingsRepo.setVisualizerDramatic(false)
+        }
+    }
 
     fun clientIdMasked(): String {
         val id = encryptedPrefs.clientId

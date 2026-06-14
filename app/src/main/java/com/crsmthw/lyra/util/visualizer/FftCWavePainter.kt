@@ -11,17 +11,26 @@ import kotlin.math.min
 
 class FftCWavePainter(
     var startHz : Int   = 0,
-    var endHz   : Int   = 2000,
+    var endHz   : Int   = 6000,   // ProjectM-style: lower half of its 0..Fs/4 spectrum (~0-6 kHz @48k)
     var numBands: Int   = 128,
     var radiusR : Float = 1.0f,
-    var ampR    : Float = 0.7f,
+    var ampR    : Float = 85f,
 ) {
     private val akima        = AkimaSplineInterpolator()
     private val path         = Path()
     private var models       = Array(0) { GravityModel() }
     private var psf          : PolynomialSplineFunction? = null
     private var lastActiveMs : Long = 0L
-    private val agc          = Agc()
+    private var binAvg       = DoubleArray(0)   // per-band slow running average (ProjectM normalization)
+
+    /** Frequency-band count the FFT is grouped into — the visualizer resolution (set from settings). */
+    var bandCount: Int = 24
+
+    /** true = RMS grouping (dramatic, larger spikes); false = mean (even, smooth). Set from settings. */
+    var useRms: Boolean = false
+
+    /** Multiplier on [ampR] from the user's gain-offset setting (1.0 = no change). */
+    var gainMul: Float = 1f
 
     // Beat-snap rotation: shifts which circle position receives the bass bulge
     private var bandOffset    : Int   = 0
@@ -35,28 +44,43 @@ class FftCWavePainter(
         val raw = getFftMagnitudeRange(fftBytes, startHz, endHz)
         if (raw.size < 3) return
 
-        // Beat detection on raw magnitudes (ratio-based, so volume-invariant).
-        val energy = (raw.fold(0.0) { acc, v -> acc + v * v } / raw.size).toFloat()
-        rollingEnergy = rollingEnergy * 0.92f + energy * 0.08f
+        // Beat-matched rotation: detect the kick from the SUB-BASS only (bins 0-3 ≈ 47-187 Hz)
+        // — measuring the full band would fire on vocals/instruments, not the beat. On each
+        // kick, jump which angular position the bands map to (rotateBands, applied below).
+        val bassEnergy = (0..3).sumOf { val v = raw.getOrElse(it) { 0.0 }; v * v }.toFloat()
+        rollingEnergy = rollingEnergy * 0.92f + bassEnergy * 0.08f
         val now = System.currentTimeMillis()
-        if (energy > rollingEnergy * 1.6f && now - lastBeatMs > 300L) {
-            // Jump by a varying amount so consecutive beats land on distinct positions
-            val jump = kotlin.random.Random.nextInt(raw.size / 4, (raw.size * 2 / 3).coerceAtLeast(raw.size / 4 + 1))
-            bandOffset = (bandOffset + jump) % raw.size
+        if (bassEnergy > rollingEnergy * 1.5f && now - lastBeatMs > 250L && bandCount > 1) {
+            val from = (bandCount / 4).coerceAtLeast(1)
+            val jump = kotlin.random.Random.nextInt(from, (bandCount * 2 / 3).coerceAtLeast(from + 1))
+            bandOffset = (bandOffset + jump) % bandCount
             lastBeatMs = now
         }
 
-        // AGC + silence gate: volume-independent liveliness; true silence → null → decay.
-        var fft = agc.process(raw) ?: return
+        // Group into the chosen resolution (RMS), THEN per-band volume-normalize — ProjectM's
+        // core trick: divide each band by its OWN slow running average so every frequency is
+        // judged against its own history. Volume-independent AND frequency-balanced (treble
+        // dances as hard as bass), so no single peak dominates.
+        val grouped = if (useRms) groupRms(raw, bandCount) else groupMean(raw, bandCount)
+        if (binAvg.size != grouped.size) binAvg = DoubleArray(grouped.size) { grouped[it] }
+        var anyAbove = false
+        val norm = DoubleArray(grouped.size) { i ->
+            binAvg[i] = binAvg[i] * 0.99 + grouped[i] * 0.01    // slow long-average (ProjectM-like)
+            val v = (grouped[i] / binAvg[i].coerceAtLeast(6.0) - 0.5).coerceAtLeast(0.0)
+            if (v > 0.0) anyAbove = true
+            v
+        }
+        if (!anyAbove) return
         lastActiveMs = System.currentTimeMillis()
 
-        fft = getPowerFft(fft)
-        fft = applyFrequencyTilt(fft)
-        // Rotate so the bass bulge blooms at a different circle position each beat
-        if (bandOffset > 0) fft = rotateBands(fft, bandOffset)
-        fft = getCircleFft(fft)
+        // ProjectM log "equalize" on top of the normalization — lifts treble (the top-left
+        // quadrant of the ring) so it dances as tall as the bass instead of sitting low.
+        // Equalize while indices still map to frequency, THEN rotate to scatter the bands.
+        var eq = applyMilkdropEqualize(norm, 1.6)
+        if (bandOffset > 0) eq = rotateBands(eq, bandOffset)
+        val fft = getCircleFft(eq)
         if (models.size != fft.size) models = Array(fft.size) { GravityModel() }
-        models.forEachIndexed { i, m -> m.update(fft[i].toFloat() * ampR) }
+        models.forEachIndexed { i, m -> m.update(fft[i].toFloat() * ampR * gainMul) }
         isActive = true
     }
 

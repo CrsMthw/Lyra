@@ -27,7 +27,11 @@ import com.crsmthw.lyra.util.loadAlbumArtColors
 import com.crsmthw.lyra.util.visualizer.LocalFftData
 import com.crsmthw.lyra.util.visualizer.LocalVisualizerAccentColor
 import com.crsmthw.lyra.util.visualizer.LocalVisualizerBottomEnabled
+import com.crsmthw.lyra.util.visualizer.LocalVisualizerConfig
+import com.crsmthw.lyra.util.visualizer.VisualizerConfig
+import com.crsmthw.lyra.util.visualizer.VisualizerStyle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlin.math.pow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -132,10 +136,31 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
         ) { enabled, style -> enabled && style.showBottom }.distinctUntilChanged()
     }.collectAsStateWithLifecycle(false)
 
+    // Per-surface visualizer config (resolution + gain offset, each with a sync toggle that
+    // splits circle/bottom only when style is BOTH). Built from the settings and pushed to the
+    // painters via LocalVisualizerConfig. Gain offset n maps to a ×1.4^n multiplier on base gain.
+    val vStyle    by container.settingsRepository.visualizerStyle.collectAsStateWithLifecycle(VisualizerStyle.BOTH)
+    val vResC     by container.settingsRepository.visualizerResolution.collectAsStateWithLifecycle(24)
+    val vResB     by container.settingsRepository.visualizerResolutionBottom.collectAsStateWithLifecycle(24)
+    val vResSync  by container.settingsRepository.visualizerResolutionSync.collectAsStateWithLifecycle(true)
+    val vGainC    by container.settingsRepository.visualizerGain.collectAsStateWithLifecycle(0)
+    val vGainB    by container.settingsRepository.visualizerGainBottom.collectAsStateWithLifecycle(0)
+    val vGainSync by container.settingsRepository.visualizerGainSync.collectAsStateWithLifecycle(true)
+    val vDramatic by container.settingsRepository.visualizerDramatic.collectAsStateWithLifecycle(false)
+    val bothSurfaces = vStyle == VisualizerStyle.BOTH
+    val visualizerConfig = VisualizerConfig(
+        circleBands   = vResC,
+        bottomBands   = if (bothSurfaces && !vResSync) vResB else vResC,
+        circleGainMul = 1.4f.pow(vGainC),
+        bottomGainMul = 1.4f.pow(if (bothSurfaces && !vGainSync) vGainB else vGainC),
+        dramatic      = vDramatic,
+    )
+
     CompositionLocalProvider(
         LocalFftData provides container.visualizerManager.fftData,
         LocalVisualizerAccentColor provides visualizerAccentColor,
         LocalVisualizerBottomEnabled provides bottomVisualizerEnabled,
+        LocalVisualizerConfig provides visualizerConfig,
     ) {
     // Screen push/pop slides settle via the expressive `motionScheme` so navigation springs in
     // instead of the framework's flat default spring. Read here (composable scope) and captured —

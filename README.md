@@ -11,7 +11,7 @@
 - Library browser with playlist and liked songs support
 - Full player with seek, shuffle, repeat, sleep timer, and queue-aware playback
 - Synchronized lyrics — time-synced, auto-scrolling lyrics on the player screen (via LRCLIB), with a plain-text fallback when synced lyrics aren't available
-- Audio visualizer — optional reactive visualizer coloured from the current album art; choose the circular pulse behind the album art, the wave along the bottom of other screens, or both, in Settings
+- Audio visualizer — optional, album-art-coloured visualizer that reacts across the full audible range (ProjectM-style per-band normalization); choose the circular pulse behind the album art, the wave along the bottom of other screens, or both, plus resolution, gain, and averaging controls in Settings
 - Add to / remove from playlists, like a song, or jump to its album/artist — from the player or any track's touch-and-hold menu; create a new playlist on the spot
 - Spotify Connect device switching — transfer playback to any device on your account, with a volume slider for the active device; "This device" card wakes Spotify locally when it isn't running
 - Home-screen widget — resizable Now Playing widget with playback controls; its layout and artwork scale to the size you choose, and its colours are drawn from the current album art
@@ -143,7 +143,7 @@ app/src/main/java/com/crsmthw/lyra/
 │   ├── navigation/  LyraNavGraph, Screen
 │   ├── screens/     auth / library / player / search / settings / album / artist / queue
 │   └── theme/       Material You + static colour schemes, AMOLED overlay
-├── util/            Extensions, Motion, visualizer (Visualizer(0) capture + AGC + FFT painters)
+├── util/            Extensions, Motion, visualizer (Visualizer(0) capture + per-band-normalized FFT painters)
 └── widget/          Home-screen widget (Jetpack Glance)
 ```
 
@@ -177,6 +177,7 @@ app/src/main/java/com/crsmthw/lyra/
 
 - **Lyrics** — [LRCLIB](https://github.com/tranxuanthang/lrclib), a free and open-source lyrics API
 - **Visualizer** — visual style inspired by [Nier-Visualizer](https://github.com/bogerchan/Nier-Visualizer) and [NextGenVisualizer](https://github.com/jeffshee/NextGenVisualizer)
+- **Visualizer audio analysis** — [projectM](https://github.com/projectM-visualizer/projectm), an open-source music visualizer whose per-band normalization + logarithmic-equalize approach Lyra's analysis is modeled on (reimplemented in Kotlin; no projectM code is used)
 - **App icon** — idea by BambiD, drawn up digitally by Shubbu
 
 ---

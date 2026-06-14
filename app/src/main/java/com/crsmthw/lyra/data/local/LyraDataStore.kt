@@ -5,6 +5,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.crsmthw.lyra.ui.theme.ThemeMode
@@ -45,6 +46,35 @@ class LyraDataStore(private val context: Context) {
         runCatching { VisualizerStyle.valueOf(raw) }.getOrDefault(VisualizerStyle.BOTH)
     }
 
+    // Number of frequency bands the visualizer groups its FFT bins into (4..128, power of 2).
+    // Lower = fewer, bigger, smoother waves; higher = sharp, high-resolution detail.
+    val visualizerResolution: Flow<Int> = context.dataStore.data.map { prefs ->
+        prefs[Keys.VISUALIZER_RESOLUTION] ?: 24
+    }
+
+    // true = RMS band grouping (dramatic, larger spikes); false = mean (even, smooth, ProjectM-style).
+    val visualizerDramatic: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[Keys.VISUALIZER_DRAMATIC] ?: false
+    }
+
+    // Independent bottom-wave resolution, used only when style is BOTH and the sync toggle is off.
+    val visualizerResolutionBottom: Flow<Int> = context.dataStore.data.map { prefs ->
+        prefs[Keys.VISUALIZER_RESOLUTION_BOTTOM] ?: 24
+    }
+    val visualizerResolutionSync: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[Keys.VISUALIZER_RESOLUTION_SYNC] ?: true
+    }
+    // Gain offset (-3..+3) per surface; 0 = the built-in base gain. Bottom used only when BOTH + unsynced.
+    val visualizerGain: Flow<Int> = context.dataStore.data.map { prefs ->
+        prefs[Keys.VISUALIZER_GAIN] ?: 0
+    }
+    val visualizerGainBottom: Flow<Int> = context.dataStore.data.map { prefs ->
+        prefs[Keys.VISUALIZER_GAIN_BOTTOM] ?: 0
+    }
+    val visualizerGainSync: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[Keys.VISUALIZER_GAIN_SYNC] ?: true
+    }
+
     val hapticsEnabled: Flow<Boolean> = context.dataStore.data.map { prefs ->
         prefs[Keys.HAPTICS_ENABLED] ?: true
     }
@@ -75,6 +105,30 @@ class LyraDataStore(private val context: Context) {
         context.dataStore.edit { it[Keys.VISUALIZER_STYLE] = style.name }
     }
 
+    suspend fun setVisualizerResolution(bands: Int) {
+        context.dataStore.edit { it[Keys.VISUALIZER_RESOLUTION] = bands }
+    }
+
+    suspend fun setVisualizerDramatic(dramatic: Boolean) {
+        context.dataStore.edit { it[Keys.VISUALIZER_DRAMATIC] = dramatic }
+    }
+
+    suspend fun setVisualizerResolutionBottom(bands: Int) {
+        context.dataStore.edit { it[Keys.VISUALIZER_RESOLUTION_BOTTOM] = bands }
+    }
+    suspend fun setVisualizerResolutionSync(sync: Boolean) {
+        context.dataStore.edit { it[Keys.VISUALIZER_RESOLUTION_SYNC] = sync }
+    }
+    suspend fun setVisualizerGain(offset: Int) {
+        context.dataStore.edit { it[Keys.VISUALIZER_GAIN] = offset }
+    }
+    suspend fun setVisualizerGainBottom(offset: Int) {
+        context.dataStore.edit { it[Keys.VISUALIZER_GAIN_BOTTOM] = offset }
+    }
+    suspend fun setVisualizerGainSync(sync: Boolean) {
+        context.dataStore.edit { it[Keys.VISUALIZER_GAIN_SYNC] = sync }
+    }
+
     suspend fun setHapticsEnabled(enabled: Boolean) {
         context.dataStore.edit { it[Keys.HAPTICS_ENABLED] = enabled }
     }
@@ -88,6 +142,13 @@ class LyraDataStore(private val context: Context) {
         val LYRICS_MODE         = booleanPreferencesKey("lyrics_mode")
         val VISUALIZER_ENABLED  = booleanPreferencesKey("visualizer_enabled")
         val VISUALIZER_STYLE    = stringPreferencesKey("visualizer_style")
+        val VISUALIZER_RESOLUTION = intPreferencesKey("visualizer_resolution")
+        val VISUALIZER_DRAMATIC = booleanPreferencesKey("visualizer_dramatic")
+        val VISUALIZER_RESOLUTION_BOTTOM = intPreferencesKey("visualizer_resolution_bottom")
+        val VISUALIZER_RESOLUTION_SYNC = booleanPreferencesKey("visualizer_resolution_sync")
+        val VISUALIZER_GAIN = intPreferencesKey("visualizer_gain")
+        val VISUALIZER_GAIN_BOTTOM = intPreferencesKey("visualizer_gain_bottom")
+        val VISUALIZER_GAIN_SYNC = booleanPreferencesKey("visualizer_gain_sync")
         val HAPTICS_ENABLED     = booleanPreferencesKey("haptics_enabled")
     }
 }

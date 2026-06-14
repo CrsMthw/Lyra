@@ -39,6 +39,24 @@ val LocalVisualizerAccentColor: ProvidableCompositionLocal<Color> =
 val LocalVisualizerBottomEnabled: ProvidableCompositionLocal<Boolean> =
     compositionLocalOf { true }
 
+// The visualizer resolution (FFT band count) chosen in Settings. Dynamic so only the canvases
+// recompose when it changes; each canvas pushes it onto its painter's bandCount.
+/**
+ * Per-surface visualizer render config, derived in LyraNavGraph from the settings (resolution +
+ * gain offset, each with a sync toggle that splits circle/bottom when style is BOTH) and pushed
+ * onto the painters. Dynamic so only the canvases recompose when a setting changes.
+ */
+data class VisualizerConfig(
+    val circleBands  : Int     = 24,
+    val bottomBands  : Int     = 24,
+    val circleGainMul: Float   = 1f,
+    val bottomGainMul: Float   = 1f,
+    val dramatic     : Boolean = false,
+)
+
+val LocalVisualizerConfig: ProvidableCompositionLocal<VisualizerConfig> =
+    compositionLocalOf { VisualizerConfig() }
+
 @Composable
 fun FftWaveCanvas(
     modifier : Modifier = Modifier,
@@ -55,6 +73,12 @@ fun FftWaveCanvas(
 
     val fftBytes by LocalFftData.current.collectAsStateWithLifecycle(null)
     val painter  = remember { FftWavePainter() }
+    val cfg = LocalVisualizerConfig.current
+    LaunchedEffect(cfg) {
+        painter.bandCount = cfg.bottomBands
+        painter.useRms    = cfg.dramatic
+        painter.gainMul   = cfg.bottomGainMul
+    }
     val paint    = remember(color, alpha) {
         AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply {
             this.color = color.copy(alpha = alpha).toArgb()
@@ -94,6 +118,12 @@ fun FftCWaveCanvas(
 ) {
     val fftBytes   by LocalFftData.current.collectAsStateWithLifecycle(null)
     val painter    = remember { FftCWavePainter() }
+    val cfg = LocalVisualizerConfig.current
+    LaunchedEffect(cfg) {
+        painter.bandCount = cfg.circleBands
+        painter.useRms    = cfg.dramatic
+        painter.gainMul   = cfg.circleGainMul
+    }
     val paint      = remember(color, alpha) {
         AndroidPaint(AndroidPaint.ANTI_ALIAS_FLAG).apply {
             this.color = color.copy(alpha = alpha).toArgb()

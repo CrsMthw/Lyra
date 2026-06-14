@@ -2,7 +2,9 @@ package com.crsmthw.lyra.util.visualizer
 
 import kotlin.math.cos
 import kotlin.math.hypot
+import kotlin.math.ln
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 /**
  * Automatic gain control + silence gate for the visualizer (à la ProjectM/Milkdrop).
@@ -73,7 +75,11 @@ fun getFftMagnitude(fftBytes: ByteArray): DoubleArray {
     }
 }
 
-fun hzToFftIndex(hz: Int): Int = (hz * 1024 / 88200).coerceIn(0, 255)
+// mag[k] is FFT bin (k+1), i.e. frequency (k+1) * sampleRate / 1024. So the index for a
+// frequency is hz * 1024 / sampleRate. The old constant (88200) was both 2x too large AND
+// assumed 44.1 kHz; this device's output mix runs at 48 kHz (measured). TODO: plumb the
+// real samplingRate from the Visualizer callback instead of hardcoding.
+fun hzToFftIndex(hz: Int): Int = (hz * 1024 / 48000).coerceIn(0, 255)
 
 fun getFftMagnitudeRange(fftBytes: ByteArray, startHz: Int, endHz: Int): DoubleArray {
     val mag = getFftMagnitude(fftBytes)
@@ -81,6 +87,40 @@ fun getFftMagnitudeRange(fftBytes: ByteArray, startHz: Int, endHz: Int): DoubleA
     val s = hzToFftIndex(startHz).coerceIn(0, mag.size - 1)
     val e = hzToFftIndex(endHz).coerceIn(s + 1, mag.size)
     return mag.copyOfRange(s, e)
+}
+
+/**
+ * Down-samples [data] into [bands] groups by **RMS** (root-mean-square of each contiguous bin
+ * group), the user-chosen visualizer resolution. RMS (not a plain mean) weights the louder bins
+ * so a beat inside a group stays punchy instead of being averaged into mush; it also pools flat
+ * "deadzone" bins with livelier neighbours. Returns [data] unchanged when [bands] >= its size.
+ */
+fun groupRms(data: DoubleArray, bands: Int): DoubleArray {
+    if (bands <= 0 || bands >= data.size) return data
+    return DoubleArray(bands) { b ->
+        val start = b * data.size / bands
+        val end   = ((b + 1) * data.size / bands).coerceAtMost(data.size)
+        var sumSq = 0.0
+        for (i in start until end) sumSq += data[i] * data[i]
+        sqrt(sumSq / (end - start).coerceAtLeast(1))
+    }
+}
+
+/**
+ * Down-samples [data] into [bands] groups by plain **mean** — ProjectM's approach (it sums each
+ * band; after the per-band normalization a sum and a mean are equivalent). Smoother/calmer than
+ * [groupRms], which weights the louder bins for more punch. Returns [data] unchanged when
+ * [bands] >= its size.
+ */
+fun groupMean(data: DoubleArray, bands: Int): DoubleArray {
+    if (bands <= 0 || bands >= data.size) return data
+    return DoubleArray(bands) { b ->
+        val start = b * data.size / bands
+        val end   = ((b + 1) * data.size / bands).coerceAtMost(data.size)
+        var sum = 0.0
+        for (i in start until end) sum += data[i]
+        sum / (end - start).coerceAtLeast(1)
+    }
 }
 
 fun getMirrorFft(fft: DoubleArray): DoubleArray = fft.reversedArray() + fft
@@ -102,6 +142,23 @@ fun applyFrequencyTilt(fft: DoubleArray, tiltFactor: Double = 4.0): DoubleArray 
     val n = fft.size
     if (n <= 1) return fft
     return DoubleArray(n) { i -> fft[i] * (1.0 + tiltFactor * i / (n - 1)) }
+}
+
+/**
+ * ProjectM / Milkdrop-style logarithmic "equalize" curve. Where [applyFrequencyTilt] ramps
+ * gain *linearly* across the band (so it over-boosts the mids), this mirrors MilkdropFFT's
+ * `equalize[i] = scaling * log((N/2 - i) / (N/2))`: unity at the low end, leaving the mids
+ * largely alone, then rising **log-steeply toward the very top** so the highest frequencies
+ * (the percussion "sparkle") counter music's natural bass-heavy falloff without drowning the
+ * vocal range. [boost] scales how aggressive the treble lift is.
+ */
+fun applyMilkdropEqualize(fft: DoubleArray, boost: Double = 3.0): DoubleArray {
+    val n = fft.size
+    if (n <= 1) return fft
+    return DoubleArray(n) { i ->
+        val frac = (i.toDouble() / n).coerceAtMost(0.999)   // 0 .. <1, never log(0)
+        fft[i] * (1.0 + boost * -ln(1.0 - frac))
+    }
 }
 
 fun toCartesian(radius: Float, theta: Float) =

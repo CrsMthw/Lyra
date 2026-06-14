@@ -36,6 +36,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import com.crsmthw.lyra.util.confirm
 import com.crsmthw.lyra.util.press
+import com.crsmthw.lyra.util.tick
 import com.crsmthw.lyra.util.toggle
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -54,6 +55,7 @@ import com.crsmthw.lyra.ui.components.TopScrim
 import com.crsmthw.lyra.ui.components.rememberHeroScrollProgress
 import com.crsmthw.lyra.ui.theme.ThemeMode
 import com.crsmthw.lyra.util.visualizer.VisualizerStyle
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -67,12 +69,20 @@ fun SettingsScreen(
     val dynamicColor        by viewModel.dynamicColor.collectAsStateWithLifecycle()
     val visualizerEnabled   by viewModel.visualizerEnabled.collectAsStateWithLifecycle()
     val visualizerStyle     by viewModel.visualizerStyle.collectAsStateWithLifecycle()
+    val visualizerResolution by viewModel.visualizerResolution.collectAsStateWithLifecycle()
+    val visualizerDramatic  by viewModel.visualizerDramatic.collectAsStateWithLifecycle()
+    val visualizerResolutionBottom by viewModel.visualizerResolutionBottom.collectAsStateWithLifecycle()
+    val visualizerResolutionSync by viewModel.visualizerResolutionSync.collectAsStateWithLifecycle()
+    val visualizerGain      by viewModel.visualizerGain.collectAsStateWithLifecycle()
+    val visualizerGainBottom by viewModel.visualizerGainBottom.collectAsStateWithLifecycle()
+    val visualizerGainSync  by viewModel.visualizerGainSync.collectAsStateWithLifecycle()
     val hapticsEnabled      by viewModel.hapticsEnabled.collectAsStateWithLifecycle()
     val haptics              = LocalHapticFeedback.current
     val imageCacheBytes        by viewModel.imageCacheBytes.collectAsStateWithLifecycle()
     val libraryCacheBytes      by viewModel.libraryCacheBytes.collectAsStateWithLifecycle()
     var showLogoutDialog  by remember { mutableStateOf(false) }
     var showThemeSheet    by remember { mutableStateOf(false) }
+    var showVisualizerSheet by remember { mutableStateOf(false) }
 
     Scaffold(
         contentWindowInsets = WindowInsets(0),
@@ -163,23 +173,18 @@ fun SettingsScreen(
                 onCheckedChange = viewModel::setVisualizerEnabled,
             )
 
-            // Style picker — which surface(s) the visualizer renders on. Only
-            // meaningful when the visualizer is enabled. The expand/shrink settles via the
-            // expressive `motionScheme` so the reveal springs (the fade stays linear — alpha).
+            // Advanced visualizer settings — revealed only when the visualizer is on; opens a
+            // bottom sheet (style / resolution / dramatic peaks) to keep the main list tidy.
             AnimatedVisibility(
                 visible = visualizerEnabled,
                 enter   = fadeIn() + expandVertically(MaterialTheme.motionScheme.defaultSpatialSpec<IntSize>()),
                 exit    = shrinkVertically(MaterialTheme.motionScheme.defaultSpatialSpec<IntSize>()) + fadeOut(),
             ) {
-                ConnectedChoiceRow(
-                    options  = listOf(
-                        VisualizerStyle.CIRCLE to stringResource(R.string.settings_visualizer_style_circle),
-                        VisualizerStyle.BOTTOM to stringResource(R.string.settings_visualizer_style_bottom),
-                        VisualizerStyle.BOTH   to stringResource(R.string.settings_visualizer_style_both),
-                    ),
-                    selected = visualizerStyle,
-                    onSelect = viewModel::setVisualizerStyle,
-                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 8.dp),
+                SettingsItem(
+                    icon     = Icons.Default.Tune,
+                    title    = stringResource(R.string.settings_visualizer_advanced),
+                    subtitle = stringResource(R.string.settings_visualizer_advanced_desc),
+                    onClick  = { showVisualizerSheet = true },
                 )
             }
 
@@ -387,6 +392,30 @@ fun SettingsScreen(
         )
     }
 
+    // ── Advanced visualizer modal sheet ───────────────────────────────────────
+    if (showVisualizerSheet) {
+        VisualizerSheet(
+            style              = visualizerStyle,
+            resolution         = visualizerResolution,
+            resolutionBottom   = visualizerResolutionBottom,
+            resolutionSync     = visualizerResolutionSync,
+            gain               = visualizerGain,
+            gainBottom         = visualizerGainBottom,
+            gainSync           = visualizerGainSync,
+            dramatic           = visualizerDramatic,
+            onStyle            = viewModel::setVisualizerStyle,
+            onResolution       = viewModel::setVisualizerResolution,
+            onResolutionBottom = viewModel::setVisualizerResolutionBottom,
+            onResolutionSync   = viewModel::setVisualizerResolutionSync,
+            onGain             = viewModel::setVisualizerGain,
+            onGainBottom       = viewModel::setVisualizerGainBottom,
+            onGainSync         = viewModel::setVisualizerGainSync,
+            onDramatic         = viewModel::setVisualizerDramatic,
+            onReset            = viewModel::resetVisualizerSettings,
+            onDismiss          = { showVisualizerSheet = false },
+        )
+    }
+
     // ── Logout confirmation dialog ────────────────────────────────────────────
     if (showLogoutDialog) {
         AlertDialog(
@@ -487,6 +516,247 @@ private fun ThemeSheet(
 
         Spacer(Modifier.navigationBarsPadding())
         Spacer(Modifier.height(8.dp))
+    }
+}
+
+/**
+ * Advanced visualizer settings bottom sheet — surfaces (style), resolution (band count) and the
+ * dramatic-peaks (RMS vs mean) toggle. Mirrors [ThemeSheet]: Hidden↔Expanded only, connected
+ * segment picker for style, [SettingsToggleItem] for the toggle. Opened from the main settings list.
+ */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun VisualizerSheet(
+    style             : VisualizerStyle,
+    resolution        : Int,
+    resolutionBottom  : Int,
+    resolutionSync    : Boolean,
+    gain              : Int,
+    gainBottom        : Int,
+    gainSync          : Boolean,
+    dramatic          : Boolean,
+    onStyle           : (VisualizerStyle) -> Unit,
+    onResolution      : (Int) -> Unit,
+    onResolutionBottom: (Int) -> Unit,
+    onResolutionSync  : (Boolean) -> Unit,
+    onGain            : (Int) -> Unit,
+    onGainBottom      : (Int) -> Unit,
+    onGainSync        : (Boolean) -> Unit,
+    onDramatic        : (Boolean) -> Unit,
+    onReset           : () -> Unit,
+    onDismiss         : () -> Unit,
+) {
+    val sheetState = rememberBottomSheetState(
+        SheetValue.Hidden,
+        setOf(SheetValue.Hidden, SheetValue.Expanded),
+    )
+    val both = style == VisualizerStyle.BOTH
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState       = sheetState,
+    ) {
+        // Header
+        Row(
+            modifier          = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Default.Equalizer, contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.width(12.dp))
+            Text(
+                text  = stringResource(R.string.settings_visualizer_advanced),
+                style = MaterialTheme.typography.titleLarge,
+            )
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        // ── Surfaces ──
+        VisualizerSectionLabel(stringResource(R.string.settings_visualizer_style_label))
+        ConnectedChoiceRow(
+            options  = listOf(
+                VisualizerStyle.CIRCLE to stringResource(R.string.settings_visualizer_style_circle),
+                VisualizerStyle.BOTTOM to stringResource(R.string.settings_visualizer_style_bottom),
+                VisualizerStyle.BOTH   to stringResource(R.string.settings_visualizer_style_both),
+            ),
+            selected = style,
+            onSelect = onStyle,
+            modifier = Modifier.padding(horizontal = 16.dp),
+        )
+        VisualizerTip(stringResource(R.string.settings_visualizer_surfaces_tip))
+
+        HorizontalDivider(modifier = Modifier.padding(16.dp))
+
+        // ── Resolution (sync splits circle/bottom only when style is Both) ──
+        VisualizerSectionLabel(stringResource(R.string.settings_visualizer_resolution_section))
+        if (both) {
+            SyncToggleRow(stringResource(R.string.settings_visualizer_sync), resolutionSync, onResolutionSync)
+            if (resolutionSync) {
+                ResolutionSliderRow(null, resolution, onResolution)
+            } else {
+                ResolutionSliderRow(stringResource(R.string.settings_visualizer_label_circle), resolution, onResolution)
+                ResolutionSliderRow(stringResource(R.string.settings_visualizer_label_bottom), resolutionBottom, onResolutionBottom)
+            }
+        } else {
+            ResolutionSliderRow(null, resolution, onResolution)
+        }
+        VisualizerTip(stringResource(R.string.settings_visualizer_resolution_tip))
+
+        HorizontalDivider(modifier = Modifier.padding(16.dp))
+
+        // ── Gain offset ──
+        VisualizerSectionLabel(stringResource(R.string.settings_visualizer_gain_section))
+        if (both) {
+            SyncToggleRow(stringResource(R.string.settings_visualizer_sync), gainSync, onGainSync)
+            if (gainSync) {
+                GainSliderRow(null, gain, onGain)
+            } else {
+                GainSliderRow(stringResource(R.string.settings_visualizer_label_circle), gain, onGain)
+                GainSliderRow(stringResource(R.string.settings_visualizer_label_bottom), gainBottom, onGainBottom)
+            }
+        } else {
+            GainSliderRow(null, gain, onGain)
+        }
+        VisualizerTip(stringResource(R.string.settings_visualizer_gain_tip))
+
+        HorizontalDivider(modifier = Modifier.padding(16.dp))
+
+        // ── Averaging method (RMS vs mean) — same connected picker as Surfaces ──
+        VisualizerSectionLabel(stringResource(R.string.settings_visualizer_averaging_section))
+        ConnectedChoiceRow(
+            options  = listOf(
+                true  to stringResource(R.string.settings_visualizer_avg_rms),
+                false to stringResource(R.string.settings_visualizer_avg_mean),
+            ),
+            selected = dramatic,
+            onSelect = onDramatic,
+            modifier = Modifier.padding(horizontal = 16.dp),
+        )
+        VisualizerTip(stringResource(R.string.settings_visualizer_averaging_tip))
+
+        // ── Reset (elevated card, error-tinted, confirmation dialog) ──
+        val resetHaptics = LocalHapticFeedback.current
+        var showResetConfirm by remember { mutableStateOf(false) }
+        ElevatedCard(
+            onClick  = { resetHaptics.press(); showResetConfirm = true },
+            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp),
+        ) {
+            Row(
+                modifier          = Modifier.fillMaxWidth().padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Default.Restore, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    text  = stringResource(R.string.settings_visualizer_reset),
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+            }
+        }
+
+        if (showResetConfirm) {
+            AlertDialog(
+                onDismissRequest = { showResetConfirm = false },
+                icon  = { Icon(Icons.Default.Restore, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                title = { Text(stringResource(R.string.settings_visualizer_reset_title)) },
+                text  = { Text(stringResource(R.string.settings_visualizer_reset_message)) },
+                confirmButton = {
+                    TextButton(
+                        onClick = { resetHaptics.confirm(); onReset(); showResetConfirm = false },
+                        colors  = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                    ) { Text(stringResource(R.string.settings_visualizer_reset_confirm)) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { resetHaptics.press(); showResetConfirm = false }) {
+                        Text(stringResource(R.string.action_cancel))
+                    }
+                },
+            )
+        }
+
+        Spacer(Modifier.navigationBarsPadding())
+        Spacer(Modifier.height(8.dp))
+    }
+}
+
+@Composable
+private fun VisualizerSectionLabel(text: String) {
+    Text(
+        text     = text,
+        style    = MaterialTheme.typography.labelLarge,
+        color    = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp),
+    )
+}
+
+@Composable
+private fun VisualizerTip(text: String) {
+    Text(
+        text     = text,
+        style    = MaterialTheme.typography.bodySmall,
+        color    = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 4.dp),
+    )
+}
+
+@Composable
+private fun SyncToggleRow(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    val haptics = LocalHapticFeedback.current
+    Row(
+        modifier          = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+        Switch(checked = checked, onCheckedChange = { haptics.toggle(it); onCheckedChange(it) })
+    }
+}
+
+/** Resolution slider (4..128 bands). [prefix] = null shows just "N bands"; otherwise "<prefix> · N bands". */
+@Composable
+private fun ResolutionSliderRow(prefix: String?, bands: Int, onBands: (Int) -> Unit) {
+    val haptics = LocalHapticFeedback.current
+    val resolutions = remember { listOf(4, 8, 16, 24, 32, 64, 128) }
+    var pos by remember(bands) { mutableFloatStateOf(resolutions.indexOf(bands).coerceAtLeast(0).toFloat()) }
+    val n = resolutions[pos.roundToInt()]
+    Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+        Text(
+            text  = if (prefix == null) stringResource(R.string.settings_visualizer_res_bands, n)
+                    else stringResource(R.string.settings_visualizer_res_bands_labeled, prefix, n),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Slider(
+            value                 = pos,
+            onValueChange         = { v -> if (v.roundToInt() != pos.roundToInt()) haptics.tick(); pos = v },
+            onValueChangeFinished = { onBands(resolutions[pos.roundToInt()]) },
+            valueRange            = 0f..(resolutions.size - 1).toFloat(),
+            steps                 = resolutions.size - 2,
+        )
+    }
+}
+
+/** Gain-offset slider (-3..+3). [prefix] = null shows just the signed value; otherwise "<prefix> · +N". */
+@Composable
+private fun GainSliderRow(prefix: String?, offset: Int, onOffset: (Int) -> Unit) {
+    val haptics = LocalHapticFeedback.current
+    var pos by remember(offset) { mutableFloatStateOf(offset.toFloat()) }
+    val cur = pos.roundToInt()
+    val signed = if (cur > 0) "+$cur" else cur.toString()
+    Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+        Text(
+            text  = if (prefix == null) signed
+                    else stringResource(R.string.settings_visualizer_gain_labeled, prefix, signed),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Slider(
+            value                 = pos,
+            onValueChange         = { v -> if (v.roundToInt() != pos.roundToInt()) haptics.tick(); pos = v },
+            onValueChangeFinished = { onOffset(pos.roundToInt()) },
+            valueRange            = -3f..3f,
+            steps                 = 5,
+        )
     }
 }
 

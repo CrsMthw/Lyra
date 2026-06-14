@@ -13,6 +13,13 @@ class SettingsRepository(private val dataStore: LyraDataStore) {
     val lyricsMode       : Flow<Boolean>        = dataStore.lyricsMode
     val visualizerEnabled: Flow<Boolean>        = dataStore.visualizerEnabled
     val visualizerStyle  : Flow<VisualizerStyle> = dataStore.visualizerStyle
+    val visualizerResolution: Flow<Int>         = dataStore.visualizerResolution
+    val visualizerDramatic: Flow<Boolean>       = dataStore.visualizerDramatic
+    val visualizerResolutionBottom: Flow<Int>   = dataStore.visualizerResolutionBottom
+    val visualizerResolutionSync: Flow<Boolean> = dataStore.visualizerResolutionSync
+    val visualizerGain: Flow<Int>               = dataStore.visualizerGain
+    val visualizerGainBottom: Flow<Int>         = dataStore.visualizerGainBottom
+    val visualizerGainSync: Flow<Boolean>       = dataStore.visualizerGainSync
     val hapticsEnabled   : Flow<Boolean>        = dataStore.hapticsEnabled
 
     suspend fun setThemeMode        (mode   : ThemeMode)      = dataStore.setThemeMode(mode)
@@ -21,5 +28,12 @@ class SettingsRepository(private val dataStore: LyraDataStore) {
     suspend fun setLyricsMode       (enabled: Boolean)        = dataStore.setLyricsMode(enabled)
     suspend fun setVisualizerEnabled(enabled: Boolean)        = dataStore.setVisualizerEnabled(enabled)
     suspend fun setVisualizerStyle  (style  : VisualizerStyle) = dataStore.setVisualizerStyle(style)
+    suspend fun setVisualizerResolution(bands: Int)           = dataStore.setVisualizerResolution(bands)
+    suspend fun setVisualizerDramatic(dramatic: Boolean)      = dataStore.setVisualizerDramatic(dramatic)
+    suspend fun setVisualizerResolutionBottom(bands: Int)     = dataStore.setVisualizerResolutionBottom(bands)
+    suspend fun setVisualizerResolutionSync(sync: Boolean)    = dataStore.setVisualizerResolutionSync(sync)
+    suspend fun setVisualizerGain(offset: Int)                = dataStore.setVisualizerGain(offset)
+    suspend fun setVisualizerGainBottom(offset: Int)          = dataStore.setVisualizerGainBottom(offset)
+    suspend fun setVisualizerGainSync(sync: Boolean)          = dataStore.setVisualizerGainSync(sync)
     suspend fun setHapticsEnabled   (enabled: Boolean)        = dataStore.setHapticsEnabled(enabled)
 }
