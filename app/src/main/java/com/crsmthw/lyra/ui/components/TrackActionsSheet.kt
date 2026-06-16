@@ -3,6 +3,8 @@ package com.crsmthw.lyra.ui.components
 import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Album
@@ -86,7 +88,13 @@ fun TrackActionsHost(
         return
     }
 
-    ModalBottomSheet(onDismissRequest = controller::dismiss) {
+    CappedModalBottomSheet(onDismissRequest = controller::dismiss) {
+      BoxWithConstraints {
+        Column(
+            modifier = Modifier
+                .heightIn(max = maxHeight - sheetTopGap())
+                .verticalScroll(rememberScrollState()),
+        ) {
         // Header — track art + title/artist
         Row(
             modifier          = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
@@ -156,6 +164,8 @@ fun TrackActionsHost(
         }
 
         Spacer(Modifier.navigationBarsPadding())
+        }
+      }
     }
 }
 

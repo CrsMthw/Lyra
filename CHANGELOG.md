@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.1] - 2026-06-16
+
+_A responsive-UI release — Lyra now adapts cleanly across phones, foldables, tablets, and Chromebooks: large landscape screens gain a permanent docked full-player third pane, the Library hero adapts to the available height, and modal bottom sheets behave correctly at every screen size._
+
+### Added
+- **Docked full-player third pane (large tablets — ≥ 1200 dp landscape)** — on extra-wide screens the floating mini-player / pop-out panel is replaced by a permanent, full-featured player docked as a **third pane** on the right of the browse screens (Library, Album, Artist). It reuses the full `PlayerScreen` in a new **docked mode**: forced portrait layout, the full-screen **expand** button moved to the **top-left** (where the close chevron would be), and the same **options menu** (lyrics / visualizer / sleep timer) on the top-right — so every player feature, including in-pane lyrics and the circle visualizer, is reachable without leaving the list. The **queue opens inside the pane** (crossfades in place) instead of taking over the screen. The pane is hosted in `LyraNavGraph` *beside* the `NavHost` (not inside the per-screen content), so it stays put while the browse panes slide/fade between screens. Gated on a **measured** 1200 dp width (the M3 "large" breakpoint — `isWidthAtLeastBreakpoint(1200)` can't be used because the default window-size-class buckets cap width at 840 dp); below that the mini-player + pop-out behave exactly as before.
+
+### Changed
+- **Library "Lyra" hero now shows whenever the pane is tall enough** — the spacious hero was previously portrait-only; it's now gated on available height (≥ 500 dp), so an unfolded / tablet landscape pane gets the full hero too, while a short phone-landscape pane keeps the compact title-pill layout.
+- **"N songs" → "N tracks"** on the Liked Songs library card, matching the detail header and the playlist cards.
+
+### Fixed
+- **Modal bottom sheets no longer bounce / wedge touch when their content is ~the screen height** — the M3 `ModalBottomSheet` puts its Expanded anchor at `(fullHeight − contentSize)`, so content that fills the screen *exactly* lands the anchor at offset 0, where the spring fling overshoots past the edge and the sheet creeps / jitters / stops responding to touch on the first pull-up (Google issuetracker 285847707; reproduced on the Fold's cover screen and on the unfolded screen at certain slider counts). Introduced a shared **`CappedModalBottomSheet`** (`ui/components/BottomSheetCap.kt`) now used by every sheet — Advanced visualizer, Theme, Device picker, Add to playlist, and the song touch-and-hold menu: it drops the partial-expanded detent (sheets **expand fully on open** — content-sized when short, near-full + internal scroll when long — so bottom actions are never hidden behind a half-height detent, which also removes the device-picker open-snap), and caps the scrollable content a **status-bar height** below the screen so the sheet sits just below the status bar (Spotify-style) and the Expanded anchor is always a stable non-zero offset.
+- **Advanced visualizer settings sheet now scrolls** — its content could exceed the sheet height (e.g. on a tablet, or with four sliders when circle/bottom sync is off), clipping the lower options (Gain / Averaging / Reset); it now scrolls to reach everything.
+
 ## [3.1.0] - 2026-06-14
 
 ### Added
@@ -220,7 +235,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Initial release
 
-[Unreleased]: https://github.com/CrsMthw/Lyra/compare/v3.1.0...HEAD
+[Unreleased]: https://github.com/CrsMthw/Lyra/compare/v3.1.1...HEAD
+[3.1.1]: https://github.com/CrsMthw/Lyra/compare/v3.1.0...v3.1.1
 [3.1.0]: https://github.com/CrsMthw/Lyra/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/CrsMthw/Lyra/compare/v2.2.0...v3.0.0
 [2.2.0]: https://github.com/CrsMthw/Lyra/compare/v2.1.0...v2.2.0

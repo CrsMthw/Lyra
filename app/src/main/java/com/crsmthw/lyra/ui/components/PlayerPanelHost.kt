@@ -29,6 +29,11 @@ import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 // player panel. The `onRequestPlayer` lambda passed to `content` opens the panel on wide
 // screens and calls `onOpenPlayer` on narrow screens, so track-tap handlers don't need to
 // know which mode they're in.
+//
+// On EXTRA-WIDE screens (≥1200dp, e.g. a tablet in landscape) the player lives in a permanent
+// docked third pane hosted by `LyraNavGraph` — OUTSIDE the per-screen nav transition, so it
+// doesn't slide/fade when navigating between browse screens. Here we just render the screen
+// content and suppress the mini player + pop-out so nothing competes with that docked pane.
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 fun PlayerPanelHost(
@@ -42,10 +47,23 @@ fun PlayerPanelHost(
 ) {
     val density        = LocalDensity.current
     val haptics        = LocalHapticFeedback.current
-    val screenHeightDp = with(density) { LocalWindowInfo.current.containerSize.height.toDp() }
+    val containerSize  = LocalWindowInfo.current.containerSize
+    val screenWidthDp  = with(density) { containerSize.width.toDp() }
+    val screenHeightDp = with(density) { containerSize.height.toDp() }
     val isWideScreen   = currentWindowAdaptiveInfo().windowSizeClass.isWidthAtLeastBreakpoint(600)
     val isShortScreen  = screenHeightDp < 500.dp
     val canShowPanel   = isWideScreen && !isShortScreen
+    // Mirror of LyraNavGraph's docked-pane gate: when the docked third pane is up, drop the mini
+    // player + pop-out entirely. Measured width (not isWidthAtLeastBreakpoint(1200), whose default
+    // V1 width buckets cap at 840dp). `containerSize` is the WINDOW, so this still reads 1280dp even
+    // though this host is laid out into the narrower left region.
+    val isExtraWide    = screenWidthDp >= 1200.dp && screenHeightDp >= 600.dp
+
+    if (isExtraWide) {
+        Box(modifier = modifier.fillMaxSize()) { content {} }   // player is the docked pane
+        return
+    }
+
     val maxPanelHeight = screenHeightDp * 0.8f
 
     var showPlayerPanel by rememberSaveable { mutableStateOf(false) }

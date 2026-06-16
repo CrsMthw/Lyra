@@ -95,6 +95,7 @@ fun PlayerScreen(
     onFullScreen          : (() -> Unit)? = null,
     onOpenAlbum           : ((albumId: String) -> Unit)? = null,
     onOpenArtist          : ((artistId: String) -> Unit)? = null,
+    docked                : Boolean = false,
     sharedTransitionScope : SharedTransitionScope? = null,
     animatedContentScope  : AnimatedContentScope? = null,
 ) {
@@ -105,7 +106,9 @@ fun PlayerScreen(
     var showPlaylistPicker   by rememberSaveable { mutableStateOf(false) }
     var showDevicePicker     by remember { mutableStateOf(false) }
     var showMediaMenu        by remember { mutableStateOf(false) }
-    val isLandscape = LocalConfiguration.current.let { it.screenWidthDp > it.screenHeightDp }
+    // When docked as a third pane the column is narrow-and-tall (≈380dp wide), so always use the
+    // portrait art-over-controls layout regardless of the (landscape) device orientation.
+    val isLandscape = !docked && LocalConfiguration.current.let { it.screenWidthDp > it.screenHeightDp }
 
     // ── Dynamic color extraction ──────────────────────────────────────────────
     val context     = LocalContext.current
@@ -297,18 +300,23 @@ fun PlayerScreen(
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = { haptics.confirm(); onBack() }) {
-                        Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Close",
-                            tint = topContentColor)
-                    }
-                },
-                actions = {
-                    if (onFullScreen != null) {
-                        IconButton(onClick = onFullScreen) {
-                            Icon(Icons.Default.OpenInFull, contentDescription = "Full screen",
+                    if (docked) {
+                        // Docked pane has no "close": put the full-screen expand button on the left
+                        // (where the chevron would be), so the right side carries only the options menu.
+                        if (onFullScreen != null) {
+                            IconButton(onClick = onFullScreen) {
+                                Icon(Icons.Default.OpenInFull, contentDescription = "Full screen",
+                                    tint = topContentColor)
+                            }
+                        }
+                    } else {
+                        IconButton(onClick = { haptics.confirm(); onBack() }) {
+                            Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Close",
                                 tint = topContentColor)
                         }
                     }
+                },
+                actions = {
                     Box {
                         IconButton(onClick = { haptics.press(); showMediaMenu = true }) {
                             Icon(Icons.Default.Tune,

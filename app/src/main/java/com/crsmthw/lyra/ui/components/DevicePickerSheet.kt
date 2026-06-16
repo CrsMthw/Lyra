@@ -46,15 +46,9 @@ fun DevicePickerSheet(
     val active = devices.firstOrNull { it.isActive }
     val volumeEnabled = active?.supportsVolume != false
     var volume by remember(active?.id) { mutableFloatStateOf((active?.volumePercent ?: 50).toFloat()) }
-    // Hidden ↔ Expanded only (no half-height partial detent) — otherwise the sheet settles into
-    // its partial detent shortly after opening, clipping the bottom of a device list that just
-    // barely fit and hiding controls below the fold. (positional args: initialValue, sheetValues)
-    val sheetState = rememberBottomSheetState(
-        SheetValue.Hidden,
-        setOf(SheetValue.Hidden, SheetValue.Expanded),
-    )
-
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+    CappedModalBottomSheet(onDismissRequest = onDismiss) {
+      BoxWithConstraints {
+        Column(modifier = Modifier.heightIn(max = maxHeight - sheetTopGap())) {
         Text(
             text     = stringResource(R.string.player_connect_device),
             style    = MaterialTheme.typography.titleMedium,
@@ -89,7 +83,8 @@ fun DevicePickerSheet(
                 }
             }
             else -> {
-                LazyColumn {
+                // weight(fill = false): scrolls within the capped column when long, wraps when short.
+                LazyColumn(modifier = Modifier.weight(1f, fill = false)) {
                     item(key = "this_device_card") {
                         ElevatedCard(
                             onClick  = onThisDevice,
@@ -169,6 +164,8 @@ fun DevicePickerSheet(
                 }
             }
         }
+        }
+      }
     }
 }
 

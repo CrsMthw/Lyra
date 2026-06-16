@@ -21,7 +21,7 @@
 - Open Spotify share links directly in Lyra (`open.spotify.com/track/…`, `/album/…`, `/artist/…`)
 - Sleep timer with Live notification countdown on Android 16+
 - Pull-to-refresh on both the library and track lists
-- Adaptive two-pane layout for foldables and tablets
+- Adaptive layout for every screen — single-pane on phones, a two-pane browser/detail split on foldables and tablets, and a permanent docked full-player third pane on large landscape screens (tablets, Chromebooks)
 - Material 3 Expressive design — spring-based motion and seamless album-art transitions, with Material You dynamic colour and AMOLED black mode
 - Haptic feedback — subtle Material 3 Expressive haptics throughout the UI, toggleable in Settings
 - Tokens stored encrypted via AES-256-GCM (Android Keystore)

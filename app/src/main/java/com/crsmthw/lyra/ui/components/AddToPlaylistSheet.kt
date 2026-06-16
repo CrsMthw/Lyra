@@ -54,17 +54,21 @@ fun AddToPlaylistSheet(
         }
     }
 
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        PlaylistList(
-            pickerState = pickerState,
-            onSelect    = onSelect,
-            onCreateNew = {
-                newName          = ""
-                newDescription   = ""
-                newIsPublic      = false
-                showCreateDialog = true
-            },
-        )
+    CappedModalBottomSheet(onDismissRequest = onDismiss) {
+      BoxWithConstraints {
+        Column(modifier = Modifier.heightIn(max = maxHeight - sheetTopGap())) {
+            PlaylistList(
+                pickerState = pickerState,
+                onSelect    = onSelect,
+                onCreateNew = {
+                    newName          = ""
+                    newDescription   = ""
+                    newIsPublic      = false
+                    showCreateDialog = true
+                },
+            )
+        }
+      }
     }
 
     if (showCreateDialog) {
@@ -98,7 +102,7 @@ fun AddToPlaylistSheet(
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun PlaylistList(
+private fun ColumnScope.PlaylistList(
     pickerState : PlaylistPickerState,
     onSelect    : (SpotifyPlaylist) -> Unit,
     onCreateNew : () -> Unit,
@@ -119,7 +123,8 @@ private fun PlaylistList(
             }
         }
         else -> {
-            LazyColumn {
+            // weight(fill = false): scrolls within the capped column when long, wraps when short.
+            LazyColumn(modifier = Modifier.weight(1f, fill = false)) {
                 item {
                     ListItem(
                         leadingContent  = {

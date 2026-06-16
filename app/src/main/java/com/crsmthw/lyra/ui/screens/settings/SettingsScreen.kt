@@ -14,6 +14,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import com.crsmthw.lyra.ui.components.CappedModalBottomSheet
+import com.crsmthw.lyra.ui.components.sheetTopGap
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -454,16 +456,13 @@ private fun ThemeSheet(
     onDynamic   : (Boolean) -> Unit,
     onDismiss   : () -> Unit,
 ) {
-    // Hidden ↔ Expanded only (no half-height partial detent) so the sheet doesn't settle into a
-    // partial detent shortly after opening and clip its lower toggles. (positional: initialValue, values)
-    val sheetState = rememberBottomSheetState(
-        SheetValue.Hidden,
-        setOf(SheetValue.Hidden, SheetValue.Expanded),
-    )
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState       = sheetState,
-    ) {
+    CappedModalBottomSheet(onDismissRequest = onDismiss) {
+      BoxWithConstraints {
+        Column(
+            modifier = Modifier
+                .heightIn(max = maxHeight - sheetTopGap())
+                .verticalScroll(rememberScrollState()),
+        ) {
         // Header
         Row(
             modifier          = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 4.dp),
@@ -516,6 +515,8 @@ private fun ThemeSheet(
 
         Spacer(Modifier.navigationBarsPadding())
         Spacer(Modifier.height(8.dp))
+        }
+      }
     }
 }
 
@@ -546,137 +547,149 @@ private fun VisualizerSheet(
     onReset           : () -> Unit,
     onDismiss         : () -> Unit,
 ) {
-    val sheetState = rememberBottomSheetState(
-        SheetValue.Hidden,
-        setOf(SheetValue.Hidden, SheetValue.Expanded),
-    )
     val both = style == VisualizerStyle.BOTH
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState       = sheetState,
-    ) {
-        // Header
-        Row(
-            modifier          = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(Icons.Default.Equalizer, contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.width(12.dp))
-            Text(
-                text  = stringResource(R.string.settings_visualizer_advanced),
-                style = MaterialTheme.typography.titleLarge,
-            )
-        }
+    // Reset confirmation hoisted to the sheet scope (outside the scrollable content).
+    val resetHaptics = LocalHapticFeedback.current
+    var showResetConfirm by remember { mutableStateOf(false) }
 
-        Spacer(Modifier.height(16.dp))
-
-        // ── Surfaces ──
-        VisualizerSectionLabel(stringResource(R.string.settings_visualizer_style_label))
-        ConnectedChoiceRow(
-            options  = listOf(
-                VisualizerStyle.CIRCLE to stringResource(R.string.settings_visualizer_style_circle),
-                VisualizerStyle.BOTTOM to stringResource(R.string.settings_visualizer_style_bottom),
-                VisualizerStyle.BOTH   to stringResource(R.string.settings_visualizer_style_both),
-            ),
-            selected = style,
-            onSelect = onStyle,
-            modifier = Modifier.padding(horizontal = 16.dp),
-        )
-        VisualizerTip(stringResource(R.string.settings_visualizer_surfaces_tip))
-
-        HorizontalDivider(modifier = Modifier.padding(16.dp))
-
-        // ── Resolution (sync splits circle/bottom only when style is Both) ──
-        VisualizerSectionLabel(stringResource(R.string.settings_visualizer_resolution_section))
-        if (both) {
-            SyncToggleRow(stringResource(R.string.settings_visualizer_sync), resolutionSync, onResolutionSync)
-            if (resolutionSync) {
-                ResolutionSliderRow(null, resolution, onResolution)
-            } else {
-                ResolutionSliderRow(stringResource(R.string.settings_visualizer_label_circle), resolution, onResolution)
-                ResolutionSliderRow(stringResource(R.string.settings_visualizer_label_bottom), resolutionBottom, onResolutionBottom)
-            }
-        } else {
-            ResolutionSliderRow(null, resolution, onResolution)
-        }
-        VisualizerTip(stringResource(R.string.settings_visualizer_resolution_tip))
-
-        HorizontalDivider(modifier = Modifier.padding(16.dp))
-
-        // ── Gain offset ──
-        VisualizerSectionLabel(stringResource(R.string.settings_visualizer_gain_section))
-        if (both) {
-            SyncToggleRow(stringResource(R.string.settings_visualizer_sync), gainSync, onGainSync)
-            if (gainSync) {
-                GainSliderRow(null, gain, onGain)
-            } else {
-                GainSliderRow(stringResource(R.string.settings_visualizer_label_circle), gain, onGain)
-                GainSliderRow(stringResource(R.string.settings_visualizer_label_bottom), gainBottom, onGainBottom)
-            }
-        } else {
-            GainSliderRow(null, gain, onGain)
-        }
-        VisualizerTip(stringResource(R.string.settings_visualizer_gain_tip))
-
-        HorizontalDivider(modifier = Modifier.padding(16.dp))
-
-        // ── Averaging method (RMS vs mean) — same connected picker as Surfaces ──
-        VisualizerSectionLabel(stringResource(R.string.settings_visualizer_averaging_section))
-        ConnectedChoiceRow(
-            options  = listOf(
-                true  to stringResource(R.string.settings_visualizer_avg_rms),
-                false to stringResource(R.string.settings_visualizer_avg_mean),
-            ),
-            selected = dramatic,
-            onSelect = onDramatic,
-            modifier = Modifier.padding(horizontal = 16.dp),
-        )
-        VisualizerTip(stringResource(R.string.settings_visualizer_averaging_tip))
-
-        // ── Reset (elevated card, error-tinted, confirmation dialog) ──
-        val resetHaptics = LocalHapticFeedback.current
-        var showResetConfirm by remember { mutableStateOf(false) }
-        ElevatedCard(
-            onClick  = { resetHaptics.press(); showResetConfirm = true },
-            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp),
-        ) {
-            Row(
-                modifier          = Modifier.fillMaxWidth().padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
+    // Cap the scrollable content so the sheet's measured size stays STRICTLY below the screen height.
+    // The M3 sheet places its Expanded anchor at (fullHeight − contentSize); when content == the screen
+    // height that anchor sits at offset 0 (the very edge), and the sheet's spring fling overshoots past
+    // it and bounces / wedges touch on the first pull-up — a known M3 bug (issuetracker 285847707). It
+    // is why this sheet broke (its sliders make the height variable, so it can land exactly on the
+    // screen height) while shorter sheets never do, and why content TALLER than the screen was fine
+    // (inner scroll absorbs the fling). BoxWithConstraints gives the height available to the content;
+    // a real 48dp margin keeps Expanded at a non-zero offset where the spring has room to settle. The
+    // default sheet state keeps the partial-expanded detent (opens half, like AddToPlaylistSheet).
+    CappedModalBottomSheet(onDismissRequest = onDismiss) {
+        BoxWithConstraints {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = maxHeight - sheetTopGap())
+                    .verticalScroll(rememberScrollState()),
             ) {
-                Icon(Icons.Default.Restore, contentDescription = null, tint = MaterialTheme.colorScheme.error)
-                Spacer(Modifier.width(12.dp))
-                Text(
-                    text  = stringResource(R.string.settings_visualizer_reset),
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodyLarge,
+                // Header
+                Row(
+                    modifier          = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Default.Equalizer, contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        text  = stringResource(R.string.settings_visualizer_advanced),
+                        style = MaterialTheme.typography.titleLarge,
+                    )
+                }
+
+                Spacer(Modifier.height(16.dp))
+
+                // ── Surfaces ──
+                VisualizerSectionLabel(stringResource(R.string.settings_visualizer_style_label))
+                ConnectedChoiceRow(
+                    options  = listOf(
+                        VisualizerStyle.CIRCLE to stringResource(R.string.settings_visualizer_style_circle),
+                        VisualizerStyle.BOTTOM to stringResource(R.string.settings_visualizer_style_bottom),
+                        VisualizerStyle.BOTH   to stringResource(R.string.settings_visualizer_style_both),
+                    ),
+                    selected = style,
+                    onSelect = onStyle,
+                    modifier = Modifier.padding(horizontal = 16.dp),
                 )
+                VisualizerTip(stringResource(R.string.settings_visualizer_surfaces_tip))
+
+                HorizontalDivider(modifier = Modifier.padding(16.dp))
+
+                // ── Resolution (sync splits circle/bottom only when style is Both) ──
+                VisualizerSectionLabel(stringResource(R.string.settings_visualizer_resolution_section))
+                if (both) {
+                    SyncToggleRow(stringResource(R.string.settings_visualizer_sync), resolutionSync, onResolutionSync)
+                    if (resolutionSync) {
+                        ResolutionSliderRow(null, resolution, onResolution)
+                    } else {
+                        ResolutionSliderRow(stringResource(R.string.settings_visualizer_label_circle), resolution, onResolution)
+                        ResolutionSliderRow(stringResource(R.string.settings_visualizer_label_bottom), resolutionBottom, onResolutionBottom)
+                    }
+                } else {
+                    ResolutionSliderRow(null, resolution, onResolution)
+                }
+                VisualizerTip(stringResource(R.string.settings_visualizer_resolution_tip))
+
+                HorizontalDivider(modifier = Modifier.padding(16.dp))
+
+                // ── Gain offset ──
+                VisualizerSectionLabel(stringResource(R.string.settings_visualizer_gain_section))
+                if (both) {
+                    SyncToggleRow(stringResource(R.string.settings_visualizer_sync), gainSync, onGainSync)
+                    if (gainSync) {
+                        GainSliderRow(null, gain, onGain)
+                    } else {
+                        GainSliderRow(stringResource(R.string.settings_visualizer_label_circle), gain, onGain)
+                        GainSliderRow(stringResource(R.string.settings_visualizer_label_bottom), gainBottom, onGainBottom)
+                    }
+                } else {
+                    GainSliderRow(null, gain, onGain)
+                }
+                VisualizerTip(stringResource(R.string.settings_visualizer_gain_tip))
+
+                HorizontalDivider(modifier = Modifier.padding(16.dp))
+
+                // ── Averaging method (RMS vs mean) — same connected picker as Surfaces ──
+                VisualizerSectionLabel(stringResource(R.string.settings_visualizer_averaging_section))
+                ConnectedChoiceRow(
+                    options  = listOf(
+                        true  to stringResource(R.string.settings_visualizer_avg_rms),
+                        false to stringResource(R.string.settings_visualizer_avg_mean),
+                    ),
+                    selected = dramatic,
+                    onSelect = onDramatic,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+                VisualizerTip(stringResource(R.string.settings_visualizer_averaging_tip))
+
+                // ── Reset (elevated card, error-tinted; confirmation dialog hoisted above) ──
+                ElevatedCard(
+                    onClick  = { resetHaptics.press(); showResetConfirm = true },
+                    modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp),
+                ) {
+                    Row(
+                        modifier          = Modifier.fillMaxWidth().padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Default.Restore, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            text  = stringResource(R.string.settings_visualizer_reset),
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                    }
+                }
+
+                Spacer(Modifier.navigationBarsPadding())
+                Spacer(Modifier.height(8.dp))
             }
         }
+    }
 
-        if (showResetConfirm) {
-            AlertDialog(
-                onDismissRequest = { showResetConfirm = false },
-                icon  = { Icon(Icons.Default.Restore, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
-                title = { Text(stringResource(R.string.settings_visualizer_reset_title)) },
-                text  = { Text(stringResource(R.string.settings_visualizer_reset_message)) },
-                confirmButton = {
-                    TextButton(
-                        onClick = { resetHaptics.confirm(); onReset(); showResetConfirm = false },
-                        colors  = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
-                    ) { Text(stringResource(R.string.settings_visualizer_reset_confirm)) }
-                },
-                dismissButton = {
-                    TextButton(onClick = { resetHaptics.press(); showResetConfirm = false }) {
-                        Text(stringResource(R.string.action_cancel))
-                    }
-                },
-            )
-        }
-
-        Spacer(Modifier.navigationBarsPadding())
-        Spacer(Modifier.height(8.dp))
+    if (showResetConfirm) {
+        AlertDialog(
+            onDismissRequest = { showResetConfirm = false },
+            icon  = { Icon(Icons.Default.Restore, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+            title = { Text(stringResource(R.string.settings_visualizer_reset_title)) },
+            text  = { Text(stringResource(R.string.settings_visualizer_reset_message)) },
+            confirmButton = {
+                TextButton(
+                    onClick = { resetHaptics.confirm(); onReset(); showResetConfirm = false },
+                    colors  = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                ) { Text(stringResource(R.string.settings_visualizer_reset_confirm)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { resetHaptics.press(); showResetConfirm = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            },
+        )
     }
 }
 

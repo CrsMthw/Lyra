@@ -1,6 +1,8 @@
 package com.crsmthw.lyra.ui.navigation
 
 import android.content.Intent
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.animateColorAsState
@@ -9,6 +11,10 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -19,9 +25,14 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.crsmthw.lyra.util.loadAlbumArtColors
 import com.crsmthw.lyra.util.visualizer.LocalFftData
@@ -166,10 +177,27 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
     // instead of the framework's flat default spring. Read here (composable scope) and captured —
     // the transition lambdas below aren't composable contexts. Cross-fades stay default (alpha).
     val navSlideSpec = MaterialTheme.motionScheme.defaultSpatialSpec<IntOffset>()
+
+    // ── Docked third pane (tablet in landscape) ──────────────────────────────
+    // Gate on the MEASURED window width — NOT isWidthAtLeastBreakpoint(1200), whose default V1
+    // width buckets cap at 840dp. The pane is hosted HERE, beside the NavHost and OUTSIDE the
+    // per-destination slide/fade, so it stays put while the browse screens animate. It shows only
+    // on the browse routes that have a left list to pair with (not on Player/Queue/Search/etc.).
+    val windowContainer = LocalWindowInfo.current.containerSize
+    val isExtraWide = with(LocalDensity.current) {
+        windowContainer.width.toDp() >= 1200.dp && windowContainer.height.toDp() >= 600.dp
+    }
+    val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route
+    val isBrowse = currentRoute == Screen.Library.route ||
+                   currentRoute == Screen.AlbumDetail.route ||
+                   currentRoute == Screen.ArtistDetail.route
+
     SharedTransitionLayout {
+      Row(modifier = Modifier.fillMaxSize()) {
         NavHost(
             navController        = navController,
             startDestination     = startDestination,
+            modifier             = Modifier.weight(1f).fillMaxHeight(),
             enterTransition      = { slideInHorizontally(navSlideSpec)  { it / 4 } + fadeIn()  },
             exitTransition       = { slideOutHorizontally(navSlideSpec) { -(it / 4) } + fadeOut() },
             popEnterTransition   = { slideInHorizontally(navSlideSpec)  { -(it / 4) } + fadeIn()  },
@@ -319,6 +347,62 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
                 )
             }
         }
+
+        if (isExtraWide && isBrowse) {
+            DockedPlayerPane(
+                playerViewModel = playerVm,
+                container        = container,
+                onExpand         = { safePush(Screen.Player.route) },
+                onOpenAlbum      = { albumId -> safePush(Screen.AlbumDetail.createRoute(albumId)) },
+                onOpenArtist     = { artistId -> safePush(Screen.ArtistDetail.createRoute(artistId)) },
+                modifier         = Modifier.width(DOCKED_PLAYER_WIDTH).fillMaxHeight(),
+            )
+        }
+      } // Row
     }
     } // CompositionLocalProvider
+}
+
+/** Fixed width of the docked full-player pane (M3 recommends ~360–412dp for a fixed pane /
+ *  side sheet; 380 keeps the portrait player comfortable on a ~1280dp tablet). */
+private val DOCKED_PLAYER_WIDTH = 380.dp
+
+/**
+ * Permanent docked player pane shown on the right of browse screens at extra-wide widths.
+ * Reuses the full `PlayerScreen` (docked mode = portrait, expand button, options menu) and can
+ * swap to an embedded `QueueScreen` in-place — so the queue opens inside the pane instead of as a
+ * full-screen destination. Lives outside the NavHost so it doesn't ride the nav slide/fade.
+ */
+@Composable
+private fun DockedPlayerPane(
+    playerViewModel: PlayerViewModel,
+    container      : AppContainer,
+    onExpand       : () -> Unit,
+    onOpenAlbum    : (String) -> Unit,
+    onOpenArtist   : (String) -> Unit,
+    modifier       : Modifier = Modifier,
+) {
+    var showQueue by remember { mutableStateOf(false) }
+    BackHandler(enabled = showQueue) { showQueue = false }
+    Crossfade(targetState = showQueue, label = "dockedQueue", modifier = modifier) { queue ->
+        if (queue) {
+            val queueVm = viewModel<QueueViewModel>(factory = QueueViewModelFactory(container))
+            QueueScreen(
+                viewModel    = queueVm,
+                onBack       = { showQueue = false },
+                onOpenAlbum  = onOpenAlbum,
+                onOpenArtist = onOpenArtist,
+            )
+        } else {
+            PlayerScreen(
+                viewModel    = playerViewModel,
+                onBack       = {},
+                onOpenQueue  = { showQueue = true },
+                onFullScreen = onExpand,
+                onOpenAlbum  = onOpenAlbum,
+                onOpenArtist = onOpenArtist,
+                docked       = true,
+            )
+        }
+    }
 }

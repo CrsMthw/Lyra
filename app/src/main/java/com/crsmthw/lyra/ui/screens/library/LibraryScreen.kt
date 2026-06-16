@@ -433,8 +433,14 @@ private fun LibraryBrowserPane(
         }
     }
 
-    if (isLandscape) {
-        // Landscape: floating controls over scrollable content (no hero — title pill always shown)
+    // The spacious "Lyra" hero needs vertical room. Show it whenever the pane is tall enough —
+    // portrait on any device, and landscape on a tablet (≈800dp tall). Only a SHORT landscape pane
+    // (a phone, ≈360–410dp tall) drops the hero for the compact title-pill layout.
+    val compactNoHero = isLandscape && LocalConfiguration.current.screenHeightDp < 500
+
+    if (compactNoHero) {
+        // Compact (short landscape, e.g. phone): floating controls over scrollable content, no hero
+        // — vertical space is tight, so the title pill is always shown rather than fading in.
         val statusBarTopDp     = with(density) { WindowInsets.statusBars.getTop(this).toDp() }
         val listTopPadding     = statusBarTopDp + 64.dp
         val listContentPadding = remember(listTopPadding, navBarBottomDp) { PaddingValues(top = listTopPadding, bottom = 100.dp + navBarBottomDp) }
@@ -526,7 +532,8 @@ private fun LibraryBrowserPane(
             )
         }
     } else {
-        // Portrait: no solid top app bar (OneUI 8.5 style). The "Lyra" hero is the first list item
+        // Hero layout (portrait on any device, or a landscape pane tall enough — e.g. a tablet):
+        // no solid top app bar (OneUI 8.5 style). The "Lyra" hero is the first list item
         // and scrolls away; a top scrim fades content under the status bar, a floating action pill
         // carries the settings/error actions, and a small title pill fades in once the hero is gone.
         val titlePillAlpha = rememberHeroScrollProgress(listState)
@@ -1167,7 +1174,7 @@ private fun LikedSongsCard(
 
             Column(modifier = Modifier.weight(1f)) {
                 Text(stringResource(R.string.liked_songs), style = MaterialTheme.typography.titleMedium, maxLines = 1)
-                Text("$count songs", style = MaterialTheme.typography.bodySmall,
+                Text("$count tracks", style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
 
