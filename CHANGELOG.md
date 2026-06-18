@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.2] - 2026-06-18
+
+_A compliance + polish release — Lyra now gracefully re-authenticates when a Spotify refresh token expires (ahead of Spotify's new six-month token-expiration policy taking effect 2026-07-20), and the app icon now appears, crisply, on the sign-in screen._
+
+### Added
+- **Automatic re-authentication when a Spotify refresh token expires** — Spotify is making refresh tokens expire **6 months after the original authorization** (rolling out to existing apps on **2026-07-20**); a dead refresh token now returns `invalid_grant` instead of a new access token. Lyra previously had no handling for this: the failed refresh was silently ignored, the dead token was never discarded, and `isAuthenticated()` stayed `true` — so the user would have been stranded on Library with every Web-API call 401-ing, unable to get back to sign-in. Now, when a refresh fails with `invalid_grant`, `SpotifyAuthManager.refreshAccessToken()` **discards the stored tokens** and emits a one-shot `sessionExpired` event; `LyraNavGraph` observes it and routes the user back to the **sign-in screen**, which shows a *"Your Spotify session expired"* notice. The Client ID is preserved, so reconnecting is a single **Connect** tap. The discard is gated specifically on AppAuth's `invalid_grant` (`TYPE_OAUTH_TOKEN_ERROR` + `INVALID_GRANT`) — **transient/offline refresh failures never sign the user out**. Per Spotify's guidance, a failed refresh is **never retried**: `TokenManager`'s 401 path now refreshes-and-retries only on success, dedups concurrent 401s by token identity (so a server-side-revoked-but-locally-valid token still triggers the refresh that surfaces `invalid_grant`), and returns the original 401 untouched when the refresh fails. App Remote playback control is unaffected — it authenticates through the installed Spotify app, not Lyra's refresh token.
+- **App icon on the sign-in screen** — the Lyra icon now sits above the title on the auth screen (both first launch and the session-expired screen), using the same rounded-tile treatment as Settings → About.
+
+### Fixed
+- **App icon no longer looks blurry** — the app-icon tile on Settings → About (and the new sign-in-screen icon) was rendered with `Modifier.scale(1.5f)`, which magnified a small rasterised copy of the vector drawable and softened it. It now renders the vector at its final size and clips it down to the tile, so the logo stays crisp on both screens.
+
 ## [3.1.1] - 2026-06-16
 
 _A responsive-UI release — Lyra now adapts cleanly across phones, foldables, tablets, and Chromebooks: large landscape screens gain a permanent docked full-player third pane, the Library hero adapts to the available height, and modal bottom sheets behave correctly at every screen size._
@@ -235,7 +246,8 @@ _A responsive-UI release — Lyra now adapts cleanly across phones, foldables, t
 ### Added
 - Initial release
 
-[Unreleased]: https://github.com/CrsMthw/Lyra/compare/v3.1.1...HEAD
+[Unreleased]: https://github.com/CrsMthw/Lyra/compare/v3.1.2...HEAD
+[3.1.2]: https://github.com/CrsMthw/Lyra/compare/v3.1.1...v3.1.2
 [3.1.1]: https://github.com/CrsMthw/Lyra/compare/v3.1.0...v3.1.1
 [3.1.0]: https://github.com/CrsMthw/Lyra/compare/v3.0.0...v3.1.0
 [3.0.0]: https://github.com/CrsMthw/Lyra/compare/v2.2.0...v3.0.0

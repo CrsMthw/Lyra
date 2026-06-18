@@ -29,7 +29,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -823,15 +822,22 @@ private fun AboutSection() {
         HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
         Spacer(Modifier.height(28.dp))
 
-        // App icon — large rounded square tile
-        Image(
-            painter            = painterResource(R.drawable.ic_launcher_foreground),
-            contentDescription = null,
-            modifier           = Modifier
+        // App icon — large rounded square tile. The foreground logo bursts past its
+        // adaptive-icon safe-zone padding by rendering at its FINAL size (150dp) and
+        // clipping down to a 100dp tile — NOT Modifier.scale()-ing a 100dp raster up,
+        // which magnifies the small rasterised bitmap and blurs it.
+        Box(
+            modifier         = Modifier
                 .size(100.dp)
-                .clip(RoundedCornerShape(26.dp))
-                .scale(1.5f),
-        )
+                .clip(RoundedCornerShape(26.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Image(
+                painter            = painterResource(R.drawable.ic_launcher_foreground),
+                contentDescription = null,
+                modifier           = Modifier.requiredSize(150.dp),
+            )
+        }
 
         Spacer(Modifier.height(16.dp))
 

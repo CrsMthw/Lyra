@@ -4,6 +4,10 @@ import android.content.Context
 import android.content.Intent
 import androidx.core.net.toUri
 import com.crsmthw.lyra.data.local.EncryptedPrefs
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import net.openid.appauth.*
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -48,6 +52,18 @@ class SpotifyAuthManager(
     }
 
     private val authService = AuthorizationService(context)
+
+    /**
+     * Emitted exactly once when a refresh fails because the refresh token is dead
+     * (Spotify `invalid_grant` — e.g. the 6-month expiry, or the user revoked access).
+     * The tokens have already been discarded by the time this fires; the UI observes
+     * this to route the user back through sign-in. Hot, no replay — a one-shot event.
+     */
+    private val _sessionExpired = MutableSharedFlow<Unit>(
+        extraBufferCapacity = 1,
+        onBufferOverflow    = BufferOverflow.DROP_OLDEST,
+    )
+    val sessionExpired: SharedFlow<Unit> = _sessionExpired.asSharedFlow()
 
     // ── Step 1: Build and return the intent that opens the auth browser ──────
 
@@ -134,7 +150,21 @@ class SpotifyAuthManager(
                         )
                         cont.resume(Result.success(Unit))
                     }
-                    ex != null -> cont.resume(Result.failure(ex))
+                    ex != null -> {
+                        // Spotify returns invalid_grant when the refresh token is dead (6-month
+                        // expiry / revoked). AppAuth maps that to TYPE_OAUTH_TOKEN_ERROR + INVALID_GRANT
+                        // (verified against appauth 0.11.1 sources). Network/transient failures are
+                        // TYPE_GENERAL_ERROR, so this check never fires offline — we must NOT log the
+                        // user out for being offline. On a dead token: discard it and do NOT retry,
+                        // per Spotify's requirement; signal the UI to send the user back to sign-in.
+                        val invalidGrant = ex.type == AuthorizationException.TYPE_OAUTH_TOKEN_ERROR &&
+                            ex.code == AuthorizationException.TokenRequestErrors.INVALID_GRANT.code
+                        if (invalidGrant) {
+                            encryptedPrefs.clearTokens()
+                            _sessionExpired.tryEmit(Unit)
+                        }
+                        cont.resume(Result.failure(ex))
+                    }
                     else       -> cont.resume(Result.failure(Exception("Refresh failed")))
                 }
             }

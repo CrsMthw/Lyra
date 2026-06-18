@@ -7,6 +7,7 @@
     <string name="auth_client_id_placeholder">Paste your Client ID here</string>
     <string name="auth_connect_button">Connect to Spotify</string>
     <string name="auth_help_text">Get your Client ID at developer.spotify.com → Your App → Settings</string>
+    <string name="auth_session_expired_notice">Your Spotify session expired. Tap Connect to sign in again.</string>
 
     <!-- Library -->
     <string name="liked_songs">Liked Songs</string>

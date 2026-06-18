@@ -3,7 +3,9 @@ package com.crsmthw.lyra.ui.screens.auth
 import android.app.Activity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -13,7 +15,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -27,9 +31,10 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun AuthScreen(
-    encryptedPrefs  : EncryptedPrefs,
-    authManager     : SpotifyAuthManager,
-    onAuthenticated : () -> Unit,
+    encryptedPrefs    : EncryptedPrefs,
+    authManager       : SpotifyAuthManager,
+    onAuthenticated   : () -> Unit,
+    showExpiredNotice : Boolean = false,
 ) {
     val scope          = rememberCoroutineScope()
     val keyboard       = LocalSoftwareKeyboardController.current
@@ -82,6 +87,27 @@ fun AuthScreen(
             horizontalAlignment   = Alignment.CenterHorizontally,
         ) {
 
+            // ── App icon ─────────────────────────────────────────────────────
+            // Same look as Settings → About: the foreground logo bursting past its
+            // adaptive-icon safe-zone padding on a 100dp rounded-square tile. The
+            // vector is rendered at its FINAL size (150dp) and clipped down, rather
+            // than Modifier.scale()-ing a 100dp raster up — scaling magnifies the
+            // small rasterised bitmap and blurs it.
+            Box(
+                modifier         = Modifier
+                    .size(100.dp)
+                    .clip(RoundedCornerShape(26.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Image(
+                    painter            = painterResource(R.drawable.ic_launcher_foreground),
+                    contentDescription = null,
+                    modifier           = Modifier.requiredSize(150.dp),
+                )
+            }
+
+            Spacer(Modifier.height(16.dp))
+
             // ── App name ─────────────────────────────────────────────────────
             Text(stringResource(R.string.app_name), style = MaterialTheme.typography.displaySmall)
             Text(
@@ -90,7 +116,27 @@ fun AuthScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
-            Spacer(Modifier.height(48.dp))
+            // ── Session-expired notice ───────────────────────────────────────
+            // Shown when the refresh token died (6-month expiry / revoked) and the
+            // user was routed back here. Client ID is preserved → a single Connect tap.
+            if (showExpiredNotice && errorMessage == null) {
+                Spacer(Modifier.height(24.dp))
+                Surface(
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    shape = MaterialTheme.shapes.medium,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        text     = stringResource(R.string.auth_session_expired_notice),
+                        style    = MaterialTheme.typography.bodyMedium,
+                        color    = MaterialTheme.colorScheme.onSecondaryContainer,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                    )
+                }
+                Spacer(Modifier.height(24.dp))
+            } else {
+                Spacer(Modifier.height(48.dp))
+            }
 
             // ── Client ID field ──────────────────────────────────────────────
             OutlinedTextField(

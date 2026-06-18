@@ -24,6 +24,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -117,6 +118,22 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
     else
         Screen.Auth.route
 
+    // When the refresh token dies (Spotify invalid_grant — 6-month expiry / revoked), the auth
+    // manager has already discarded the tokens and emits here. Route the user back to sign-in
+    // (clearing the back stack) and flag the Auth screen to explain why. NavHost is always
+    // composed while foregrounded; an event missed in the background is re-fired by the next
+    // API call, and a cold start already lands on Auth via isAuthenticated() == false.
+    var sessionExpired by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        container.authManager.sessionExpired.collect {
+            sessionExpired = true
+            navController.navigate(Screen.Auth.route) {
+                popUpTo(0) { inclusive = true }
+                launchSingleTop = true
+            }
+        }
+    }
+
     val context = LocalContext.current
     val isDarkTheme = MaterialTheme.colorScheme.background.let {
         0.299f * it.red + 0.587f * it.green + 0.114f * it.blue < 0.5f
@@ -206,9 +223,11 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
 
             composable(Screen.Auth.route) {
                 AuthScreen(
-                    encryptedPrefs  = container.encryptedPrefs,
-                    authManager     = container.authManager,
-                    onAuthenticated = {
+                    encryptedPrefs    = container.encryptedPrefs,
+                    authManager       = container.authManager,
+                    showExpiredNotice = sessionExpired,
+                    onAuthenticated   = {
+                        sessionExpired = false
                         navController.navigate(Screen.Library.route) {
                             popUpTo(Screen.Auth.route) { inclusive = true }
                             launchSingleTop = true
