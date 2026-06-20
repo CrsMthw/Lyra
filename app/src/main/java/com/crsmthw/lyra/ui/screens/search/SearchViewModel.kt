@@ -119,4 +119,4 @@ fun SpotifyArtist.toRecentSearch() =
     RecentSearch("artist", id, "", name, "Artist", images?.firstOrNull()?.url)
 
 fun SpotifyPlaylist.toRecentSearch() =
-    RecentSearch("playlist", id, uri, name, owner.displayName ?: "Playlist", thumbnailUrl.ifBlank { null })
+    RecentSearch("playlist", id, uri, name, owner?.displayName ?: "Playlist", thumbnailUrl.ifBlank { null })

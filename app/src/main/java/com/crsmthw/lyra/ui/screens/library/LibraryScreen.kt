@@ -354,8 +354,8 @@ private fun LibraryBrowserPane(
     val selectedPlaylistId = state.currentPlaylist?.id
 
     val userId      = state.user?.id
-    val myPlaylists = if (userId != null) state.playlists.filter { it.owner.id == userId } else state.playlists
-    val following   = if (userId != null) state.playlists.filter { it.owner.id != userId } else emptyList()
+    val myPlaylists = if (userId != null) state.playlists.filter { it.owner?.id == userId } else state.playlists
+    val following   = if (userId != null) state.playlists.filter { it.owner?.id != userId } else emptyList()
 
     // Shared list items — identical in both portrait and landscape LazyColumns
     val listBody: LazyListScope.() -> Unit = {
@@ -869,7 +869,7 @@ private fun RightPaneContent(
     val playlist     = state.currentPlaylist
     val isLikedSongs = playlist == null
     // Owned playlists only (never Liked Songs / followed) get the delete action.
-    val canDelete    = playlist != null && playlist.owner.id == state.user?.id
+    val canDelete    = playlist != null && playlist.owner?.id == state.user?.id
     val haptics      = LocalHapticFeedback.current
     var showOverflowMenu  by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
@@ -961,7 +961,7 @@ private fun RightPaneContent(
                 onTrackClick()
             },
             onTrackLongClick = { track ->
-                val removable = playlist?.takeIf { it.owner.id == state.user?.id }
+                val removable = playlist?.takeIf { it.owner?.id == state.user?.id }
                     ?.let { RemovablePlaylist(it.id, it.name) }
                 viewModel.trackActions.open(track.toTrackActionTarget(removable))
             },
@@ -1253,7 +1253,7 @@ private fun PlaylistListCard(
                 } else {
                     // Following — show whose it is and the count together when both are known.
                     val countText = if (playlist.trackCount > 0) "${playlist.trackCount} tracks" else null
-                    listOfNotNull(playlist.owner.displayName, countText).joinToString(" · ").ifBlank { "Playlist" }
+                    listOfNotNull(playlist.owner?.displayName, countText).joinToString(" · ").ifBlank { "Playlist" }
                 }
                 Text(subtitle, style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

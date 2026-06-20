@@ -440,7 +440,7 @@ private fun PlaylistRow(playlist: SpotifyPlaylist, onClick: () -> Unit) {
         headlineContent  = { Text(playlist.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         supportingContent= {
             Text(
-                playlist.owner.displayName ?: "Playlist",
+                playlist.owner?.displayName ?: "Playlist",
                 color    = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,

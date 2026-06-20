@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Crash-on-every-launch when a playlist had a sparse owner** — a `NullPointerException` in the auto-generated `PlaylistOwner.hashCode()` could put the app into an unrecoverable crash loop that only clearing app data fixed. Spotify's editorial/featured playlist objects sometimes return a sparse `owner` (missing `id`, or no `owner` at all); because Gson allocates models via `Unsafe` and bypasses the Kotlin constructor, those absent fields stayed `null` even though `PlaylistOwner.id` and `SpotifyPlaylist.owner` were declared non-null. Such a playlist got persisted into `LibraryCache`, so on the **next launch** the Library screen loaded it from disk and Compose computed `List<SpotifyPlaylist>.hashCode()` during recomposition → `id.hashCode()` on a null reference → crash, every launch, until data was cleared. `PlaylistOwner.id` and `SpotifyPlaylist.owner` are now nullable, which makes the generated `hashCode`/`equals` null-safe; a null-owner playlist sorts harmlessly into "following" (its owner id can never match the user's). Discovered from an on-device DropBox crash record.
+
 ## [3.1.2] - 2026-06-18
 
 _A compliance + polish release — Lyra now gracefully re-authenticates when a Spotify refresh token expires (ahead of Spotify's new six-month token-expiration policy taking effect 2026-07-20), and the app icon now appears, crisply, on the sign-in screen._

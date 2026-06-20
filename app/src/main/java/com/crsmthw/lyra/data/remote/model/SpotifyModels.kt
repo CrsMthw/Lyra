@@ -98,7 +98,11 @@ data class SpotifyPlaylist(
     val description   : String?,
     val images        : List<SpotifyImage>?  = null,
     val uri           : String,
-    val owner         : PlaylistOwner,
+    // Gson bypasses Kotlin's constructor (Unsafe alloc) so non-null types can still arrive null when
+    // the JSON omits the field. Spotify editorial/featured playlists return sparse owner objects — a
+    // null owner (or null owner.id) previously NPE'd the auto-generated hashCode/equals when Compose
+    // computed structural equality on a List<SpotifyPlaylist> during recomposition. Keep both nullable.
+    val owner         : PlaylistOwner?       = null,
     val collaborative : Boolean              = false,
     // Spotify renamed this from "tracks" to "items" in the simplified playlist object; keep "tracks"
     // as a legacy fallback so older/other endpoints still parse. Null here = trackCount reads 0.
@@ -109,7 +113,7 @@ data class SpotifyPlaylist(
     val trackCount  : Int    get() = tracksMeta?.total ?: 0
 }
 
-data class PlaylistOwner(val id: String, @SerializedName("display_name") val displayName: String?)
+data class PlaylistOwner(val id: String?, @SerializedName("display_name") val displayName: String?)
 data class PlaylistTracksMeta(val total: Int, val href: String?)
 
 // ── Playlist track wrapper ───────────────────────────────────────────────────
