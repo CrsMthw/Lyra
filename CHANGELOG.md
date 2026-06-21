@@ -7,7 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.3] - 2026-06-21
+
+_A Library motion release — the playlist track list now arrives with proper Material 3 Expressive transitions: a real container transform on phones, and a lateral "filmstrip" across the panes on foldables and tablets — and the long-standing blank-screen flash at the start of a track-list swap is fixed._
+
+### Changed
+- **Library single-pane — real M3 container transform (card → hero)** — tapping a playlist (or Liked Songs) now flies the tapped card's artwork up into the detail hero via a `sharedBounds` container transform (keys `"lib-art-<id>"` / `"lib-art-liked"`, springing through the same `rememberArtBoundsTransform()` as the album-art morphs), instead of the old slide-and-fade with no continuity between the card and the hero. The browser↔detail pane swap stays a gentle slide+fade underneath so the flying artwork carries the motion, and it reverses on Back.
+- **Detail hero art is now an M3 square (was the 4-sided cookie)** — the bordered art tile on every detail hero (playlist, Liked Songs, Album, Artist) is now `MaterialShapes.Square`. This makes the container transform shape-consistent: the browser card and the hero are now the *same* shape, so the art simply grows from one into the other — a real container transform with no custom shape-morphing. (An earlier attempt that morphed the clip square→cookie stroked a dark wash over flat artwork mid-morph, so the hero became a square instead.) The play / shuffle cookie buttons on the hero are unchanged.
+- **Two- & three-pane — M3 lateral transition for the right-pane playlist swap** — selecting a different playlist on the left now plays a **full-width filmstrip slide** (standard `AnimatedContent`): the outgoing track list slides fully off the left as the incoming slides in from the right, both opaque and briefly visible side-by-side (the M3 "browsing peer content" read), settling with the expressive spring's natural bounce. Previously the new list popped in ~20 % on-screen over an old list that vanished instantly. The docked three-pane tablet layout inherits it; the docked player pane is unaffected.
+- **Dependency:** `androidx.lifecycle` 2.10.0 → 2.11.0.
+
 ### Fixed
+- **Blank-screen flash at the start of a track-list transition** — switching into a playlist (and, in the two/three-pane layout, switching between playlists or into Liked Songs) could flash a blank screen at the very start of the swap, looking broken. Selecting a list emitted an **empty** state first (cleared tracks and flipped the detail/“content key”), which started the transition *before the tracks existed*; the cached tracks then arrived in a **second emission mid-transition**, and Compose's `AnimatedContent` drops/restarts its children when its `targetState` changes during a crossfade — so the outgoing pane was culled and the incoming one wasn't opaque yet → blank. Liked Songs escaped it from the browser only because its first emission stayed on the browser. The selection now **reads the cache *before* flipping to the detail**, so the swap begins **content-ready** in a single emission (the current view simply stays for the ~millisecond disk read); only a genuine cache *miss* shows a loading detail, and the network fills it *after* the transition. This also let the two-pane lateral drop an interim hand-rolled slider and use standard `AnimatedContent`.
 - **Crash-on-every-launch when a playlist had a sparse owner** — a `NullPointerException` in the auto-generated `PlaylistOwner.hashCode()` could put the app into an unrecoverable crash loop that only clearing app data fixed. Spotify's editorial/featured playlist objects sometimes return a sparse `owner` (missing `id`, or no `owner` at all); because Gson allocates models via `Unsafe` and bypasses the Kotlin constructor, those absent fields stayed `null` even though `PlaylistOwner.id` and `SpotifyPlaylist.owner` were declared non-null. Such a playlist got persisted into `LibraryCache`, so on the **next launch** the Library screen loaded it from disk and Compose computed `List<SpotifyPlaylist>.hashCode()` during recomposition → `id.hashCode()` on a null reference → crash, every launch, until data was cleared. `PlaylistOwner.id` and `SpotifyPlaylist.owner` are now nullable, which makes the generated `hashCode`/`equals` null-safe; a null-owner playlist sorts harmlessly into "following" (its owner id can never match the user's). Discovered from an on-device DropBox crash record.
 
 ## [3.1.2] - 2026-06-18
@@ -249,7 +260,8 @@ _A responsive-UI release — Lyra now adapts cleanly across phones, foldables, t
 ### Added
 - Initial release
 
-[Unreleased]: https://github.com/CrsMthw/Lyra/compare/v3.1.2...HEAD
+[Unreleased]: https://github.com/CrsMthw/Lyra/compare/v3.1.3...HEAD
+[3.1.3]: https://github.com/CrsMthw/Lyra/compare/v3.1.2...v3.1.3
 [3.1.2]: https://github.com/CrsMthw/Lyra/compare/v3.1.1...v3.1.2
 [3.1.1]: https://github.com/CrsMthw/Lyra/compare/v3.1.0...v3.1.1
 [3.1.0]: https://github.com/CrsMthw/Lyra/compare/v3.0.0...v3.1.0

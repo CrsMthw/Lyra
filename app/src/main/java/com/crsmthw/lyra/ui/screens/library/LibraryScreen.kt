@@ -6,9 +6,9 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedContentScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -106,6 +106,12 @@ import kotlinx.coroutines.withContext
 /** Pairs the search FAB with the Search screen's bar for the container transform — must match the
  *  identical key in `SearchScreen`. */
 private const val SEARCH_BAR_SHARED_KEY = "search-bar"
+
+/** Shared-element key for the single-pane Library container transform (tapped card art → detail
+ *  hero). Namespaced separately from the nav-level `"album-art"` morph; `id` is the playlist id or
+ *  `"liked"`. The matching source card and the hero use the same key so only that pair morphs. */
+private fun libArtKey(id: String?): String = "lib-art-${id ?: "liked"}"
+
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalSharedTransitionApi::class)
 @Composable
@@ -213,52 +219,63 @@ private fun SinglePaneLayout(
         .fillMaxSize()
         .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal))
     ) {
-        // Browser ↔ detail swap — a gentle slide + fade (flash-free over `background` in single
-        // pane). The spatial slide settles via the expressive `motionScheme` so it springs in; the
-        // cross-fade keeps a tween (alpha must not overshoot a valid range). The spec is read here
-        // (composable scope) and captured — `transitionSpec` itself is not a composable context.
+        // Browser ↔ detail swap as a CONTAINER TRANSFORM: a local SharedTransitionLayout wraps the
+        // AnimatedContent so the tapped card's art (`lib-art-<id>`) flies into the detail hero and
+        // morphs square→cookie (the hero side morphs the clip — see `TrackListHero`). The pane swap
+        // itself stays a gentle slide+fade so the morphing art carries the motion; the slide settles
+        // via the expressive `motionScheme` (springs in) and the cross-fade keeps a tween (alpha must
+        // not overshoot). Keys are namespaced "lib-art-*" so they never collide with the nav-level
+        // "album-art" morph; the FAB + scrims sit OUTSIDE this STL (they use the nav-level scope).
         val slideSpec = MaterialTheme.motionScheme.defaultSpatialSpec<IntOffset>()
-        AnimatedContent(
-            targetState  = state,
-            contentKey   = { s ->
-                val isDetail = s.currentPlaylist != null || s.isLoadingTracks || s.currentTracks.isNotEmpty()
-                if (isDetail) (s.currentPlaylist?.id ?: "liked") else null
-            },
-            modifier     = Modifier.fillMaxSize(),
-            transitionSpec = {
-                val enteringDetail = targetState.currentPlaylist != null ||
-                                     targetState.isLoadingTracks ||
-                                     targetState.currentTracks.isNotEmpty()
-                if (enteringDetail) {
-                    (slideInHorizontally(slideSpec) { it / 6 } + fadeIn(tween(220))) togetherWith
-                    (slideOutHorizontally(slideSpec) { -it / 8 } + fadeOut(tween(220)))
+        SharedTransitionLayout(modifier = Modifier.fillMaxSize()) {
+            val libSharedScope = this
+            AnimatedContent(
+                targetState  = state,
+                contentKey   = { s ->
+                    val isDetail = s.currentPlaylist != null || s.isLoadingTracks || s.currentTracks.isNotEmpty()
+                    if (isDetail) (s.currentPlaylist?.id ?: "liked") else null
+                },
+                modifier     = Modifier.fillMaxSize(),
+                transitionSpec = {
+                    val enteringDetail = targetState.currentPlaylist != null ||
+                                         targetState.isLoadingTracks ||
+                                         targetState.currentTracks.isNotEmpty()
+                    if (enteringDetail) {
+                        (slideInHorizontally(slideSpec) { it / 10 } + fadeIn(tween(220))) togetherWith
+                        (slideOutHorizontally(slideSpec) { -it / 12 } + fadeOut(tween(220)))
+                    } else {
+                        (slideInHorizontally(slideSpec) { -it / 10 } + fadeIn(tween(220))) togetherWith
+                        (slideOutHorizontally(slideSpec) { it / 12 } + fadeOut(tween(220)))
+                    }
+                },
+                label = "library_detail_transition",
+            ) { snapshot ->
+                val acScope = this
+                val isDetailSnapshot = snapshot.currentPlaylist != null ||
+                                       snapshot.isLoadingTracks ||
+                                       snapshot.currentTracks.isNotEmpty()
+                if (isDetailSnapshot) {
+                    RightPaneContent(
+                        state           = snapshot,
+                        viewModel       = viewModel,
+                        playerViewModel = playerViewModel,
+                        mosaicDir       = mosaicDir,
+                        onTrackClick    = onRequestPlayer,
+                        onRefresh       = viewModel::refreshCurrentTracks,
+                        onBack          = { viewModel.clearSelection() },
+                        sharedScope     = libSharedScope,
+                        animScope       = acScope,
+                    )
                 } else {
-                    (slideInHorizontally(slideSpec) { -it / 6 } + fadeIn(tween(220))) togetherWith
-                    (slideOutHorizontally(slideSpec) { it / 8 } + fadeOut(tween(220)))
+                    LibraryBrowserPane(
+                        state          = snapshot,
+                        viewModel      = viewModel,
+                        onOpenSettings = onOpenSettings,
+                        isLandscape    = isLandscape,
+                        sharedScope    = libSharedScope,
+                        animScope      = acScope,
+                    )
                 }
-            },
-            label = "library_detail_transition",
-        ) { snapshot ->
-            val isDetailSnapshot = snapshot.currentPlaylist != null ||
-                                   snapshot.isLoadingTracks ||
-                                   snapshot.currentTracks.isNotEmpty()
-            if (isDetailSnapshot) {
-                RightPaneContent(
-                    state           = snapshot,
-                    viewModel       = viewModel,
-                    playerViewModel = playerViewModel,
-                    mosaicDir       = mosaicDir,
-                    onTrackClick    = onRequestPlayer,
-                    onRefresh       = viewModel::refreshCurrentTracks,
-                    onBack          = { viewModel.clearSelection() },
-                )
-            } else {
-                LibraryBrowserPane(
-                    state          = snapshot,
-                    viewModel      = viewModel,
-                    onOpenSettings = onOpenSettings,
-                    isLandscape    = isLandscape,
-                )
             }
         }
 
@@ -328,7 +345,8 @@ private fun SinglePaneLayout(
 
 // ── Library browser pane ──────────────────────────────────────────────────────
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class,
+       ExperimentalSharedTransitionApi::class)
 @Composable
 private fun LibraryBrowserPane(
     state                 : LibraryUiState,
@@ -337,6 +355,8 @@ private fun LibraryBrowserPane(
     isLandscape           : Boolean,
     modifier              : Modifier = Modifier,
     containerColor        : Color = Color.Unspecified,   // top-scrim target; defaults to background
+    sharedScope           : SharedTransitionScope? = null,   // non-null only in single pane (container transform)
+    animScope             : AnimatedContentScope? = null,
 ) {
     var showRefreshErrorDialog by remember { mutableStateOf(false) }
     val haptics        = LocalHapticFeedback.current
@@ -360,11 +380,21 @@ private fun LibraryBrowserPane(
     // Shared list items — identical in both portrait and landscape LazyColumns
     val listBody: LazyListScope.() -> Unit = {
         item(key = "liked") {
+            // Container-transform source: same inline `sharedBounds` form as the search-FAB morph.
+            val likedArt = if (sharedScope != null && animScope != null)
+                with(sharedScope) {
+                    Modifier.sharedBounds(
+                        sharedContentState      = rememberSharedContentState(key = libArtKey(null)),
+                        animatedVisibilityScope = animScope,
+                        boundsTransform         = rememberArtBoundsTransform(),
+                    )
+                } else Modifier
             LikedSongsCard(
-                count       = state.likedSongCount,
-                isSelected  = likedSongsSelected,
-                onOpen      = { haptics.confirm(); viewModel.selectLikedSongs() },
-                onPlay      = { viewModel.playPlaylist("spotify:user:${state.user?.id}:collection") },
+                count             = state.likedSongCount,
+                isSelected        = likedSongsSelected,
+                onOpen            = { haptics.confirm(); viewModel.selectLikedSongs() },
+                onPlay            = { viewModel.playPlaylist("spotify:user:${state.user?.id}:collection") },
+                artSharedModifier = likedArt,
             )
         }
         if (state.featuredPlaylists.isNotEmpty()) {
@@ -376,11 +406,26 @@ private fun LibraryBrowserPane(
                 LazyRow(contentPadding = PaddingValues(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     items(state.featuredPlaylists, key = { it.id }) { playlist ->
+                        // Only the featured card owns the `lib-art-<id>` source when no main-list
+                        // card already does — a followed playlist can appear in BOTH featured and the
+                        // list, and two sources for one key is a duplicate-shared-key crash. The
+                        // main list (ownership-partitioned) + liked are already unique among themselves.
+                        val featuredArtMod =
+                            if (sharedScope != null && animScope != null &&
+                                state.playlists.none { it.id == playlist.id })
+                                with(sharedScope) {
+                                    Modifier.sharedBounds(
+                                        sharedContentState      = rememberSharedContentState(key = libArtKey(playlist.id)),
+                                        animatedVisibilityScope = animScope,
+                                        boundsTransform         = rememberArtBoundsTransform(),
+                                    )
+                                } else Modifier
                         PlaylistCard(
-                            playlist    = playlist,
-                            mosaicFile  = if (playlist.id in state.playlistsWithMosaics)
+                            playlist          = playlist,
+                            mosaicFile        = if (playlist.id in state.playlistsWithMosaics)
                                 File(mosaicDir, "${playlist.id}.png") else null,
-                            onClick     = { haptics.confirm(); viewModel.selectPlaylist(playlist) },
+                            onClick           = { haptics.confirm(); viewModel.selectPlaylist(playlist) },
+                            artSharedModifier = featuredArtMod,
                         )
                     }
                 }
@@ -392,14 +437,23 @@ private fun LibraryBrowserPane(
                     modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp))
             }
             items(myPlaylists, key = { it.id }) { playlist ->
+                val playlistArt = if (sharedScope != null && animScope != null)
+                    with(sharedScope) {
+                        Modifier.sharedBounds(
+                            sharedContentState      = rememberSharedContentState(key = libArtKey(playlist.id)),
+                            animatedVisibilityScope = animScope,
+                            boundsTransform         = rememberArtBoundsTransform(),
+                        )
+                    } else Modifier
                 PlaylistListCard(
-                    playlist    = playlist,
-                    mosaicFile  = if (playlist.id in state.playlistsWithMosaics)
+                    playlist          = playlist,
+                    mosaicFile        = if (playlist.id in state.playlistsWithMosaics)
                         File(mosaicDir, "${playlist.id}.png") else null,
-                    isSelected  = playlist.id == selectedPlaylistId,
-                    isMine      = true,
-                    onClick     = { haptics.confirm(); viewModel.selectPlaylist(playlist) },
-                    onPlay      = { viewModel.playPlaylist(playlist.uri) },
+                    isSelected        = playlist.id == selectedPlaylistId,
+                    isMine            = true,
+                    onClick           = { haptics.confirm(); viewModel.selectPlaylist(playlist) },
+                    onPlay            = { viewModel.playPlaylist(playlist.uri) },
+                    artSharedModifier = playlistArt,
                 )
             }
         }
@@ -409,13 +463,22 @@ private fun LibraryBrowserPane(
                     modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp))
             }
             items(following, key = { it.id }) { playlist ->
+                val playlistArt = if (sharedScope != null && animScope != null)
+                    with(sharedScope) {
+                        Modifier.sharedBounds(
+                            sharedContentState      = rememberSharedContentState(key = libArtKey(playlist.id)),
+                            animatedVisibilityScope = animScope,
+                            boundsTransform         = rememberArtBoundsTransform(),
+                        )
+                    } else Modifier
                 PlaylistListCard(
-                    playlist    = playlist,
-                    mosaicFile  = if (playlist.id in state.playlistsWithMosaics)
+                    playlist          = playlist,
+                    mosaicFile        = if (playlist.id in state.playlistsWithMosaics)
                         File(mosaicDir, "${playlist.id}.png") else null,
-                    isSelected  = playlist.id == selectedPlaylistId,
-                    onClick     = { haptics.confirm(); viewModel.selectPlaylist(playlist) },
-                    onPlay      = { viewModel.playPlaylist(playlist.uri) },
+                    isSelected        = playlist.id == selectedPlaylistId,
+                    onClick           = { haptics.confirm(); viewModel.selectPlaylist(playlist) },
+                    onPlay            = { viewModel.playPlaylist(playlist.uri) },
+                    artSharedModifier = playlistArt,
                 )
             }
         }
@@ -778,20 +841,21 @@ private fun TwoPaneLayout(
                 elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
             ) {
                 Box(modifier = Modifier.fillMaxSize()) {
-                    // Full state as targetState so each scope gets its own frozen snapshot:
-                    // outgoing holds old playlist data, incoming holds new playlist data.
-                    // Slide-only (no alpha/fade) means neither scope ever becomes transparent —
-                    // eliminating the white flash that alpha-based transitions cause in light mode.
-                    // The slide settles via the expressive `motionScheme` so the swap springs in
-                    // (read here, in composable scope; `transitionSpec` is not a composable context).
+                    // M3 LATERAL (peer browse): a full-width filmstrip — the outgoing track list slides
+                    // fully off the left as the incoming slides in from the right, both opaque, NO fade
+                    // (M3 Lateral cautions against it; a full-width opaque slide has nothing to
+                    // "white-flash"). The slide settles via the expressive `motionScheme` spring for the
+                    // natural bounce. Standard `AnimatedContent` retains the exiting pane correctly now
+                    // that `selectPlaylist` flips to the detail content-ready (no mid-transition emission
+                    // to make it cull the outgoing) — see `LibraryViewModel.selectPlaylist`.
                     val rightPaneSlideSpec = MaterialTheme.motionScheme.defaultSpatialSpec<IntOffset>()
                     AnimatedContent(
                         targetState    = state,
                         contentKey     = { s -> s.currentPlaylist?.id to (s.currentPlaylist == null) },
                         modifier       = Modifier.fillMaxSize(),
                         transitionSpec = {
-                            slideInHorizontally(rightPaneSlideSpec) { it / 5 } togetherWith
-                            slideOutHorizontally(rightPaneSlideSpec) { -it / 5 }
+                            slideInHorizontally(rightPaneSlideSpec) { it } togetherWith
+                            slideOutHorizontally(rightPaneSlideSpec) { -it }
                         },
                         label = "right_pane",
                     ) { snapshot ->
@@ -848,7 +912,8 @@ private fun TwoPaneLayout(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class,
+       ExperimentalSharedTransitionApi::class)
 @Composable
 private fun RightPaneContent(
     state           : LibraryUiState,
@@ -859,6 +924,8 @@ private fun RightPaneContent(
     onRefresh       : () -> Unit,
     onBack          : (() -> Unit)? = null,            // non-null → show the back pill (single-pane)
     containerColor  : Color = Color.Unspecified,       // scrim target; defaults to background
+    sharedScope     : SharedTransitionScope? = null,   // container-transform target (single pane)
+    animScope       : AnimatedContentScope? = null,
 ) {
     val currentTrackId by remember {
         playerViewModel.uiState.map { it.currentTrack?.id }.distinctUntilChanged()
@@ -978,6 +1045,9 @@ private fun RightPaneContent(
                     trackCount   = trackCount,
                     onPlay       = { haptics.press(); viewModel.playPlaylist(playUri) },
                     onShuffle    = { haptics.press(); viewModel.shufflePlaylist(playUri) },
+                    playlistId   = playlist?.id,
+                    sharedScope  = sharedScope,
+                    animScope    = animScope,
                 )
             },
             emptyContent = when {
@@ -1089,6 +1159,7 @@ private fun RightPaneContent(
 // The shared DetailArtHero with the playlist/Liked art (real cover, else the Liked gradient or a
 // music-note fallback) and an "N tracks" subtitle.
 
+@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 private fun TrackListHero(
     artUrl      : String?,
@@ -1097,12 +1168,28 @@ private fun TrackListHero(
     trackCount  : Int,
     onPlay      : () -> Unit,
     onShuffle   : () -> Unit,
+    playlistId  : String? = null,
+    sharedScope : SharedTransitionScope? = null,
+    animScope   : AnimatedContentScope? = null,
 ) {
+    // Container-transform TARGET (single pane): the hero art tile shares bounds with the tapped
+    // browser card (`lib-art-<id>`, or `lib-art-liked`) and flies + cross-fades into the hero. Card
+    // and hero are the same M3 square shape, so it's a real M3 container transform (no shape morph).
+    val artModifier = if (sharedScope != null && animScope != null)
+        with(sharedScope) {
+            Modifier.sharedBounds(
+                sharedContentState      = rememberSharedContentState(key = libArtKey(playlistId)),
+                animatedVisibilityScope = animScope,
+                boundsTransform         = rememberArtBoundsTransform(),
+            )
+        } else Modifier
+
     DetailArtHero(
-        title     = name,
-        subtitle  = if (trackCount > 0) "$trackCount tracks" else null,
-        onPlay    = onPlay,
-        onShuffle = onShuffle,
+        title       = name,
+        subtitle    = if (trackCount > 0) "$trackCount tracks" else null,
+        onPlay      = onPlay,
+        onShuffle   = onShuffle,
+        artModifier = artModifier,
     ) {
         if (!artUrl.isNullOrBlank()) {
             AsyncImage(
@@ -1138,14 +1225,16 @@ private fun TrackListHero(
 
 @Composable
 private fun LikedSongsCard(
-    count       : Int,
-    onOpen      : () -> Unit,
-    onPlay      : () -> Unit,
-    isSelected  : Boolean = false,
+    count             : Int,
+    onOpen            : () -> Unit,
+    onPlay            : () -> Unit,
+    modifier          : Modifier = Modifier,
+    isSelected        : Boolean = false,
+    artSharedModifier : Modifier = Modifier,   // container-transform source — applied to the art tile
 ) {
     Card(
         onClick   = onOpen,
-        modifier  = Modifier
+        modifier  = modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 4.dp),
         shape     = RoundedCornerShape(16.dp),
@@ -1162,6 +1251,7 @@ private fun LikedSongsCard(
             Box(
                 modifier = Modifier
                     .size(56.dp)
+                    .then(artSharedModifier)
                     .clip(RoundedCornerShape(12.dp))
                     .background(Brush.linearGradient(listOf(Color(0xFF6A11CB), Color(0xFF2575FC)))),
                 contentAlignment = Alignment.Center,
@@ -1196,16 +1286,18 @@ private fun LikedSongsCard(
 
 @Composable
 private fun PlaylistListCard(
-    playlist    : SpotifyPlaylist,
-    mosaicFile  : File?,
-    isSelected  : Boolean = false,
-    isMine      : Boolean = false,   // own playlist → count only (owner name is the user, redundant)
-    onClick     : () -> Unit,
-    onPlay      : () -> Unit,
+    playlist          : SpotifyPlaylist,
+    mosaicFile        : File?,
+    modifier          : Modifier = Modifier,
+    isSelected        : Boolean = false,
+    isMine            : Boolean = false,   // own playlist → count only (owner name is the user, redundant)
+    onClick           : () -> Unit,
+    onPlay            : () -> Unit,
+    artSharedModifier : Modifier = Modifier,   // container-transform source — applied to the art tile
 ) {
     Card(
         onClick   = onClick,
-        modifier  = Modifier
+        modifier  = modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 4.dp),
         shape     = RoundedCornerShape(16.dp),
@@ -1227,12 +1319,13 @@ private fun PlaylistListCard(
                     model              = thumbModel,
                     contentDescription = playlist.name,
                     contentScale       = ContentScale.Crop,
-                    modifier           = Modifier.size(56.dp).clip(thumbShape),
+                    modifier           = Modifier.size(56.dp).then(artSharedModifier).clip(thumbShape),
                 )
             } else {
                 Box(
                     modifier = Modifier
                         .size(56.dp)
+                        .then(artSharedModifier)
                         .clip(thumbShape)
                         .background(MaterialTheme.colorScheme.surfaceVariant),
                     contentAlignment = Alignment.Center,

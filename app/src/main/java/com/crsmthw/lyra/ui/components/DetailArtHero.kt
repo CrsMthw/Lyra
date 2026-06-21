@@ -35,7 +35,7 @@ import com.crsmthw.lyra.R
 
 /**
  * The shared OneUI-style detail hero used by the playlist/Liked, album, and artist detail screens
- * (single-pane hero, and the two-pane left panel): the art clipped to a 4-sided cookie shape
+ * (single-pane hero, and the two-pane left panel): the art clipped to an M3 square shape
  * (bordered, centred), then a row with the [title] + [subtitle] (+ optional [meta] line) on the
  * left and optional shuffle/play cookie buttons on the right. Pass `onShuffle`/`onPlay` = null to
  * omit that button (the artist screen has neither). [meta] is a second, smaller line under the
@@ -46,14 +46,17 @@ import com.crsmthw.lyra.R
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun DetailArtHero(
-    title      : String,
-    modifier   : Modifier = Modifier,
-    subtitle   : String? = null,
-    meta       : String? = null,
-    onPlay     : (() -> Unit)? = null,
-    onShuffle  : (() -> Unit)? = null,
-    artSize    : Dp = 220.dp,
-    artContent : @Composable BoxScope.() -> Unit,
+    title       : String,
+    modifier    : Modifier = Modifier,
+    subtitle    : String? = null,
+    meta        : String? = null,
+    onPlay      : (() -> Unit)? = null,
+    onShuffle   : (() -> Unit)? = null,
+    artSize     : Dp = 220.dp,
+    // Carries the single-pane Library container-transform `sharedBounds` onto the art tile; defaults
+    // to a no-op so the album / artist / two-pane heroes stay static.
+    artModifier : Modifier = Modifier,
+    artContent  : @Composable BoxScope.() -> Unit,
 ) {
     val shuffleLabel = stringResource(R.string.player_shuffle)
     val playLabel    = stringResource(R.string.player_play)
@@ -63,11 +66,13 @@ fun DetailArtHero(
             modifier         = Modifier.fillMaxWidth().statusBarsPadding().padding(top = 40.dp),
             contentAlignment = Alignment.Center,
         ) {
+            val artTileShape = MaterialShapes.Square.toShape()
             Box(
                 modifier         = Modifier
+                    .then(artModifier)
                     .size(artSize)
-                    .border(2.dp, MaterialTheme.colorScheme.outline, MaterialShapes.Cookie4Sided.toShape())
-                    .clip(MaterialShapes.Cookie4Sided.toShape()),
+                    .border(2.dp, MaterialTheme.colorScheme.outline, artTileShape)
+                    .clip(artTileShape),
                 contentAlignment = Alignment.Center,
                 content          = artContent,
             )

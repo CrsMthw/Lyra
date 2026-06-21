@@ -104,8 +104,14 @@
     <string name="settings_visualizer_sync">Sync circle &amp; bottom</string>
     <string name="settings_visualizer_label_circle">Circle</string>
     <string name="settings_visualizer_label_bottom">Bottom</string>
-    <string name="settings_visualizer_res_bands">%1$d bands</string>
-    <string name="settings_visualizer_res_bands_labeled">%1$s · %2$d bands</string>
+    <plurals name="settings_visualizer_res_bands">
+        <item quantity="one">%1$d band</item>
+        <item quantity="other">%1$d bands</item>
+    </plurals>
+    <plurals name="settings_visualizer_res_bands_labeled">
+        <item quantity="one">%1$s · %2$d band</item>
+        <item quantity="other">%1$s · %2$d bands</item>
+    </plurals>
     <string name="settings_visualizer_gain_labeled">%1$s · %2$s</string>
     <string name="settings_visualizer_reset">Reset visualizer settings</string>
     <string name="settings_visualizer_reset_title">Reset visualizer settings?</string>

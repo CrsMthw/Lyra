@@ -40,6 +40,7 @@ import com.crsmthw.lyra.util.press
 import com.crsmthw.lyra.util.tick
 import com.crsmthw.lyra.util.toggle
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntSize
@@ -733,8 +734,8 @@ private fun ResolutionSliderRow(prefix: String?, bands: Int, onBands: (Int) -> U
     val n = resolutions[pos.roundToInt()]
     Column(modifier = Modifier.padding(horizontal = 16.dp)) {
         Text(
-            text  = if (prefix == null) stringResource(R.string.settings_visualizer_res_bands, n)
-                    else stringResource(R.string.settings_visualizer_res_bands_labeled, prefix, n),
+            text  = if (prefix == null) pluralStringResource(R.plurals.settings_visualizer_res_bands, n, n)
+                    else pluralStringResource(R.plurals.settings_visualizer_res_bands_labeled, n, prefix, n),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

@@ -19,10 +19,11 @@ import java.io.File
 
 @Composable
 fun PlaylistCard(
-    playlist    : SpotifyPlaylist,
-    mosaicFile  : File?,
-    onClick     : () -> Unit,
-    modifier    : Modifier = Modifier,
+    playlist          : SpotifyPlaylist,
+    mosaicFile        : File?,
+    onClick           : () -> Unit,
+    modifier          : Modifier = Modifier,
+    artSharedModifier : Modifier = Modifier,   // container-transform source (single-pane Library)
 ) {
     val imageShape = RoundedCornerShape(8.dp)
 
@@ -41,6 +42,7 @@ fun PlaylistCard(
                 modifier           = Modifier
                     .fillMaxWidth()
                     .aspectRatio(1f)
+                    .then(artSharedModifier)
                     .clip(imageShape),
             )
         } else {
@@ -48,6 +50,7 @@ fun PlaylistCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(1f)
+                    .then(artSharedModifier)
                     .clip(imageShape),
                 color = MaterialTheme.colorScheme.surfaceVariant,
             ) {

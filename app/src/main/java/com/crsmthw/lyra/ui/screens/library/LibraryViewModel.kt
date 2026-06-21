@@ -289,50 +289,64 @@ class LibraryViewModel(
         }
     }
 
+    /** Tracks the playlist the user most recently tapped, so the async cache read below can bail when
+     *  a newer tap supersedes it (currentPlaylist isn't set until the detail is content-ready, so the
+     *  usual `currentPlaylist?.id` in-flight guard can't be used during the cache read). */
+    private var pendingSelectionId: String? = null
+
     fun selectPlaylist(playlist: SpotifyPlaylist) {
-        if (_uiState.value.currentPlaylist?.id == playlist.id) return
-        _uiState.update { it.copy(
-            currentPlaylist      = playlist,
-            isLoadingTracks      = true,
-            currentTracks        = emptyList(),
-            playlistTracksOffset = 0,
-            playlistTracksTotal  = playlist.trackCount,   // metadata total; refined from the response
-            error                = null,
-        ) }
+        if (_uiState.value.currentPlaylist?.id == playlist.id || pendingSelectionId == playlist.id) return
+        // Read the cached tracks BEFORE flipping to the detail, so the browser→detail container
+        // transform starts content-ready: no empty first frame, and no track emission landing
+        // mid-transition (a state change during the crossfade is what blanks the screen). The browser
+        // simply stays up for the ~ms disk read. Mirrors selectLikedSongs. A genuine cache miss flips
+        // to the empty loading detail and the network fills it AFTER the transition (so it can't blank).
+        pendingSelectionId = playlist.id
         viewModelScope.launch {
             val snapshotId = playlist.snapshotId
-            if (snapshotId != null) {
-                val cached = withContext(Dispatchers.IO) { cache.loadTrackList(playlist.id) }
-                if (cached != null && cached.snapshotId == snapshotId) {
-                    // Snapshot matches → cache is current. Show it and seed pagination from it; whatever
-                    // pages were loaded+cached before are preserved (no page-0 refetch that would clobber).
-                    _uiState.update { it.copy(
-                        currentTracks        = cached.tracks,
-                        isLoadingTracks      = false,
-                        playlistTracksOffset = cached.tracks.size,
-                        playlistTracksTotal  = maxOf(playlist.trackCount, cached.tracks.size),
-                    ) }
-                    if (playlist.id !in _uiState.value.playlistsWithMosaics && playlist.thumbnailUrl.isBlank()) {
-                        withContext(Dispatchers.IO) { mosaicGenerator.generate(playlist.id, cached.tracks) }
-                        _uiState.update { s -> s.copy(playlistsWithMosaics = s.playlistsWithMosaics + playlist.id) }
-                    }
-                    // Reconcile the authoritative total once per open (cheap limit=1): heals a
-                    // drifted count — an in-app add that Spotify's /me/playlists metadata hasn't
-                    // caught up on, or a change made on another device — without a manual refresh.
-                    // maxOf with the loaded size so a lagging server total can never drag the count
-                    // below what's actually cached. Updates the header total and, via the cache, the
-                    // My Playlists list count.
-                    repository.getPlaylistTracks(playlist.id, limit = 1, offset = 0).onSuccess { resp ->
-                        if (_uiState.value.currentPlaylist?.id != playlist.id) return@onSuccess
-                        val total = maxOf(resp.total, _uiState.value.currentTracks.size)
-                        _uiState.update { it.copy(playlistTracksTotal = total) }
-                        withContext(Dispatchers.IO) { cache.setPlaylistTrackCount(playlist.id, total) }
-                    }
-                    return@launch
+            val cached = if (snapshotId != null)
+                withContext(Dispatchers.IO) { cache.loadTrackList(playlist.id) } else null
+            if (pendingSelectionId != playlist.id) return@launch   // a newer selection superseded this
+
+            if (cached != null && cached.snapshotId == snapshotId) {
+                // Snapshot matches → cache is current. Flip to the detail in ONE content-ready emission
+                // (tracks present from the transition's first frame); seed pagination from it (whatever
+                // pages were loaded+cached before are preserved — no page-0 refetch that would clobber).
+                _uiState.update { it.copy(
+                    currentPlaylist      = playlist,
+                    currentTracks        = cached.tracks,
+                    isLoadingTracks      = false,
+                    playlistTracksOffset = cached.tracks.size,
+                    playlistTracksTotal  = maxOf(playlist.trackCount, cached.tracks.size),
+                    error                = null,
+                ) }
+                if (playlist.id !in _uiState.value.playlistsWithMosaics && playlist.thumbnailUrl.isBlank()) {
+                    withContext(Dispatchers.IO) { mosaicGenerator.generate(playlist.id, cached.tracks) }
+                    _uiState.update { s -> s.copy(playlistsWithMosaics = s.playlistsWithMosaics + playlist.id) }
                 }
+                // Reconcile the authoritative total once per open (cheap limit=1): heals a drifted
+                // count — an in-app add that Spotify's /me/playlists metadata hasn't caught up on, or a
+                // change made on another device — without a manual refresh. maxOf with the loaded size
+                // so a lagging server total can never drag the count below what's actually cached.
+                repository.getPlaylistTracks(playlist.id, limit = 1, offset = 0).onSuccess { resp ->
+                    if (_uiState.value.currentPlaylist?.id != playlist.id) return@onSuccess
+                    val total = maxOf(resp.total, _uiState.value.currentTracks.size)
+                    _uiState.update { it.copy(playlistTracksTotal = total) }
+                    withContext(Dispatchers.IO) { cache.setPlaylistTrackCount(playlist.id, total) }
+                }
+                return@launch
             }
 
-            // No cache or stale snapshot — fetch the first page with the loading indicator
+            // No cache or stale snapshot — flip to a loading detail (hero + spinner), then fetch the
+            // first page. The fetch lands after the transition, so the empty start doesn't blank.
+            _uiState.update { it.copy(
+                currentPlaylist      = playlist,
+                isLoadingTracks      = true,
+                currentTracks        = emptyList(),
+                playlistTracksOffset = 0,
+                playlistTracksTotal  = playlist.trackCount,   // metadata total; refined from the response
+                error                = null,
+            ) }
             repository.getPlaylistTracks(playlist.id).fold(
                 onSuccess = { resp ->
                     if (_uiState.value.currentPlaylist?.id != playlist.id) return@fold
@@ -355,7 +369,7 @@ class LibraryViewModel(
                     }
                 },
                 onFailure = { e ->
-                    // Only reached when there was no usable cache (cache hit returns early above).
+                    if (_uiState.value.currentPlaylist?.id != playlist.id) return@fold
                     val msg = if (e.message?.contains("403") == true)
                         "Track list unavailable for this playlist. You can still play it with the ▶ button."
                     else e.message
@@ -366,6 +380,7 @@ class LibraryViewModel(
     }
 
     fun clearSelection() {
+        pendingSelectionId = null   // cancel any in-flight playlist cache read
         _uiState.update { it.copy(
             currentPlaylist     = null,
             currentTracks       = emptyList(),
@@ -405,16 +420,16 @@ class LibraryViewModel(
     }
 
     fun selectLikedSongs() {
-        _uiState.update { it.copy(
-            currentPlaylist     = null,
-            currentTracks       = emptyList(),
-            error               = null,
-            likedSongsOffset    = 0,
-            likedSongsTotal     = 0,
-            isLoadingMoreTracks = false,
-        )}
+        // Already on Liked (no playlist + tracks loaded), or a Liked load already in flight → no-op.
+        if ((_uiState.value.currentPlaylist == null && _uiState.value.currentTracks.isNotEmpty()) ||
+            pendingSelectionId == LibraryCache.LIKED_SONGS_KEY) return
+        // Read the liked cache BEFORE flipping to the list, so the swap starts content-ready — no empty
+        // placeholder first frame and no track emission landing mid-transition (which blanks the
+        // two-pane swap). The current view stays for the ~ms disk read. Mirrors selectPlaylist.
+        pendingSelectionId = LibraryCache.LIKED_SONGS_KEY
         viewModelScope.launch {
             val cached = withContext(Dispatchers.IO) { cache.loadTrackList(LibraryCache.LIKED_SONGS_KEY) }
+            if (pendingSelectionId != LibraryCache.LIKED_SONGS_KEY) return@launch   // superseded by a newer selection
 
             if (cached != null) {
                 // Show cached tracks immediately — no loading spinner for the user.
@@ -424,10 +439,13 @@ class LibraryViewModel(
                 val cachedCount   = cached.snapshotId.toIntOrNull() ?: cached.tracks.size
                 val cachedTracks  = cached.tracks.distinctBy { it.id }
                 _uiState.update { it.copy(
-                    currentTracks    = cachedTracks,
-                    isLoadingTracks  = false,
-                    likedSongsOffset = cachedTracks.size,
-                    likedSongsTotal  = cachedCount,
+                    currentPlaylist     = null,
+                    currentTracks       = cachedTracks,
+                    isLoadingTracks     = false,
+                    likedSongsOffset    = cachedTracks.size,
+                    likedSongsTotal     = cachedCount,
+                    isLoadingMoreTracks = false,
+                    error               = null,
                 )}
                 if (cachedTracks.size != cached.tracks.size) {
                     withContext(Dispatchers.IO) {
@@ -472,8 +490,17 @@ class LibraryViewModel(
                 return@launch
             }
 
-            // No cache — fetch with loading indicator
-            _uiState.update { it.copy(isLoadingTracks = true) }
+            // No cache — flip to a loading detail (Liked gradient hero + spinner), then fetch. The
+            // network lands after the transition, so the empty start doesn't blank.
+            _uiState.update { it.copy(
+                currentPlaylist     = null,
+                currentTracks       = emptyList(),
+                isLoadingTracks     = true,
+                likedSongsOffset    = 0,
+                likedSongsTotal     = 0,
+                isLoadingMoreTracks = false,
+                error               = null,
+            )}
             fetchAndReplaceLikedSongs()
         }
     }
