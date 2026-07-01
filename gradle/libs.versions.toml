@@ -1,12 +1,11 @@
 [versions]
 agp                  = "9.2.1"
-kotlin               = "2.3.21"
-ksp                  = "2.3.8"
+kotlin               = "2.4.0"
 coreKtx              = "1.19.0"
 lifecycleRuntime     = "2.11.0"
 activityCompose      = "1.13.0"
-composeBom           = "2026.05.01"
-material3            = "1.5.0-alpha21"
+composeBom           = "2026.06.00"
+material3            = "1.5.0-alpha22"
 navigation           = "2.9.8"
 datastore            = "1.2.1"
 appauth              = "0.11.1"
@@ -58,4 +57,3 @@ glance-material3                     = { group = "androidx.glance",            n
 android-application = { id = "com.android.application",             version.ref = "agp" }
 kotlin-android      = { id = "org.jetbrains.kotlin.android",        version.ref = "kotlin" }
 kotlin-compose      = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
-ksp                 = { id = "com.google.devtools.ksp",             version.ref = "ksp" }

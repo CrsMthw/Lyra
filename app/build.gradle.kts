@@ -1,7 +1,6 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
-    alias(libs.plugins.ksp)
 }
 
 android {
@@ -12,8 +11,8 @@ android {
         applicationId = "com.crsmthw.lyra"
         minSdk        = 35
         targetSdk     = 37
-        versionCode   = 14
-        versionName   = "3.1.3"
+        versionCode   = 15
+        versionName   = "3.1.4"
 
         // AppAuth redirect scheme – must match AndroidManifest intent-filter
         manifestPlaceholders["appAuthRedirectScheme"] = "com.crsmthw.lyra"
@@ -39,6 +38,18 @@ android {
 }
 
 kotlin { jvmToolchain(21) }
+
+// This project ships no tests (no src/test or src/androidTest). AGP still creates
+// unit-test + android-test components for every variant, and that test-component
+// wiring is what trips Gradle's "Project object as a dependency notation" deprecation
+// (from AGP's own VariantDependenciesBuilder, not our code). Disabling the unused test
+// components keeps AGP off that deprecated path — remove this block if tests are added.
+androidComponents {
+    beforeVariants(selector().all()) { variant ->
+        variant.hostTests.forEach { (_, hostTest) -> hostTest.enable = false }
+        variant.deviceTests.forEach { (_, deviceTest) -> deviceTest.enable = false }
+    }
+}
 
 dependencies {
     // Core

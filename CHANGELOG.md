@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.4] - 2026-07-01
+
+_A maintenance release — toolchain and dependency upgrades plus a build-hygiene pass. No user-facing changes; the app behaves identically to 3.1.3._
+
+### Changed
+- **Kotlin 2.3.21 → 2.4.0** — the language/compiler bump, which also advances the bundled Compose compiler plugin in lockstep. No source changes were required (the project sets no Compose-compiler feature flags, so the flag deprecations that turn to errors in 2.4.0 don't apply, and it was already on the K2 compiler).
+- **Gradle wrapper 9.5.1 → 9.6.1**, **Compose BOM 2026.05.01 → 2026.06.00**, and **Material3 `1.5.0-alpha21` → `1.5.0-alpha22`**. None of the APIs changed/removed in the Material3 alpha are used by the app, so it's a clean drop-in.
+
+### Removed
+- **Unused KSP plugin** — the Kotlin Symbol Processing plugin was applied but had **zero processors** (no Room/Hilt/Moshi — DI is manual and JSON uses Gson), so its task was `SKIPPED` on every build. It was also the only thing pinning the toolchain below Kotlin 2.4.0 (no Kotlin-2.4.0-compatible KSP has shipped yet — [google/ksp#2965](https://github.com/google/ksp/issues/2965)). Removed entirely.
+
+### Fixed
+- **Build is now warning-free.** Lint reports **0 issues** (was 5 dependency-update advisories, all resolved by the upgrades above). The two remaining build-console notices were also cleared: the Gradle daemon's metaspace cap was raised (`512m → 1g`) so it no longer exhausts and restarts mid-build, and AGP's unused unit-test/androidTest components are now disabled (the project ships no tests) to keep AGP off the deprecated `Project`-as-dependency-notation path that produced the *"incompatible with Gradle 10"* warning.
+
 ## [3.1.3] - 2026-06-21
 
 _A Library motion release — the playlist track list now arrives with proper Material 3 Expressive transitions: a real container transform on phones, and a lateral "filmstrip" across the panes on foldables and tablets — and the long-standing blank-screen flash at the start of a track-list swap is fixed._
@@ -260,7 +274,8 @@ _A responsive-UI release — Lyra now adapts cleanly across phones, foldables, t
 ### Added
 - Initial release
 
-[Unreleased]: https://github.com/CrsMthw/Lyra/compare/v3.1.3...HEAD
+[Unreleased]: https://github.com/CrsMthw/Lyra/compare/v3.1.4...HEAD
+[3.1.4]: https://github.com/CrsMthw/Lyra/compare/v3.1.3...v3.1.4
 [3.1.3]: https://github.com/CrsMthw/Lyra/compare/v3.1.2...v3.1.3
 [3.1.2]: https://github.com/CrsMthw/Lyra/compare/v3.1.1...v3.1.2
 [3.1.1]: https://github.com/CrsMthw/Lyra/compare/v3.1.0...v3.1.1
