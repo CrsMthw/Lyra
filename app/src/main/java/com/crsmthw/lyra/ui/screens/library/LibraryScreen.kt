@@ -65,6 +65,7 @@ import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.SuccessResult
 import coil3.toBitmap
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.remote.model.SpotifyPlaylist
@@ -336,7 +337,7 @@ private fun SinglePaneLayout(
                     .padding(end = 16.dp, bottom = fabBottomPadding)
                     .then(fabSharedModifier),
             ) {
-                Icon(Icons.Default.Search, contentDescription = "Search",
+                Icon(Icons.Default.Search, contentDescription = stringResource(R.string.cd_search),
                     modifier = Modifier.size(FloatingActionButtonDefaults.MediumIconSize))
             }
         }
@@ -399,7 +400,7 @@ private fun LibraryBrowserPane(
         }
         if (state.featuredPlaylists.isNotEmpty()) {
             item(key = "featured_header") {
-                Text("Featured", style = MaterialTheme.typography.titleMedium,
+                Text(stringResource(R.string.library_featured), style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 8.dp))
             }
             item(key = "featured_row") {
@@ -433,7 +434,7 @@ private fun LibraryBrowserPane(
         }
         if (myPlaylists.isNotEmpty()) {
             item(key = "mine_header") {
-                Text("My Playlists", style = MaterialTheme.typography.titleMedium,
+                Text(stringResource(R.string.library_my_playlists), style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp))
             }
             items(myPlaylists, key = { it.id }) { playlist ->
@@ -459,7 +460,7 @@ private fun LibraryBrowserPane(
         }
         if (following.isNotEmpty()) {
             item(key = "following_header") {
-                Text("Following", style = MaterialTheme.typography.titleMedium,
+                Text(stringResource(R.string.library_following), style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp))
             }
             items(following, key = { it.id }) { playlist ->
@@ -487,12 +488,12 @@ private fun LibraryBrowserPane(
     val actionsBar: @Composable RowScope.() -> Unit = {
         if (state.refreshError != null) {
             IconButton(onClick = { showRefreshErrorDialog = true }) {
-                Icon(Icons.Default.Warning, contentDescription = "Refresh error",
+                Icon(Icons.Default.Warning, contentDescription = stringResource(R.string.cd_refresh_error),
                     tint = MaterialTheme.colorScheme.error)
             }
         }
         IconButton(onClick = { haptics.press(); onOpenSettings() }) {
-            Icon(Icons.Default.Settings, contentDescription = "Settings")
+            Icon(Icons.Default.Settings, contentDescription = stringResource(R.string.settings_title))
         }
     }
 
@@ -537,7 +538,7 @@ private fun LibraryBrowserPane(
                             textAlign = TextAlign.Center,
                         )
                         Spacer(Modifier.height(12.dp))
-                        Button(onClick = viewModel::loadLibrary) { Text("Retry") }
+                        Button(onClick = viewModel::loadLibrary) { Text(stringResource(R.string.action_retry)) }
                     }
                 }
             } else {
@@ -633,7 +634,7 @@ private fun LibraryBrowserPane(
                             textAlign = TextAlign.Center,
                         )
                         Spacer(Modifier.height(12.dp))
-                        Button(onClick = viewModel::loadLibrary) { Text("Retry") }
+                        Button(onClick = viewModel::loadLibrary) { Text(stringResource(R.string.action_retry)) }
                     }
                 }
             } else {
@@ -823,7 +824,7 @@ private fun TwoPaneLayout(
                             .padding(16.dp)
                             .then(fabSharedModifier),
                     ) {
-                        Icon(Icons.Default.Search, contentDescription = "Search",
+                        Icon(Icons.Default.Search, contentDescription = stringResource(R.string.cd_search),
                             modifier = Modifier.size(FloatingActionButtonDefaults.MediumIconSize))
                     }
                 }
@@ -868,7 +869,7 @@ private fun TwoPaneLayout(
                                         modifier = Modifier.size(64.dp),
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f))
                                     Spacer(Modifier.height(16.dp))
-                                    Text("Select a playlist",
+                                    Text(stringResource(R.string.library_select_playlist),
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         style = MaterialTheme.typography.bodyMedium)
                                 }
@@ -1088,7 +1089,7 @@ private fun RightPaneContent(
                     .padding(start = 16.dp, top = 8.dp),
             ) {
                 IconButton(onClick = { haptics.confirm(); onBack() }) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.cd_back))
                 }
             }
         }
@@ -1186,7 +1187,7 @@ private fun TrackListHero(
 
     DetailArtHero(
         title       = name,
-        subtitle    = if (trackCount > 0) "$trackCount tracks" else null,
+        subtitle    = if (trackCount > 0) pluralStringResource(R.plurals.library_track_count, trackCount, trackCount) else null,
         onPlay      = onPlay,
         onShuffle   = onShuffle,
         artModifier = artModifier,
@@ -1264,7 +1265,7 @@ private fun LikedSongsCard(
 
             Column(modifier = Modifier.weight(1f)) {
                 Text(stringResource(R.string.liked_songs), style = MaterialTheme.typography.titleMedium, maxLines = 1)
-                Text("$count tracks", style = MaterialTheme.typography.bodySmall,
+                Text(pluralStringResource(R.plurals.library_track_count, count, count), style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
 
@@ -1275,7 +1276,7 @@ private fun LikedSongsCard(
                 elevation       = FloatingActionButtonDefaults.elevation(defaultElevation = 4.dp),
                 modifier        = Modifier.size(40.dp),
             ) {
-                Icon(Icons.Default.PlayArrow, contentDescription = "Play",
+                Icon(Icons.Default.PlayArrow, contentDescription = stringResource(R.string.player_play),
                     modifier = Modifier.size(20.dp))
             }
         }
@@ -1340,13 +1341,16 @@ private fun PlaylistListCard(
             Column(modifier = Modifier.weight(1f)) {
                 Text(playlist.name, style = MaterialTheme.typography.titleMedium,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
+                val countText =
+                    pluralStringResource(R.plurals.library_track_count, playlist.trackCount, playlist.trackCount)
                 val subtitle = if (isMine) {
                     // Own playlist — the owner is the user, so show just the count.
-                    "${playlist.trackCount} tracks"
+                    countText
                 } else {
                     // Following — show whose it is and the count together when both are known.
-                    val countText = if (playlist.trackCount > 0) "${playlist.trackCount} tracks" else null
-                    listOfNotNull(playlist.owner?.displayName, countText).joinToString(" · ").ifBlank { "Playlist" }
+                    listOfNotNull(playlist.owner?.displayName, countText.takeIf { playlist.trackCount > 0 })
+                        .joinToString(" · ")
+                        .ifBlank { stringResource(R.string.library_playlist_fallback) }
                 }
                 Text(subtitle, style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1362,7 +1366,7 @@ private fun PlaylistListCard(
                 elevation      = FloatingActionButtonDefaults.elevation(defaultElevation = 4.dp),
                 modifier       = Modifier.size(40.dp),
             ) {
-                Icon(Icons.Default.PlayArrow, contentDescription = "Play",
+                Icon(Icons.Default.PlayArrow, contentDescription = stringResource(R.string.player_play),
                     modifier = Modifier.size(20.dp))
             }
         }
@@ -1456,7 +1460,7 @@ private fun RefreshErrorDialog(error: String, onDismiss: () -> Unit) {
                 append("\n\nCached data is shown. Wait, then retry.")
             } else error)
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("OK") } },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_ok)) } },
     )
 }
 

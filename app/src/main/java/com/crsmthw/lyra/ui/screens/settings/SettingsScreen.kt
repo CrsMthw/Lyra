@@ -276,31 +276,31 @@ fun SettingsScreen(
             ListItem(
                 leadingContent   = { Icon(Icons.Default.Image, contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant) },
-                headlineContent  = { Text("Image Cache") },
+                headlineContent  = { Text(stringResource(R.string.settings_image_cache)) },
                 supportingContent = { Text(formatBytes(imageCacheBytes),
                     color = MaterialTheme.colorScheme.onSurfaceVariant) },
                 trailingContent  = {
                     TextButton(
                         onClick  = { haptics.press(); showClearCacheDialog = true },
                         enabled  = imageCacheBytes > 0L,
-                    ) { Text("Clear") }
+                    ) { Text(stringResource(R.string.settings_clear)) }
                 },
             )
 
             if (showClearCacheDialog) {
                 AlertDialog(
                     onDismissRequest = { showClearCacheDialog = false },
-                    title            = { Text("Clear Image Cache?") },
-                    text             = { Text("Playlist artwork will be re-downloaded next time it's needed.") },
+                    title            = { Text(stringResource(R.string.settings_clear_image_cache_title)) },
+                    text             = { Text(stringResource(R.string.settings_clear_image_cache_message)) },
                     confirmButton    = {
                         TextButton(onClick = {
                             haptics.confirm()
                             viewModel.clearImageCache()
                             showClearCacheDialog = false
-                        }) { Text("Clear") }
+                        }) { Text(stringResource(R.string.settings_clear)) }
                     },
                     dismissButton    = {
-                        TextButton(onClick = { haptics.press(); showClearCacheDialog = false }) { Text("Cancel") }
+                        TextButton(onClick = { haptics.press(); showClearCacheDialog = false }) { Text(stringResource(R.string.action_cancel)) }
                     },
                 )
             }
@@ -309,31 +309,31 @@ fun SettingsScreen(
             ListItem(
                 leadingContent   = { Icon(Icons.Default.LibraryMusic, contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant) },
-                headlineContent  = { Text("Library Cache") },
+                headlineContent  = { Text(stringResource(R.string.settings_library_cache)) },
                 supportingContent = { Text(formatBytes(libraryCacheBytes),
                     color = MaterialTheme.colorScheme.onSurfaceVariant) },
                 trailingContent  = {
                     TextButton(
                         onClick  = { haptics.press(); showClearLibraryDialog = true },
                         enabled  = libraryCacheBytes > 0L,
-                    ) { Text("Clear") }
+                    ) { Text(stringResource(R.string.settings_clear)) }
                 },
             )
 
             if (showClearLibraryDialog) {
                 AlertDialog(
                     onDismissRequest = { showClearLibraryDialog = false },
-                    title            = { Text("Clear Library Cache?") },
-                    text             = { Text("Playlist and track data will be re-fetched from Spotify next time you open the library.") },
+                    title            = { Text(stringResource(R.string.settings_clear_library_cache_title)) },
+                    text             = { Text(stringResource(R.string.settings_clear_library_cache_message)) },
                     confirmButton    = {
                         TextButton(onClick = {
                             haptics.confirm()
                             viewModel.clearLibraryCache()
                             showClearLibraryDialog = false
-                        }) { Text("Clear") }
+                        }) { Text(stringResource(R.string.settings_clear)) }
                     },
                     dismissButton    = {
-                        TextButton(onClick = { haptics.press(); showClearLibraryDialog = false }) { Text("Cancel") }
+                        TextButton(onClick = { haptics.press(); showClearLibraryDialog = false }) { Text(stringResource(R.string.action_cancel)) }
                     },
                 )
             }
@@ -422,17 +422,17 @@ fun SettingsScreen(
     if (showLogoutDialog) {
         AlertDialog(
             onDismissRequest = { showLogoutDialog = false },
-            title            = { Text("Disconnect Spotify?") },
-            text             = { Text("This will clear your tokens. You'll need to reconnect your Client ID.") },
+            title            = { Text(stringResource(R.string.settings_disconnect_title)) },
+            text             = { Text(stringResource(R.string.settings_disconnect_message)) },
             confirmButton    = {
                 TextButton(onClick = { haptics.confirm(); showLogoutDialog = false; onLogout() },
                            colors  = ButtonDefaults.textButtonColors(
                                contentColor = MaterialTheme.colorScheme.error)) {
-                    Text("Disconnect")
+                    Text(stringResource(R.string.settings_disconnect))
                 }
             },
             dismissButton    = {
-                TextButton(onClick = { haptics.press(); showLogoutDialog = false }) { Text("Cancel") }
+                TextButton(onClick = { haptics.press(); showLogoutDialog = false }) { Text(stringResource(R.string.action_cancel)) }
             },
         )
     }

@@ -1,6 +1,7 @@
 package com.crsmthw.lyra.ui.components
 
 import androidx.compose.foundation.border
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
@@ -24,6 +25,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -32,6 +34,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.crsmthw.lyra.R
+import com.crsmthw.lyra.util.rememberPressMorphShape
 
 /**
  * The shared OneUI-style detail hero used by the playlist/Liked, album, and artist detail screens
@@ -114,20 +117,34 @@ fun DetailArtHero(
             if (onShuffle != null || onPlay != null) {
                 Spacer(Modifier.width(12.dp))
                 onShuffle?.let { shuffle ->
+                    // Press shape-morph (M3 Expressive): clover squishes toward a square while
+                    // held, springs back on release — see rememberPressMorphShape in util/Motion.kt.
+                    val shuffleInteraction = remember { MutableInteractionSource() }
                     FilledTonalIconButton(
-                        onClick  = shuffle,
-                        shape    = MaterialShapes.Clover4Leaf.toShape(),
-                        modifier = Modifier.size(52.dp),
+                        onClick           = shuffle,
+                        shape             = rememberPressMorphShape(
+                            shape             = MaterialShapes.Clover4Leaf,
+                            pressedShape      = MaterialShapes.Square,
+                            interactionSource = shuffleInteraction,
+                        ),
+                        modifier          = Modifier.size(52.dp),
+                        interactionSource = shuffleInteraction,
                     ) {
                         Icon(Icons.Default.Shuffle, contentDescription = shuffleLabel, modifier = Modifier.size(22.dp))
                     }
                 }
                 if (onShuffle != null && onPlay != null) Spacer(Modifier.width(8.dp))
                 onPlay?.let { play ->
+                    val playInteraction = remember { MutableInteractionSource() }
                     FilledIconButton(
-                        onClick  = play,
-                        shape    = MaterialShapes.Cookie6Sided.toShape(),
-                        modifier = Modifier.size(64.dp),
+                        onClick           = play,
+                        shape             = rememberPressMorphShape(
+                            shape             = MaterialShapes.Cookie6Sided,
+                            pressedShape      = MaterialShapes.Square,
+                            interactionSource = playInteraction,
+                        ),
+                        modifier          = Modifier.size(64.dp),
+                        interactionSource = playInteraction,
                     ) {
                         Icon(Icons.Default.PlayArrow, contentDescription = playLabel, modifier = Modifier.size(30.dp))
                     }

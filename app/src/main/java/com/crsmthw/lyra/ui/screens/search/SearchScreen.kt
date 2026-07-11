@@ -130,7 +130,7 @@ fun SearchScreen(
 
                     if (!hasAny) {
                         Box(Modifier.fillMaxSize().navigationBarsPadding(), contentAlignment = Alignment.Center) {
-                            Text("No results for \"${state.query}\"",
+                            Text(stringResource(R.string.search_no_results, state.query),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     } else {

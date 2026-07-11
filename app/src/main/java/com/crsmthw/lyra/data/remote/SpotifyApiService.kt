@@ -95,6 +95,9 @@ interface SpotifyApiService {
     @GET("me/player/queue")
     suspend fun getQueue(): QueueResponse?
 
+    @POST("me/player/queue")
+    suspend fun addToQueue(@Query("uri") uri: String)
+
     @GET("me/player/devices")
     suspend fun getAvailableDevices(): DevicesResponse?
 

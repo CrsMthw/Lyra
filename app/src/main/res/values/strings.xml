@@ -39,6 +39,10 @@
     <string name="track_action_remove_from_playlist">Remove from %1$s</string>
     <string name="track_action_go_to_album">Go to album</string>
     <string name="track_action_go_to_artist">Go to artist</string>
+    <string name="track_action_add_to_queue">Add to queue</string>
+    <string name="track_action_queued">Added to queue</string>
+    <string name="track_action_queue_failed">Couldn\'t add to queue</string>
+    <string name="track_action_share">Share</string>
     <string name="create_playlist_name_label">Name</string>
     <string name="create_playlist_name_placeholder">My playlist</string>
     <string name="create_playlist_description_label">Description</string>
@@ -62,6 +66,47 @@
     <string name="player_device_volume">Device volume</string>
     <string name="player_volume_down">Volume down</string>
     <string name="player_volume_up">Volume up</string>
+
+    <!-- Shared content descriptions / generic actions -->
+    <string name="cd_back">Back</string>
+    <string name="cd_close">Close</string>
+    <string name="cd_full_screen">Full screen</string>
+    <string name="cd_search">Search</string>
+    <string name="cd_album_art">Album art</string>
+    <string name="cd_like">Like</string>
+    <string name="cd_toggle_visibility">Toggle visibility</string>
+    <string name="cd_refresh_error">Refresh error</string>
+    <string name="action_retry">Retry</string>
+    <string name="action_ok">OK</string>
+
+    <!-- Library sections -->
+    <string name="library_featured">Featured</string>
+    <string name="library_my_playlists">My Playlists</string>
+    <string name="library_following">Following</string>
+    <string name="library_select_playlist">Select a playlist</string>
+    <string name="library_playlist_fallback">Playlist</string>
+    <plurals name="library_track_count">
+        <item quantity="one">%1$d track</item>
+        <item quantity="other">%1$d tracks</item>
+    </plurals>
+
+    <!-- Player labels -->
+    <string name="player_now_playing_label">NOW PLAYING</string>
+
+    <!-- Search -->
+    <string name="search_no_results">No results for “%1$s”</string>
+
+    <!-- Settings cache / disconnect -->
+    <string name="settings_image_cache">Image Cache</string>
+    <string name="settings_library_cache">Library Cache</string>
+    <string name="settings_clear">Clear</string>
+    <string name="settings_clear_image_cache_title">Clear Image Cache?</string>
+    <string name="settings_clear_image_cache_message">Playlist artwork will be re-downloaded next time it\'s needed.</string>
+    <string name="settings_clear_library_cache_title">Clear Library Cache?</string>
+    <string name="settings_clear_library_cache_message">Playlist and track data will be re-fetched from Spotify next time you open the library.</string>
+    <string name="settings_disconnect_title">Disconnect Spotify?</string>
+    <string name="settings_disconnect_message">This will clear your tokens. You\'ll need to reconnect your Client ID.</string>
+    <string name="settings_disconnect">Disconnect</string>
 
     <!-- Queue -->
     <string name="player_queue">Queue</string>

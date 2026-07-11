@@ -1,5 +1,6 @@
 package com.crsmthw.lyra.ui.components
 
+import android.content.Intent
 import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -13,6 +14,8 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.LibraryAdd
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlaylistRemove
+import androidx.compose.material.icons.filled.QueueMusic
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -78,6 +81,21 @@ fun TrackActionsHost(
         }
     }
 
+    // Add-to-queue outcome: toast + haptic, then close the sheet (mirrors the add flow above).
+    val queueResult = state.queueResult
+    val queueResultMsg = when (queueResult) {
+        true  -> stringResource(R.string.track_action_queued)
+        false -> stringResource(R.string.track_action_queue_failed)
+        null  -> null
+    }
+    LaunchedEffect(queueResult) {
+        queueResultMsg?.let {
+            if (queueResult == true) haptics.confirm() else haptics.reject()
+            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+            controller.dismiss()
+        }
+    }
+
     if (state.showPlaylistPicker) {
         AddToPlaylistSheet(
             pickerState = pickerState,
@@ -131,6 +149,13 @@ fun TrackActionsHost(
             onClick = controller::openPlaylistPicker,
         )
 
+        ActionItem(
+            icon    = Icons.Default.QueueMusic,
+            text    = stringResource(R.string.track_action_add_to_queue),
+            enabled = !state.isQueueing,
+            onClick = controller::addToQueue,
+        )
+
         val liked = state.isLiked
         ActionItem(
             icon    = if (liked == true) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
@@ -162,6 +187,20 @@ fun TrackActionsHost(
                 onClick = { controller.dismiss(); onGoToArtist(artistId) },
             )
         }
+
+        ActionItem(
+            icon = Icons.Default.Share,
+            text = stringResource(R.string.track_action_share),
+            onClick = {
+                controller.dismiss()
+                context.startActivity(Intent.createChooser(
+                    Intent(Intent.ACTION_SEND).apply {
+                        putExtra(Intent.EXTRA_TEXT, "https://open.spotify.com/track/${target.id}")
+                        type = "text/plain"
+                    }, null,
+                ))
+            },
+        )
 
         Spacer(Modifier.navigationBarsPadding())
         }

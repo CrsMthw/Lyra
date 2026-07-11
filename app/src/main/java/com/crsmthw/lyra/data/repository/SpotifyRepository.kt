@@ -72,6 +72,10 @@ class SpotifyRepository(
         api.search(query = query, type = "track,album,artist", limit = 10)
     }
 
+    suspend fun addToQueue(trackUri: String): Result<Unit> = safeCall {
+        api.addToQueue(trackUri)
+    }
+
     suspend fun saveTrack(trackId: String): Result<Unit> = safeCall {
         api.saveTracks("spotify:track:$trackId")
     }

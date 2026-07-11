@@ -221,7 +221,7 @@ private fun CreateForm(
             IconButton(onClick = onBack, enabled = !isCreating) {
                 Icon(
                     imageVector        = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Back",
+                    contentDescription = stringResource(R.string.cd_back),
                 )
             }
             Text(

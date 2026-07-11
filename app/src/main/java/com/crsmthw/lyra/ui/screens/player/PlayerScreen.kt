@@ -22,6 +22,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.offset
 import androidx.compose.material3.MaterialShapes
@@ -294,7 +295,7 @@ fun PlayerScreen(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         modifier            = Modifier.fillMaxWidth(),
                     ) {
-                        Text("NOW PLAYING",
+                        Text(stringResource(R.string.player_now_playing_label),
                             style = MaterialTheme.typography.labelSmall,
                             color = topContentColor)
                     }
@@ -305,13 +306,13 @@ fun PlayerScreen(
                         // (where the chevron would be), so the right side carries only the options menu.
                         if (onFullScreen != null) {
                             IconButton(onClick = onFullScreen) {
-                                Icon(Icons.Default.OpenInFull, contentDescription = "Full screen",
+                                Icon(Icons.Default.OpenInFull, contentDescription = stringResource(R.string.cd_full_screen),
                                     tint = topContentColor)
                             }
                         }
                     } else {
                         IconButton(onClick = { haptics.confirm(); onBack() }) {
-                            Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Close",
+                            Icon(Icons.Default.KeyboardArrowDown, contentDescription = stringResource(R.string.cd_close),
                                 tint = topContentColor)
                         }
                     }
@@ -466,7 +467,7 @@ fun PlayerScreen(
                                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                     AsyncImage(
                                         model              = artImageModel,
-                                        contentDescription = "Album art",
+                                        contentDescription = stringResource(R.string.cd_album_art),
                                         contentScale       = ContentScale.Crop,
                                         modifier           = artMod
                                             .size(displaySide)
@@ -632,7 +633,7 @@ fun PlayerScreen(
                                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                     AsyncImage(
                                         model              = artImageModel,
-                                        contentDescription = "Album art",
+                                        contentDescription = stringResource(R.string.cd_album_art),
                                         contentScale       = ContentScale.Crop,
                                         modifier           = artMod
                                             .size(displaySide)
@@ -858,7 +859,7 @@ private fun PlayerControls(
         IconButton(onClick = { haptics.toggle(!state.isLiked); onToggleLike() }) {
             Icon(
                 imageVector        = if (state.isLiked) Icons.Default.Favorite else Icons.Outlined.FavoriteBorder,
-                contentDescription = "Like",
+                contentDescription = stringResource(R.string.cd_like),
                 tint               = if (state.isLiked) surfaceAccentColor else LocalContentColor.current,
             )
         }
@@ -1078,38 +1079,94 @@ private fun PlayerControls(
             containerColor = surfaceAccentColor.copy(alpha = 0.12f),
             contentColor   = surfaceAccentColor,
         )
-        // Connected icon buttons. A plain Row (not M3 ButtonGroup) is used deliberately: the overflow
-        // feature was disabled (empty overflowIndicator/menuContent), and ButtonGroup's overflow
-        // MeasurePolicy crashes with an inverted Constraints when the folded-landscape controls column
-        // is tight (IllegalArgumentException: maxWidth must be >= minWidth). A Row clips instead.
-        Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-            FilledTonalIconButton(
-                onClick  = { haptics.press(); onOpenQueue() },
-                enabled  = state.currentTrack != null,
-                modifier = Modifier.size(40.dp),
-                shape    = ButtonGroupDefaults.connectedLeadingButtonShape,
-                colors   = accentButtonColors,
-            ) {
-                Icon(Icons.AutoMirrored.Filled.QueueMusic, queueLabel, Modifier.size(18.dp))
-            }
-            FilledTonalIconButton(
-                onClick  = { haptics.press(); onShare() },
-                enabled  = state.currentTrack != null,
-                modifier = Modifier.size(40.dp),
-                shape    = RoundedCornerShape(2.dp),
-                colors   = accentButtonColors,
-            ) {
-                Icon(Icons.Default.Share, shareLabel, Modifier.size(18.dp))
-            }
-            FilledTonalIconButton(
-                onClick  = { haptics.press(); onAddToPlaylist() },
-                enabled  = state.currentTrack != null,
-                modifier = Modifier.size(40.dp),
-                shape    = ButtonGroupDefaults.connectedTrailingButtonShape,
-                colors   = accentButtonColors,
-            ) {
-                Icon(Icons.Default.LibraryAdd, addToPlaylistLabel, Modifier.size(18.dp))
-            }
+        // Real M3 ButtonGroup (see docs/MATERIAL3.md → ButtonGroup). The old plain-Row workaround
+        // existed because the group was built with overflow DISABLED (empty overflowIndicator),
+        // whose measure policy computes a negative child width in the tight folded-landscape
+        // controls column (IllegalArgumentException: maxWidth must be >= minWidth). With a real
+        // OverflowIndicator an item that can't fit collapses into the overflow menu instead, and
+        // customItem + animateWidth restores the inter-button press-squeeze the Row lost.
+        val queueInteraction = remember { MutableInteractionSource() }
+        val shareInteraction = remember { MutableInteractionSource() }
+        val addInteraction   = remember { MutableInteractionSource() }
+        ButtonGroup(
+            overflowIndicator = { menuState ->
+                ButtonGroupDefaults.OverflowIndicator(
+                    menuState = menuState,
+                    modifier  = Modifier.size(40.dp),
+                    colors    = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = surfaceAccentColor.copy(alpha = 0.12f),
+                        contentColor   = surfaceAccentColor,
+                    ),
+                )
+            },
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            customItem(
+                buttonGroupContent = {
+                    FilledTonalIconButton(
+                        onClick           = { haptics.press(); onOpenQueue() },
+                        enabled           = state.currentTrack != null,
+                        modifier          = Modifier.size(40.dp).animateWidth(queueInteraction),
+                        shape             = ButtonGroupDefaults.connectedLeadingButtonShape,
+                        colors            = accentButtonColors,
+                        interactionSource = queueInteraction,
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.QueueMusic, queueLabel, Modifier.size(18.dp))
+                    }
+                },
+                menuContent = { menuState ->
+                    DropdownMenuItem(
+                        text        = { Text(queueLabel) },
+                        leadingIcon = { Icon(Icons.AutoMirrored.Filled.QueueMusic, null) },
+                        enabled     = state.currentTrack != null,
+                        onClick     = { haptics.press(); menuState.dismiss(); onOpenQueue() },
+                    )
+                },
+            )
+            customItem(
+                buttonGroupContent = {
+                    FilledTonalIconButton(
+                        onClick           = { haptics.press(); onShare() },
+                        enabled           = state.currentTrack != null,
+                        modifier          = Modifier.size(40.dp).animateWidth(shareInteraction),
+                        shape             = RoundedCornerShape(2.dp),
+                        colors            = accentButtonColors,
+                        interactionSource = shareInteraction,
+                    ) {
+                        Icon(Icons.Default.Share, shareLabel, Modifier.size(18.dp))
+                    }
+                },
+                menuContent = { menuState ->
+                    DropdownMenuItem(
+                        text        = { Text(shareLabel) },
+                        leadingIcon = { Icon(Icons.Default.Share, null) },
+                        enabled     = state.currentTrack != null,
+                        onClick     = { haptics.press(); menuState.dismiss(); onShare() },
+                    )
+                },
+            )
+            customItem(
+                buttonGroupContent = {
+                    FilledTonalIconButton(
+                        onClick           = { haptics.press(); onAddToPlaylist() },
+                        enabled           = state.currentTrack != null,
+                        modifier          = Modifier.size(40.dp).animateWidth(addInteraction),
+                        shape             = ButtonGroupDefaults.connectedTrailingButtonShape,
+                        colors            = accentButtonColors,
+                        interactionSource = addInteraction,
+                    ) {
+                        Icon(Icons.Default.LibraryAdd, addToPlaylistLabel, Modifier.size(18.dp))
+                    }
+                },
+                menuContent = { menuState ->
+                    DropdownMenuItem(
+                        text        = { Text(addToPlaylistLabel) },
+                        leadingIcon = { Icon(Icons.Default.LibraryAdd, null) },
+                        enabled     = state.currentTrack != null,
+                        onClick     = { haptics.press(); menuState.dismiss(); onAddToPlaylist() },
+                    )
+                },
+            )
         }
     }
 }
@@ -1151,6 +1208,6 @@ private fun SleepTimerDialog(
             }
         },
         confirmButton = {},
-        dismissButton = { TextButton(onClick = { haptics.press(); onDismiss() }) { Text("Cancel") } },
+        dismissButton = { TextButton(onClick = { haptics.press(); onDismiss() }) { Text(stringResource(R.string.action_cancel)) } },
     )
 }

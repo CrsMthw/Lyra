@@ -15,6 +15,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -242,7 +243,7 @@ fun PlayerCardContent(
                 IconButton(onClick = { haptics.confirm(); onClose() }) {
                     Icon(Icons.Default.KeyboardArrowDown, "Close", tint = topContentColor)
                 }
-                Text("NOW PLAYING", style = MaterialTheme.typography.labelSmall,
+                Text(stringResource(R.string.player_now_playing_label), style = MaterialTheme.typography.labelSmall,
                     color = topContentColor)
                 IconButton(onClick = { haptics.confirm(); onFullScreen() }) {
                     Icon(Icons.Default.OpenInFull, "Full screen", tint = topContentColor)
@@ -273,7 +274,7 @@ fun PlayerCardContent(
             val artSharedMod = localArtMod.then(navArtMod)
             AsyncImage(
                 model              = artImageModel,
-                contentDescription = "Album art",
+                contentDescription = stringResource(R.string.cd_album_art),
                 contentScale       = ContentScale.Crop,
                 modifier           = artSharedMod
                     .size(artSize)
@@ -318,7 +319,7 @@ fun PlayerCardContent(
                 IconButton(onClick = { haptics.toggle(!state.isLiked); playerViewModel.toggleLike() }) {
                     Icon(
                         imageVector        = if (state.isLiked) Icons.Default.Favorite else Icons.Outlined.FavoriteBorder,
-                        contentDescription = "Like",
+                        contentDescription = stringResource(R.string.cd_like),
                         tint               = if (state.isLiked) surfaceAccentColor else LocalContentColor.current,
                     )
                 }
@@ -515,47 +516,104 @@ fun PlayerCardContent(
                     containerColor = surfaceAccentColor.copy(alpha = 0.12f),
                     contentColor   = surfaceAccentColor,
                 )
-                // Plain Row, not M3 ButtonGroup: overflow was disabled here, and ButtonGroup's overflow
-                // MeasurePolicy crashes with an inverted Constraints when the column is tight (see the
-                // matching note + folded-landscape crash fix in PlayerScreen). A Row clips instead.
-                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                    FilledTonalIconButton(
-                        onClick  = { haptics.press(); onOpenQueue() },
-                        enabled  = enabled,
-                        modifier = Modifier.size(40.dp),
-                        shape    = ButtonGroupDefaults.connectedLeadingButtonShape,
-                        colors   = accentButtonColors,
-                    ) {
-                        Icon(Icons.AutoMirrored.Filled.QueueMusic, queueLabel, Modifier.size(18.dp))
+                // Real M3 ButtonGroup with a real OverflowIndicator — see the matching note in
+                // PlayerScreen and docs/MATERIAL3.md → ButtonGroup: the old plain-Row workaround
+                // only existed because a DISABLED overflow (empty overflowIndicator) mis-measures
+                // in tight columns. customItem + animateWidth restores the press-squeeze.
+                val shareTrack = {
+                    haptics.press()
+                    state.currentTrack?.id?.let { id ->
+                        context.startActivity(Intent.createChooser(
+                            Intent(Intent.ACTION_SEND).apply {
+                                putExtra(Intent.EXTRA_TEXT, "https://open.spotify.com/track/$id")
+                                type = "text/plain"
+                            }, null
+                        ))
                     }
-                    FilledTonalIconButton(
-                        onClick = {
-                            haptics.press()
-                            state.currentTrack?.id?.let { id ->
-                                context.startActivity(Intent.createChooser(
-                                    Intent(Intent.ACTION_SEND).apply {
-                                        putExtra(Intent.EXTRA_TEXT, "https://open.spotify.com/track/$id")
-                                        type = "text/plain"
-                                    }, null
-                                ))
+                    Unit
+                }
+                val queueInteraction = remember { MutableInteractionSource() }
+                val shareInteraction = remember { MutableInteractionSource() }
+                val addInteraction   = remember { MutableInteractionSource() }
+                ButtonGroup(
+                    overflowIndicator = { menuState ->
+                        ButtonGroupDefaults.OverflowIndicator(
+                            menuState = menuState,
+                            modifier  = Modifier.size(40.dp),
+                            colors    = IconButtonDefaults.filledIconButtonColors(
+                                containerColor = surfaceAccentColor.copy(alpha = 0.12f),
+                                contentColor   = surfaceAccentColor,
+                            ),
+                        )
+                    },
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    customItem(
+                        buttonGroupContent = {
+                            FilledTonalIconButton(
+                                onClick           = { haptics.press(); onOpenQueue() },
+                                enabled           = enabled,
+                                modifier          = Modifier.size(40.dp).animateWidth(queueInteraction),
+                                shape             = ButtonGroupDefaults.connectedLeadingButtonShape,
+                                colors            = accentButtonColors,
+                                interactionSource = queueInteraction,
+                            ) {
+                                Icon(Icons.AutoMirrored.Filled.QueueMusic, queueLabel, Modifier.size(18.dp))
                             }
                         },
-                        enabled  = enabled,
-                        modifier = Modifier.size(40.dp),
-                        shape    = RoundedCornerShape(2.dp),
-                        colors   = accentButtonColors,
-                    ) {
-                        Icon(Icons.Default.Share, shareLabel, Modifier.size(18.dp))
-                    }
-                    FilledTonalIconButton(
-                        onClick  = { haptics.press(); playerViewModel.loadOwnedPlaylists(); showPlaylistPicker = true },
-                        enabled  = enabled,
-                        modifier = Modifier.size(40.dp),
-                        shape    = ButtonGroupDefaults.connectedTrailingButtonShape,
-                        colors   = accentButtonColors,
-                    ) {
-                        Icon(Icons.Default.LibraryAdd, addToPlaylistLabel, Modifier.size(18.dp))
-                    }
+                        menuContent = { menuState ->
+                            DropdownMenuItem(
+                                text        = { Text(queueLabel) },
+                                leadingIcon = { Icon(Icons.AutoMirrored.Filled.QueueMusic, null) },
+                                enabled     = enabled,
+                                onClick     = { haptics.press(); menuState.dismiss(); onOpenQueue() },
+                            )
+                        },
+                    )
+                    customItem(
+                        buttonGroupContent = {
+                            FilledTonalIconButton(
+                                onClick           = shareTrack,
+                                enabled           = enabled,
+                                modifier          = Modifier.size(40.dp).animateWidth(shareInteraction),
+                                shape             = RoundedCornerShape(2.dp),
+                                colors            = accentButtonColors,
+                                interactionSource = shareInteraction,
+                            ) {
+                                Icon(Icons.Default.Share, shareLabel, Modifier.size(18.dp))
+                            }
+                        },
+                        menuContent = { menuState ->
+                            DropdownMenuItem(
+                                text        = { Text(shareLabel) },
+                                leadingIcon = { Icon(Icons.Default.Share, null) },
+                                enabled     = enabled,
+                                onClick     = { menuState.dismiss(); shareTrack() },
+                            )
+                        },
+                    )
+                    customItem(
+                        buttonGroupContent = {
+                            FilledTonalIconButton(
+                                onClick           = { haptics.press(); playerViewModel.loadOwnedPlaylists(); showPlaylistPicker = true },
+                                enabled           = enabled,
+                                modifier          = Modifier.size(40.dp).animateWidth(addInteraction),
+                                shape             = ButtonGroupDefaults.connectedTrailingButtonShape,
+                                colors            = accentButtonColors,
+                                interactionSource = addInteraction,
+                            ) {
+                                Icon(Icons.Default.LibraryAdd, addToPlaylistLabel, Modifier.size(18.dp))
+                            }
+                        },
+                        menuContent = { menuState ->
+                            DropdownMenuItem(
+                                text        = { Text(addToPlaylistLabel) },
+                                leadingIcon = { Icon(Icons.Default.LibraryAdd, null) },
+                                enabled     = enabled,
+                                onClick     = { haptics.press(); menuState.dismiss(); playerViewModel.loadOwnedPlaylists(); showPlaylistPicker = true },
+                            )
+                        },
+                    )
                 }
             }
         }

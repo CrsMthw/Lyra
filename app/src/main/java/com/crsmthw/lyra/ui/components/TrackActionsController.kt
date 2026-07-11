@@ -76,6 +76,8 @@ data class TrackActionsState(
     val target             : TrackActionTarget? = null,  // non-null = the actions sheet is open
     val isLiked            : Boolean?           = null,  // null = still resolving
     val showPlaylistPicker : Boolean           = false,
+    val isQueueing         : Boolean           = false,  // add-to-queue in flight (row disabled)
+    val queueResult        : Boolean?          = null,   // non-null = done; true = queued OK
 )
 
 /**
@@ -110,6 +112,22 @@ class TrackActionsController(
     fun dismiss() {
         _state.value = TrackActionsState()
         _pickerState.value = PlaylistPickerState()
+    }
+
+    /**
+     * Appends the target to the playback queue (`POST /me/player/queue`). The sheet stays open
+     * (row disabled) until the result lands; [TrackActionsHost] toasts it and dismisses.
+     */
+    fun addToQueue() {
+        val t = _state.value.target ?: return
+        if (_state.value.isQueueing) return
+        _state.update { if (it.target?.id == t.id) it.copy(isQueueing = true) else it }
+        scope.launch {
+            val ok = repository.addToQueue(t.uri).isSuccess
+            _state.update {
+                if (it.target?.id == t.id) it.copy(isQueueing = false, queueResult = ok) else it
+            }
+        }
     }
 
     /** Optimistic; the sheet stays open and reflects the new state, reverting on failure. */
