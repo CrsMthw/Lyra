@@ -103,19 +103,6 @@ class SpotifyRepository(
         api.checkSavedTracks(uri).firstOrNull() ?: false
     }
 
-    // ── Artist follows — NOT part of me/library (artist uris fail there); me/following only.
-    suspend fun followArtist(artistId: String): Result<Unit> = safeCall {
-        api.followArtists(ids = artistId)
-    }
-
-    suspend fun unfollowArtist(artistId: String): Result<Unit> = safeCall {
-        api.unfollowArtists(ids = artistId)
-    }
-
-    suspend fun isArtistFollowed(artistId: String): Result<Boolean> = safeCall {
-        api.checkFollowedArtists(ids = artistId).firstOrNull() ?: false
-    }
-
     suspend fun saveTrack(trackId: String): Result<Unit> = safeCall {
         api.saveTracks("spotify:track:$trackId")
     }

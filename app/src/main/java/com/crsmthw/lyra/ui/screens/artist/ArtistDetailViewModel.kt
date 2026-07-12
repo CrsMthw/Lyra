@@ -37,13 +37,14 @@ class ArtistDetailViewModel(
     private val _state = MutableStateFlow(ArtistDetailUiState())
     val uiState: StateFlow<ArtistDetailUiState> = _state
 
+    private val artistUri = "spotify:artist:$artistId"
+
     init {
         load()
         viewModelScope.launch {
             // Seed from the cached followed-artists list (kept in sync by the toggles + the
             // Artists filter's full fetch) so the heart is usable even when the network check
-            // misbehaves. A cached "followed" wins over an API false: me/library/contains has
-            // been seen returning nothing for artist uris.
+            // fails (e.g. a pre-2026-07 token missing the user-follow-* scopes).
             val cachedFollowed = withContext(Dispatchers.IO) {
                 libraryCache.load()?.followedArtists?.any { it.id == artistId }
             }
@@ -51,25 +52,30 @@ class ArtistDetailViewModel(
                 _state.update { it.copy(isFollowed = true) }
                 return@launch
             }
-            repository.isArtistFollowed(artistId).fold(
+            repository.isInLibrary(artistUri).fold(
                 onSuccess = { followed -> _state.update { it.copy(isFollowed = followed) } },
                 onFailure = { e ->
                     // Never leave the heart stuck disabled (isFollowed == null): assume not
                     // followed — the first toggle then PUTs and is correct either way.
-                    Log.w("ArtistDetailVM", "me/following/contains failed for $artistId", e)
+                    Log.w("ArtistDetailVM", "me/library/contains failed for $artistUri", e)
                     _state.update { it.copy(isFollowed = false) }
                 },
             )
         }
     }
 
-    /** Optimistic follow/unfollow via me/following (artists aren't accepted by me/library); keeps the Artists filter in sync. */
+    /**
+     * Optimistic follow/unfollow via the unified me/library with the artist uri (the Feb-2026
+     * replacement for the removed PUT/DELETE me/following — which 403s "Forbidden" for dev-mode
+     * apps regardless of scopes). Requires the user-follow-modify scope: without it this PUT
+     * 403s and the heart reverts. Keeps the Artists filter in sync.
+     */
     fun toggleFollowed() {
         val followed = _state.value.isFollowed ?: return
         _state.update { it.copy(isFollowed = !followed) }
         viewModelScope.launch {
-            val result = if (followed) repository.unfollowArtist(artistId)
-                         else repository.followArtist(artistId)
+            val result = if (followed) repository.removeFromLibrary(artistUri)
+                         else repository.saveToLibrary(artistUri)
             result.fold(
                 onSuccess = {
                     withContext(Dispatchers.IO) {
@@ -87,7 +93,7 @@ class ArtistDetailViewModel(
                     }
                 },
                 onFailure = { e ->
-                    Log.w("ArtistDetailVM", "follow toggle failed for $artistId", e)
+                    Log.w("ArtistDetailVM", "follow toggle failed for $artistUri", e)
                     _state.update { it.copy(isFollowed = followed) }   // revert
                 },
             )

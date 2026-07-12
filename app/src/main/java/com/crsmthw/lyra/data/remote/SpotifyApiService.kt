@@ -37,32 +37,16 @@ interface SpotifyApiService {
         @Query("offset") offset: Int = 0,
     ): SavedAlbumsResponse
 
+    // The READ side of follows survived Feb 2026 (needs the user-follow-read scope — without it
+    // this 403s and the Artists filter looks empty). The WRITE side (PUT/DELETE me/following +
+    // me/following/contains) was removed for dev-mode apps: follow/unfollow/status go through
+    // the unified me/library endpoints above with artist uris + the user-follow-* scopes.
     @GET("me/following")
     suspend fun getFollowedArtists(
         @Query("type")  type : String  = "artist",
         @Query("limit") limit: Int     = 50,
         @Query("after") after: String? = null,   // cursor: id of the last artist of the prev page
     ): FollowedArtistsResponse
-
-    // Artist follows did NOT move into the unified me/library (PUT with an artist uri fails and
-    // contains returns nothing) — they stay on the dedicated me/following family.
-    @PUT("me/following")
-    suspend fun followArtists(
-        @Query("type") type: String = "artist",
-        @Query("ids")  ids : String,
-    )
-
-    @DELETE("me/following")
-    suspend fun unfollowArtists(
-        @Query("type") type: String = "artist",
-        @Query("ids")  ids : String,
-    )
-
-    @GET("me/following/contains")
-    suspend fun checkFollowedArtists(
-        @Query("type") type: String = "artist",
-        @Query("ids")  ids : String,
-    ): List<Boolean>
 
     // ── Playlists ────────────────────────────────────────────────────────────
     @GET("playlists/{id}")
