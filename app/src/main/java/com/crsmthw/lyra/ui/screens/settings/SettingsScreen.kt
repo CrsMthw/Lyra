@@ -15,6 +15,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import com.crsmthw.lyra.ui.components.CappedModalBottomSheet
+import com.crsmthw.lyra.ui.components.ConnectedChoiceRow
 import com.crsmthw.lyra.ui.components.sheetTopGap
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -770,42 +771,6 @@ private fun GainSliderRow(prefix: String?, offset: Int, onOffset: (Int) -> Unit)
             valueRange            = -3f..3f,
             steps                 = 5,
         )
-    }
-}
-
-// ── Connected single-choice picker (M3 Expressive morph) ────────────────────────
-
-/**
- * A connected single-choice picker (theme mode, visualizer style) built on the full M3 Expressive
- * [ButtonGroup]: each `toggleableItem` segment gets the connected leading/middle/trailing shape morph
- * (rounds → squircle on select, squish on press) AND the inter-button press-squeeze — pressing one
- * segment expands it while compressing its neighbours, then springs back. A real overflow indicator
- * is supplied so the measure pass always has a home for an item that can't fit, never the
- * empty-overflow path that mis-measures in genuinely tight layouts. Picking fires a `press` haptic.
- */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
-@Composable
-private fun <T> ConnectedChoiceRow(
-    options : List<Pair<T, String>>,
-    selected: T,
-    onSelect: (T) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val haptics = LocalHapticFeedback.current
-    ButtonGroup(
-        overflowIndicator = { menuState -> ButtonGroupDefaults.OverflowIndicator(menuState) },
-        modifier          = modifier.fillMaxWidth(),
-    ) {
-        options.forEach { (value, label) ->
-            toggleableItem(
-                checked         = selected == value,
-                label           = label,
-                onCheckedChange = { isChecked ->
-                    if (isChecked && selected != value) { haptics.press(); onSelect(value) }
-                },
-                weight          = 1f,
-            )
-        }
     }
 }
 

@@ -77,6 +77,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.PullToRefreshState
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import com.crsmthw.lyra.ui.components.ConnectedChoiceRow
 import com.crsmthw.lyra.ui.components.DetailArtHero
 import com.crsmthw.lyra.ui.components.PlayerPanelHost
 import com.crsmthw.lyra.ui.components.PlaylistCard
@@ -1516,44 +1517,23 @@ private fun PlaylistListCard(
 
 // ── Library filter (Playlists / Albums / Artists) ─────────────────────────────
 
-/**
- * Connected single-choice picker for the Library content type — full M3 Expressive [ButtonGroup]
- * with a real overflow indicator (same rationale as Settings' ConnectedChoiceRow: an empty
- * overflow mis-measures in tight layouts; see docs/MATERIAL3.md → ButtonGroup).
- */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+/** Connected single-choice picker for the Library content type — see [ConnectedChoiceRow]. */
 @Composable
 private fun LibraryFilterRow(
     selected : LibraryFilter,
     onSelect : (LibraryFilter) -> Unit,
     modifier : Modifier = Modifier,
 ) {
-    val haptics = LocalHapticFeedback.current
-    val options = listOf(
-        LibraryFilter.PLAYLISTS to stringResource(R.string.library_filter_playlists),
-        LibraryFilter.ALBUMS    to stringResource(R.string.library_filter_albums),
-        LibraryFilter.ARTISTS   to stringResource(R.string.library_filter_artists),
+    ConnectedChoiceRow(
+        options  = listOf(
+            LibraryFilter.PLAYLISTS to stringResource(R.string.library_filter_playlists),
+            LibraryFilter.ALBUMS    to stringResource(R.string.library_filter_albums),
+            LibraryFilter.ARTISTS   to stringResource(R.string.library_filter_artists),
+        ),
+        selected = selected,
+        onSelect = onSelect,
+        modifier = modifier,
     )
-    // Width-capped + centred: letting the group stretch across a wide (unfolded) pane made the
-    // segments so wide the selected label read off-centre; the folded pane is narrower than the
-    // cap, so phones are unaffected.
-    Box(modifier = modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-        ButtonGroup(
-            overflowIndicator = { menuState -> ButtonGroupDefaults.OverflowIndicator(menuState) },
-            modifier          = Modifier.fillMaxWidth().widthIn(max = 420.dp),
-        ) {
-            options.forEach { (value, label) ->
-                toggleableItem(
-                    checked         = selected == value,
-                    label           = label,
-                    onCheckedChange = { isChecked ->
-                        if (isChecked && selected != value) { haptics.press(); onSelect(value) }
-                    },
-                    weight          = 1f,
-                )
-            }
-        }
-    }
 }
 
 /** Loading / empty placeholder for the Albums and Artists filters. */

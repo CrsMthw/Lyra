@@ -36,6 +36,7 @@ import coil3.compose.AsyncImage
 import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.remote.model.SpotifyArtist
 import com.crsmthw.lyra.data.remote.model.SpotifyTrack
+import com.crsmthw.lyra.ui.components.ConnectedChoiceRow
 import com.crsmthw.lyra.ui.components.HeroBandHeight
 import com.crsmthw.lyra.ui.components.TitlePill
 import com.crsmthw.lyra.ui.components.TopActionPill
@@ -108,30 +109,12 @@ fun StatsScreen(
                         StatsTimeRange.MEDIUM to stringResource(R.string.stats_range_medium),
                         StatsTimeRange.LONG   to stringResource(R.string.stats_range_long),
                     )
-                    Box(
-                        modifier         = Modifier
-                            .fillMaxWidth()
-                            .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 8.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                    ButtonGroup(
-                        overflowIndicator = { menuState -> ButtonGroupDefaults.OverflowIndicator(menuState) },
-                        modifier          = Modifier.fillMaxWidth().widthIn(max = 420.dp),
-                    ) {
-                        options.forEach { (value, label) ->
-                            toggleableItem(
-                                checked         = state.range == value,
-                                label           = label,
-                                onCheckedChange = { isChecked ->
-                                    if (isChecked && state.range != value) {
-                                        haptics.press(); viewModel.setRange(value)
-                                    }
-                                },
-                                weight          = 1f,
-                            )
-                        }
-                    }
-                    }
+                    ConnectedChoiceRow(
+                        options  = options,
+                        selected = state.range,
+                        onSelect = viewModel::setRange,
+                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 8.dp),
+                    )
                 }
 
                 when {
