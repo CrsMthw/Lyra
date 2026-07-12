@@ -472,8 +472,9 @@ private fun LibraryBrowserPane(
                 artSharedModifier = likedArt,
             )
         }
-        // ── "For you" band — discovery from the user's own listening ─────────────
-        if (state.jumpBackIn.isNotEmpty()) {
+        // ── "For you" band — discovery from the user's own listening. Opt-in via Settings
+        //    (default off): cached band data may still be in state, so gate on the toggle too.
+        if (state.forYouEnabled && state.jumpBackIn.isNotEmpty()) {
             item(key = "jump_header") {
                 Text(stringResource(R.string.library_jump_back_in), style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 8.dp))
@@ -502,7 +503,7 @@ private fun LibraryBrowserPane(
                 }
             }
         }
-        if (state.topTracks.isNotEmpty()) {
+        if (state.forYouEnabled && state.topTracks.isNotEmpty()) {
             item(key = "onrepeat_header") {
                 Text(stringResource(R.string.library_on_repeat), style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 8.dp))

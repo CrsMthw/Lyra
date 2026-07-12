@@ -80,6 +80,7 @@ fun SettingsScreen(
     val visualizerGainBottom by viewModel.visualizerGainBottom.collectAsStateWithLifecycle()
     val visualizerGainSync  by viewModel.visualizerGainSync.collectAsStateWithLifecycle()
     val hapticsEnabled      by viewModel.hapticsEnabled.collectAsStateWithLifecycle()
+    val forYouEnabled       by viewModel.forYouEnabled.collectAsStateWithLifecycle()
     val haptics              = LocalHapticFeedback.current
     val imageCacheBytes        by viewModel.imageCacheBytes.collectAsStateWithLifecycle()
     val libraryCacheBytes      by viewModel.libraryCacheBytes.collectAsStateWithLifecycle()
@@ -156,6 +157,16 @@ fun SettingsScreen(
                     ThemeMode.DARK   -> stringResource(R.string.settings_theme_dark)
                 },
                 onClick  = { showThemeSheet = true },
+            )
+
+            // "For you" band toggle — opt-in (default OFF): algorithmic resurfacing is the kind
+            // of Spotify bloat Lyra exists to escape, so it must be asked for, never imposed.
+            SettingsToggleItem(
+                icon            = Icons.Default.AutoAwesome,
+                title           = stringResource(R.string.settings_for_you),
+                subtitle        = stringResource(R.string.settings_for_you_desc),
+                checked         = forYouEnabled,
+                onCheckedChange = viewModel::setForYouEnabled,
             )
 
             // Haptic feedback toggle (app-wide)

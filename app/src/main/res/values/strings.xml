@@ -149,6 +149,8 @@
     <string name="settings_amoled_desc">Ultra-dark background in dark mode</string>
     <string name="settings_dynamic_color">Material You Colors</string>
     <string name="settings_dynamic_color_desc">Extract accent color from your wallpaper</string>
+    <string name="settings_for_you">For you band</string>
+    <string name="settings_for_you_desc">Show Jump back in and On repeat on the Library</string>
     <string name="settings_haptics">Haptic feedback</string>
     <string name="settings_haptics_desc">Vibrate on taps, toggles, and gestures</string>
     <string name="settings_visualizer_desc">Show audio wave animation while music is playing</string>

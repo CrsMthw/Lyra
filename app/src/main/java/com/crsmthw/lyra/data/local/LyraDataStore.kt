@@ -79,6 +79,12 @@ class LyraDataStore(private val context: Context) {
         prefs[Keys.HAPTICS_ENABLED] ?: true
     }
 
+    // Default OFF: the "For you" band is opt-in — algorithmic resurfacing is the kind of
+    // Spotify bloat Lyra exists to escape.
+    val forYouEnabled: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[Keys.FOR_YOU_ENABLED] ?: false
+    }
+
     // ── Writes ──────────────────────────────────────────────────────────────
 
     suspend fun setThemeMode(mode: ThemeMode) {
@@ -133,6 +139,10 @@ class LyraDataStore(private val context: Context) {
         context.dataStore.edit { it[Keys.HAPTICS_ENABLED] = enabled }
     }
 
+    suspend fun setForYouEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.FOR_YOU_ENABLED] = enabled }
+    }
+
     // ── Keys ────────────────────────────────────────────────────────────────
 
     private object Keys {
@@ -150,5 +160,6 @@ class LyraDataStore(private val context: Context) {
         val VISUALIZER_GAIN_BOTTOM = intPreferencesKey("visualizer_gain_bottom")
         val VISUALIZER_GAIN_SYNC = booleanPreferencesKey("visualizer_gain_sync")
         val HAPTICS_ENABLED     = booleanPreferencesKey("haptics_enabled")
+        val FOR_YOU_ENABLED     = booleanPreferencesKey("for_you_enabled")
     }
 }

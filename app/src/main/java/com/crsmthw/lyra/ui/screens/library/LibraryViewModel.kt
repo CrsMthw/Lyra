@@ -11,6 +11,7 @@ import com.crsmthw.lyra.data.local.LibraryCacheData
 import com.crsmthw.lyra.data.player.PlayerStateManager
 import com.crsmthw.lyra.data.remote.SpotifyRemoteManager
 import com.crsmthw.lyra.data.remote.model.*
+import com.crsmthw.lyra.data.repository.SettingsRepository
 import com.crsmthw.lyra.data.repository.SpotifyRepository
 import com.crsmthw.lyra.di.AppContainer
 import com.crsmthw.lyra.ui.components.TrackActionsController
@@ -19,6 +20,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -28,6 +30,7 @@ enum class LibraryFilter { PLAYLISTS, ALBUMS, ARTISTS }
 
 data class LibraryUiState(
     val playlists             : List<SpotifyPlaylist>  = emptyList(),
+    val forYouEnabled         : Boolean                = false,   // Settings toggle, default off
     val jumpBackIn            : List<JumpBackInItem>   = emptyList(),
     val topTracks             : List<SpotifyTrack>     = emptyList(),
     val libraryFilter         : LibraryFilter          = LibraryFilter.PLAYLISTS,
@@ -58,6 +61,7 @@ class LibraryViewModel(
     private val mosaicGenerator : MosaicGenerator,
     private val remoteManager   : SpotifyRemoteManager,
     private val playerStateManager: PlayerStateManager,
+    private val settingsRepository: SettingsRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(LibraryUiState())
@@ -118,6 +122,24 @@ class LibraryViewModel(
         loadLibrary()
         observeCacheRevision()
         observeTrackListChanges()
+        observeForYouSetting()
+    }
+
+    /**
+     * Mirrors the Settings "For you band" toggle into UI state (gates the band's sections) and,
+     * when it's switched ON mid-session, fires the fetch the gated [loadForYou] skipped at load
+     * time so the band populates without a manual refresh. Only a genuine off→on transition
+     * triggers the fetch — the first emission is start-up state, where loadLibrary owns the load.
+     */
+    private fun observeForYouSetting() {
+        viewModelScope.launch {
+            var previous: Boolean? = null
+            settingsRepository.forYouEnabled.collect { enabled ->
+                _uiState.update { it.copy(forYouEnabled = enabled) }
+                if (previous == false && enabled) loadForYou()
+                previous = enabled
+            }
+        }
     }
 
     /**
@@ -249,6 +271,9 @@ class LibraryViewModel(
      */
     private fun loadForYou() {
         viewModelScope.launch {
+            // Read the persisted toggle directly (not the state mirror, which may not have
+            // emitted yet at start-up): band off → no recently-played/top-tracks calls at all.
+            if (!settingsRepository.forYouEnabled.first()) return@launch
             repository.getRecentlyPlayed(limit = 50).onSuccess { resp ->
                 _uiState.update { it.copy(jumpBackIn = buildJumpBackIn(resp, _uiState.value.playlists)) }
             }
@@ -831,5 +856,5 @@ private fun Throwable?.isTransientNetworkError(): Boolean =
 class LibraryViewModelFactory(private val container: AppContainer) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T =
-        LibraryViewModel(container.spotifyRepository, container.libraryCache, container.mosaicGenerator, container.remoteManager, container.playerStateManager) as T
+        LibraryViewModel(container.spotifyRepository, container.libraryCache, container.mosaicGenerator, container.remoteManager, container.playerStateManager, container.settingsRepository) as T
 }

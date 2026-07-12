@@ -21,6 +21,7 @@ class SettingsRepository(private val dataStore: LyraDataStore) {
     val visualizerGainBottom: Flow<Int>         = dataStore.visualizerGainBottom
     val visualizerGainSync: Flow<Boolean>       = dataStore.visualizerGainSync
     val hapticsEnabled   : Flow<Boolean>        = dataStore.hapticsEnabled
+    val forYouEnabled    : Flow<Boolean>        = dataStore.forYouEnabled
 
     suspend fun setThemeMode        (mode   : ThemeMode)      = dataStore.setThemeMode(mode)
     suspend fun setAmoledBlack      (enabled: Boolean)        = dataStore.setAmoledBlack(enabled)
@@ -36,4 +37,5 @@ class SettingsRepository(private val dataStore: LyraDataStore) {
     suspend fun setVisualizerGainBottom(offset: Int)          = dataStore.setVisualizerGainBottom(offset)
     suspend fun setVisualizerGainSync(sync: Boolean)          = dataStore.setVisualizerGainSync(sync)
     suspend fun setHapticsEnabled   (enabled: Boolean)        = dataStore.setHapticsEnabled(enabled)
+    suspend fun setForYouEnabled    (enabled: Boolean)        = dataStore.setForYouEnabled(enabled)
 }
