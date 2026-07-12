@@ -215,6 +215,50 @@ data class FeaturedPlaylistsResponse(
     val playlists: UserPlaylistsResponse,
 )
 
+// ── Recently played (Get Recently Played Tracks) ─────────────────────────────
+data class PlayHistoryContext(
+    val type : String? = null,   // "playlist" | "album" | "artist" | "show"
+    val uri  : String? = null,   // e.g. spotify:playlist:<id>
+) {
+    /** The bare id from the context uri, or null if the uri is absent/malformed. */
+    val contextId: String? get() = uri?.substringAfterLast(':')?.takeIf { it.isNotBlank() }
+}
+
+data class PlayHistoryItem(
+    val track : SpotifyTrack?,
+    @SerializedName("played_at") val playedAt : String? = null,
+    val context : PlayHistoryContext? = null,
+)
+
+data class RecentlyPlayedResponse(
+    val items : List<PlayHistoryItem>? = null,
+)
+
+// ── Saved albums (Get User's Saved Albums) ───────────────────────────────────
+data class SavedAlbum(
+    @SerializedName("added_at") val addedAt : String? = null,
+    val album : SpotifyAlbum?,   // null-safe: albums can vanish from the catalog
+)
+
+data class SavedAlbumsResponse(
+    val items : List<SavedAlbum>? = null,
+    val total : Int     = 0,
+    val next  : String? = null,
+)
+
+// ── Followed artists (Get Followed Artists — cursor-paged, nested) ───────────
+data class FollowedArtistsResponse(
+    val artists : FollowedArtistsPage? = null,
+)
+
+data class FollowedArtistsPage(
+    val items   : List<SpotifyArtist>? = null,
+    val total   : Int = 0,
+    val cursors : FollowCursors? = null,
+)
+
+data class FollowCursors(val after: String? = null)
+
 // ── Album (full) ─────────────────────────────────────────────────────────────
 
 data class SpotifyCopyright(

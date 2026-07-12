@@ -9,6 +9,8 @@ sealed class Screen(val route: String) {
 
     data object Queue : Screen("queue")
 
+    data object Stats : Screen("stats")
+
     // Deep-link to a specific playlist's track list
     data object PlaylistDetail : Screen("playlist/{id}") {
         fun createRoute(id: String) = "playlist/$id"

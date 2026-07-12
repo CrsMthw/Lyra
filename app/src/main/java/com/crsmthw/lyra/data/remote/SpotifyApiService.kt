@@ -31,6 +31,19 @@ interface SpotifyApiService {
     @GET("me/library/contains")
     suspend fun checkSavedTracks(@Query("uris") uris: String): List<Boolean>
 
+    @GET("me/albums")
+    suspend fun getSavedAlbums(
+        @Query("limit")  limit : Int = 50,
+        @Query("offset") offset: Int = 0,
+    ): SavedAlbumsResponse
+
+    @GET("me/following")
+    suspend fun getFollowedArtists(
+        @Query("type")  type : String  = "artist",
+        @Query("limit") limit: Int     = 50,
+        @Query("after") after: String? = null,   // cursor: id of the last artist of the prev page
+    ): FollowedArtistsResponse
+
     // ── Playlists ────────────────────────────────────────────────────────────
     @GET("playlists/{id}")
     suspend fun getPlaylistFull(@Path("id") id: String): SpotifyPlaylistFull
@@ -97,6 +110,24 @@ interface SpotifyApiService {
 
     @POST("me/player/queue")
     suspend fun addToQueue(@Query("uri") uri: String)
+
+    @GET("me/player/recently-played")
+    suspend fun getRecentlyPlayed(@Query("limit") limit: Int = 50): RecentlyPlayedResponse
+
+    // ── Personalisation ──────────────────────────────────────────────────────
+    @GET("me/top/tracks")
+    suspend fun getTopTracks(
+        @Query("time_range") timeRange: String = "short_term",   // short_term | medium_term | long_term
+        @Query("limit")      limit    : Int    = 20,
+        @Query("offset")     offset   : Int    = 0,
+    ): Paged<SpotifyTrack>
+
+    @GET("me/top/artists")
+    suspend fun getTopArtists(
+        @Query("time_range") timeRange: String = "short_term",
+        @Query("limit")      limit    : Int    = 20,
+        @Query("offset")     offset   : Int    = 0,
+    ): Paged<SpotifyArtist>
 
     @GET("me/player/devices")
     suspend fun getAvailableDevices(): DevicesResponse?

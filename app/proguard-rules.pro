@@ -10,6 +10,8 @@
 -keep class com.crsmthw.lyra.data.local.CachedTrackList { *; }
 -keep class com.crsmthw.lyra.data.local.LibraryCacheData { *; }
 -keep class com.crsmthw.lyra.data.local.RecentSearch { *; }
+-keep class com.crsmthw.lyra.data.local.ForYouCacheData { *; }
+-keep class com.crsmthw.lyra.data.local.JumpBackInItem { *; }
 
 # Spotify App Remote
 -keep class com.spotify.android.appremote.** { *; }

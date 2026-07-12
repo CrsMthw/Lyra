@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.crsmthw.lyra.data.local.CachedTrackList
+import com.crsmthw.lyra.data.local.ForYouCacheData
+import com.crsmthw.lyra.data.local.JumpBackInItem
 import com.crsmthw.lyra.data.local.LibraryCache
 import com.crsmthw.lyra.data.local.LibraryCacheData
 import com.crsmthw.lyra.data.player.PlayerStateManager
@@ -21,9 +23,18 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/** Which content type the Library browser shows. */
+enum class LibraryFilter { PLAYLISTS, ALBUMS, ARTISTS }
+
 data class LibraryUiState(
     val playlists             : List<SpotifyPlaylist>  = emptyList(),
     val featuredPlaylists     : List<SpotifyPlaylist>  = emptyList(),
+    val jumpBackIn            : List<JumpBackInItem>   = emptyList(),
+    val topTracks             : List<SpotifyTrack>     = emptyList(),
+    val libraryFilter         : LibraryFilter          = LibraryFilter.PLAYLISTS,
+    val savedAlbums           : List<SpotifyAlbum>     = emptyList(),
+    val followedArtists       : List<SpotifyArtist>    = emptyList(),
+    val isLoadingCollections  : Boolean                = false,
     val likedSongCount        : Int                    = 0,
     val currentPlaylist       : SpotifyPlaylist?        = null,
     val currentTracks         : List<SpotifyTrack>     = emptyList(),
@@ -165,6 +176,10 @@ class LibraryViewModel(
                 _uiState.update { it.copy(
                     playlists         = cached.playlists,
                     featuredPlaylists = cached.featuredPlaylists,
+                    jumpBackIn        = cached.forYou?.jumpBackIn.orEmpty(),
+                    topTracks         = cached.forYou?.topTracks.orEmpty(),
+                    savedAlbums       = cached.savedAlbums.orEmpty(),
+                    followedArtists   = cached.followedArtists.orEmpty(),
                     likedSongCount    = cached.likedSongCount,
                     user              = cached.user,
                     isLoading         = false,
@@ -208,20 +223,176 @@ class LibraryViewModel(
 
             _uiState.update { it.copy(isLoading = false) }
 
-            // Persist refreshed data, preserving existing track list cache
+            loadForYou()   // after playlists+featured so jump-back-in context lookup can resolve
+
+            // Persist refreshed data, preserving existing track list + For-you cache
             val s = _uiState.value
             withContext(Dispatchers.IO) {
-                val existingTrackLists = cache.load()?.trackLists ?: emptyMap()
+                val existing = cache.load()
                 cache.save(LibraryCacheData(
                     playlists         = s.playlists,
                     featuredPlaylists = s.featuredPlaylists,
                     likedSongCount    = s.likedSongCount,
                     user              = s.user,
-                    trackLists        = existingTrackLists,
+                    trackLists        = existing?.trackLists ?: emptyMap(),
+                    forYou            = existing?.forYou,
+                    savedAlbums       = existing?.savedAlbums,
+                    followedArtists   = existing?.followedArtists,
                 ))
             }
             // Generate mosaics for any new playlists that now have cached track lists
             generateMissingMosaicsAsync(s.playlists + s.featuredPlaylists, cache.load()?.trackLists ?: emptyMap())
+        }
+    }
+
+    /**
+     * Loads the "For you" band: jump-back-in (de-duped recently-played contexts) + short-term top
+     * tracks. Runs after the playlist lists are in state so playlist contexts can resolve to a
+     * name/art without extra calls; playlist contexts that aren't in the library are skipped
+     * (naming them would cost a metadata call each). Failures keep the cached band silently.
+     */
+    private fun loadForYou() {
+        viewModelScope.launch {
+            repository.getRecentlyPlayed(limit = 50).onSuccess { resp ->
+                val lookup = _uiState.value.playlists + _uiState.value.featuredPlaylists
+                _uiState.update { it.copy(jumpBackIn = buildJumpBackIn(resp, lookup)) }
+            }
+            repository.getTopTracks(timeRange = "short_term", limit = 20).onSuccess { page ->
+                _uiState.update { it.copy(topTracks = page.items) }
+            }
+            val s = _uiState.value
+            if (s.jumpBackIn.isNotEmpty() || s.topTracks.isNotEmpty()) {
+                withContext(Dispatchers.IO) {
+                    cache.saveForYou(ForYouCacheData(jumpBackIn = s.jumpBackIn, topTracks = s.topTracks))
+                }
+            }
+        }
+    }
+
+    private fun buildJumpBackIn(
+        resp      : RecentlyPlayedResponse,
+        playlists : List<SpotifyPlaylist>,
+    ): List<JumpBackInItem> {
+        val items = mutableListOf<JumpBackInItem>()
+        val seen  = mutableSetOf<String>()
+        for (h in resp.items.orEmpty()) {
+            if (items.size >= MAX_JUMP_BACK_IN) break
+            val ctx = h.context ?: continue
+            val uri = ctx.uri ?: continue
+            if (!seen.add(uri)) continue
+            val id = ctx.contextId ?: continue
+            when {
+                // Liked Songs plays as the "collection" context (spotify:user:<id>:collection).
+                uri.endsWith(":collection") ->
+                    items += JumpBackInItem(type = "liked", id = "liked", uri = uri, title = "liked")
+                ctx.type == "playlist" -> {
+                    val pl = playlists.firstOrNull { it.id == id } ?: continue
+                    items += JumpBackInItem(
+                        type   = "playlist",
+                        id     = pl.id,
+                        uri    = pl.uri,
+                        title  = pl.name,
+                        artUrl = pl.thumbnailUrl.takeIf { it.isNotBlank() },
+                    )
+                }
+                ctx.type == "album" -> {
+                    val track = h.track ?: continue
+                    val name  = track.album?.name ?: continue
+                    items += JumpBackInItem(
+                        type     = "album",
+                        id       = id,
+                        uri      = uri,
+                        title    = name,
+                        subtitle = track.allArtists,
+                        artUrl   = track.artUrl.takeIf { it.isNotBlank() },
+                    )
+                }
+                ctx.type == "artist" -> {
+                    val track  = h.track ?: continue
+                    val artist = track.artists?.firstOrNull() ?: continue
+                    items += JumpBackInItem(
+                        type   = "artist",
+                        id     = artist.id,
+                        uri    = uri,
+                        title  = artist.name,
+                        artUrl = track.artUrl.takeIf { it.isNotBlank() },
+                    )
+                }
+            }
+        }
+        return items
+    }
+
+    // ── Library filter (Playlists / Albums / Artists) ────────────────────────
+
+    /** Once-per-session network refresh guard for the Albums/Artists filter content. */
+    private var collectionsLoaded = false
+
+    fun setLibraryFilter(filter: LibraryFilter) {
+        _uiState.update { it.copy(libraryFilter = filter) }
+        // Cached content (if any) is already in state from loadLibrary; refresh from the network
+        // the first time either non-playlist filter is opened this session.
+        if (filter != LibraryFilter.PLAYLISTS) loadCollections()
+    }
+
+    private fun loadCollections() {
+        if (collectionsLoaded) return
+        collectionsLoaded = true
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingCollections = true) }
+
+            // Saved albums — offset-paged.
+            val albums = mutableListOf<SpotifyAlbum>()
+            var offset = 0
+            var albumsOk = true
+            while (true) {
+                val page = repository.getSavedAlbums(limit = 50, offset = offset).getOrNull()
+                if (page == null) { albumsOk = albums.isNotEmpty(); break }
+                val items = page.items.orEmpty()
+                albums += items.mapNotNull { it.album }
+                offset += items.size
+                if (page.next == null || items.isEmpty()) break
+            }
+            if (albumsOk) _uiState.update { it.copy(savedAlbums = albums) }
+
+            // Followed artists — cursor-paged, nested under "artists".
+            val artists = mutableListOf<SpotifyArtist>()
+            var after: String? = null
+            var artistsOk = true
+            while (true) {
+                val page = repository.getFollowedArtists(after).getOrNull()?.artists
+                if (page == null) { artistsOk = artists.isNotEmpty(); break }
+                val items = page.items.orEmpty()
+                artists += items
+                after = page.cursors?.after
+                if (after == null || items.isEmpty()) break
+            }
+            if (artistsOk) _uiState.update { it.copy(followedArtists = artists) }
+
+            _uiState.update { it.copy(isLoadingCollections = false) }
+
+            if (albumsOk || artistsOk) {
+                val s = _uiState.value
+                withContext(Dispatchers.IO) { cache.saveCollections(s.savedAlbums, s.followedArtists) }
+            } else {
+                collectionsLoaded = false   // both fetches failed with nothing cached — allow a retry
+            }
+        }
+    }
+
+    /** Plays the On-repeat row from [startIndex]: the tapped track first, the rest queued behind it. */
+    fun playTopTrack(startIndex: Int) {
+        val uris = _uiState.value.topTracks.drop(startIndex).map { it.uri }
+        if (uris.isEmpty()) return
+        playerStateManager.setOptimisticallyPlaying()
+        viewModelScope.launch {
+            repository.play(uris = uris).onFailure { e ->
+                if (e.message?.contains("404") == true) {
+                    remoteManager.connectAndPlay(uris.first())
+                } else {
+                    playerStateManager.releasePlayingOptimism()
+                }
+            }
         }
     }
 
@@ -257,15 +428,20 @@ class LibraryViewModel(
 
             _uiState.update { it.copy(isLibraryRefreshing = false) }
 
+            loadForYou()
+
             val s = _uiState.value
             withContext(Dispatchers.IO) {
-                val existingTrackLists = cache.load()?.trackLists ?: emptyMap()
+                val existing = cache.load()
                 cache.save(LibraryCacheData(
                     playlists         = s.playlists,
                     featuredPlaylists = s.featuredPlaylists,
                     likedSongCount    = s.likedSongCount,
                     user              = s.user,
-                    trackLists        = existingTrackLists,
+                    trackLists        = existing?.trackLists ?: emptyMap(),
+                    forYou            = existing?.forYou,
+                    savedAlbums       = existing?.savedAlbums,
+                    followedArtists   = existing?.followedArtists,
                 ))
             }
             generateMissingMosaicsAsync(s.playlists + s.featuredPlaylists, cache.load()?.trackLists ?: emptyMap())
@@ -648,6 +824,9 @@ class LibraryViewModel(
     }
 
 }
+
+/** Cap on "Jump back in" tiles — enough for two swipes of the row, cheap to build. */
+private const val MAX_JUMP_BACK_IN = 10
 
 private fun Throwable?.isTransientNetworkError(): Boolean =
     this?.cause is java.net.UnknownHostException ||

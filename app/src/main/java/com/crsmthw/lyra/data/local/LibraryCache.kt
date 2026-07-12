@@ -2,6 +2,8 @@ package com.crsmthw.lyra.data.local
 
 import android.content.Context
 import com.crsmthw.lyra.data.remote.model.PlaylistTracksMeta
+import com.crsmthw.lyra.data.remote.model.SpotifyAlbum
+import com.crsmthw.lyra.data.remote.model.SpotifyArtist
 import com.crsmthw.lyra.data.remote.model.SpotifyPlaylist
 import com.crsmthw.lyra.data.remote.model.SpotifyTrack
 import com.crsmthw.lyra.data.remote.model.SpotifyUser
@@ -31,12 +33,40 @@ data class RecentSearch(
     val imageUrl : String?,
 )
 
+/**
+ * One "Jump back in" tile: a de-duped recently-played context. [type] is
+ * "playlist" | "liked" | "album" | "artist"; [id] navigates (playlists resolve against the
+ * library list, albums/artists push their detail route), [uri] plays.
+ */
+data class JumpBackInItem(
+    val type     : String,
+    val id       : String,
+    val uri      : String,
+    val title    : String,
+    val subtitle : String? = null,
+    val artUrl   : String? = null,
+)
+
+/**
+ * Cached "For you" band. All fields nullable — Gson allocates via Unsafe and bypasses Kotlin
+ * defaults, so absent fields in caches written before this existed arrive null regardless of
+ * declared defaults (same hazard as the sparse-owner crash; see SpotifyPlaylist).
+ */
+data class ForYouCacheData(
+    val jumpBackIn : List<JumpBackInItem>? = null,
+    val topTracks  : List<SpotifyTrack>?   = null,
+)
+
 data class LibraryCacheData(
     val playlists         : List<SpotifyPlaylist>          = emptyList(),
     val featuredPlaylists : List<SpotifyPlaylist>          = emptyList(),
     val likedSongCount    : Int                            = 0,
     val user              : SpotifyUser?                   = null,
     val trackLists        : Map<String, CachedTrackList>   = emptyMap(),
+    // Nullable: absent in caches written before these existed (Gson Unsafe alloc — see above).
+    val forYou            : ForYouCacheData?               = null,
+    val savedAlbums       : List<SpotifyAlbum>?            = null,
+    val followedArtists   : List<SpotifyArtist>?           = null,
 )
 
 class LibraryCache(context: Context) {
@@ -72,6 +102,22 @@ class LibraryCache(context: Context) {
     fun save(data: LibraryCacheData) = synchronized(lock) { saveLocked(data) }
 
     fun load(): LibraryCacheData? = synchronized(lock) { loadLocked() }
+
+    /** Persists just the For-you band (jump-back-in + top tracks), leaving the rest untouched. */
+    fun saveForYou(forYou: ForYouCacheData) {
+        synchronized(lock) {
+            val current = loadLocked() ?: LibraryCacheData()
+            saveLocked(current.copy(forYou = forYou))
+        }
+    }
+
+    /** Persists the Albums/Artists filter content, leaving the rest untouched. */
+    fun saveCollections(savedAlbums: List<SpotifyAlbum>, followedArtists: List<SpotifyArtist>) {
+        synchronized(lock) {
+            val current = loadLocked() ?: LibraryCacheData()
+            saveLocked(current.copy(savedAlbums = savedAlbums, followedArtists = followedArtists))
+        }
+    }
 
     fun saveTrackList(playlistId: String, snapshotId: String, tracks: List<SpotifyTrack>) {
         synchronized(lock) {

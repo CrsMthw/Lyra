@@ -18,8 +18,11 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
@@ -68,6 +71,7 @@ import coil3.toBitmap
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import com.crsmthw.lyra.R
+import com.crsmthw.lyra.data.local.JumpBackInItem
 import com.crsmthw.lyra.data.remote.model.SpotifyPlaylist
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.PullToRefreshState
@@ -90,6 +94,7 @@ import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import com.crsmthw.lyra.ui.screens.player.RepeatMode
 import com.crsmthw.lyra.util.ListScrollHaptics
 import com.crsmthw.lyra.util.confirm
+import com.crsmthw.lyra.util.longPress
 import com.crsmthw.lyra.util.press
 import com.crsmthw.lyra.util.rememberArtBoundsTransform
 import com.crsmthw.lyra.util.threshold
@@ -125,6 +130,7 @@ fun LibraryScreen(
     onOpenQueue           : () -> Unit = {},
     onOpenAlbum           : (String) -> Unit = {},
     onOpenArtist          : (String) -> Unit = {},
+    onOpenStats           : () -> Unit = {},
     sharedTransitionScope : SharedTransitionScope? = null,
     animatedContentScope  : AnimatedContentScope? = null,
 ) {
@@ -148,6 +154,9 @@ fun LibraryScreen(
                 onOpenSearch          = onOpenSearchHaptic,
                 onOpenSettings        = onOpenSettings,
                 onRequestPlayer       = onRequestPlayer,
+                onOpenAlbum           = onOpenAlbum,
+                onOpenArtist          = onOpenArtist,
+                onOpenStats           = onOpenStats,
                 sharedTransitionScope = sharedTransitionScope,
                 animatedContentScope  = animatedContentScope,
             )
@@ -159,6 +168,9 @@ fun LibraryScreen(
                 onOpenSearch          = onOpenSearchHaptic,
                 onOpenSettings        = onOpenSettings,
                 onRequestPlayer       = onRequestPlayer,
+                onOpenAlbum           = onOpenAlbum,
+                onOpenArtist          = onOpenArtist,
+                onOpenStats           = onOpenStats,
                 sharedTransitionScope = sharedTransitionScope,
                 animatedContentScope  = animatedContentScope,
             )
@@ -201,6 +213,9 @@ private fun SinglePaneLayout(
     onOpenSearch          : () -> Unit,
     onOpenSettings        : () -> Unit,
     onRequestPlayer       : () -> Unit,
+    onOpenAlbum           : (String) -> Unit = {},
+    onOpenArtist          : (String) -> Unit = {},
+    onOpenStats           : () -> Unit = {},
     sharedTransitionScope : SharedTransitionScope? = null,
     animatedContentScope  : AnimatedContentScope? = null,
 ) {
@@ -273,6 +288,9 @@ private fun SinglePaneLayout(
                         viewModel      = viewModel,
                         onOpenSettings = onOpenSettings,
                         isLandscape    = isLandscape,
+                        onOpenAlbum    = onOpenAlbum,
+                        onOpenArtist   = onOpenArtist,
+                        onOpenStats    = onOpenStats,
                         sharedScope    = libSharedScope,
                         animScope      = acScope,
                     )
@@ -354,6 +372,9 @@ private fun LibraryBrowserPane(
     viewModel             : LibraryViewModel,
     onOpenSettings        : () -> Unit,
     isLandscape           : Boolean,
+    onOpenAlbum           : (String) -> Unit = {},
+    onOpenArtist          : (String) -> Unit = {},
+    onOpenStats           : () -> Unit = {},
     modifier              : Modifier = Modifier,
     containerColor        : Color = Color.Unspecified,   // top-scrim target; defaults to background
     sharedScope           : SharedTransitionScope? = null,   // non-null only in single pane (container transform)
@@ -380,6 +401,50 @@ private fun LibraryBrowserPane(
 
     // Shared list items — identical in both portrait and landscape LazyColumns
     val listBody: LazyListScope.() -> Unit = {
+        // Content-type filter (Playlists / Albums / Artists) — connected M3 ButtonGroup.
+        item(key = "filter") {
+            LibraryFilterRow(
+                selected = state.libraryFilter,
+                onSelect = viewModel::setLibraryFilter,
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp),
+            )
+        }
+        when (state.libraryFilter) {
+            LibraryFilter.ALBUMS -> {
+                if (state.savedAlbums.isEmpty()) {
+                    item(key = "albums_empty") {
+                        CollectionEmptyState(
+                            isLoading = state.isLoadingCollections,
+                            text      = stringResource(R.string.library_no_albums),
+                        )
+                    }
+                } else {
+                    items(state.savedAlbums, key = { "album-${it.id}" }) { album ->
+                        AlbumListCard(
+                            album   = album,
+                            onClick = { haptics.confirm(); onOpenAlbum(album.id) },
+                        )
+                    }
+                }
+            }
+            LibraryFilter.ARTISTS -> {
+                if (state.followedArtists.isEmpty()) {
+                    item(key = "artists_empty") {
+                        CollectionEmptyState(
+                            isLoading = state.isLoadingCollections,
+                            text      = stringResource(R.string.library_no_artists),
+                        )
+                    }
+                } else {
+                    items(state.followedArtists, key = { "artist-${it.id}" }) { artist ->
+                        ArtistListCard(
+                            artist  = artist,
+                            onClick = { haptics.confirm(); onOpenArtist(artist.id) },
+                        )
+                    }
+                }
+            }
+            LibraryFilter.PLAYLISTS -> {
         item(key = "liked") {
             // Container-transform source: same inline `sharedBounds` form as the search-FAB morph.
             val likedArt = if (sharedScope != null && animScope != null)
@@ -397,6 +462,54 @@ private fun LibraryBrowserPane(
                 onPlay            = { viewModel.playPlaylist("spotify:user:${state.user?.id}:collection") },
                 artSharedModifier = likedArt,
             )
+        }
+        // ── "For you" band — discovery from the user's own listening ─────────────
+        if (state.jumpBackIn.isNotEmpty()) {
+            item(key = "jump_header") {
+                Text(stringResource(R.string.library_jump_back_in), style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 8.dp))
+            }
+            item(key = "jump_row") {
+                LazyRow(contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    items(state.jumpBackIn, key = { it.uri }) { jump ->
+                        JumpBackInCard(
+                            item       = jump,
+                            mosaicFile = if (jump.type == "playlist" && jump.id in state.playlistsWithMosaics)
+                                File(mosaicDir, "${jump.id}.png") else null,
+                            onClick    = {
+                                haptics.confirm()
+                                when (jump.type) {
+                                    "liked"    -> viewModel.selectLikedSongs()
+                                    "playlist" -> (state.playlists + state.featuredPlaylists)
+                                        .firstOrNull { it.id == jump.id }
+                                        ?.let(viewModel::selectPlaylist)
+                                    "album"    -> onOpenAlbum(jump.id)
+                                    "artist"   -> onOpenArtist(jump.id)
+                                }
+                            },
+                        )
+                    }
+                }
+            }
+        }
+        if (state.topTracks.isNotEmpty()) {
+            item(key = "onrepeat_header") {
+                Text(stringResource(R.string.library_on_repeat), style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 8.dp))
+            }
+            item(key = "onrepeat_row") {
+                LazyRow(contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    itemsIndexed(state.topTracks, key = { _, t -> t.id }) { idx, track ->
+                        TopTrackCard(
+                            track       = track,
+                            onClick     = { haptics.confirm(); viewModel.playTopTrack(idx) },
+                            onLongClick = { viewModel.trackActions.open(track.toTrackActionTarget()) },
+                        )
+                    }
+                }
+            }
         }
         if (state.featuredPlaylists.isNotEmpty()) {
             item(key = "featured_header") {
@@ -483,6 +596,8 @@ private fun LibraryBrowserPane(
                 )
             }
         }
+            }   // end PLAYLISTS branch
+        }   // end filter when
     }
 
     val actionsBar: @Composable RowScope.() -> Unit = {
@@ -491,6 +606,9 @@ private fun LibraryBrowserPane(
                 Icon(Icons.Default.Warning, contentDescription = stringResource(R.string.cd_refresh_error),
                     tint = MaterialTheme.colorScheme.error)
             }
+        }
+        IconButton(onClick = { haptics.press(); onOpenStats() }) {
+            Icon(Icons.Default.Insights, contentDescription = stringResource(R.string.stats_title))
         }
         IconButton(onClick = { haptics.press(); onOpenSettings() }) {
             Icon(Icons.Default.Settings, contentDescription = stringResource(R.string.settings_title))
@@ -736,6 +854,9 @@ private fun TwoPaneLayout(
     onOpenSearch          : () -> Unit,
     onOpenSettings        : () -> Unit,
     onRequestPlayer       : () -> Unit,
+    onOpenAlbum           : (String) -> Unit = {},
+    onOpenArtist          : (String) -> Unit = {},
+    onOpenStats           : () -> Unit = {},
     sharedTransitionScope : SharedTransitionScope? = null,
     animatedContentScope  : AnimatedContentScope? = null,
 ) {
@@ -785,6 +906,9 @@ private fun TwoPaneLayout(
                         viewModel             = viewModel,
                         onOpenSettings        = onOpenSettings,
                         isLandscape           = isLandscape,
+                        onOpenAlbum           = onOpenAlbum,
+                        onOpenArtist          = onOpenArtist,
+                        onOpenStats           = onOpenStats,
                         modifier              = Modifier.fillMaxSize(),
                         containerColor        = MaterialTheme.colorScheme.surface,
                     )
@@ -1370,6 +1494,284 @@ private fun PlaylistListCard(
                     modifier = Modifier.size(20.dp))
             }
         }
+    }
+}
+
+// ── Library filter (Playlists / Albums / Artists) ─────────────────────────────
+
+/**
+ * Connected single-choice picker for the Library content type — full M3 Expressive [ButtonGroup]
+ * with a real overflow indicator (same rationale as Settings' ConnectedChoiceRow: an empty
+ * overflow mis-measures in tight layouts; see docs/MATERIAL3.md → ButtonGroup).
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun LibraryFilterRow(
+    selected : LibraryFilter,
+    onSelect : (LibraryFilter) -> Unit,
+    modifier : Modifier = Modifier,
+) {
+    val haptics = LocalHapticFeedback.current
+    val options = listOf(
+        LibraryFilter.PLAYLISTS to stringResource(R.string.library_filter_playlists),
+        LibraryFilter.ALBUMS    to stringResource(R.string.library_filter_albums),
+        LibraryFilter.ARTISTS   to stringResource(R.string.library_filter_artists),
+    )
+    ButtonGroup(
+        overflowIndicator = { menuState -> ButtonGroupDefaults.OverflowIndicator(menuState) },
+        modifier          = modifier.fillMaxWidth(),
+    ) {
+        options.forEach { (value, label) ->
+            toggleableItem(
+                checked         = selected == value,
+                label           = label,
+                onCheckedChange = { isChecked ->
+                    if (isChecked && selected != value) { haptics.press(); onSelect(value) }
+                },
+                weight          = 1f,
+            )
+        }
+    }
+}
+
+/** Loading / empty placeholder for the Albums and Artists filters. */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun CollectionEmptyState(isLoading: Boolean, text: String) {
+    Box(
+        modifier         = Modifier.fillMaxWidth().padding(vertical = 48.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (isLoading) {
+            ContainedLoadingIndicator()
+        } else {
+            Text(text, style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/** One saved album row (Albums filter) — mirrors PlaylistListCard's layout. */
+@Composable
+private fun AlbumListCard(
+    album   : com.crsmthw.lyra.data.remote.model.SpotifyAlbum,
+    onClick : () -> Unit,
+) {
+    Card(
+        onClick   = onClick,
+        modifier  = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        shape     = RoundedCornerShape(16.dp),
+        colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+    ) {
+        Row(
+            modifier          = Modifier.fillMaxWidth().padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val artUrl = album.images?.firstOrNull()?.url
+            if (artUrl != null) {
+                AsyncImage(
+                    model              = artUrl,
+                    contentDescription = album.name,
+                    contentScale       = ContentScale.Crop,
+                    modifier           = Modifier.size(56.dp).clip(RoundedCornerShape(12.dp)),
+                )
+            } else {
+                Box(
+                    modifier = Modifier.size(56.dp).clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Default.Album, contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(album.name, style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                val subtitle = listOfNotNull(
+                    album.artists?.joinToString(" · ") { it.name }?.takeIf { it.isNotBlank() },
+                    album.releaseYear.takeIf { it.isNotBlank() },
+                ).joinToString(" · ")
+                if (subtitle.isNotBlank()) {
+                    Text(subtitle, style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+    }
+}
+
+/** One followed artist row (Artists filter) — circular art, name only. */
+@Composable
+private fun ArtistListCard(
+    artist  : com.crsmthw.lyra.data.remote.model.SpotifyArtist,
+    onClick : () -> Unit,
+) {
+    Card(
+        onClick   = onClick,
+        modifier  = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        shape     = RoundedCornerShape(16.dp),
+        colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+    ) {
+        Row(
+            modifier          = Modifier.fillMaxWidth().padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val artUrl = artist.images?.firstOrNull()?.url
+            if (artUrl != null) {
+                AsyncImage(
+                    model              = artUrl,
+                    contentDescription = artist.name,
+                    contentScale       = ContentScale.Crop,
+                    modifier           = Modifier.size(56.dp).clip(CircleShape),
+                )
+            } else {
+                Box(
+                    modifier = Modifier.size(56.dp).clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Default.Person, contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            Spacer(Modifier.width(12.dp))
+            Text(artist.name, style = MaterialTheme.typography.titleMedium,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f))
+        }
+    }
+}
+
+// ── "For you" band cards ──────────────────────────────────────────────────────
+
+/** One "Jump back in" tile: a recently-played context (playlist / Liked / album / artist). */
+@Composable
+private fun JumpBackInCard(
+    item       : JumpBackInItem,
+    mosaicFile : File?,
+    onClick    : () -> Unit,
+) {
+    val imageShape = RoundedCornerShape(8.dp)
+    Column(
+        modifier = Modifier
+            .width(110.dp)
+            .clickable(onClick = onClick)
+            .padding(bottom = 4.dp),
+    ) {
+        if (item.type == "liked") {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(1f)
+                    .clip(imageShape)
+                    .background(Brush.linearGradient(listOf(Color(0xFF6A11CB), Color(0xFF2575FC)))),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Default.Favorite, contentDescription = null,
+                    tint = Color.White, modifier = Modifier.size(32.dp))
+            }
+        } else {
+            val imageModel = mosaicFile ?: item.artUrl
+            if (imageModel != null) {
+                AsyncImage(
+                    model              = imageModel,
+                    contentDescription = item.title,
+                    contentScale       = ContentScale.Crop,
+                    modifier           = Modifier.fillMaxWidth().aspectRatio(1f).clip(imageShape),
+                )
+            } else {
+                Surface(
+                    modifier = Modifier.fillMaxWidth().aspectRatio(1f).clip(imageShape),
+                    color    = MaterialTheme.colorScheme.surfaceVariant,
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Default.MusicNote, contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            // "liked" persists a marker, not a name, so the label stays localized.
+            text     = if (item.type == "liked") stringResource(R.string.liked_songs) else item.title,
+            style    = MaterialTheme.typography.bodySmall,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            color    = MaterialTheme.colorScheme.onSurface,
+        )
+        if (!item.subtitle.isNullOrBlank()) {
+            Text(
+                text     = item.subtitle,
+                style    = MaterialTheme.typography.labelSmall,
+                color    = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/** One "On repeat" tile: a short-term top track. Tap plays from here; hold opens the song menu. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun TopTrackCard(
+    track       : com.crsmthw.lyra.data.remote.model.SpotifyTrack,
+    onClick     : () -> Unit,
+    onLongClick : () -> Unit,
+) {
+    val haptics = LocalHapticFeedback.current
+    Column(
+        modifier = Modifier
+            .width(110.dp)
+            .combinedClickable(
+                onClick     = onClick,
+                onLongClick = { haptics.longPress(); onLongClick() },
+            )
+            .padding(bottom = 4.dp),
+    ) {
+        if (track.artUrl.isNotBlank()) {
+            AsyncImage(
+                model              = track.artUrl,
+                contentDescription = track.name,
+                contentScale       = ContentScale.Crop,
+                modifier           = Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(8.dp)),
+            )
+        } else {
+            Surface(
+                modifier = Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(8.dp)),
+                color    = MaterialTheme.colorScheme.surfaceVariant,
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.MusicNote, contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text     = track.name,
+            style    = MaterialTheme.typography.bodySmall,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            color    = MaterialTheme.colorScheme.onSurface,
+        )
+        Text(
+            text     = track.allArtists,
+            style    = MaterialTheme.typography.labelSmall,
+            color    = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 

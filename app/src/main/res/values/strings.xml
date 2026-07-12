@@ -80,11 +80,18 @@
     <string name="action_ok">OK</string>
 
     <!-- Library sections -->
+    <string name="library_jump_back_in">Jump back in</string>
+    <string name="library_on_repeat">On repeat</string>
     <string name="library_featured">Featured</string>
     <string name="library_my_playlists">My Playlists</string>
     <string name="library_following">Following</string>
     <string name="library_select_playlist">Select a playlist</string>
     <string name="library_playlist_fallback">Playlist</string>
+    <string name="library_filter_playlists">Playlists</string>
+    <string name="library_filter_albums">Albums</string>
+    <string name="library_filter_artists">Artists</string>
+    <string name="library_no_albums">No saved albums</string>
+    <string name="library_no_artists">No followed artists</string>
     <plurals name="library_track_count">
         <item quantity="one">%1$d track</item>
         <item quantity="other">%1$d tracks</item>
@@ -107,6 +114,15 @@
     <string name="settings_disconnect_title">Disconnect Spotify?</string>
     <string name="settings_disconnect_message">This will clear your tokens. You\'ll need to reconnect your Client ID.</string>
     <string name="settings_disconnect">Disconnect</string>
+
+    <!-- Stats ("Wrapped-lite") -->
+    <string name="stats_title">Your stats</string>
+    <string name="stats_range_short">4 weeks</string>
+    <string name="stats_range_medium">6 months</string>
+    <string name="stats_range_long">All time</string>
+    <string name="stats_top_artists">Top artists</string>
+    <string name="stats_top_tracks">Top tracks</string>
+    <string name="stats_empty">No listening data yet</string>
 
     <!-- Queue -->
     <string name="player_queue">Queue</string>

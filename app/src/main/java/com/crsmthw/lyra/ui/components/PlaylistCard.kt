@@ -11,9 +11,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.remote.model.SpotifyPlaylist
 import java.io.File
 
@@ -72,7 +74,7 @@ fun PlaylistCard(
             color    = MaterialTheme.colorScheme.onSurface,
         )
         Text(
-            text  = "${playlist.trackCount} tracks",
+            text  = pluralStringResource(R.plurals.library_track_count, playlist.trackCount, playlist.trackCount),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

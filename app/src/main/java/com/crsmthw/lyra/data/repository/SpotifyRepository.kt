@@ -56,6 +56,26 @@ class SpotifyRepository(
         api.getFeaturedPlaylists()
     }
 
+    suspend fun getRecentlyPlayed(limit: Int = 50): Result<RecentlyPlayedResponse> = safeCall {
+        api.getRecentlyPlayed(limit)
+    }
+
+    suspend fun getTopTracks(timeRange: String = "short_term", limit: Int = 20): Result<Paged<SpotifyTrack>> = safeCall {
+        api.getTopTracks(timeRange, limit)
+    }
+
+    suspend fun getTopArtists(timeRange: String = "short_term", limit: Int = 20): Result<Paged<SpotifyArtist>> = safeCall {
+        api.getTopArtists(timeRange, limit)
+    }
+
+    suspend fun getSavedAlbums(limit: Int = 50, offset: Int = 0): Result<SavedAlbumsResponse> = safeCall {
+        api.getSavedAlbums(limit, offset)
+    }
+
+    suspend fun getFollowedArtists(after: String? = null): Result<FollowedArtistsResponse> = safeCall {
+        api.getFollowedArtists(after = after)
+    }
+
     suspend fun getAlbum(id: String): Result<SpotifyAlbumFull> = safeCall {
         api.getAlbum(id)
     }

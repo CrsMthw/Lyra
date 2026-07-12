@@ -75,6 +75,9 @@ import com.crsmthw.lyra.ui.screens.queue.QueueViewModelFactory
 import com.crsmthw.lyra.ui.screens.search.SearchScreen
 import com.crsmthw.lyra.ui.screens.search.SearchViewModel
 import com.crsmthw.lyra.ui.screens.search.SearchViewModelFactory
+import com.crsmthw.lyra.ui.screens.stats.StatsScreen
+import com.crsmthw.lyra.ui.screens.stats.StatsViewModel
+import com.crsmthw.lyra.ui.screens.stats.StatsViewModelFactory
 import com.crsmthw.lyra.ui.screens.settings.SettingsScreen
 import com.crsmthw.lyra.ui.screens.settings.SettingsViewModel
 import com.crsmthw.lyra.ui.screens.settings.SettingsViewModelFactory
@@ -247,6 +250,7 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
                     onOpenQueue           = { safePush(Screen.Queue.route) },
                     onOpenAlbum           = { albumId -> safePush(Screen.AlbumDetail.createRoute(albumId)) },
                     onOpenArtist          = { artistId -> safePush(Screen.ArtistDetail.createRoute(artistId)) },
+                    onOpenStats           = { safePush(Screen.Stats.route) },
                     sharedTransitionScope = this@SharedTransitionLayout,
                     animatedContentScope  = this@composable,
                 )
@@ -267,6 +271,16 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
             composable(Screen.Queue.route) {
                 val vm = viewModel<QueueViewModel>(factory = QueueViewModelFactory(container))
                 QueueScreen(
+                    viewModel    = vm,
+                    onBack       = ::safeNavigateUp,
+                    onOpenAlbum  = { albumId -> safePush(Screen.AlbumDetail.createRoute(albumId)) },
+                    onOpenArtist = { artistId -> safePush(Screen.ArtistDetail.createRoute(artistId)) },
+                )
+            }
+
+            composable(Screen.Stats.route) {
+                val vm = viewModel<StatsViewModel>(factory = StatsViewModelFactory(container))
+                StatsScreen(
                     viewModel    = vm,
                     onBack       = ::safeNavigateUp,
                     onOpenAlbum  = { albumId -> safePush(Screen.AlbumDetail.createRoute(albumId)) },
