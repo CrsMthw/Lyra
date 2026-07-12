@@ -78,6 +78,8 @@
     <string name="cd_refresh_error">Refresh error</string>
     <string name="action_retry">Retry</string>
     <string name="action_ok">OK</string>
+    <string name="cd_follow">Save to library</string>
+    <string name="cd_unfollow">Remove from library</string>
 
     <!-- Library sections -->
     <string name="library_jump_back_in">Jump back in</string>

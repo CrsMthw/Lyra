@@ -18,6 +18,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -50,6 +52,7 @@ import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import com.crsmthw.lyra.util.ListScrollHaptics
 import com.crsmthw.lyra.util.confirm
 import com.crsmthw.lyra.util.press
+import com.crsmthw.lyra.util.toggle
 import com.crsmthw.lyra.util.visualizer.FftWaveCanvas
 import com.crsmthw.lyra.util.visualizer.LocalVisualizerAccentColor
 
@@ -196,6 +199,17 @@ fun ArtistDetailScreen(
                                             .statusBarsPadding()
                                             .padding(end = 12.dp, top = 8.dp),
                                     ) {
+                                        IconButton(
+                                            onClick = { haptics.toggle(state.isFollowed != true); viewModel.toggleFollowed() },
+                                            enabled = state.isFollowed != null,
+                                        ) {
+                                            Icon(
+                                                imageVector        = if (state.isFollowed == true) Icons.Default.Favorite
+                                                                                 else Icons.Default.FavoriteBorder,
+                                                contentDescription = stringResource(
+                                                    if (state.isFollowed == true) R.string.cd_unfollow else R.string.cd_follow),
+                                            )
+                                        }
                                         IconButton(onClick = {
                                             haptics.press()
                                             context.startActivity(Intent.createChooser(
@@ -321,6 +335,17 @@ fun ArtistDetailScreen(
                                 .statusBarsPadding()
                                 .padding(end = 16.dp, top = 8.dp),
                         ) {
+                            IconButton(
+                                onClick = { haptics.toggle(state.isFollowed != true); viewModel.toggleFollowed() },
+                                enabled = state.isFollowed != null,
+                            ) {
+                                Icon(
+                                    imageVector        = if (state.isFollowed == true) Icons.Default.Favorite
+                                                         else Icons.Default.FavoriteBorder,
+                                    contentDescription = stringResource(
+                                        if (state.isFollowed == true) R.string.cd_unfollow else R.string.cd_follow),
+                                )
+                            }
                             IconButton(onClick = {
                                 haptics.press()
                                 context.startActivity(Intent.createChooser(

@@ -96,6 +96,17 @@ class SpotifyRepository(
         api.addToQueue(trackUri)
     }
 
+    // ── Unified library save/remove/check — works for ANY Spotify uri (track, album, artist,
+    //    show…); the Feb-2026 API folded all follows/saves into me/library. The api methods are
+    //    named for tracks (their original use) but just pass the uris through.
+    suspend fun saveToLibrary(uri: String): Result<Unit> = safeCall { api.saveTracks(uri) }
+
+    suspend fun removeFromLibrary(uri: String): Result<Unit> = safeCall { api.removeTracks(uri) }
+
+    suspend fun isInLibrary(uri: String): Result<Boolean> = safeCall {
+        api.checkSavedTracks(uri).firstOrNull() ?: false
+    }
+
     suspend fun saveTrack(trackId: String): Result<Unit> = safeCall {
         api.saveTracks("spotify:track:$trackId")
     }

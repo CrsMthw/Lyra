@@ -42,6 +42,7 @@ import com.crsmthw.lyra.ui.components.TopActionPill
 import com.crsmthw.lyra.ui.components.TopScrim
 import com.crsmthw.lyra.ui.components.TrackActionsHost
 import com.crsmthw.lyra.ui.components.rememberHeroScrollProgress
+import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import com.crsmthw.lyra.ui.components.toTrackActionTarget
 import com.crsmthw.lyra.util.ListScrollHaptics
 import com.crsmthw.lyra.util.confirm
@@ -56,10 +57,11 @@ import com.crsmthw.lyra.util.press
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun StatsScreen(
-    viewModel   : StatsViewModel,
-    onBack      : () -> Unit,
-    onOpenAlbum : (String) -> Unit = {},
-    onOpenArtist: (String) -> Unit = {},
+    viewModel       : StatsViewModel,
+    playerViewModel : PlayerViewModel,
+    onBack          : () -> Unit,
+    onOpenAlbum     : (String) -> Unit = {},
+    onOpenArtist    : (String) -> Unit = {},
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val haptics = LocalHapticFeedback.current
@@ -106,11 +108,15 @@ fun StatsScreen(
                         StatsTimeRange.MEDIUM to stringResource(R.string.stats_range_medium),
                         StatsTimeRange.LONG   to stringResource(R.string.stats_range_long),
                     )
-                    ButtonGroup(
-                        overflowIndicator = { menuState -> ButtonGroupDefaults.OverflowIndicator(menuState) },
-                        modifier          = Modifier
+                    Box(
+                        modifier         = Modifier
                             .fillMaxWidth()
                             .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 8.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                    ButtonGroup(
+                        overflowIndicator = { menuState -> ButtonGroupDefaults.OverflowIndicator(menuState) },
+                        modifier          = Modifier.fillMaxWidth().widthIn(max = 420.dp),
                     ) {
                         options.forEach { (value, label) ->
                             toggleableItem(
@@ -124,6 +130,7 @@ fun StatsScreen(
                                 weight          = 1f,
                             )
                         }
+                    }
                     }
                 }
 
@@ -209,7 +216,14 @@ fun StatsScreen(
                                 TopTrackRow(
                                     track       = track,
                                     rank        = idx + 1,
-                                    onClick     = { haptics.confirm(); viewModel.playTrack(idx) },
+                                    onClick     = {
+                                        haptics.confirm()
+                                        // Proven play path (state refresh + wake/404 fallback).
+                                        playerViewModel.playTrack(
+                                            uri  = track.uri,
+                                            uris = state.current.topTracks.drop(idx).map { it.uri },
+                                        )
+                                    },
                                     onLongClick = { viewModel.trackActions.open(track.toTrackActionTarget()) },
                                 )
                             }

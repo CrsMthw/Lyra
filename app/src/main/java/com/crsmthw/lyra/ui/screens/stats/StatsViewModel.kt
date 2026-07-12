@@ -4,8 +4,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.crsmthw.lyra.data.local.LibraryCache
-import com.crsmthw.lyra.data.player.PlayerStateManager
-import com.crsmthw.lyra.data.remote.SpotifyRemoteManager
 import com.crsmthw.lyra.data.remote.model.SpotifyArtist
 import com.crsmthw.lyra.data.remote.model.SpotifyTrack
 import com.crsmthw.lyra.data.repository.SpotifyRepository
@@ -45,10 +43,8 @@ data class StatsUiState(
  * after the first visit.
  */
 class StatsViewModel(
-    private val repository         : SpotifyRepository,
-    private val playerStateManager : PlayerStateManager,
-    private val remoteManager      : SpotifyRemoteManager,
-    libraryCache                   : LibraryCache,
+    private val repository : SpotifyRepository,
+    libraryCache           : LibraryCache,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(StatsUiState())
@@ -97,22 +93,6 @@ class StatsViewModel(
 
     /** Retries the visible range after a failure. */
     fun retry() = load(_uiState.value.range)
-
-    /** Plays the visible range's top tracks from [startIndex] (tapped first, rest queued behind). */
-    fun playTrack(startIndex: Int) {
-        val uris = _uiState.value.current.topTracks.drop(startIndex).map { it.uri }
-        if (uris.isEmpty()) return
-        playerStateManager.setOptimisticallyPlaying()
-        viewModelScope.launch {
-            repository.play(uris = uris).onFailure { e ->
-                if (e.message?.contains("404") == true) {
-                    remoteManager.connectAndPlay(uris.first())
-                } else {
-                    playerStateManager.releasePlayingOptimism()
-                }
-            }
-        }
-    }
 }
 
 class StatsViewModelFactory(private val container: AppContainer) : ViewModelProvider.Factory {
@@ -120,8 +100,6 @@ class StatsViewModelFactory(private val container: AppContainer) : ViewModelProv
     override fun <T : ViewModel> create(modelClass: Class<T>): T =
         StatsViewModel(
             container.spotifyRepository,
-            container.playerStateManager,
-            container.remoteManager,
             container.libraryCache,
         ) as T
 }

@@ -119,6 +119,45 @@ class LibraryCache(context: Context) {
         }
     }
 
+    // ── Surgical collection updates (album save / artist follow toggles on the detail screens).
+    //    Ping `revision` so LibraryViewModel re-syncs its Albums/Artists filter lists.
+
+    fun addSavedAlbum(album: SpotifyAlbum) {
+        synchronized(lock) {
+            val current = loadLocked() ?: LibraryCacheData()
+            if (current.savedAlbums.orEmpty().any { it.id == album.id }) return
+            saveLocked(current.copy(savedAlbums = listOf(album) + current.savedAlbums.orEmpty()))
+            _revision.value++
+        }
+    }
+
+    fun removeSavedAlbum(albumId: String) {
+        synchronized(lock) {
+            val current = loadLocked() ?: return
+            if (current.savedAlbums.orEmpty().none { it.id == albumId }) return
+            saveLocked(current.copy(savedAlbums = current.savedAlbums.orEmpty().filterNot { it.id == albumId }))
+            _revision.value++
+        }
+    }
+
+    fun addFollowedArtist(artist: SpotifyArtist) {
+        synchronized(lock) {
+            val current = loadLocked() ?: LibraryCacheData()
+            if (current.followedArtists.orEmpty().any { it.id == artist.id }) return
+            saveLocked(current.copy(followedArtists = listOf(artist) + current.followedArtists.orEmpty()))
+            _revision.value++
+        }
+    }
+
+    fun removeFollowedArtist(artistId: String) {
+        synchronized(lock) {
+            val current = loadLocked() ?: return
+            if (current.followedArtists.orEmpty().none { it.id == artistId }) return
+            saveLocked(current.copy(followedArtists = current.followedArtists.orEmpty().filterNot { it.id == artistId }))
+            _revision.value++
+        }
+    }
+
     fun saveTrackList(playlistId: String, snapshotId: String, tracks: List<SpotifyTrack>) {
         synchronized(lock) {
             val current = loadLocked() ?: LibraryCacheData()

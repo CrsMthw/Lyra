@@ -281,8 +281,9 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
             composable(Screen.Stats.route) {
                 val vm = viewModel<StatsViewModel>(factory = StatsViewModelFactory(container))
                 StatsScreen(
-                    viewModel    = vm,
-                    onBack       = ::safeNavigateUp,
+                    viewModel       = vm,
+                    playerViewModel = playerVm,
+                    onBack          = ::safeNavigateUp,
                     onOpenAlbum  = { albumId -> safePush(Screen.AlbumDetail.createRoute(albumId)) },
                     onOpenArtist = { artistId -> safePush(Screen.ArtistDetail.createRoute(artistId)) },
                 )

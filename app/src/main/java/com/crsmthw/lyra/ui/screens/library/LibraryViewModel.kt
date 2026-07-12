@@ -160,7 +160,11 @@ class LibraryViewModel(
         viewModelScope.launch {
             cache.revision.drop(1).collect {
                 val cached = withContext(Dispatchers.IO) { cache.load() } ?: return@collect
-                _uiState.update { it.copy(playlists = cached.playlists) }
+                _uiState.update { it.copy(
+                    playlists       = cached.playlists,
+                    savedAlbums     = cached.savedAlbums.orEmpty(),
+                    followedArtists = cached.followedArtists.orEmpty(),
+                ) }
             }
         }
     }
@@ -320,6 +324,27 @@ class LibraryViewModel(
                 }
             }
         }
+        // Fallback fill: many recently-played items carry NO context (queue/search/autoplay plays,
+        // and some App-Remote plays) — without this the row can come up empty even with heavy
+        // listening. Fill remaining slots with the played tracks' albums, de-duped against both
+        // the context items above and each other.
+        if (items.size < MAX_JUMP_BACK_IN) {
+            for (h in resp.items.orEmpty()) {
+                if (items.size >= MAX_JUMP_BACK_IN) break
+                val track = h.track ?: continue
+                val album = track.album ?: continue
+                val uri   = "spotify:album:${album.id}"
+                if (!seen.add(uri)) continue
+                items += JumpBackInItem(
+                    type     = "album",
+                    id       = album.id,
+                    uri      = uri,
+                    title    = album.name,
+                    subtitle = track.allArtists,
+                    artUrl   = track.artUrl.takeIf { it.isNotBlank() },
+                )
+            }
+        }
         return items
     }
 
@@ -376,22 +401,6 @@ class LibraryViewModel(
                 withContext(Dispatchers.IO) { cache.saveCollections(s.savedAlbums, s.followedArtists) }
             } else {
                 collectionsLoaded = false   // both fetches failed with nothing cached — allow a retry
-            }
-        }
-    }
-
-    /** Plays the On-repeat row from [startIndex]: the tapped track first, the rest queued behind it. */
-    fun playTopTrack(startIndex: Int) {
-        val uris = _uiState.value.topTracks.drop(startIndex).map { it.uri }
-        if (uris.isEmpty()) return
-        playerStateManager.setOptimisticallyPlaying()
-        viewModelScope.launch {
-            repository.play(uris = uris).onFailure { e ->
-                if (e.message?.contains("404") == true) {
-                    remoteManager.connectAndPlay(uris.first())
-                } else {
-                    playerStateManager.releasePlayingOptimism()
-                }
             }
         }
     }

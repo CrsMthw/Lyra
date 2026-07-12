@@ -291,6 +291,14 @@ private fun SinglePaneLayout(
                         onOpenAlbum    = onOpenAlbum,
                         onOpenArtist   = onOpenArtist,
                         onOpenStats    = onOpenStats,
+                        onPlayTopTrack = { idx ->
+                            snapshot.topTracks.getOrNull(idx)?.let { tapped ->
+                                playerViewModel.playTrack(
+                                    uri  = tapped.uri,
+                                    uris = snapshot.topTracks.drop(idx).map { it.uri },
+                                )
+                            }
+                        },
                         sharedScope    = libSharedScope,
                         animScope      = acScope,
                     )
@@ -375,6 +383,7 @@ private fun LibraryBrowserPane(
     onOpenAlbum           : (String) -> Unit = {},
     onOpenArtist          : (String) -> Unit = {},
     onOpenStats           : () -> Unit = {},
+    onPlayTopTrack        : (Int) -> Unit = {},
     modifier              : Modifier = Modifier,
     containerColor        : Color = Color.Unspecified,   // top-scrim target; defaults to background
     sharedScope           : SharedTransitionScope? = null,   // non-null only in single pane (container transform)
@@ -504,7 +513,7 @@ private fun LibraryBrowserPane(
                     itemsIndexed(state.topTracks, key = { _, t -> t.id }) { idx, track ->
                         TopTrackCard(
                             track       = track,
-                            onClick     = { haptics.confirm(); viewModel.playTopTrack(idx) },
+                            onClick     = { haptics.confirm(); onPlayTopTrack(idx) },
                             onLongClick = { viewModel.trackActions.open(track.toTrackActionTarget()) },
                         )
                     }
@@ -909,6 +918,14 @@ private fun TwoPaneLayout(
                         onOpenAlbum           = onOpenAlbum,
                         onOpenArtist          = onOpenArtist,
                         onOpenStats           = onOpenStats,
+                        onPlayTopTrack        = { idx ->
+                            state.topTracks.getOrNull(idx)?.let { tapped ->
+                                playerViewModel.playTrack(
+                                    uri  = tapped.uri,
+                                    uris = state.topTracks.drop(idx).map { it.uri },
+                                )
+                            }
+                        },
                         modifier              = Modifier.fillMaxSize(),
                         containerColor        = MaterialTheme.colorScheme.surface,
                     )
@@ -1517,19 +1534,24 @@ private fun LibraryFilterRow(
         LibraryFilter.ALBUMS    to stringResource(R.string.library_filter_albums),
         LibraryFilter.ARTISTS   to stringResource(R.string.library_filter_artists),
     )
-    ButtonGroup(
-        overflowIndicator = { menuState -> ButtonGroupDefaults.OverflowIndicator(menuState) },
-        modifier          = modifier.fillMaxWidth(),
-    ) {
-        options.forEach { (value, label) ->
-            toggleableItem(
-                checked         = selected == value,
-                label           = label,
-                onCheckedChange = { isChecked ->
-                    if (isChecked && selected != value) { haptics.press(); onSelect(value) }
-                },
-                weight          = 1f,
-            )
+    // Width-capped + centred: letting the group stretch across a wide (unfolded) pane made the
+    // segments so wide the selected label read off-centre; the folded pane is narrower than the
+    // cap, so phones are unaffected.
+    Box(modifier = modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        ButtonGroup(
+            overflowIndicator = { menuState -> ButtonGroupDefaults.OverflowIndicator(menuState) },
+            modifier          = Modifier.fillMaxWidth().widthIn(max = 420.dp),
+        ) {
+            options.forEach { (value, label) ->
+                toggleableItem(
+                    checked         = selected == value,
+                    label           = label,
+                    onCheckedChange = { isChecked ->
+                        if (isChecked && selected != value) { haptics.press(); onSelect(value) }
+                    },
+                    weight          = 1f,
+                )
+            }
         }
     }
 }
@@ -1701,23 +1723,25 @@ private fun JumpBackInCard(
             }
         }
         Spacer(Modifier.height(6.dp))
+        // minLines 2 + an always-present subtitle line keep EVERY card the same height — mixed
+        // 1-/2-line titles made the LazyRow re-measure as items scrolled in, visibly shifting the
+        // section below.
         Text(
             // "liked" persists a marker, not a name, so the label stays localized.
             text     = if (item.type == "liked") stringResource(R.string.liked_songs) else item.title,
             style    = MaterialTheme.typography.bodySmall,
+            minLines = 2,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             color    = MaterialTheme.colorScheme.onSurface,
         )
-        if (!item.subtitle.isNullOrBlank()) {
-            Text(
-                text     = item.subtitle,
-                style    = MaterialTheme.typography.labelSmall,
-                color    = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
+        Text(
+            text     = item.subtitle.orEmpty(),
+            style    = MaterialTheme.typography.labelSmall,
+            color    = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -1758,9 +1782,11 @@ private fun TopTrackCard(
             }
         }
         Spacer(Modifier.height(6.dp))
+        // minLines 2 keeps every card the same height (see JumpBackInCard).
         Text(
             text     = track.name,
             style    = MaterialTheme.typography.bodySmall,
+            minLines = 2,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             color    = MaterialTheme.colorScheme.onSurface,

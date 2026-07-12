@@ -18,6 +18,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -55,6 +57,7 @@ import com.crsmthw.lyra.util.ListScrollHaptics
 import com.crsmthw.lyra.util.confirm
 import com.crsmthw.lyra.util.longPress
 import com.crsmthw.lyra.util.press
+import com.crsmthw.lyra.util.toggle
 import com.crsmthw.lyra.util.toDurationString
 import com.crsmthw.lyra.util.toTimeString
 import com.crsmthw.lyra.util.visualizer.FftWaveCanvas
@@ -225,6 +228,17 @@ fun AlbumDetailScreen(
                                             .statusBarsPadding()
                                             .padding(end = 12.dp, top = 8.dp),
                                     ) {
+                                        IconButton(
+                                            onClick = { haptics.toggle(state.isSaved != true); viewModel.toggleSaved() },
+                                            enabled = state.isSaved != null,
+                                        ) {
+                                            Icon(
+                                                imageVector        = if (state.isSaved == true) Icons.Default.Favorite
+                                                                                 else Icons.Default.FavoriteBorder,
+                                                contentDescription = stringResource(
+                                                    if (state.isSaved == true) R.string.cd_unfollow else R.string.cd_follow),
+                                            )
+                                        }
                                         IconButton(onClick = {
                                             haptics.press()
                                             context.startActivity(Intent.createChooser(
@@ -357,6 +371,17 @@ fun AlbumDetailScreen(
                                 .statusBarsPadding()
                                 .padding(end = 16.dp, top = 8.dp),
                         ) {
+                            IconButton(
+                                onClick = { haptics.toggle(state.isSaved != true); viewModel.toggleSaved() },
+                                enabled = state.isSaved != null,
+                            ) {
+                                Icon(
+                                    imageVector        = if (state.isSaved == true) Icons.Default.Favorite
+                                                         else Icons.Default.FavoriteBorder,
+                                    contentDescription = stringResource(
+                                        if (state.isSaved == true) R.string.cd_unfollow else R.string.cd_follow),
+                                )
+                            }
                             IconButton(onClick = {
                                 haptics.press()
                                 context.startActivity(Intent.createChooser(
