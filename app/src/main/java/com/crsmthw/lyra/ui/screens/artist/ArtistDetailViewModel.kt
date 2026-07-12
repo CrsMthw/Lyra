@@ -1,5 +1,6 @@
 package com.crsmthw.lyra.ui.screens.artist
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -41,9 +42,26 @@ class ArtistDetailViewModel(
     init {
         load()
         viewModelScope.launch {
-            repository.isInLibrary(artistUri).onSuccess { followed ->
-                _state.update { it.copy(isFollowed = followed) }
+            // Seed from the cached followed-artists list (kept in sync by the toggles + the
+            // Artists filter's full fetch) so the heart is usable even when the network check
+            // misbehaves. A cached "followed" wins over an API false: me/library/contains has
+            // been seen returning nothing for artist uris.
+            val cachedFollowed = withContext(Dispatchers.IO) {
+                libraryCache.load()?.followedArtists?.any { it.id == artistId }
             }
+            if (cachedFollowed == true) {
+                _state.update { it.copy(isFollowed = true) }
+                return@launch
+            }
+            repository.isInLibrary(artistUri).fold(
+                onSuccess = { followed -> _state.update { it.copy(isFollowed = followed) } },
+                onFailure = { e ->
+                    // Never leave the heart stuck disabled (isFollowed == null): assume not
+                    // followed — the first toggle then PUTs and is correct either way.
+                    Log.w("ArtistDetailVM", "me/library/contains failed for $artistUri", e)
+                    _state.update { it.copy(isFollowed = false) }
+                },
+            )
         }
     }
 
