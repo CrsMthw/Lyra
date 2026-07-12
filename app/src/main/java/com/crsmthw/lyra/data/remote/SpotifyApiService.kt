@@ -44,6 +44,26 @@ interface SpotifyApiService {
         @Query("after") after: String? = null,   // cursor: id of the last artist of the prev page
     ): FollowedArtistsResponse
 
+    // Artist follows did NOT move into the unified me/library (PUT with an artist uri fails and
+    // contains returns nothing) — they stay on the dedicated me/following family.
+    @PUT("me/following")
+    suspend fun followArtists(
+        @Query("type") type: String = "artist",
+        @Query("ids")  ids : String,
+    )
+
+    @DELETE("me/following")
+    suspend fun unfollowArtists(
+        @Query("type") type: String = "artist",
+        @Query("ids")  ids : String,
+    )
+
+    @GET("me/following/contains")
+    suspend fun checkFollowedArtists(
+        @Query("type") type: String = "artist",
+        @Query("ids")  ids : String,
+    ): List<Boolean>
+
     // ── Playlists ────────────────────────────────────────────────────────────
     @GET("playlists/{id}")
     suspend fun getPlaylistFull(@Path("id") id: String): SpotifyPlaylistFull

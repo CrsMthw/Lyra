@@ -37,6 +37,8 @@ class SpotifyAuthManager(
         val SCOPES = listOf(
             "user-library-read",
             "user-library-modify",
+            "user-follow-read",      // me/following (followed artists list + contains)
+            "user-follow-modify",    // PUT/DELETE me/following (artist follow toggle)
             "playlist-read-private",
             "playlist-read-collaborative",
             "playlist-modify-public",

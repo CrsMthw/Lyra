@@ -37,8 +37,6 @@ class ArtistDetailViewModel(
     private val _state = MutableStateFlow(ArtistDetailUiState())
     val uiState: StateFlow<ArtistDetailUiState> = _state
 
-    private val artistUri = "spotify:artist:$artistId"
-
     init {
         load()
         viewModelScope.launch {
@@ -53,25 +51,25 @@ class ArtistDetailViewModel(
                 _state.update { it.copy(isFollowed = true) }
                 return@launch
             }
-            repository.isInLibrary(artistUri).fold(
+            repository.isArtistFollowed(artistId).fold(
                 onSuccess = { followed -> _state.update { it.copy(isFollowed = followed) } },
                 onFailure = { e ->
                     // Never leave the heart stuck disabled (isFollowed == null): assume not
                     // followed — the first toggle then PUTs and is correct either way.
-                    Log.w("ArtistDetailVM", "me/library/contains failed for $artistUri", e)
+                    Log.w("ArtistDetailVM", "me/following/contains failed for $artistId", e)
                     _state.update { it.copy(isFollowed = false) }
                 },
             )
         }
     }
 
-    /** Optimistic follow/unfollow via the unified me/library; keeps the Artists filter in sync. */
+    /** Optimistic follow/unfollow via me/following (artists aren't accepted by me/library); keeps the Artists filter in sync. */
     fun toggleFollowed() {
         val followed = _state.value.isFollowed ?: return
         _state.update { it.copy(isFollowed = !followed) }
         viewModelScope.launch {
-            val result = if (followed) repository.removeFromLibrary(artistUri)
-                         else repository.saveToLibrary(artistUri)
+            val result = if (followed) repository.unfollowArtist(artistId)
+                         else repository.followArtist(artistId)
             result.fold(
                 onSuccess = {
                     withContext(Dispatchers.IO) {
@@ -88,7 +86,10 @@ class ArtistDetailViewModel(
                         }
                     }
                 },
-                onFailure = { _state.update { it.copy(isFollowed = followed) } },   // revert
+                onFailure = { e ->
+                    Log.w("ArtistDetailVM", "follow toggle failed for $artistId", e)
+                    _state.update { it.copy(isFollowed = followed) }   // revert
+                },
             )
         }
     }
