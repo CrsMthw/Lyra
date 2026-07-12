@@ -163,12 +163,6 @@ interface SpotifyApiService {
         @Query("limit") limit: Int,
     ): SearchResponse
 
-    // ── Browse / Featured ────────────────────────────────────────────────────
-    @GET("browse/featured-playlists")
-    suspend fun getFeaturedPlaylists(
-        @Query("limit") limit: Int = 10,
-    ): FeaturedPlaylistsResponse
-
     // ── Token refresh (hits accounts endpoint, not api) ──────────────────────
     // Note: handled by TokenManager via OkHttp directly (not Retrofit)
 }

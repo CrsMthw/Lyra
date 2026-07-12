@@ -28,7 +28,6 @@ enum class LibraryFilter { PLAYLISTS, ALBUMS, ARTISTS }
 
 data class LibraryUiState(
     val playlists             : List<SpotifyPlaylist>  = emptyList(),
-    val featuredPlaylists     : List<SpotifyPlaylist>  = emptyList(),
     val jumpBackIn            : List<JumpBackInItem>   = emptyList(),
     val topTracks             : List<SpotifyTrack>     = emptyList(),
     val libraryFilter         : LibraryFilter          = LibraryFilter.PLAYLISTS,
@@ -179,7 +178,6 @@ class LibraryViewModel(
             if (cached != null && hasCache) {
                 _uiState.update { it.copy(
                     playlists         = cached.playlists,
-                    featuredPlaylists = cached.featuredPlaylists,
                     jumpBackIn        = cached.forYou?.jumpBackIn.orEmpty(),
                     topTracks         = cached.forYou?.topTracks.orEmpty(),
                     savedAlbums       = cached.savedAlbums.orEmpty(),
@@ -189,7 +187,7 @@ class LibraryViewModel(
                     isLoading         = false,
                 )}
                 // Generate mosaics for playlists with cached track lists but no mosaic yet
-                generateMissingMosaicsAsync(cached.playlists + cached.featuredPlaylists, cached.trackLists)
+                generateMissingMosaicsAsync(cached.playlists, cached.trackLists)
             } else {
                 _uiState.update { it.copy(isLoading = true) }
             }
@@ -220,14 +218,9 @@ class LibraryViewModel(
                 onFailure = { },
             )
 
-            repository.getFeaturedPlaylists().fold(
-                onSuccess = { resp -> _uiState.update { it.copy(featuredPlaylists = resp.playlists.items) } },
-                onFailure = { },
-            )
-
             _uiState.update { it.copy(isLoading = false) }
 
-            loadForYou()   // after playlists+featured so jump-back-in context lookup can resolve
+            loadForYou()   // after playlists so jump-back-in context lookup can resolve
 
             // Persist refreshed data, preserving existing track list + For-you cache
             val s = _uiState.value
@@ -235,7 +228,6 @@ class LibraryViewModel(
                 val existing = cache.load()
                 cache.save(LibraryCacheData(
                     playlists         = s.playlists,
-                    featuredPlaylists = s.featuredPlaylists,
                     likedSongCount    = s.likedSongCount,
                     user              = s.user,
                     trackLists        = existing?.trackLists ?: emptyMap(),
@@ -245,7 +237,7 @@ class LibraryViewModel(
                 ))
             }
             // Generate mosaics for any new playlists that now have cached track lists
-            generateMissingMosaicsAsync(s.playlists + s.featuredPlaylists, cache.load()?.trackLists ?: emptyMap())
+            generateMissingMosaicsAsync(s.playlists, cache.load()?.trackLists ?: emptyMap())
         }
     }
 
@@ -258,8 +250,7 @@ class LibraryViewModel(
     private fun loadForYou() {
         viewModelScope.launch {
             repository.getRecentlyPlayed(limit = 50).onSuccess { resp ->
-                val lookup = _uiState.value.playlists + _uiState.value.featuredPlaylists
-                _uiState.update { it.copy(jumpBackIn = buildJumpBackIn(resp, lookup)) }
+                _uiState.update { it.copy(jumpBackIn = buildJumpBackIn(resp, _uiState.value.playlists)) }
             }
             repository.getTopTracks(timeRange = "short_term", limit = 20).onSuccess { page ->
                 _uiState.update { it.copy(topTracks = page.items) }
@@ -430,11 +421,6 @@ class LibraryViewModel(
                 onFailure = { },
             )
 
-            repository.getFeaturedPlaylists().fold(
-                onSuccess = { resp -> _uiState.update { it.copy(featuredPlaylists = resp.playlists.items) } },
-                onFailure = { },
-            )
-
             _uiState.update { it.copy(isLibraryRefreshing = false) }
 
             loadForYou()
@@ -444,7 +430,6 @@ class LibraryViewModel(
                 val existing = cache.load()
                 cache.save(LibraryCacheData(
                     playlists         = s.playlists,
-                    featuredPlaylists = s.featuredPlaylists,
                     likedSongCount    = s.likedSongCount,
                     user              = s.user,
                     trackLists        = existing?.trackLists ?: emptyMap(),
@@ -453,7 +438,7 @@ class LibraryViewModel(
                     followedArtists   = existing?.followedArtists,
                 ))
             }
-            generateMissingMosaicsAsync(s.playlists + s.featuredPlaylists, cache.load()?.trackLists ?: emptyMap())
+            generateMissingMosaicsAsync(s.playlists, cache.load()?.trackLists ?: emptyMap())
         }
     }
 

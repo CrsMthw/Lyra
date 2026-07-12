@@ -59,6 +59,8 @@ data class ForYouCacheData(
 
 data class LibraryCacheData(
     val playlists         : List<SpotifyPlaylist>          = emptyList(),
+    // Dead since the featured-playlists endpoint stopped returning editorial content (removed
+    // 2026-07); kept so Gson still reads cache files written by older versions. Never written.
     val featuredPlaylists : List<SpotifyPlaylist>          = emptyList(),
     val likedSongCount    : Int                            = 0,
     val user              : SpotifyUser?                   = null,

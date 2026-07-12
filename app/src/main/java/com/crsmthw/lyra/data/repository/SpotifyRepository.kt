@@ -52,10 +52,6 @@ class SpotifyRepository(
         api.getPlaylistTracks(id, limit, offset)
     }
 
-    suspend fun getFeaturedPlaylists(): Result<FeaturedPlaylistsResponse> = safeCall {
-        api.getFeaturedPlaylists()
-    }
-
     suspend fun getRecentlyPlayed(limit: Int = 50): Result<RecentlyPlayedResponse> = safeCall {
         api.getRecentlyPlayed(limit)
     }

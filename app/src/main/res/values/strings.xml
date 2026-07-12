@@ -84,7 +84,6 @@
     <!-- Library sections -->
     <string name="library_jump_back_in">Jump back in</string>
     <string name="library_on_repeat">On repeat</string>
-    <string name="library_featured">Featured</string>
     <string name="library_my_playlists">My Playlists</string>
     <string name="library_following">Following</string>
     <string name="library_select_playlist">Select a playlist</string>

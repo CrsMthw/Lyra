@@ -80,7 +80,6 @@ import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import com.crsmthw.lyra.ui.components.ConnectedChoiceRow
 import com.crsmthw.lyra.ui.components.DetailArtHero
 import com.crsmthw.lyra.ui.components.PlayerPanelHost
-import com.crsmthw.lyra.ui.components.PlaylistCard
 import com.crsmthw.lyra.ui.components.HeroBandHeight
 import com.crsmthw.lyra.ui.components.RemovablePlaylist
 import com.crsmthw.lyra.ui.components.rememberHeroScrollProgress
@@ -491,7 +490,7 @@ private fun LibraryBrowserPane(
                                 haptics.confirm()
                                 when (jump.type) {
                                     "liked"    -> viewModel.selectLikedSongs()
-                                    "playlist" -> (state.playlists + state.featuredPlaylists)
+                                    "playlist" -> state.playlists
                                         .firstOrNull { it.id == jump.id }
                                         ?.let(viewModel::selectPlaylist)
                                     "album"    -> onOpenAlbum(jump.id)
@@ -516,40 +515,6 @@ private fun LibraryBrowserPane(
                             track       = track,
                             onClick     = { haptics.confirm(); onPlayTopTrack(idx) },
                             onLongClick = { viewModel.trackActions.open(track.toTrackActionTarget()) },
-                        )
-                    }
-                }
-            }
-        }
-        if (state.featuredPlaylists.isNotEmpty()) {
-            item(key = "featured_header") {
-                Text(stringResource(R.string.library_featured), style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 8.dp))
-            }
-            item(key = "featured_row") {
-                LazyRow(contentPadding = PaddingValues(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    items(state.featuredPlaylists, key = { it.id }) { playlist ->
-                        // Only the featured card owns the `lib-art-<id>` source when no main-list
-                        // card already does — a followed playlist can appear in BOTH featured and the
-                        // list, and two sources for one key is a duplicate-shared-key crash. The
-                        // main list (ownership-partitioned) + liked are already unique among themselves.
-                        val featuredArtMod =
-                            if (sharedScope != null && animScope != null &&
-                                state.playlists.none { it.id == playlist.id })
-                                with(sharedScope) {
-                                    Modifier.sharedBounds(
-                                        sharedContentState      = rememberSharedContentState(key = libArtKey(playlist.id)),
-                                        animatedVisibilityScope = animScope,
-                                        boundsTransform         = rememberArtBoundsTransform(),
-                                    )
-                                } else Modifier
-                        PlaylistCard(
-                            playlist          = playlist,
-                            mosaicFile        = if (playlist.id in state.playlistsWithMosaics)
-                                File(mosaicDir, "${playlist.id}.png") else null,
-                            onClick           = { haptics.confirm(); viewModel.selectPlaylist(playlist) },
-                            artSharedModifier = featuredArtMod,
                         )
                     }
                 }

@@ -210,11 +210,6 @@ data class SavedTracksResponse(
     val next   : String?,
 )
 
-data class FeaturedPlaylistsResponse(
-    val message  : String?,
-    val playlists: UserPlaylistsResponse,
-)
-
 // ── Recently played (Get Recently Played Tracks) ─────────────────────────────
 data class PlayHistoryContext(
     val type : String? = null,   // "playlist" | "album" | "artist" | "show"
