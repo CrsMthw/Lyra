@@ -61,9 +61,11 @@ fun DetailArtHero(
     val shuffleLabel = stringResource(R.string.player_shuffle)
     val playLabel    = stringResource(R.string.player_play)
     Column(modifier = modifier.fillMaxWidth()) {
-        // Centered cookie art tile.
+        // Centered cookie art tile. Top padding must clear the floating pills overlaid on the
+        // detail screens (statusBarsPadding + 8dp offset, TopPillHeight tall) — anything less and
+        // the back/actions pills sit on the art's top corners.
         Box(
-            modifier         = Modifier.fillMaxWidth().statusBarsPadding().padding(top = 40.dp),
+            modifier         = Modifier.fillMaxWidth().statusBarsPadding().padding(top = TopPillHeight + 20.dp),
             contentAlignment = Alignment.Center,
         ) {
             val artTileShape = MaterialShapes.Square.toShape()
