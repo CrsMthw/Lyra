@@ -37,6 +37,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import com.crsmthw.lyra.util.confirm
+import com.crsmthw.lyra.util.screenTransitionSpec
 import com.crsmthw.lyra.util.press
 import com.crsmthw.lyra.util.tick
 import com.crsmthw.lyra.util.toggle
@@ -191,8 +192,8 @@ fun SettingsScreen(
             // bottom sheet (style / resolution / dramatic peaks) to keep the main list tidy.
             AnimatedVisibility(
                 visible = visualizerEnabled,
-                enter   = fadeIn() + expandVertically(MaterialTheme.motionScheme.defaultSpatialSpec<IntSize>()),
-                exit    = shrinkVertically(MaterialTheme.motionScheme.defaultSpatialSpec<IntSize>()) + fadeOut(),
+                enter   = fadeIn() + expandVertically(screenTransitionSpec<IntSize>()),
+                exit    = shrinkVertically(screenTransitionSpec<IntSize>()) + fadeOut(),
             ) {
                 SettingsItem(
                     icon     = Icons.Default.Tune,

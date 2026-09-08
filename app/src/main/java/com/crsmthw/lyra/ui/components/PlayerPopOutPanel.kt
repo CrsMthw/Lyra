@@ -22,6 +22,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
+import com.crsmthw.lyra.util.screenTransitionSpec
 
 @OptIn(ExperimentalSharedTransitionApi::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -38,10 +39,10 @@ fun PlayerPopOutPanel(
 ) {
     val density  = LocalDensity.current
     val navBarPx = WindowInsets.navigationBars.getBottom(density)
-    val panelSlideSpec = MaterialTheme.motionScheme.defaultSpatialSpec<IntOffset>()
+    val panelSlideSpec = screenTransitionSpec<IntOffset>()
 
     // Driven by PlayerPanelHost's `panelTransition` so the host's nav-scope gate reads the exact
-    // same animation that's on screen (no separate timer to desync from this spring).
+    // same animation that's on screen (no separate timer to desync from it).
     panelTransition.AnimatedVisibility(
         visible  = { it },
         enter    = slideInVertically(panelSlideSpec)  { it + navBarPx + with(density) { 16.dp.roundToPx() } },

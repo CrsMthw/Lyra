@@ -27,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import com.crsmthw.lyra.util.confirm
+import com.crsmthw.lyra.util.screenTransitionSpec
 import com.crsmthw.lyra.util.press
 import androidx.compose.ui.Modifier
 import kotlin.math.abs
@@ -68,7 +69,7 @@ fun MiniPlayer(
     val resolvedSurfaceAccent = if (surfaceAccentColor == Color.Unspecified) resolvedAccent else surfaceAccentColor
     val density    = LocalDensity.current
     val navBarPx   = WindowInsets.navigationBars.getBottom(density)
-    val miniSlideSpec = MaterialTheme.motionScheme.defaultSpatialSpec<IntOffset>()
+    val miniSlideSpec = screenTransitionSpec<IntOffset>()
     AnimatedVisibility(
         visible  = visible && currentTrack != null,
         enter    = slideInVertically(miniSlideSpec)  { it + navBarPx },

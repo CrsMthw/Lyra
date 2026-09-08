@@ -6,6 +6,7 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -35,6 +36,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.crsmthw.lyra.util.NavTransitionMillis
 import com.crsmthw.lyra.util.loadAlbumArtColors
 import com.crsmthw.lyra.util.visualizer.LocalFftData
 import com.crsmthw.lyra.util.visualizer.LocalVisualizerAccentColor
@@ -193,10 +195,26 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
         LocalVisualizerBottomEnabled provides bottomVisualizerEnabled,
         LocalVisualizerConfig provides visualizerConfig,
     ) {
-    // Screen push/pop slides settle via the expressive `motionScheme` so navigation springs in
-    // instead of the framework's flat default spring. Read here (composable scope) and captured —
-    // the transition lambdas below aren't composable contexts. Cross-fades stay default (alpha).
-    val navSlideSpec = MaterialTheme.motionScheme.defaultSpatialSpec<IntOffset>()
+    // Screen push/pop transitions use FINITE, MATCHED durations — deliberately NOT a spring, and a
+    // considered exception to the "route spatial motion through motionScheme.*SpatialSpec()" rule in
+    // CLAUDE.md. This is how platform navigation behaves everywhere (Compose Navigation's own default
+    // is fadeIn(tween(700))), and springs actively break it here:
+    //
+    // MaterialExpressiveTheme's defaultSpatialSpec is an UNDERdamped spring (dampingRatio 0.8 /
+    // stiffness 380), so the slide overshoots and keeps oscillating for ~400-700ms, while fadeOut()'s
+    // default effects spring settles in ~280ms. Navigation disposes the outgoing entry only once the
+    // WHOLE transition settles (onTransitionComplete fires at currentState == targetState), it
+    // z-orders the outgoing entry ABOVE the incoming one during a pop, and in Compose alpha does NOT
+    // affect hit testing. Net effect: the spring's invisible tail left a few hundred ms where the
+    // screen looked settled but taps still hit the previous screen's controls.
+    //
+    // One shared duration for the slide AND the fade makes "looks finished" == "is finished", so the
+    // entry is disposed the instant the motion stops. That removes the dead window at its source
+    // rather than blocking input to paper over it (which just traded it for unresponsive touches).
+    // Also better for predictive back, which SEEKS the transition by gesture progress — a fraction-
+    // driven tween seeks cleanly, an oscillating spring does not.
+    val navSlideSpec = tween<IntOffset>(NavTransitionMillis, easing = FastOutSlowInEasing)
+    val navFadeSpec  = tween<Float>(NavTransitionMillis, easing = FastOutSlowInEasing)
 
     // ── Docked third pane (tablet in landscape) ──────────────────────────────
     // Gate on the MEASURED window width — NOT isWidthAtLeastBreakpoint(1200), whose default V1
@@ -218,10 +236,22 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
             navController        = navController,
             startDestination     = startDestination,
             modifier             = Modifier.weight(1f).fillMaxHeight(),
-            enterTransition      = { slideInHorizontally(navSlideSpec)  { it / 4 } + fadeIn()  },
-            exitTransition       = { slideOutHorizontally(navSlideSpec) { -(it / 4) } + fadeOut() },
-            popEnterTransition   = { slideInHorizontally(navSlideSpec)  { -(it / 4) } + fadeIn()  },
-            popExitTransition    = { slideOutHorizontally(navSlideSpec) { it / 4 } + fadeOut() },
+            // Every fade is pinned to navFadeSpec so it ends on the same frame as the slide. Leaving
+            // these as bare fadeIn()/fadeOut() is what desynced them: their default is a spring.
+            enterTransition      = { slideInHorizontally(navSlideSpec)  { it / 4 } + fadeIn(navFadeSpec)  },
+            exitTransition       = { slideOutHorizontally(navSlideSpec) { -(it / 4) } + fadeOut(navFadeSpec) },
+            popEnterTransition   = { slideInHorizontally(navSlideSpec)  { -(it / 4) } + fadeIn(navFadeSpec)  },
+            popExitTransition    = { slideOutHorizontally(navSlideSpec) { it / 4 } + fadeOut(navFadeSpec) },
+            // Predictive back (the BACK GESTURE) runs its own pair of transitions — new parameters in
+            // Navigation 2.10.0. Leave them out and Navigation's defaults silently take over for every
+            // gesture back, because they are defaulted rather than inherited from popEnter/popExit:
+            // `DefaultNavTransitions.predictivePopExitTransition` is `scaleOut(targetScale = 0.7f)` with
+            // NO paired fade, so the outgoing screen shrinks to 70%, sits there fully opaque, then pops
+            // out — while a button/programmatic back still slid correctly. Mirror the pop slides so both
+            // back paths look identical.
+            // The lambda's own parameter is `swipeEdge` (unused); the inner `it` is still the pane width.
+            predictivePopEnterTransition = { _ -> slideInHorizontally(navSlideSpec)  { -(it / 4) } + fadeIn(navFadeSpec)  },
+            predictivePopExitTransition  = { _ -> slideOutHorizontally(navSlideSpec) { it / 4 } + fadeOut(navFadeSpec) },
         ) {
 
             composable(Screen.Auth.route) {

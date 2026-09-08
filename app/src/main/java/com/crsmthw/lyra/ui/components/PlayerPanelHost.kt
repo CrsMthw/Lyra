@@ -93,13 +93,26 @@ fun PlayerPanelHost(
         Box(modifier = modifier.fillMaxSize()) {
             content(onRequestPlayer)
 
-            // Scrim behind the panel
+            // Scrim behind the panel.
+            //
+            // The tap-to-dismiss modifier is only installed while the panel is actually OPEN, and is
+            // dropped entirely while the scrim fades out. `clickable(enabled = false)` is NOT enough:
+            // it still installs a PointerInputModifierNode (Clickable.kt gates only the gesture
+            // recognition on `enabled`), Compose stops hit testing at the topmost hit sibling, and an
+            // unconsumed event does not fall through to siblings beneath it. So a disabled scrim still
+            // swallowed every tap aimed at the library underneath for the whole 300ms fade — long after
+            // it was visually gone (~4% opacity by 250ms). With no pointer input at all, the fading
+            // Box is just a draw modifier and taps reach the content behind it immediately.
             if (scrimAlpha > 0f) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(Color.Black.copy(alpha = scrimAlpha))
-                        .clickable(enabled = showPlayerPanel) { haptics.confirm(); showPlayerPanel = false }
+                        .then(
+                            if (showPlayerPanel)
+                                Modifier.clickable { haptics.confirm(); showPlayerPanel = false }
+                            else Modifier
+                        )
                 )
             }
 

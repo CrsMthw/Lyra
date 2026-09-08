@@ -93,6 +93,7 @@ import com.crsmthw.lyra.ui.components.toTrackActionTarget
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import com.crsmthw.lyra.ui.screens.player.RepeatMode
 import com.crsmthw.lyra.util.ListScrollHaptics
+import com.crsmthw.lyra.util.screenTransitionSpec
 import com.crsmthw.lyra.util.confirm
 import com.crsmthw.lyra.util.longPress
 import com.crsmthw.lyra.util.press
@@ -238,11 +239,13 @@ private fun SinglePaneLayout(
         // Browser ↔ detail swap as a CONTAINER TRANSFORM: a local SharedTransitionLayout wraps the
         // AnimatedContent so the tapped card's art (`lib-art-<id>`) flies into the detail hero and
         // morphs square→cookie (the hero side morphs the clip — see `TrackListHero`). The pane swap
-        // itself stays a gentle slide+fade so the morphing art carries the motion; the slide settles
-        // via the expressive `motionScheme` (springs in) and the cross-fade keeps a tween (alpha must
-        // not overshoot). Keys are namespaced "lib-art-*" so they never collide with the nav-level
+        // itself stays a gentle slide+fade so the morphing art carries the motion; the slide uses the
+        // app-wide `screenTransitionSpec()` (see `util/Motion.kt` — finite, so the outgoing pane is
+        // disposed the frame the motion ends and cannot keep catching touches while invisible) and the
+        // cross-fade keeps a tween (alpha must not overshoot). Keys are namespaced "lib-art-*" so they
+        // never collide with the nav-level
         // "album-art" morph; the FAB + scrims sit OUTSIDE this STL (they use the nav-level scope).
-        val slideSpec = MaterialTheme.motionScheme.defaultSpatialSpec<IntOffset>()
+        val slideSpec = screenTransitionSpec<IntOffset>()
         SharedTransitionLayout(modifier = Modifier.fillMaxSize()) {
             val libSharedScope = this
             AnimatedContent(
@@ -953,11 +956,11 @@ private fun TwoPaneLayout(
                     // M3 LATERAL (peer browse): a full-width filmstrip — the outgoing track list slides
                     // fully off the left as the incoming slides in from the right, both opaque, NO fade
                     // (M3 Lateral cautions against it; a full-width opaque slide has nothing to
-                    // "white-flash"). The slide settles via the expressive `motionScheme` spring for the
-                    // natural bounce. Standard `AnimatedContent` retains the exiting pane correctly now
+                    // "white-flash"). The slide uses the app-wide `screenTransitionSpec()`, matching every
+                    // other pane/screen swap. Standard `AnimatedContent` retains the exiting pane correctly now
                     // that `selectPlaylist` flips to the detail content-ready (no mid-transition emission
                     // to make it cull the outgoing) — see `LibraryViewModel.selectPlaylist`.
-                    val rightPaneSlideSpec = MaterialTheme.motionScheme.defaultSpatialSpec<IntOffset>()
+                    val rightPaneSlideSpec = screenTransitionSpec<IntOffset>()
                     AnimatedContent(
                         targetState    = state,
                         contentKey     = { s -> s.currentPlaylist?.id to (s.currentPlaylist == null) },
