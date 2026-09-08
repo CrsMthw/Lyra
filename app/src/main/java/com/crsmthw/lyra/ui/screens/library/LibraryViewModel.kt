@@ -55,6 +55,24 @@ data class LibraryUiState(
     val playlistsWithMosaics  : Set<String>            = emptySet(),
 )
 
+/**
+ * True when the Library is showing a track list (a playlist, or Liked Songs) rather than the
+ * browser. `isLoadingTracks` is part of it so a cache MISS still counts as "in the detail" —
+ * otherwise back would be dead while the first fetch is in flight.
+ */
+val LibraryUiState.isShowingDetail: Boolean
+    get() = currentPlaylist != null || isLoadingTracks || currentTracks.isNotEmpty()
+
+/**
+ * Stable identity of whatever pane the single-pane Library is showing: a playlist id, `"liked"`,
+ * or `null` for the browser. This is the single-pane transition's state — see `SinglePaneLayout`,
+ * where the seekable (predictive-back-driven) transition animates over THIS rather than over the
+ * whole [LibraryUiState], so ordinary data emissions (tracks paginating in, a refresh landing)
+ * can't restart or freeze the pane swap.
+ */
+val LibraryUiState.detailKey: String?
+    get() = if (isShowingDetail) (currentPlaylist?.id ?: "liked") else null
+
 class LibraryViewModel(
     private val repository      : SpotifyRepository,
     private val cache           : LibraryCache,

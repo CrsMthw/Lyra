@@ -2,14 +2,17 @@
 
 package com.crsmthw.lyra.ui.screens.library
 
-import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedContentScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.SeekableTransitionState
+import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.rememberTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -93,6 +96,7 @@ import com.crsmthw.lyra.ui.components.toTrackActionTarget
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import com.crsmthw.lyra.ui.screens.player.RepeatMode
 import com.crsmthw.lyra.util.ListScrollHaptics
+import com.crsmthw.lyra.util.NavTransitionMillis
 import com.crsmthw.lyra.util.screenTransitionSpec
 import com.crsmthw.lyra.util.confirm
 import com.crsmthw.lyra.util.longPress
@@ -109,6 +113,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.cancellation.CancellationException
 
 /** Pairs the search FAB with the Search screen's bar for the container transform — must match the
  *  identical key in `SearchScreen`. */
@@ -204,6 +209,26 @@ private fun PullThresholdHaptics(state: PullToRefreshState) {
 
 // ── Single pane (phone / folded) ─────────────────────────────────────────────
 
+/**
+ * What the single-pane detail↔browser transition should do on the next state emission.
+ *
+ * The gesture and the ViewModel emission that commits it are asynchronous with respect to each
+ * other, so the driving effect needs to know WHY the state looks the way it does — a detail key
+ * that is still set means "unwind" after a cancelled gesture but "wait" after a committed one.
+ * Three booleans could encode this, but they admit combinations that don't exist.
+ */
+private enum class BackPhase { Idle, Seeking, Committing, Cancelled }
+
+/**
+ * Holds the last [LibraryUiState] a given detail pane saw, so an outgoing pane keeps rendering its
+ * own tracks after the selection has been cleared from the live state.
+ *
+ * Deliberately NOT snapshot-backed: it is assigned during composition, and a `MutableState` write
+ * to something read in the same pass would schedule an extra recomposition. Staleness isn't a risk
+ * because the scope that assigns it also reads the live state, so any change recomposes it.
+ */
+private class PaneStateHolder(var value: LibraryUiState)
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class,
        ExperimentalSharedTransitionApi::class)
 @Composable
@@ -220,7 +245,8 @@ private fun SinglePaneLayout(
     sharedTransitionScope : SharedTransitionScope? = null,
     animatedContentScope  : AnimatedContentScope? = null,
 ) {
-    val isShowingDetail = state.currentPlaylist != null || state.isLoadingTracks || state.currentTracks.isNotEmpty()
+    val isShowingDetail = state.isShowingDetail
+    val detailKey       = state.detailKey
     val isLandscape = LocalConfiguration.current.let { it.screenWidthDp > it.screenHeightDp }
     val context   = LocalContext.current
     val mosaicDir = remember { File(context.filesDir, "mosaics") }
@@ -230,7 +256,93 @@ private fun SinglePaneLayout(
         playerViewModel.uiState.map { it.currentTrack != null }.distinctUntilChanged()
     }.collectAsStateWithLifecycle(false)
 
-    BackHandler(enabled = isShowingDetail) { viewModel.clearSelection() }
+    // ── Predictive back: detail → browser ────────────────────────────────────────────────────
+    // Backing out of a playlist / Liked Songs is GESTURE-DRIVEN, so the container transform (the
+    // art flying back into its browser card) tracks the finger instead of firing as a fixed
+    // animation after the gesture commits — the same treatment the nav-level screens get from
+    // NavHost's predictivePopEnter/ExitTransition.
+    //
+    // The pane swap is not a nav destination (both panes live in this one screen), so there is no
+    // NavHost to do this for us: we drive the AnimatedContent from a SeekableTransitionState the
+    // same way NavHost does internally (navigation-compose, NavHost.kt).
+    //
+    // THE LOAD-BEARING CHOICE: the transition's state is `detailKey` (a String?), NOT the whole
+    // LibraryUiState. Animating over the state object would mean every ordinary emission — track
+    // pagination, a refresh landing, a mosaic finishing — is a new target, and SeekableTransition-
+    // State compares targets with `equals`: a same-pane emission mid-animation would reset
+    // `fraction` to 0 and restart the swap (the blank-screen class of bug in docs/MOTION.md),
+    // while suppressing those emissions would freeze the pane at stale data. Keying on identity
+    // makes both impossible — data reaches the panes as ordinary state reads (see the content
+    // lambda), completely outside the transition.
+    val transitionState = remember { SeekableTransitionState(detailKey) }
+    val transition      = rememberTransition(transitionState, label = "library_detail_transition")
+
+    var backPhase    by remember { mutableStateOf(BackPhase.Idle) }
+    var backProgress by remember { mutableFloatStateOf(0f) }
+
+    PredictiveBackHandler(enabled = isShowingDetail) { events ->
+        backProgress = 0f
+        backPhase    = BackPhase.Seeking   // set BEFORE collecting, so the first progress frame
+        try {                              // can't race an animateTo against the seek
+            events.collect { event -> backProgress = event.progress }
+            // Committed. Phase flips first so the effect below parks instead of unwinding during
+            // the frame or two before clearSelection's emission arrives.
+            backPhase = BackPhase.Committing
+            viewModel.clearSelection()
+        } catch (_: CancellationException) {
+            backPhase = BackPhase.Cancelled
+        }
+    }
+
+    if (backPhase == BackPhase.Seeking) {
+        LaunchedEffect(backProgress) {
+            transitionState.seekTo(backProgress.coerceIn(0f, 1f), targetState = null)
+        }
+    } else {
+        LaunchedEffect(detailKey, backPhase) {
+            when (backPhase) {
+                // Waiting for clearSelection's emission. When it lands detailKey becomes null and
+                // this effect re-runs; animateTo(null) then finds the target UNCHANGED (the seek
+                // already set it), so it resumes from the gesture's fraction with only the
+                // remaining duration instead of restarting from 0.
+                BackPhase.Committing -> if (detailKey == null) {
+                    transitionState.animateTo(null)
+                    backPhase = BackPhase.Idle
+                }
+                // Released without committing: unwind the seek back to the detail pane. The
+                // duration is scaled by how far the gesture actually got, so a cancel at 5%
+                // snaps back quickly instead of taking a full transition.
+                BackPhase.Cancelled -> {
+                    // totalDurationNanos is the max across the transition's children. The slide and
+                    // fade always contribute, so this is normally ~NavTransitionMillis — but floor it
+                    // anyway: a zero total would compute tween(0) and snap back instead of easing.
+                    val totalMillis = (transition.totalDurationNanos / 1_000_000)
+                        .coerceAtLeast(NavTransitionMillis.toLong())
+                    animate(
+                        initialValue  = transitionState.fraction,
+                        targetValue   = 0f,
+                        animationSpec = tween((transitionState.fraction * totalMillis).toInt()),
+                    ) { value, _ ->
+                        // seekTo/snapTo suspend, but `animate`'s callback does not — so the work
+                        // is handed back to the effect's own scope (as NavHost does internally).
+                        this@LaunchedEffect.launch {
+                            if (value > 0f) transitionState.seekTo(value)
+                            if (value == 0f) transitionState.snapTo(detailKey)
+                        }
+                    }
+                    backPhase = BackPhase.Idle
+                }
+                // Ordinary pane change (tapping a playlist, tapping a different one, or a
+                // non-gesture back). Same-key emissions fall through to Unit — they carry data,
+                // not a pane change, and must not touch the transition.
+                BackPhase.Idle -> if (transitionState.targetState != detailKey) {
+                    transitionState.animateTo(detailKey)
+                }
+                BackPhase.Seeking -> Unit   // unreachable: guarded by the branch above
+            }
+        }
+    }
+
 
     Box(modifier = Modifier
         .fillMaxSize()
@@ -248,17 +360,14 @@ private fun SinglePaneLayout(
         val slideSpec = screenTransitionSpec<IntOffset>()
         SharedTransitionLayout(modifier = Modifier.fillMaxSize()) {
             val libSharedScope = this
-            AnimatedContent(
-                targetState  = state,
-                contentKey   = { s ->
-                    val isDetail = s.currentPlaylist != null || s.isLoadingTracks || s.currentTracks.isNotEmpty()
-                    if (isDetail) (s.currentPlaylist?.id ?: "liked") else null
-                },
+            // Driven by `transition` (the SeekableTransitionState above) rather than by a
+            // targetState of its own — that is what lets the back gesture seek this swap frame by
+            // frame. The label lives on rememberTransition; this overload has no `label` param.
+            transition.AnimatedContent(
                 modifier     = Modifier.fillMaxSize(),
+                contentKey   = { it },
                 transitionSpec = {
-                    val enteringDetail = targetState.currentPlaylist != null ||
-                                         targetState.isLoadingTracks ||
-                                         targetState.currentTracks.isNotEmpty()
+                    val enteringDetail = targetState != null
                     if (enteringDetail) {
                         (slideInHorizontally(slideSpec) { it / 10 } + fadeIn(tween(220))) togetherWith
                         (slideOutHorizontally(slideSpec) { -it / 12 } + fadeOut(tween(220)))
@@ -267,15 +376,20 @@ private fun SinglePaneLayout(
                         (slideOutHorizontally(slideSpec) { it / 12 } + fadeOut(tween(220)))
                     }
                 },
-                label = "library_detail_transition",
-            ) { snapshot ->
+            ) { paneKey ->
                 val acScope = this
-                val isDetailSnapshot = snapshot.currentPlaylist != null ||
-                                       snapshot.isLoadingTracks ||
-                                       snapshot.currentTracks.isNotEmpty()
-                if (isDetailSnapshot) {
+                if (paneKey != null) {
+                    // The live `state` describes the INCOMING pane, so the outgoing detail pane —
+                    // still on screen, sliding away, its tracks already cleared from the state —
+                    // has to render from the last state that was actually its own. Each pane key
+                    // gets its own holder, refreshed while it is the current pane and frozen once
+                    // it isn't. Written during composition (not from an effect) so a pane is never
+                    // shown a stale value on its first frame; the enclosing scope reads `state`,
+                    // so live data still recomposes the current pane.
+                    val paneState = remember(paneKey) { PaneStateHolder(state) }
+                    if (state.detailKey == paneKey) paneState.value = state
                     RightPaneContent(
-                        state           = snapshot,
+                        state           = paneState.value,
                         viewModel       = viewModel,
                         playerViewModel = playerViewModel,
                         mosaicDir       = mosaicDir,
@@ -287,7 +401,7 @@ private fun SinglePaneLayout(
                     )
                 } else {
                     LibraryBrowserPane(
-                        state          = snapshot,
+                        state          = state,
                         viewModel      = viewModel,
                         onOpenSettings = onOpenSettings,
                         isLandscape    = isLandscape,
@@ -295,10 +409,10 @@ private fun SinglePaneLayout(
                         onOpenArtist   = onOpenArtist,
                         onOpenStats    = onOpenStats,
                         onPlayTopTrack = { idx ->
-                            snapshot.topTracks.getOrNull(idx)?.let { tapped ->
+                            state.topTracks.getOrNull(idx)?.let { tapped ->
                                 playerViewModel.playTrack(
                                     uri  = tapped.uri,
-                                    uris = snapshot.topTracks.drop(idx).map { it.uri },
+                                    uris = state.topTracks.drop(idx).map { it.uri },
                                 )
                             }
                         },
