@@ -380,11 +380,11 @@ private fun LibraryBrowserPane(
     viewModel             : LibraryViewModel,
     onOpenSettings        : () -> Unit,
     isLandscape           : Boolean,
+    modifier              : Modifier = Modifier,
     onOpenAlbum           : (String) -> Unit = {},
     onOpenArtist          : (String) -> Unit = {},
     onOpenStats           : () -> Unit = {},
     onPlayTopTrack        : (Int) -> Unit = {},
-    modifier              : Modifier = Modifier,
     containerColor        : Color = Color.Unspecified,   // top-scrim target; defaults to background
     sharedScope           : SharedTransitionScope? = null,   // non-null only in single pane (container transform)
     animScope             : AnimatedContentScope? = null,

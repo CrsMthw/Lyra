@@ -8,13 +8,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.LibraryAdd
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlaylistRemove
-import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -150,7 +150,7 @@ fun TrackActionsHost(
         )
 
         ActionItem(
-            icon    = Icons.Default.QueueMusic,
+            icon    = Icons.AutoMirrored.Filled.QueueMusic,
             text    = stringResource(R.string.track_action_add_to_queue),
             enabled = !state.isQueueing,
             onClick = controller::addToQueue,

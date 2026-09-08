@@ -148,7 +148,6 @@ class SpotifyRepository(
 
     suspend fun addTrackToPlaylist(playlistId: String, trackUri: String): Result<Unit> = safeCall {
         api.addTracksToPlaylist(playlistId, AddTracksRequest(listOf(trackUri)))
-        Unit
     }
 
     /** Deletes an owned playlist (Spotify models this as unfollowing it). */
@@ -158,7 +157,6 @@ class SpotifyRepository(
 
     suspend fun removeTrackFromPlaylist(playlistId: String, trackUri: String): Result<Unit> = safeCall {
         api.removeItemsFromPlaylist(playlistId, RemoveItemsRequest(listOf(RemoveItemEntry(trackUri))))
-        Unit
     }
 
     suspend fun getQueue(): Result<QueueResponse?> = safeCall {
