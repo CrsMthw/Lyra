@@ -161,15 +161,15 @@ app/src/main/java/com/crsmthw/lyra/
 
 | Layer | Library |
 |---|---|
-| UI | Jetpack Compose + Material 3 Expressive (Material3 1.5.0-alpha22) |
-| Navigation | Navigation Compose 2.9.8 |
+| UI | Jetpack Compose (BOM 2026.08.00) + Material 3 Expressive (Material3 1.5.0-alpha27) |
+| Navigation | Navigation Compose 2.10.0 |
 | Auth | AppAuth 0.11.1 (PKCE) |
-| Network | Retrofit 3.0.0 + OkHttp 5.4.0 |
-| Images | Coil 3 |
-| Widgets | Jetpack Glance |
+| Network | Retrofit 3.0.0 + OkHttp 5.5.0 |
+| Images | Coil 3.6.2 |
+| Widgets | Jetpack Glance 1.3.0-alpha02 |
 | Secure storage | Android Keystore (AES-256-GCM) |
 | Settings | DataStore Preferences |
-| Build | AGP 9.2.1 · Kotlin 2.4.0 · Gradle 9.6.1 |
+| Build | AGP 9.4.0 · Kotlin 2.4.20 · Gradle 9.7.1 · JDK 21 · min SDK 35 · target SDK 37 |
 
 ---
 
