@@ -25,13 +25,17 @@ import com.crsmthw.lyra.util.press
  * Connected single-choice picker (Library filter, Stats range, Settings theme/visualizer pickers)
  * built on the M3 Expressive [ButtonGroup].
  *
- * Segments are hand-rolled `customItem`s instead of `toggleableItem`: alpha22's `toggleableItem`
- * renders the selected segment's label off-centre once the group is stretched wide (unfolded
- * Library filter / Stats range picker), so each segment is a [ToggleButton] with an explicitly
- * centred full-width label. Everything else `toggleableItem` provided is kept: `weight(1f)`
- * segments, the inter-button press-squeeze (`animateWidth`, default compression limit — same as
- * `toggleableItem`'s), and a real overflow indicator (an empty overflow mis-measures in tight
- * layouts; see docs/MATERIAL3.md → ButtonGroup).
+ * Segments are hand-rolled `customItem`s instead of `toggleableItem`: `toggleableItem` renders the
+ * selected segment's label off-centre once the group is stretched wide (unfolded Library filter /
+ * Stats range picker), so each segment is a [ToggleButton] with an explicitly centred full-width
+ * label. Everything else `toggleableItem` provided is kept: `weight(1f)` segments, the inter-button
+ * press-squeeze (`animateWidth`, default compression limit — same as `toggleableItem`'s), and a real
+ * overflow indicator (an empty overflow mis-measures in tight layouts; see docs/MATERIAL3.md →
+ * ButtonGroup).
+ *
+ * The off-centre bug was first hit on material3 1.5.0-alpha22 and is **still unfixed as of
+ * 1.5.0-alpha27** (re-verified against the alpha27 artifact) — do not drop the `customItem`
+ * workaround on the assumption that a newer alpha fixed it. Re-check before removing.
  *
  * The group is also width-capped at [maxWidth] and centred — segments on a wide unfolded pane
  * otherwise stretch to ~3× their folded width. (`widthIn` must precede `fillMaxWidth` in the

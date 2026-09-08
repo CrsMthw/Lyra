@@ -334,7 +334,7 @@ fun PlayerScreen(
                             val lyricsShowing   = state.lyricsMode && lyricsAvailable
                             val lyricsLoading   = state.lyricsState is LyricsState.Loading
                             DropdownMenuGroup(shapes = MenuDefaults.groupShapes()) {
-                                DropdownMenuItem(
+                                CheckableDropdownMenuItem(
                                     checked       = lyricsShowing,
                                     onCheckedChange = {
                                         haptics.toggle(!lyricsShowing)
@@ -353,7 +353,7 @@ fun PlayerScreen(
                                         selectedContainerColor = surfaceAccentColor.copy(alpha = 0.15f),
                                     ),
                                 )
-                                DropdownMenuItem(
+                                CheckableDropdownMenuItem(
                                     checked       = state.visualizerEnabled,
                                     onCheckedChange = { enable ->
                                         haptics.toggle(enable)
