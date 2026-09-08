@@ -24,6 +24,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import com.crsmthw.lyra.util.confirm
@@ -41,6 +42,8 @@ import com.crsmthw.lyra.R
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
+import coil3.size.Size
 import com.crsmthw.lyra.data.remote.model.SpotifyTrack
 import com.crsmthw.lyra.util.rememberArtBoundsTransform
 
@@ -120,8 +123,26 @@ fun MiniPlayer(
                     }
                 } else Modifier
 
+                // This art is a shared-element participant: the same "album-art" element morphs into
+                // the full player / pop-out panel, where it is drawn at ~600px. Two things conspired
+                // to make that morph blurry:
+                //   1. `thumbnailUrl` is Spotify's SMALLEST image (images.last() — 64px), while the
+                //      player uses `artUrl` (images.first() — 640px). During the morph Compose renders
+                //      ONE participant across the animating bounds, and on a pop the target is the
+                //      mini player — so a 64px bitmap was being upscaled ~10x.
+                //   2. Coil sizes a decode to the composable's own box, which here is 44.dp, so even
+                //      the full-size URL would decode too small to survive the morph.
+                // Hence: full-size URL AND an explicit natural-size decode. The extra memory is one
+                // bitmap for the currently-playing track, which the full player loads anyway.
+                val context = LocalContext.current
+                val artRequest = remember(currentTrack.artUrl, currentTrack.thumbnailUrl) {
+                    ImageRequest.Builder(context)
+                        .data(currentTrack.artUrl.takeIf { it.isNotBlank() } ?: currentTrack.thumbnailUrl)
+                        .size(Size.ORIGINAL)
+                        .build()
+                }
                 AsyncImage(
-                    model              = currentTrack.thumbnailUrl,
+                    model              = artRequest,
                     contentDescription = currentTrack.album?.name,
                     contentScale       = ContentScale.Crop,
                     modifier           = artModifier.then(navArtModifier)
