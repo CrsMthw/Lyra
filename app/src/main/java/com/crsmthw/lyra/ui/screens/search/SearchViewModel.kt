@@ -36,7 +36,7 @@ data class SearchUiState(
     val isLoading     : Boolean         = false,
     /** A page is in flight *underneath* the live results — it never swaps the list out. */
     val isLoadingMore : Boolean         = false,
-    /** At least one type still has a `next`, so the list can still grow. */
+    /** At least one row-producing type still has a `next`, so the list can still grow. */
     val canLoadMore   : Boolean         = false,
     /**
      * The last page request failed, so paging is parked. Renders as an inline retry row at the end
@@ -164,9 +164,9 @@ class SearchViewModel(
                             results      = results,
                             isLoading    = false,
                             pagingFailed = false,
-                            // An all-empty first page is the end of the road whatever `next` says:
-                            // the screen renders that as the "No results" state, which composes no
-                            // LazyColumn — so the scroll trigger could never fire to page past it.
+                            // A first page that produced no ROW-item is the end of the road
+                            // whatever `next` says: the scroll trigger reads row geometry, so it
+                            // could never fire to page past it (see `itemCount` below).
                             canLoadMore  = results.hasMore() && results.itemCount() > 0,
                         )
                     }
@@ -213,8 +213,8 @@ class SearchViewModel(
                         it.copy(
                             results       = merged,
                             isLoadingMore = false,
-                            // A page whose every item was a duplicate would leave the scroll
-                            // trigger satisfied forever, so treat "nothing new" as the end.
+                            // A page that added no new ROW-item would leave the scroll trigger
+                            // satisfied forever, so treat "nothing new" as the end.
                             canLoadMore   = merged.hasMore() &&
                                             merged.itemCount() > results.itemCount() &&
                                             nextOffset <= MAX_SEARCH_OFFSET,
@@ -277,12 +277,23 @@ private fun <T> Paged<T>.appendItems(page: Paged<T>?, id: (T) -> String): Paged<
     )
 }
 
-/** True while any type still has a further page. */
+// Both terminators below count only the ROW-PRODUCING types. Artists are excluded on purpose:
+// they render as exactly two fixed `LazyColumn` items (a section header plus one horizontal
+// `LazyRow`), so appending artists never grows `totalItemsCount` — and the screen's paging trigger
+// reads precisely that. Counting them left the trigger latched on an artists-only page and fired
+// back-to-back `/search` calls up to the offset ceiling with nothing changing on screen.
+// `playlists` is counted because it DOES render one row per item; it is simply always null today
+// (the search type is track,album,artist), which is also why `appendPage` passes it through
+// unmerged — merge it there before requesting it.
+// Deliberate consequence: once tracks and albums are exhausted the artists row stops growing too —
+// correct, since nothing in the UI can page artists into view anyway.
+
+/** True while any row-producing type still has a further page. */
 private fun SearchResponse.hasMore() =
-    tracks?.next != null || albums?.next != null || artists?.next != null
+    tracks?.next != null || albums?.next != null || playlists?.next != null
 
 private fun SearchResponse.itemCount() =
-    (tracks?.items?.size ?: 0) + (albums?.items?.size ?: 0) + (artists?.items?.size ?: 0)
+    (tracks?.items?.size ?: 0) + (albums?.items?.size ?: 0) + (playlists?.items?.size ?: 0)
 
 class SearchViewModelFactory(private val container: AppContainer) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
