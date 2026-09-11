@@ -75,17 +75,54 @@ fun getFftMagnitude(fftBytes: ByteArray): DoubleArray {
     }
 }
 
-// mag[k] is FFT bin (k+1), i.e. frequency (k+1) * sampleRate / 1024. So the index for a
-// frequency is hz * 1024 / sampleRate. The old constant (88200) was both 2x too large AND
-// assumed 44.1 kHz; this device's output mix runs at 48 kHz (measured). TODO: plumb the
-// real samplingRate from the Visualizer callback instead of hardcoding.
-fun hzToFftIndex(hz: Int): Int = (hz * 1024 / 48000).coerceIn(0, 255)
+/**
+ * Output-mix sample rate assumed before the `Visualizer` has reported a real one (it only arrives
+ * with the first captured frame). 48 kHz is what every device measured so far mixes at.
+ */
+const val DefaultSampleRateHz = 48_000
 
-fun getFftMagnitudeRange(fftBytes: ByteArray, startHz: Int, endHz: Int): DoubleArray {
+/** `Visualizer.getCaptureSizeRange()[1]` on every device seen so far — see `VisualizerManager`. */
+const val DefaultFftCaptureSize = 1024
+
+/**
+ * Index into [getFftMagnitude]'s output for the frequency [hz], given the output mix's
+ * [sampleRateHz] and the Visualizer's [captureSize].
+ *
+ * The FFT covers 0..[sampleRateHz]/2 in `captureSize / 2` bins, so bin k sits at
+ * `k * sampleRateHz / captureSize` Hz (≈46.9 Hz per bin at 48 kHz / 1024) and the index for a
+ * frequency is `hz * captureSize / sampleRateHz`. The pre-2026-09 constant (88200) was both 2×
+ * too large AND assumed 44.1 kHz.
+ *
+ * [sampleRateHz] is plumbed from `Visualizer.OnDataCaptureListener.onFftDataCapture` via
+ * [FftFrame], so the mapping is exact on a 44.1 kHz sink as well as a 48 kHz one — at 44.1 kHz the
+ * painters' 6 kHz ceiling is bin 139, not 128, so hardcoding 48000 there really analysed only
+ * 0–5.5 kHz. The default is just the pre-first-frame fallback.
+ *
+ * Note [getFftMagnitude] drops the DC bin, so its element k is really bin k+1 and the returned
+ * index is off by under one bin width. Deliberately left as it was: correcting it would shift
+ * every band's frequency assignment (and so how the visualizer looks) for less than half a band.
+ */
+fun hzToFftIndex(
+    hz           : Int,
+    sampleRateHz : Int = DefaultSampleRateHz,
+    captureSize  : Int = DefaultFftCaptureSize,
+): Int {
+    val rate = if (sampleRateHz > 0) sampleRateHz else DefaultSampleRateHz
+    // getFftMagnitude() returns captureSize/2 - 1 elements, so its last valid index is -2.
+    val last = (captureSize / 2 - 2).coerceAtLeast(0)
+    return (hz.toLong() * captureSize / rate).toInt().coerceIn(0, last)
+}
+
+fun getFftMagnitudeRange(
+    fftBytes     : ByteArray,
+    startHz      : Int,
+    endHz        : Int,
+    sampleRateHz : Int = DefaultSampleRateHz,
+): DoubleArray {
     val mag = getFftMagnitude(fftBytes)
     if (mag.isEmpty()) return DoubleArray(0)
-    val s = hzToFftIndex(startHz).coerceIn(0, mag.size - 1)
-    val e = hzToFftIndex(endHz).coerceIn(s + 1, mag.size)
+    val s = hzToFftIndex(startHz, sampleRateHz, fftBytes.size).coerceIn(0, mag.size - 1)
+    val e = hzToFftIndex(endHz,   sampleRateHz, fftBytes.size).coerceIn(s + 1, mag.size)
     return mag.copyOfRange(s, e)
 }
 
