@@ -11,6 +11,7 @@ import com.crsmthw.lyra.data.local.LibraryCacheData
 import com.crsmthw.lyra.data.player.PlayerStateManager
 import com.crsmthw.lyra.data.remote.SpotifyRemoteManager
 import com.crsmthw.lyra.data.remote.model.*
+import com.crsmthw.lyra.data.repository.PartialRemovalException
 import com.crsmthw.lyra.data.repository.SettingsRepository
 import com.crsmthw.lyra.data.repository.SpotifyRepository
 import com.crsmthw.lyra.di.AppContainer
@@ -99,6 +100,31 @@ private fun LibraryUiState.selectionCleared() =
     if (!selectionMode && selectedUris.isEmpty()) this
     else copy(selectionMode = false, selectedUris = emptySet())
 
+/**
+ * Commits rows that are gone from the open playlist server-side: drops them from [currentTracks],
+ * shrinks the paging counters to match, and reports [result]. Shared by the fully-successful removal
+ * and the partial one (a chunked removal whose later chunk failed after earlier chunks committed),
+ * so the count arithmetic below exists once. Pure — the caller applies it inside its own
+ * `_uiState.update`, so it never adds an emission.
+ */
+private fun LibraryUiState.tracksRemoved(
+    uris  : Collection<String>,
+    result: RemoveSelectionResult,
+): LibraryUiState {
+    val remaining = currentTracks.filterNot { it.uri in uris }
+    // The count delta, not uris.size: a uri can appear twice in a playlist (and remove-by-uri
+    // drops every occurrence), so only the list can say how many rows actually went. Offset and
+    // total shrink by the same amount, keeping pagination pointed where the API left off.
+    val removed   = currentTracks.size - remaining.size
+    return copy(
+        currentTracks        = remaining,
+        playlistTracksOffset = (playlistTracksOffset - removed).coerceAtLeast(remaining.size),
+        playlistTracksTotal  = (playlistTracksTotal - removed).coerceAtLeast(remaining.size),
+        isRemovingSelection  = false,
+        removeResult         = result,
+    )
+}
+
 class LibraryViewModel(
     private val repository      : SpotifyRepository,
     private val cache           : LibraryCache,
@@ -168,7 +194,11 @@ class LibraryViewModel(
 
     /**
      * Batch-removes every checked track from the open playlist in ONE API call (chunked past the
-     * API's 100-item cap), then drops the rows and leaves selection mode. Keeps the rows on failure.
+     * API's 100-item cap), then drops the rows and leaves selection mode. A total failure keeps
+     * every row and the whole selection; a PARTIAL one (a later chunk failed after earlier chunks
+     * already committed server-side) drops what actually went and keeps the mode on the remainder,
+     * so the retry sends only what's left. A cancelled removal (the scope dying mid-flight) still
+     * reports nothing — the server can be ahead of the cache until the next per-open reconcile.
      */
     fun removeSelectedTracks() {
         val s        = _uiState.value
@@ -188,26 +218,28 @@ class LibraryViewModel(
                     _uiState.update { st ->
                         if (st.currentPlaylist?.id != playlist.id)
                             return@update st.copy(isRemovingSelection = false)
-                        val remaining = st.currentTracks.filterNot { it.uri in uris }
-                        // The count delta, not uris.size: a uri can appear twice in a playlist (and
-                        // remove-by-uri drops every occurrence), so only the list can say how many
-                        // rows actually went. Offset and total shrink by the same amount, keeping
-                        // pagination pointed where the API left off.
-                        val removed   = st.currentTracks.size - remaining.size
-                        st.copy(
-                            currentTracks        = remaining,
-                            playlistTracksOffset = (st.playlistTracksOffset - removed).coerceAtLeast(remaining.size),
-                            playlistTracksTotal  = (st.playlistTracksTotal - removed).coerceAtLeast(remaining.size),
-                            isRemovingSelection  = false,
-                            removeResult         = RemoveSelectionResult.Success,
-                        ).selectionCleared()
+                        st.tracksRemoved(uris, RemoveSelectionResult.Success).selectionCleared()
                     }
                 },
                 onFailure = { e ->
-                    _uiState.update { it.copy(
-                        isRemovingSelection = false,
-                        removeResult        = RemoveSelectionResult.Failure(e.message),
-                    ) }
+                    // A chunked removal can fail PARTWAY: the uris it carries are already gone from
+                    // the playlist server-side, so commit them down both paths the success branch
+                    // uses before reporting the error — otherwise the dialog claims nothing was
+                    // removed while the playlist is already shorter, and the rows survive in the
+                    // cache until the next per-open reconcile.
+                    val partial = (e as? PartialRemovalException)?.removed?.takeIf { it.isNotEmpty() }
+                    if (partial != null) {
+                        withContext(Dispatchers.IO) { cache.removeFromPlaylistTrackList(playlist.id, partial) }
+                    }
+                    _uiState.update { st ->
+                        val failure = RemoveSelectionResult.Failure(e.message)
+                        // Same "still the same playlist" guard as the success path — the list edit
+                        // is playlist-scoped, but the error report isn't, so it's reported either way.
+                        if (partial == null || st.currentPlaylist?.id != playlist.id)
+                            return@update st.copy(isRemovingSelection = false, removeResult = failure)
+                        // Keep the mode on what's left, so a retry sends only the pending uris.
+                        st.tracksRemoved(partial, failure).copy(selectedUris = st.selectedUris - partial)
+                    }
                 },
             )
         }
