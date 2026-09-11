@@ -30,6 +30,11 @@ import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 // screens and calls `onOpenPlayer` on narrow screens, so track-tap handlers don't need to
 // know which mode they're in.
 //
+// Two opt-ins exist for the screens that are a single full-width list rather than a two-pane
+// browser (Stats, Search): `miniPlayerFullWidth` keeps the bar full-width on wide screens instead of
+// pinning it to the right 58%, and `miniPlayerAvoidsIme` lifts it above the software keyboard.
+// Both default to the two-pane behaviour Library/Album/Artist already had.
+//
 // On EXTRA-WIDE screens (≥1200dp, e.g. a tablet in landscape) the player lives in a permanent
 // docked third pane hosted by `LyraNavGraph` — OUTSIDE the per-screen nav transition, so it
 // doesn't slide/fade when navigating between browse screens. Here we just render the screen
@@ -41,6 +46,8 @@ fun PlayerPanelHost(
     onOpenPlayer            : () -> Unit,
     modifier                : Modifier = Modifier,
     onOpenQueue             : () -> Unit = {},
+    miniPlayerFullWidth     : Boolean = false,
+    miniPlayerAvoidsIme     : Boolean = false,
     navSharedTransitionScope: SharedTransitionScope? = null,
     navAnimatedContentScope : AnimatedContentScope? = null,
     content                 : @Composable BoxScope.(onRequestPlayer: () -> Unit) -> Unit,
@@ -118,8 +125,32 @@ fun PlayerPanelHost(
 
             // Mini player placement: right 58% pane on any wide screen (isWideScreen, regardless of
             // isShortScreen), full-width on narrow. This matches the two-pane layout used by Album/Artist
-            // screens whenever screenWidthDp >= 600.
-            //
+            // screens whenever screenWidthDp >= 600. `miniPlayerFullWidth` opts out for the screens that
+            // are a SINGLE full-width list at every width (Stats, Search) — there is no right pane there
+            // for a 58% bar to line up with, so pinned-right just reads as a bug on the unfolded screen.
+            val miniPlacement = if (isWideScreen && !miniPlayerFullWidth)
+                Modifier.align(Alignment.BottomEnd).fillMaxWidth(0.58f)
+            else
+                Modifier.align(Alignment.BottomCenter)
+
+            // Bottom inset for the mini player. `miniPlayerAvoidsIme` lifts it above the keyboard —
+            // Search auto-focuses its field, so the keyboard is up on entry and a mini player left at
+            // the window bottom would spend most of the screen's life hidden behind it. The inset is
+            // the UNION of the IME and nav bar, which takes the larger of the two instead of stacking:
+            // the IME inset already spans the nav bar, so imePadding() + navigationBarsPadding() would
+            // leave a nav-bar-sized gap above the keyboard. The pop-out panel below deliberately keeps
+            // plain navigationBarsPadding() — it is capped at 80% of the screen height, so lifting it
+            // above the keyboard would squash it and make it jump every time the IME toggles.
+            // Horizontal stays in the side list: the IME has no horizontal inset, so this keeps the
+            // side nav bar clearance `navigationBarsPadding()` gives in landscape.
+            val miniBottomInset = if (miniPlayerAvoidsIme)
+                Modifier.windowInsetsPadding(
+                    WindowInsets.ime.union(WindowInsets.navigationBars)
+                        .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)
+                )
+            else
+                Modifier.navigationBarsPadding()
+
             // The mini player's SECONDARY nav scope (wide screens only) is held CONTINUOUSLY while the
             // pop-out panel is fully closed, and dropped only while it is open/animating. Continuous-
             // when-closed is required for the morph to work on POP: a shared element added after a pop
@@ -138,10 +169,7 @@ fun PlayerPanelHost(
                 playerViewModel            = playerViewModel,
                 onExpand                   = onRequestPlayer,
                 visible                    = !showPlayerPanel,
-                modifier                   = if (isWideScreen)
-                    Modifier.align(Alignment.BottomEnd).fillMaxWidth(0.58f).navigationBarsPadding()
-                else
-                    Modifier.align(Alignment.BottomCenter).navigationBarsPadding(),
+                modifier                   = miniPlacement.then(miniBottomInset),
                 sharedTransitionScope      = if (canShowPanel) this@SharedTransitionLayout else navSharedTransitionScope,
                 animatedVisibilityScope    = if (canShowPanel) null else navAnimatedContentScope as? AnimatedVisibilityScope,
                 navSharedTransitionScope   = miniNavScope,

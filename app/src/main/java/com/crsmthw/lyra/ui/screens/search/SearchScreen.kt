@@ -5,6 +5,8 @@ import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -12,8 +14,9 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.foundation.text.input.clearText
+import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
@@ -34,7 +37,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -45,13 +47,17 @@ import com.crsmthw.lyra.data.local.RecentSearch
 import com.crsmthw.lyra.data.remote.model.SpotifyAlbum
 import com.crsmthw.lyra.data.remote.model.SpotifyArtist
 import com.crsmthw.lyra.data.remote.model.SpotifyPlaylist
+import com.crsmthw.lyra.ui.components.PlayerPanelHost
 import com.crsmthw.lyra.ui.components.TopScrim
 import com.crsmthw.lyra.ui.components.TrackActionsHost
 import com.crsmthw.lyra.ui.components.TrackRow
 import com.crsmthw.lyra.ui.components.toTrackActionTarget
+import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import com.crsmthw.lyra.util.ListScrollHaptics
 import com.crsmthw.lyra.util.confirm
+import com.crsmthw.lyra.util.press
 import com.crsmthw.lyra.util.rememberArtBoundsTransform
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import com.crsmthw.lyra.util.visualizer.FftWaveCanvas
 import com.crsmthw.lyra.util.visualizer.LocalVisualizerAccentColor
@@ -61,11 +67,13 @@ import com.crsmthw.lyra.util.visualizer.LocalVisualizerAccentColor
 @Composable
 fun SearchScreen(
     viewModel             : SearchViewModel,
+    playerViewModel       : PlayerViewModel,
     onBack                : () -> Unit,
     onOpenPlayer          : () -> Unit,
     onAlbumClick          : (albumId: String) -> Unit,
     onArtistClick         : (artistId: String) -> Unit,
     onTrackClick          : (uri: String, allUris: List<String>) -> Unit,
+    onOpenQueue           : () -> Unit = {},
     sharedTransitionScope : SharedTransitionScope? = null,
     animatedContentScope  : AnimatedContentScope? = null,
 ) {
@@ -74,6 +82,14 @@ fun SearchScreen(
     val keyboard        = LocalSoftwareKeyboardController.current
     val focusRequester  = remember { FocusRequester() }
     val haptics         = LocalHapticFeedback.current
+
+    // The input field owns its own text (M3's TextFieldState form). The ViewModel stays the source
+    // of truth for the *searched* query, fed from here so its 400 ms debounce is untouched; it is
+    // seeded from the VM so returning to a still-live Search entry keeps what was typed.
+    val queryState      = rememberTextFieldState(initialText = state.query)
+    LaunchedEffect(queryState, viewModel) {
+        snapshotFlow { queryState.text.toString() }.collect { viewModel.onQueryChange(it) }
+    }
 
     // Container transform: the floating bar shares bounds with the Library search FAB (same
     // SEARCH_BAR_SHARED_KEY) so tapping the FAB expands it into this bar. Null scopes (two-pane /
@@ -99,6 +115,21 @@ fun SearchScreen(
     // Top content inset clears the floating bar: status bar + top margin + bar height + a gap.
     val topInset       = statusBarTopDp + 8.dp + SearchBarHeight + 12.dp
 
+    // The mini player / pop-out panel wrap the whole screen, as on Library/Album/Artist. The
+    // "search-bar" container transform is unaffected: it is built against the NAV shared-transition
+    // scope, which is passed straight through the host's own SharedTransitionLayout — exactly how
+    // the Library FAB end of the same morph already coexists with this host.
+    PlayerPanelHost(
+        playerViewModel          = playerViewModel,
+        onOpenPlayer             = onOpenPlayer,
+        onOpenQueue              = onOpenQueue,
+        // A single full-width results list at every width, and the field auto-focuses — so the bar
+        // stays full-width and rides above the keyboard instead of hiding behind it.
+        miniPlayerFullWidth      = true,
+        miniPlayerAvoidsIme      = true,
+        navSharedTransitionScope = sharedTransitionScope,
+        navAnimatedContentScope  = animatedContentScope,
+    ) { _ ->
     Box(modifier = Modifier.fillMaxSize()) {
         // Scrolling content rides above the keyboard; the floating bar + top scrim do not.
         Box(
@@ -136,10 +167,30 @@ fun SearchScreen(
                     } else {
                         val resultsListState = rememberLazyListState()
                         ListScrollHaptics(resultsListState)
+
+                        // Lazy-load on scroll: the API caps a page at 10 per type, so the list
+                        // grows by `offset`. Every gate lives INSIDE the snapshotFlow rather than
+                        // in the collector, so `isLoadingMore` clearing re-emits and the next page
+                        // can follow while the user stays parked at the end of the list.
+                        LaunchedEffect(resultsListState, viewModel) {
+                            snapshotFlow {
+                                val info = resultsListState.layoutInfo
+                                val last = info.visibleItemsInfo.lastOrNull()?.index ?: -1
+                                state.canLoadMore && !state.isLoading && !state.isLoadingMore &&
+                                    info.totalItemsCount > 0 &&
+                                    last >= info.totalItemsCount - LOAD_MORE_THRESHOLD
+                            }
+                                .distinctUntilChanged()
+                                .collect { nearEnd -> if (nearEnd) viewModel.loadMore() }
+                        }
+
                         LazyColumn(
                             state          = resultsListState,
                             modifier       = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(top = topInset, bottom = navBarBottomDp + 16.dp),
+                            // 100dp of mini-player clearance on top of the nav bar, so the last row
+                            // scrolls clear of the floating bar (UI_PATTERNS.md → "LazyColumn bottom
+                            // padding must include nav bar height").
+                            contentPadding = PaddingValues(top = topInset, bottom = 100.dp + navBarBottomDp),
                         ) {
 
                             // ── Artists — horizontal stories row ──────────────
@@ -214,6 +265,19 @@ fun SearchScreen(
                                 }
                             }
 
+                            // Paging spinner — a small inline one, per MATERIAL3.md's loading
+                            // conventions (ContainedLoadingIndicator is for full-area states).
+                            if (state.isLoadingMore) {
+                                item(key = "load_more") {
+                                    Box(
+                                        modifier         = Modifier.fillMaxWidth().padding(16.dp),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                                    }
+                                }
+                            }
+
                             item(key = "footer_space") { Spacer(Modifier.height(16.dp)) }
                         }
                     }
@@ -240,18 +304,32 @@ fun SearchScreen(
 
         // Recent searches — only while the query is blank. Lives in the outer (non-ime-padded) Box,
         // top-anchored, so the keyboard never lifts it; it vanishes the moment anything is typed.
-        if (state.query.isBlank() && recents.isNotEmpty()) {
+        // Gated on the *field's* text, not the ViewModel's: the VM is a debounce-coupled frame or
+        // two behind now, which would flash this list over the results on the first keystroke.
+        if (queryState.text.isBlank() && recents.isNotEmpty()) {
+            // A full cap-10 list plus its header and Clear all overruns the shorter geometries
+            // (folded outer screen, any landscape), and Clear all sits at the END — so the column
+            // scrolls. The bottom inset is max(IME, nav bar) and is applied OUTSIDE the scroll, so
+            // the viewport ends above the keyboard rather than behind it: the screen auto-focuses,
+            // so the keyboard is up by default and a viewport that ran under it would park Clear all
+            // out of reach at full scroll. Top-anchoring (the reason this lives in the outer,
+            // non-imePadding Box) is untouched — only the viewport's bottom edge moves.
             Column(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .fillMaxWidth()
-                    .padding(top = topInset),
+                    .padding(top = topInset)
+                    .windowInsetsPadding(
+                        WindowInsets.ime.union(WindowInsets.navigationBars)
+                            .only(WindowInsetsSides.Bottom)
+                    )
+                    .verticalScroll(rememberScrollState()),
             ) {
                 SectionHeader(stringResource(R.string.search_recent))
                 recents.forEach { recent ->
                     RecentSearchRow(
-                        recent  = recent,
-                        onClick = {
+                        recent   = recent,
+                        onClick  = {
                             haptics.confirm()
                             viewModel.addRecentSearch(recent)   // re-tapping moves it to the front
                             when (recent.type) {
@@ -261,8 +339,24 @@ fun SearchScreen(
                                 "playlist" -> onOpenPlayer()
                             }
                         },
+                        onRemove = {
+                            haptics.press()
+                            viewModel.removeRecentSearch(recent.id)
+                        },
                     )
                 }
+                TextButton(
+                    onClick  = {
+                        haptics.press()
+                        viewModel.clearRecentSearches()
+                    },
+                    modifier = Modifier.padding(start = 4.dp, bottom = 8.dp),
+                ) {
+                    Text(stringResource(R.string.search_recent_clear_all))
+                }
+                // Mini-player clearance, INSIDE the scroll: "Clear all" is the last thing in the
+                // list, and the floating bar would otherwise cover it once something is playing.
+                Spacer(Modifier.height(100.dp))
             }
         }
 
@@ -272,10 +366,9 @@ fun SearchScreen(
         // Floating M3 search bar. The back arrow is its own leading icon, so there is no separate
         // floating back pill — one element, which also keeps the FAB→bar morph clean.
         SearchInputBar(
-            query          = state.query,
-            onQueryChange  = viewModel::onQueryChange,
+            queryState     = queryState,
             onBack         = { keyboard?.hide(); haptics.confirm(); onBack() },
-            onClear        = viewModel::clearQuery,
+            onClear        = { queryState.clearText(); viewModel.clearQuery() },
             onSearch       = { keyboard?.hide() },
             focusRequester = focusRequester,
             modifier       = Modifier
@@ -285,6 +378,7 @@ fun SearchScreen(
                 .then(searchBarSharedModifier),
         )
     }
+    } // PlayerPanelHost
 
     TrackActionsHost(
         controller   = viewModel.trackActions,
@@ -305,6 +399,9 @@ fun SearchScreen(
 /** Pairs the Library search FAB with the Search screen's bar for the container transform. */
 private const val SEARCH_BAR_SHARED_KEY = "search-bar"
 
+/** How close to the end of the results list a scroll gets before the next page is requested. */
+private const val LOAD_MORE_THRESHOLD = 5
+
 @Composable
 private fun SectionHeader(title: String) {
     Text(
@@ -314,9 +411,13 @@ private fun SectionHeader(title: String) {
     )
 }
 
-/** One row of the "Recent" list — mirrors [AlbumRow]'s look; artist art is a circle. */
+/**
+ * One row of the "Recent" list — mirrors [AlbumRow]'s look; artist art is a circle. The remove X
+ * goes in `trailingContent`, not inside the row's own clickable area: the [IconButton] consumes
+ * the tap there, so removing an entry can't also navigate to it.
+ */
 @Composable
-private fun RecentSearchRow(recent: RecentSearch, onClick: () -> Unit) {
+private fun RecentSearchRow(recent: RecentSearch, onClick: () -> Unit, onRemove: () -> Unit) {
     val artShape = if (recent.type == "artist") CircleShape else RoundedCornerShape(4.dp)
     ListItem(
         supportingContent = {
@@ -346,6 +447,12 @@ private fun RecentSearchRow(recent: RecentSearch, onClick: () -> Unit) {
                         )
                     }
                 }
+            }
+        },
+        trailingContent = {
+            IconButton(onClick = onRemove) {
+                Icon(Icons.Default.Close,
+                    contentDescription = stringResource(R.string.search_recent_remove))
             }
         },
         modifier = Modifier.clickable(onClick = onClick),
@@ -480,18 +587,30 @@ private val SearchBarHeight = 56.dp
  * stadium [Surface] tinted to match the screen's other floating pills (`surfaceContainerHigh` + a
  * small shadow). The back arrow is the field's own leading icon — no separate back pill — so the
  * whole control is a single bounding box (which the FAB→bar container transform will share).
+ *
+ * The only non-deprecated `InputField` overload takes a [TextFieldState] **and** a [SearchBarState]
+ * (both the `query`/`onQueryChange` and the `expanded`/`onExpandedChange` forms are deprecated in
+ * Material3 1.5.0-alpha27). Lyra never expands into a full-screen search bar — there is no
+ * `ExpandedFullScreenSearchBar` anywhere — so the required state is created **already Expanded**
+ * and then left alone. That is deliberate, not cosmetic: starting it Collapsed makes the field
+ * (a) run `animateToExpanded()` on focus, whose `Animatable` is read during composition and so
+ * recomposes the field every frame for the length of a slow spatial spring, (b) keep a
+ * `snapshotFlow { text }` collector alive for the whole screen just to trigger that same expansion
+ * on the first keystroke, and (c) arm its clear-focus-on-collapse effect — all for an expansion
+ * nothing renders. Expanded short-circuits all three. Nothing in the field's *appearance* depends
+ * on the value (only key handling, the a11y state description, and that focus effect do).
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SearchInputBar(
-    query         : String,
-    onQueryChange : (String) -> Unit,
+    queryState    : TextFieldState,
     onBack        : () -> Unit,
     onClear       : () -> Unit,
     onSearch      : () -> Unit,
     focusRequester: FocusRequester,
     modifier      : Modifier = Modifier,
 ) {
+    val searchBarState = rememberSearchBarState(initialValue = SearchBarValue.Expanded)
+
     Surface(
         modifier        = modifier.fillMaxWidth().height(SearchBarHeight),
         shape           = CircleShape,
@@ -499,20 +618,18 @@ private fun SearchInputBar(
         shadowElevation = 3.dp,
     ) {
         SearchBarDefaults.InputField(
-            query            = query,
-            onQueryChange    = onQueryChange,
-            onSearch         = { onSearch() },
-            expanded         = false,
-            onExpandedChange = {},
-            modifier         = Modifier.fillMaxWidth().focusRequester(focusRequester),
-            placeholder      = { Text(stringResource(R.string.search_placeholder)) },
-            leadingIcon      = {
+            textFieldState = queryState,
+            searchBarState = searchBarState,
+            onSearch       = { onSearch() },
+            modifier       = Modifier.fillMaxWidth().focusRequester(focusRequester),
+            placeholder    = { Text(stringResource(R.string.search_placeholder)) },
+            leadingIcon    = {
                 IconButton(onClick = onBack) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = stringResource(R.string.nav_back))
                 }
             },
-            trailingIcon     = if (query.isNotBlank()) {
+            trailingIcon   = if (queryState.text.isNotBlank()) {
                 {
                     IconButton(onClick = onClear) {
                         Icon(Icons.Default.Close,

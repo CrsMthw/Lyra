@@ -265,4 +265,7 @@
     <string name="library_selection_remove">Remove selected songs</string>
     <string name="library_selection_cancel">Cancel selection</string>
     <string name="library_selection_remove_failed">Couldn\'t remove the selected songs</string>
+    <!-- Recent searches -->
+    <string name="search_recent_remove">Remove from recent searches</string>
+    <string name="search_recent_clear_all">Clear all</string>
 </resources>
