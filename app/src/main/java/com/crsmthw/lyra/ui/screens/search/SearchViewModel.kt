@@ -70,6 +70,14 @@ class SearchViewModel(
     /** Offset the NEXT page is requested at. One offset covers all three types (see repository). */
     private var nextOffset = 0
 
+    /**
+     * Query the results currently on screen were fetched for — what [loadMore] pages. NOT
+     * `state.query`, which is the live field text: that runs ahead of the 400 ms debounce, so a
+     * scroll to the end during the debounce window would have appended a page of the *new* query's
+     * results onto the old query's list.
+     */
+    private var resultsQuery = ""
+
     init {
         // Debounce search input: wait 400 ms after last keystroke before hitting API
         _query
@@ -119,7 +127,8 @@ class SearchViewModel(
         // nothing else would ever land to clear a spinner or drop a stale page.
         if (q.isBlank()) {
             searchEpoch++
-            nextOffset = 0
+            nextOffset   = 0
+            resultsQuery = ""
             _state.update {
                 it.copy(results = null, isLoading = false, isLoadingMore = false,
                         canLoadMore = false, error = null)
@@ -134,9 +143,17 @@ class SearchViewModel(
             repository.search(query, offset = 0).fold(
                 onSuccess = { results ->
                     if (epoch != searchEpoch) return@fold
-                    nextOffset = SEARCH_PAGE_SIZE
+                    resultsQuery = query
+                    nextOffset   = SEARCH_PAGE_SIZE
                     _state.update {
-                        it.copy(results = results, isLoading = false, canLoadMore = results.hasMore())
+                        it.copy(
+                            results     = results,
+                            isLoading   = false,
+                            // An all-empty first page is the end of the road whatever `next` says:
+                            // the screen renders that as the "No results" state, which composes no
+                            // LazyColumn — so the scroll trigger could never fire to page past it.
+                            canLoadMore = results.hasMore() && results.itemCount() > 0,
+                        )
                     }
                 },
                 onFailure = { e ->
@@ -159,7 +176,7 @@ class SearchViewModel(
         val current = _state.value
         if (current.isLoading || current.isLoadingMore || !current.canLoadMore) return
         val results = current.results ?: return
-        val query   = current.query.takeIf { it.isNotBlank() } ?: return
+        val query   = resultsQuery.takeIf { it.isNotBlank() } ?: return
         val epoch   = searchEpoch
         val offset  = nextOffset
         if (offset > MAX_SEARCH_OFFSET) {
@@ -198,6 +215,7 @@ class SearchViewModel(
     fun clearQuery() {
         searchEpoch++
         nextOffset   = 0
+        resultsQuery = ""
         _query.value = ""
         _state.update { SearchUiState() }
     }
