@@ -1,5 +1,8 @@
 package com.crsmthw.lyra.ui.screens.stats
 
+import androidx.compose.animation.AnimatedContentScope
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -38,6 +41,7 @@ import com.crsmthw.lyra.data.remote.model.SpotifyArtist
 import com.crsmthw.lyra.data.remote.model.SpotifyTrack
 import com.crsmthw.lyra.ui.components.ConnectedChoiceRow
 import com.crsmthw.lyra.ui.components.HeroBandHeight
+import com.crsmthw.lyra.ui.components.PlayerPanelHost
 import com.crsmthw.lyra.ui.components.TitlePill
 import com.crsmthw.lyra.ui.components.TopActionPill
 import com.crsmthw.lyra.ui.components.TopScrim
@@ -54,26 +58,45 @@ import com.crsmthw.lyra.util.press
  * "Wrapped-lite" listening stats: top artists (circle row) + top tracks (ranked list) from
  * `/me/top/{type}`, with a connected time-range picker (4 weeks / 6 months / all time).
  * Same OneUI floating-controls chrome as Queue: hero title + TopScrim + back/title pills.
+ *
+ * Wrapped in [PlayerPanelHost] like Library/Album/Artist, so playing a top track puts the floating
+ * mini player (or the pop-out panel on a wide screen) right here instead of forcing a trip back.
  */
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class,
+       ExperimentalSharedTransitionApi::class)
 @Composable
 fun StatsScreen(
-    viewModel       : StatsViewModel,
-    playerViewModel : PlayerViewModel,
-    onBack          : () -> Unit,
-    onOpenAlbum     : (String) -> Unit = {},
-    onOpenArtist    : (String) -> Unit = {},
+    viewModel             : StatsViewModel,
+    playerViewModel       : PlayerViewModel,
+    onBack                : () -> Unit,
+    onOpenPlayer          : () -> Unit = {},
+    onOpenQueue           : () -> Unit = {},
+    onOpenAlbum           : (String) -> Unit = {},
+    onOpenArtist          : (String) -> Unit = {},
+    sharedTransitionScope : SharedTransitionScope? = null,
+    animatedContentScope  : AnimatedContentScope? = null,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val haptics = LocalHapticFeedback.current
 
+    PlayerPanelHost(
+        playerViewModel          = playerViewModel,
+        onOpenPlayer             = onOpenPlayer,
+        onOpenQueue              = onOpenQueue,
+        // A single full-width list at every width — there is no right pane for a 58% bar to align to.
+        miniPlayerFullWidth      = true,
+        navSharedTransitionScope = sharedTransitionScope,
+        navAnimatedContentScope  = animatedContentScope,
+    ) { _ ->
     Scaffold(
         contentWindowInsets = WindowInsets(0),
     ) { paddingValues ->
         val density        = LocalDensity.current
         val navBarBottomDp = with(density) { WindowInsets.navigationBars.getBottom(this).toDp() }
         val scrimHeight    = navBarBottomDp + 48.dp
-        val listBottomPad  = remember(navBarBottomDp) { PaddingValues(bottom = navBarBottomDp + 16.dp) }
+        // 100dp of mini-player clearance on top of the nav bar, so the last row scrolls clear of the
+        // floating bar (UI_PATTERNS.md → "LazyColumn bottom padding must include nav bar height").
+        val listBottomPad  = remember(navBarBottomDp) { PaddingValues(bottom = 100.dp + navBarBottomDp) }
         val listState      = rememberLazyListState()
         ListScrollHaptics(listState)
         val titlePillAlpha = rememberHeroScrollProgress(listState)
@@ -256,6 +279,7 @@ fun StatsScreen(
             }
         }
     }
+    } // PlayerPanelHost
 
     TrackActionsHost(
         controller   = viewModel.trackActions,

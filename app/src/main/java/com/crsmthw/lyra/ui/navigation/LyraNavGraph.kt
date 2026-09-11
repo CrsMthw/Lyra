@@ -311,26 +311,32 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
             composable(Screen.Stats.route) {
                 val vm = viewModel<StatsViewModel>(factory = StatsViewModelFactory(container))
                 StatsScreen(
-                    viewModel       = vm,
-                    playerViewModel = playerVm,
-                    onBack          = ::safeNavigateUp,
-                    onOpenAlbum  = { albumId -> safePush(Screen.AlbumDetail.createRoute(albumId)) },
-                    onOpenArtist = { artistId -> safePush(Screen.ArtistDetail.createRoute(artistId)) },
+                    viewModel             = vm,
+                    playerViewModel       = playerVm,
+                    onBack                = ::safeNavigateUp,
+                    onOpenPlayer          = { safePush(Screen.Player.route) },
+                    onOpenQueue           = { safePush(Screen.Queue.route) },
+                    onOpenAlbum           = { albumId -> safePush(Screen.AlbumDetail.createRoute(albumId)) },
+                    onOpenArtist          = { artistId -> safePush(Screen.ArtistDetail.createRoute(artistId)) },
+                    sharedTransitionScope = this@SharedTransitionLayout,
+                    animatedContentScope  = this@composable,
                 )
             }
 
             composable(Screen.Search.route) {
                 val vm = viewModel<SearchViewModel>(factory = SearchViewModelFactory(container))
                 SearchScreen(
-                    viewModel     = vm,
-                    onBack        = ::safeNavigateUp,
-                    onOpenPlayer  = { safePush(Screen.Player.route) },
-                    onAlbumClick  = { albumId -> safePush(Screen.AlbumDetail.createRoute(albumId)) },
-                    onArtistClick = { artistId -> safePush(Screen.ArtistDetail.createRoute(artistId)) },
-                    onTrackClick  = { uri, uris ->
+                    viewModel             = vm,
+                    playerViewModel       = playerVm,
+                    onBack                = ::safeNavigateUp,
+                    onOpenPlayer          = { safePush(Screen.Player.route) },
+                    onAlbumClick          = { albumId -> safePush(Screen.AlbumDetail.createRoute(albumId)) },
+                    onArtistClick         = { artistId -> safePush(Screen.ArtistDetail.createRoute(artistId)) },
+                    onTrackClick          = { uri, uris ->
                         playerVm.playTrack(uri, uris = uris)
                         safePush(Screen.Player.route)
                     },
+                    onOpenQueue           = { safePush(Screen.Queue.route) },
                     sharedTransitionScope = this@SharedTransitionLayout,
                     animatedContentScope  = this@composable,
                 )

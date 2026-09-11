@@ -47,10 +47,12 @@ import com.crsmthw.lyra.data.local.RecentSearch
 import com.crsmthw.lyra.data.remote.model.SpotifyAlbum
 import com.crsmthw.lyra.data.remote.model.SpotifyArtist
 import com.crsmthw.lyra.data.remote.model.SpotifyPlaylist
+import com.crsmthw.lyra.ui.components.PlayerPanelHost
 import com.crsmthw.lyra.ui.components.TopScrim
 import com.crsmthw.lyra.ui.components.TrackActionsHost
 import com.crsmthw.lyra.ui.components.TrackRow
 import com.crsmthw.lyra.ui.components.toTrackActionTarget
+import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import com.crsmthw.lyra.util.ListScrollHaptics
 import com.crsmthw.lyra.util.confirm
 import com.crsmthw.lyra.util.press
@@ -65,11 +67,13 @@ import com.crsmthw.lyra.util.visualizer.LocalVisualizerAccentColor
 @Composable
 fun SearchScreen(
     viewModel             : SearchViewModel,
+    playerViewModel       : PlayerViewModel,
     onBack                : () -> Unit,
     onOpenPlayer          : () -> Unit,
     onAlbumClick          : (albumId: String) -> Unit,
     onArtistClick         : (artistId: String) -> Unit,
     onTrackClick          : (uri: String, allUris: List<String>) -> Unit,
+    onOpenQueue           : () -> Unit = {},
     sharedTransitionScope : SharedTransitionScope? = null,
     animatedContentScope  : AnimatedContentScope? = null,
 ) {
@@ -111,6 +115,21 @@ fun SearchScreen(
     // Top content inset clears the floating bar: status bar + top margin + bar height + a gap.
     val topInset       = statusBarTopDp + 8.dp + SearchBarHeight + 12.dp
 
+    // The mini player / pop-out panel wrap the whole screen, as on Library/Album/Artist. The
+    // "search-bar" container transform is unaffected: it is built against the NAV shared-transition
+    // scope, which is passed straight through the host's own SharedTransitionLayout — exactly how
+    // the Library FAB end of the same morph already coexists with this host.
+    PlayerPanelHost(
+        playerViewModel          = playerViewModel,
+        onOpenPlayer             = onOpenPlayer,
+        onOpenQueue              = onOpenQueue,
+        // A single full-width results list at every width, and the field auto-focuses — so the bar
+        // stays full-width and rides above the keyboard instead of hiding behind it.
+        miniPlayerFullWidth      = true,
+        miniPlayerAvoidsIme      = true,
+        navSharedTransitionScope = sharedTransitionScope,
+        navAnimatedContentScope  = animatedContentScope,
+    ) { _ ->
     Box(modifier = Modifier.fillMaxSize()) {
         // Scrolling content rides above the keyboard; the floating bar + top scrim do not.
         Box(
@@ -168,7 +187,10 @@ fun SearchScreen(
                         LazyColumn(
                             state          = resultsListState,
                             modifier       = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(top = topInset, bottom = navBarBottomDp + 16.dp),
+                            // 100dp of mini-player clearance on top of the nav bar, so the last row
+                            // scrolls clear of the floating bar (UI_PATTERNS.md → "LazyColumn bottom
+                            // padding must include nav bar height").
+                            contentPadding = PaddingValues(top = topInset, bottom = 100.dp + navBarBottomDp),
                         ) {
 
                             // ── Artists — horizontal stories row ──────────────
@@ -332,6 +354,9 @@ fun SearchScreen(
                 ) {
                     Text(stringResource(R.string.search_recent_clear_all))
                 }
+                // Mini-player clearance, INSIDE the scroll: "Clear all" is the last thing in the
+                // list, and the floating bar would otherwise cover it once something is playing.
+                Spacer(Modifier.height(100.dp))
             }
         }
 
@@ -353,6 +378,7 @@ fun SearchScreen(
                 .then(searchBarSharedModifier),
         )
     }
+    } // PlayerPanelHost
 
     TrackActionsHost(
         controller   = viewModel.trackActions,
