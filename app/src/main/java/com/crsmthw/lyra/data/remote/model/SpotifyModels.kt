@@ -35,7 +35,6 @@ data class SpotifyArtistFull(
     val images     : List<SpotifyImage>? = null,
     val genres     : List<String>?       = null,
     val followers  : ArtistFollowers?    = null,
-    val popularity : Int?                = null,
     val uri        : String              = "",
 ) {
     val imageUrl          : String get() = images?.firstOrNull()?.url ?: ""
@@ -48,10 +47,6 @@ data class SpotifyArtistFull(
         }
     }
 }
-
-data class ArtistTopTracksResponse(
-    val tracks: List<SpotifyTrack> = emptyList(),
-)
 
 // ── Album ────────────────────────────────────────────────────────────────────
 data class SpotifyAlbum(
@@ -131,7 +126,6 @@ data class SpotifyUser(
     @SerializedName("display_name") val displayName : String?,
     val email        : String?,
     val images       : List<SpotifyImage>? = null,
-    val product      : String?,           // "premium" | "free"
 ) {
     val avatarUrl: String get() = images?.firstOrNull()?.url ?: ""
 }
@@ -284,7 +278,6 @@ data class SpotifyAlbumFull(
     val tracks     : Paged<AlbumTrack>?      = null,
     val copyrights : List<SpotifyCopyright>? = null,
     val label      : String?                 = null,
-    val popularity : Int?                    = null,
     @SerializedName("release_date") val releaseDate : String = "",
     @SerializedName("album_type")   val albumType   : String = "",
     @SerializedName("total_tracks") val totalTracks : Int    = 0,
