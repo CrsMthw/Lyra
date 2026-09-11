@@ -254,4 +254,8 @@
     <string name="widget_cd_previous">Previous</string>
     <string name="widget_cd_shuffle">Shuffle</string>
     <string name="widget_cd_repeat">Repeat</string>
+
+    <!-- Recent searches -->
+    <string name="search_recent_remove">Remove from recent searches</string>
+    <string name="search_recent_clear_all">Clear all</string>
 </resources>

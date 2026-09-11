@@ -20,7 +20,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** Most recent tapped results kept on the Search screen. */
-private const val MAX_RECENT_SEARCHES = 5
+private const val MAX_RECENT_SEARCHES = 10
 
 data class SearchUiState(
     val query     : String         = "",
@@ -65,7 +65,27 @@ class SearchViewModel(
         val updated = (listOf(item) + _recentSearches.value.filterNot { it.id == item.id })
             .take(MAX_RECENT_SEARCHES)
         _recentSearches.value = updated
-        viewModelScope.launch { withContext(Dispatchers.IO) { libraryCache.saveRecentSearches(updated) } }
+        persistRecentSearches(updated)
+    }
+
+    /** Drops one entry from the recent list — its trailing X. De-dupes by the same key as [addRecentSearch]. */
+    fun removeRecentSearch(id: String) {
+        val updated = _recentSearches.value.filterNot { it.id == id }
+        if (updated.size == _recentSearches.value.size) return
+        _recentSearches.value = updated
+        persistRecentSearches(updated)
+    }
+
+    /** Empties the recent list — the "Clear all" affordance at the end of it. */
+    fun clearRecentSearches() {
+        if (_recentSearches.value.isEmpty()) return
+        _recentSearches.value = emptyList()
+        persistRecentSearches(emptyList())
+    }
+
+    /** Writes the list through to `recent_searches.json`; an empty list persists as an empty array. */
+    private fun persistRecentSearches(list: List<RecentSearch>) {
+        viewModelScope.launch { withContext(Dispatchers.IO) { libraryCache.saveRecentSearches(list) } }
     }
 
     fun onQueryChange(q: String) {

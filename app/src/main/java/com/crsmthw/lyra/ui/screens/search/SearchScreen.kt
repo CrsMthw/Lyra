@@ -5,6 +5,8 @@ import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -51,6 +53,7 @@ import com.crsmthw.lyra.ui.components.TrackRow
 import com.crsmthw.lyra.ui.components.toTrackActionTarget
 import com.crsmthw.lyra.util.ListScrollHaptics
 import com.crsmthw.lyra.util.confirm
+import com.crsmthw.lyra.util.press
 import com.crsmthw.lyra.util.rememberArtBoundsTransform
 import kotlinx.coroutines.flow.first
 import com.crsmthw.lyra.util.visualizer.FftWaveCanvas
@@ -251,17 +254,29 @@ fun SearchScreen(
         // Gated on the *field's* text, not the ViewModel's: the VM is a debounce-coupled frame or
         // two behind now, which would flash this list over the results on the first keystroke.
         if (queryState.text.isBlank() && recents.isNotEmpty()) {
+            // A full cap-10 list plus its header and Clear all overruns the shorter geometries
+            // (folded outer screen, any landscape), and Clear all sits at the END — so the column
+            // scrolls. The bottom inset is max(IME, nav bar) and is applied OUTSIDE the scroll, so
+            // the viewport ends above the keyboard rather than behind it: the screen auto-focuses,
+            // so the keyboard is up by default and a viewport that ran under it would park Clear all
+            // out of reach at full scroll. Top-anchoring (the reason this lives in the outer,
+            // non-imePadding Box) is untouched — only the viewport's bottom edge moves.
             Column(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .fillMaxWidth()
-                    .padding(top = topInset),
+                    .padding(top = topInset)
+                    .windowInsetsPadding(
+                        WindowInsets.ime.union(WindowInsets.navigationBars)
+                            .only(WindowInsetsSides.Bottom)
+                    )
+                    .verticalScroll(rememberScrollState()),
             ) {
                 SectionHeader(stringResource(R.string.search_recent))
                 recents.forEach { recent ->
                     RecentSearchRow(
-                        recent  = recent,
-                        onClick = {
+                        recent   = recent,
+                        onClick  = {
                             haptics.confirm()
                             viewModel.addRecentSearch(recent)   // re-tapping moves it to the front
                             when (recent.type) {
@@ -271,7 +286,20 @@ fun SearchScreen(
                                 "playlist" -> onOpenPlayer()
                             }
                         },
+                        onRemove = {
+                            haptics.press()
+                            viewModel.removeRecentSearch(recent.id)
+                        },
                     )
+                }
+                TextButton(
+                    onClick  = {
+                        haptics.press()
+                        viewModel.clearRecentSearches()
+                    },
+                    modifier = Modifier.padding(start = 4.dp, bottom = 8.dp),
+                ) {
+                    Text(stringResource(R.string.search_recent_clear_all))
                 }
             }
         }
@@ -323,9 +351,13 @@ private fun SectionHeader(title: String) {
     )
 }
 
-/** One row of the "Recent" list — mirrors [AlbumRow]'s look; artist art is a circle. */
+/**
+ * One row of the "Recent" list — mirrors [AlbumRow]'s look; artist art is a circle. The remove X
+ * goes in `trailingContent`, not inside the row's own clickable area: the [IconButton] consumes
+ * the tap there, so removing an entry can't also navigate to it.
+ */
 @Composable
-private fun RecentSearchRow(recent: RecentSearch, onClick: () -> Unit) {
+private fun RecentSearchRow(recent: RecentSearch, onClick: () -> Unit, onRemove: () -> Unit) {
     val artShape = if (recent.type == "artist") CircleShape else RoundedCornerShape(4.dp)
     ListItem(
         supportingContent = {
@@ -355,6 +387,12 @@ private fun RecentSearchRow(recent: RecentSearch, onClick: () -> Unit) {
                         )
                     }
                 }
+            }
+        },
+        trailingContent = {
+            IconButton(onClick = onRemove) {
+                Icon(Icons.Default.Close,
+                    contentDescription = stringResource(R.string.search_recent_remove))
             }
         },
         modifier = Modifier.clickable(onClick = onClick),
