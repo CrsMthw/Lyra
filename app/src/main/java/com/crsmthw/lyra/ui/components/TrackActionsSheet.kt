@@ -10,6 +10,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.LibraryAdd
@@ -35,6 +36,7 @@ import coil3.compose.AsyncImage
 import com.crsmthw.lyra.R
 import com.crsmthw.lyra.ui.screens.player.AddToPlaylistResult
 import com.crsmthw.lyra.util.confirm
+import com.crsmthw.lyra.util.press
 import com.crsmthw.lyra.util.reject
 import com.crsmthw.lyra.util.toggle
 
@@ -43,9 +45,14 @@ import com.crsmthw.lyra.util.toggle
  * bound to that screen's [TrackActionsController]; rows trigger it via `controller.open(target)`.
  *
  * Renders nothing until a target is open. Shows the actions sheet first, then swaps to the shared
- * [AddToPlaylistSheet] when the user picks "Add to playlist". Remove-from-playlist and navigation
- * are screen-supplied because only the screen owns that context; an action whose data is absent on
- * the target (no album/artist id, not removable / no callback) is simply not shown.
+ * [AddToPlaylistSheet] when the user picks "Add to playlist". Remove-from-playlist, multi-select
+ * and navigation are screen-supplied because only the screen owns that context; an action whose
+ * data is absent on the target (no album/artist id, not removable / no callback) is simply not shown.
+ *
+ * [onSelect] is the touch-and-hold front door to multi-select removal. It is offered on the same
+ * condition as "Remove from <playlist>" — the row lives in an OWNED playlist — and only the Library
+ * supplies it, so the row is absent on every other screen. The sheet dismisses itself first and
+ * hands the target over, so the caller can enter selection mode with that track pre-checked.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -54,6 +61,7 @@ fun TrackActionsHost(
     onGoToAlbum         : (String) -> Unit,
     onGoToArtist        : (String) -> Unit,
     onRemoveFromPlaylist: (() -> Unit)? = null,
+    onSelect            : ((TrackActionTarget) -> Unit)? = null,
 ) {
     val state       by controller.state.collectAsStateWithLifecycle()
     val pickerState by controller.pickerState.collectAsStateWithLifecycle()
@@ -163,6 +171,14 @@ fun TrackActionsHost(
             enabled = liked != null,          // wait for isTrackSaved to resolve before allowing a toggle
             onClick = { haptics.toggle(liked != true); controller.toggleLike() }, // optimistic; label flips in place
         )
+
+        if (target.removable != null && onSelect != null) {
+            ActionItem(
+                icon    = Icons.Default.Checklist,
+                text    = stringResource(R.string.track_action_select),
+                onClick = { haptics.press(); controller.dismiss(); onSelect(target) },
+            )
+        }
 
         if (target.removable != null && onRemoveFromPlaylist != null) {
             ActionItem(

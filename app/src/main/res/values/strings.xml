@@ -254,4 +254,15 @@
     <string name="widget_cd_previous">Previous</string>
     <string name="widget_cd_shuffle">Shuffle</string>
     <string name="widget_cd_repeat">Repeat</string>
+
+    <!-- Playlist multi-select removal (owned playlists) -->
+    <string name="track_action_select">Select</string>
+    <string name="library_select_songs">Select songs</string>
+    <plurals name="library_selected_count">
+        <item quantity="one">%1$d selected</item>
+        <item quantity="other">%1$d selected</item>
+    </plurals>
+    <string name="library_selection_remove">Remove selected songs</string>
+    <string name="library_selection_cancel">Cancel selection</string>
+    <string name="library_selection_remove_failed">Couldn\'t remove the selected songs</string>
 </resources>

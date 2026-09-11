@@ -159,6 +159,20 @@ class SpotifyRepository(
         api.removeItemsFromPlaylist(playlistId, RemoveItemsRequest(listOf(RemoveItemEntry(trackUri))))
     }
 
+    /**
+     * Batch form of [removeTrackFromPlaylist], backing the Library's multi-select removal: the whole
+     * selection goes out in ONE `RemoveItemsRequest` instead of one request per track. Spotify caps
+     * the request at 100 items, so a larger selection is sent as sequential chunks (sequential, not
+     * parallel — each call moves the playlist's snapshot on). Duplicate uris are collapsed; as with
+     * the single-track call no `positions` are sent, so a uri that appears twice in the playlist is
+     * removed everywhere it appears.
+     */
+    suspend fun removeTracksFromPlaylist(playlistId: String, uris: List<String>): Result<Unit> = safeCall {
+        uris.distinct().chunked(100).forEach { chunk ->
+            api.removeItemsFromPlaylist(playlistId, RemoveItemsRequest(chunk.map { RemoveItemEntry(it) }))
+        }
+    }
+
     suspend fun getQueue(): Result<QueueResponse?> = safeCall {
         api.getQueue()
     }

@@ -53,7 +53,23 @@ data class LibraryUiState(
     val refreshError          : String?                = null,  // non-blocking — shown as icon when cache is visible
     val user                  : SpotifyUser?           = null,
     val playlistsWithMosaics  : Set<String>            = emptySet(),
+    // ── Multi-select removal (owned playlists only) ──
+    val selectionMode         : Boolean                = false,
+    val selectedUris          : Set<String>            = emptySet(),
+    val isRemovingSelection   : Boolean                = false,  // the batch DELETE is in flight
+    val removeResult          : RemoveSelectionResult? = null,   // one-shot; the screen consumes it
 )
+
+/**
+ * Outcome of a multi-select removal, consumed **once** by `LibraryScreen` — it fires the
+ * confirm/reject haptic and, on a failure, shows the error dialog until dismissed. A one-shot in
+ * state rather than a haptic fired from the button's `onClick`, because the buzz must report what
+ * the API actually did, not what was requested.
+ */
+sealed interface RemoveSelectionResult {
+    data object Success : RemoveSelectionResult
+    data class  Failure(val message: String?) : RemoveSelectionResult
+}
 
 /**
  * True when the Library is showing a track list (a playlist, or Liked Songs) rather than the
@@ -72,6 +88,16 @@ val LibraryUiState.isShowingDetail: Boolean
  */
 val LibraryUiState.detailKey: String?
     get() = if (isShowingDetail) (currentPlaylist?.id ?: "liked") else null
+
+/**
+ * Drops any in-progress multi-select. The mode belongs to ONE open playlist, so every pane change
+ * has to clear it — opening another playlist or Liked Songs, backing out to the browser, or the
+ * playlist being deleted underneath it. Applied on top of the pane-changing `copy(...)` so the
+ * clear lands in the SAME emission as the change (never as an extra one mid-transition).
+ */
+private fun LibraryUiState.selectionCleared() =
+    if (!selectionMode && selectedUris.isEmpty()) this
+    else copy(selectionMode = false, selectedUris = emptySet())
 
 class LibraryViewModel(
     private val repository      : SpotifyRepository,
@@ -110,6 +136,88 @@ class LibraryViewModel(
         }
     }
 
+    // ── Multi-select removal (owned playlists) ───────────────────────────────────────────────
+    // One mode, two doors: the "Select" row in the song touch-and-hold menu (which pre-checks the
+    // long-pressed track) and "Select songs" in the detail's floating action pill. Both live only
+    // where "Remove from <playlist>" already does — an owned playlist, never Liked Songs or a
+    // followed one — so the UI guards on ownership and this guards on there being a playlist at all.
+
+    /** Enters selection mode, with [uri] pre-checked when it came from the song menu. */
+    fun enterSelectionMode(uri: String? = null) {
+        if (_uiState.value.currentPlaylist == null) return     // Liked Songs isn't editable
+        _uiState.update { it.copy(
+            selectionMode = true,
+            selectedUris  = if (uri != null) setOf(uri) else emptySet(),
+        ) }
+    }
+
+    /** A tap (or a long-press) on a row while in selection mode: checks / unchecks it. */
+    fun toggleTrackSelection(uri: String) {
+        _uiState.update { s ->
+            if (!s.selectionMode) s
+            else s.copy(
+                selectedUris = if (uri in s.selectedUris) s.selectedUris - uri else s.selectedUris + uri,
+            )
+        }
+    }
+
+    /** Leaves selection mode without removing anything (Cancel, or the back gesture). */
+    fun exitSelectionMode() {
+        _uiState.update { it.selectionCleared() }
+    }
+
+    /**
+     * Batch-removes every checked track from the open playlist in ONE API call (chunked past the
+     * API's 100-item cap), then drops the rows and leaves selection mode. Keeps the rows on failure.
+     */
+    fun removeSelectedTracks() {
+        val s        = _uiState.value
+        val playlist = s.currentPlaylist ?: return
+        val uris     = s.selectedUris.toList()
+        if (uris.isEmpty() || s.isRemovingSelection) return
+        _uiState.update { it.copy(isRemovingSelection = true, removeResult = null) }
+        viewModelScope.launch {
+            repository.removeTracksFromPlaylist(playlist.id, uris).fold(
+                onSuccess = {
+                    // The cache call is NOT redundant with the state edit below — it keeps the on-disk
+                    // list and the My Playlists count in sync for the next open. It is also not
+                    // SUFFICIENT: it no-ops for a playlist that was never cached (no snapshot id, so
+                    // selectPlaylist never wrote a track list), and then no trackListChanges emission
+                    // would arrive to drop the rows. Hence both, with the state edit authoritative.
+                    withContext(Dispatchers.IO) { cache.removeFromPlaylistTrackList(playlist.id, uris) }
+                    _uiState.update { st ->
+                        if (st.currentPlaylist?.id != playlist.id)
+                            return@update st.copy(isRemovingSelection = false)
+                        val remaining = st.currentTracks.filterNot { it.uri in uris }
+                        // The count delta, not uris.size: a uri can appear twice in a playlist (and
+                        // remove-by-uri drops every occurrence), so only the list can say how many
+                        // rows actually went. Offset and total shrink by the same amount, keeping
+                        // pagination pointed where the API left off.
+                        val removed   = st.currentTracks.size - remaining.size
+                        st.copy(
+                            currentTracks        = remaining,
+                            playlistTracksOffset = (st.playlistTracksOffset - removed).coerceAtLeast(remaining.size),
+                            playlistTracksTotal  = (st.playlistTracksTotal - removed).coerceAtLeast(remaining.size),
+                            isRemovingSelection  = false,
+                            removeResult         = RemoveSelectionResult.Success,
+                        ).selectionCleared()
+                    }
+                },
+                onFailure = { e ->
+                    _uiState.update { it.copy(
+                        isRemovingSelection = false,
+                        removeResult        = RemoveSelectionResult.Failure(e.message),
+                    ) }
+                },
+            )
+        }
+    }
+
+    /** Consumes [LibraryUiState.removeResult] once the screen has reported it. */
+    fun clearRemoveResult() {
+        _uiState.update { if (it.removeResult == null) it else it.copy(removeResult = null) }
+    }
+
     /**
      * Deletes an owned playlist (Spotify unfollow). On success removes it from the in-memory list
      * and cache, and closes the detail view if it was the one open. Caller guards that the playlist
@@ -127,7 +235,7 @@ class LibraryViewModel(
                             currentPlaylist = if (wasOpen) null else s.currentPlaylist,
                             currentTracks   = if (wasOpen) emptyList() else s.currentTracks,
                             refreshError    = null,
-                        )
+                        ).let { if (wasOpen) it.selectionCleared() else it }
                     }
                 },
                 onFailure = { e -> _uiState.update { it.copy(refreshError = e.message) } },
@@ -532,7 +640,7 @@ class LibraryViewModel(
                     playlistTracksOffset = cached.tracks.size,
                     playlistTracksTotal  = maxOf(playlist.trackCount, cached.tracks.size),
                     error                = null,
-                ) }
+                ).selectionCleared() }
                 if (playlist.id !in _uiState.value.playlistsWithMosaics && playlist.thumbnailUrl.isBlank()) {
                     withContext(Dispatchers.IO) { mosaicGenerator.generate(playlist.id, cached.tracks) }
                     _uiState.update { s -> s.copy(playlistsWithMosaics = s.playlistsWithMosaics + playlist.id) }
@@ -559,7 +667,7 @@ class LibraryViewModel(
                 playlistTracksOffset = 0,
                 playlistTracksTotal  = playlist.trackCount,   // metadata total; refined from the response
                 error                = null,
-            ) }
+            ).selectionCleared() }
             repository.getPlaylistTracks(playlist.id).fold(
                 onSuccess = { resp ->
                     if (_uiState.value.currentPlaylist?.id != playlist.id) return@fold
@@ -602,7 +710,7 @@ class LibraryViewModel(
             likedSongsOffset    = 0,
             likedSongsTotal     = 0,
             error               = null,
-        )}
+        ).selectionCleared() }
     }
 
     fun playPlaylist(uri: String) {
@@ -659,7 +767,7 @@ class LibraryViewModel(
                     likedSongsTotal     = cachedCount,
                     isLoadingMoreTracks = false,
                     error               = null,
-                )}
+                ).selectionCleared() }
                 if (cachedTracks.size != cached.tracks.size) {
                     withContext(Dispatchers.IO) {
                         cache.saveTrackList(LibraryCache.LIKED_SONGS_KEY, cachedCount.toString(), cachedTracks)
@@ -713,7 +821,7 @@ class LibraryViewModel(
                 likedSongsTotal     = 0,
                 isLoadingMoreTracks = false,
                 error               = null,
-            )}
+            ).selectionCleared() }
             fetchAndReplaceLikedSongs()
         }
     }
