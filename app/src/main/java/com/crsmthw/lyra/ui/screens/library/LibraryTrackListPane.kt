@@ -77,8 +77,13 @@ internal fun RightPaneContent(
     }.collectAsStateWithLifecycle(false)
     val playlist     = state.currentPlaylist
     val isLikedSongs = playlist == null
-    // Owned playlists only (never Liked Songs / followed) get the delete action.
+    // Owned playlists only (never Liked Songs / followed) get the delete action — and the same
+    // ownership test gates multi-select, so Liked Songs and followed playlists show no Select
+    // affordance at all. ANDed with the mode flag so a mode left over from an ownership change
+    // (or a pane rendering an older state during a swap) can't paint a selection UI.
     val canDelete    = playlist != null && playlist.owner?.id == state.user?.id
+    val inSelection  = canDelete && state.selectionMode
+    val nSelected    = state.selectedUris.size
     val haptics      = LocalHapticFeedback.current
     var showOverflowMenu  by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
@@ -160,20 +165,30 @@ internal fun RightPaneContent(
             isLoadingMore  = state.isLoadingMoreTracks,
             canLoadMore    = canLoadMore,
             onLoadMore     = if (isLikedSongs) viewModel::loadMoreLikedSongs else viewModel::loadMorePlaylistTracks,
+            // In selection mode a tap is a check and playback is suspended; a long-press just
+            // toggles too, since the menu it would open is where the mode came from.
             onTrackClick   = { track ->
-                if (playlist != null) {
+                if (inSelection) {
+                    viewModel.toggleTrackSelection(track.uri)
+                } else if (playlist != null) {
                     val idx = state.currentTracks.indexOfFirst { it.uri == track.uri }.coerceAtLeast(0)
                     playerViewModel.playTrack(track.uri, contextUri = playlist.uri, index = idx)
+                    onTrackClick()
                 } else {
                     playerViewModel.playFromLikedSongs(track.uri)
+                    onTrackClick()
                 }
-                onTrackClick()
             },
             onTrackLongClick = { track ->
-                val removable = playlist?.takeIf { it.owner?.id == state.user?.id }
-                    ?.let { RemovablePlaylist(it.id, it.name) }
-                viewModel.trackActions.open(track.toTrackActionTarget(removable))
+                if (inSelection) {
+                    viewModel.toggleTrackSelection(track.uri)
+                } else {
+                    val removable = playlist?.takeIf { it.owner?.id == state.user?.id }
+                        ?.let { RemovablePlaylist(it.id, it.name) }
+                    viewModel.trackActions.open(track.toTrackActionTarget(removable))
+                }
             },
+            selectedUris   = if (inSelection) state.selectedUris else null,
             modifier       = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = 100.dp + navBarBottomDp),
             listState      = listState,
@@ -187,6 +202,7 @@ internal fun RightPaneContent(
                     trackCount   = trackCount,
                     onPlay       = { haptics.press(); viewModel.playPlaylist(playUri) },
                     onShuffle    = { haptics.press(); viewModel.shufflePlaylist(playUri) },
+                    selecting    = inSelection,
                     playlistId   = playlist?.id,
                     sharedScope  = sharedScope,
                     animScope    = animScope,
@@ -222,51 +238,93 @@ internal fun RightPaneContent(
         // Floating controls — shared by single- and two-pane. The back pill shows only in
         // single-pane (the two-pane right pane sits beside the browser list, so no back is needed).
         TopScrim(color = scrimColor, modifier = Modifier.align(Alignment.TopCenter))
-        if (onBack != null) {
+        if (inSelection) {
+            // Contextual selection pill — takes over from the back / title / overflow pills for the
+            // duration of the mode: [✕] "N selected" [remove]. A plain conditional swap, not an
+            // AnimatedContent: it's a composition change, not a content transition.
             TopActionPill(
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .statusBarsPadding()
                     .padding(start = 16.dp, top = 8.dp),
             ) {
-                IconButton(onClick = { haptics.confirm(); onBack() }) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.cd_back))
+                IconButton(onClick = { haptics.press(); viewModel.exitSelectionMode() }) {
+                    Icon(Icons.Default.Close,
+                        contentDescription = stringResource(R.string.library_selection_cancel))
+                }
+                Text(
+                    text     = pluralStringResource(
+                        R.plurals.library_selected_count, nSelected, nSelected,
+                    ),
+                    style    = MaterialTheme.typography.titleMedium,
+                    maxLines = 1,
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                )
+                // press() only — the confirm/reject buzz reports what the API actually did and is
+                // fired once from LibraryScreen when `removeResult` lands.
+                IconButton(
+                    onClick = { haptics.press(); viewModel.removeSelectedTracks() },
+                    enabled = nSelected > 0 && !state.isRemovingSelection,
+                ) {
+                    Icon(Icons.Default.PlaylistRemove,
+                        contentDescription = stringResource(R.string.library_selection_remove))
                 }
             }
-        }
-        TitlePill(
-            text     = playlistName,
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .statusBarsPadding()
-                .padding(
-                    start = if (onBack != null) 16.dp + TopPillHeight + 8.dp else 16.dp,
-                    top   = 8.dp,
-                )
-                .widthIn(max = 220.dp)
-                .graphicsLayer { alpha = titlePillAlpha.value },
-        )
-        if (canDelete) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .statusBarsPadding()
-                    .padding(end = 16.dp, top = 8.dp),
-            ) {
-                TopActionPill {
-                    IconButton(onClick = { haptics.press(); showOverflowMenu = true }) {
-                        Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.more_options))
+        } else {
+            if (onBack != null) {
+                TopActionPill(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .statusBarsPadding()
+                        .padding(start = 16.dp, top = 8.dp),
+                ) {
+                    IconButton(onClick = { haptics.confirm(); onBack() }) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.cd_back))
                     }
                 }
-                DropdownMenu(
-                    expanded         = showOverflowMenu,
-                    onDismissRequest = { showOverflowMenu = false },
-                ) {
-                    DropdownMenuItem(
-                        text        = { Text(stringResource(R.string.delete_playlist)) },
-                        leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
-                        onClick     = { haptics.press(); showOverflowMenu = false; showDeleteConfirm = true },
+            }
+            TitlePill(
+                text     = playlistName,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .statusBarsPadding()
+                    .padding(
+                        start = if (onBack != null) 16.dp + TopPillHeight + 8.dp else 16.dp,
+                        top   = 8.dp,
                     )
+                    .widthIn(max = 220.dp)
+                    .graphicsLayer { alpha = titlePillAlpha.value },
+            )
+            if (canDelete) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .statusBarsPadding()
+                        .padding(end = 16.dp, top = 8.dp),
+                ) {
+                    TopActionPill {
+                        IconButton(onClick = { haptics.press(); showOverflowMenu = true }) {
+                            Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.more_options))
+                        }
+                    }
+                    DropdownMenu(
+                        expanded         = showOverflowMenu,
+                        onDismissRequest = { showOverflowMenu = false },
+                    ) {
+                        // Second door into selection mode — discoverable without a long-press, and
+                        // present for exactly the playlists the menu's "Select" row is (owned ones,
+                        // since this whole pill is gated on ownership).
+                        DropdownMenuItem(
+                            text        = { Text(stringResource(R.string.library_select_songs)) },
+                            leadingIcon = { Icon(Icons.Default.Checklist, contentDescription = null) },
+                            onClick     = { haptics.press(); showOverflowMenu = false; viewModel.enterSelectionMode() },
+                        )
+                        DropdownMenuItem(
+                            text        = { Text(stringResource(R.string.delete_playlist)) },
+                            leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
+                            onClick     = { haptics.press(); showOverflowMenu = false; showDeleteConfirm = true },
+                        )
+                    }
                 }
             }
         }
@@ -310,6 +368,7 @@ private fun TrackListHero(
     trackCount  : Int,
     onPlay      : () -> Unit,
     onShuffle   : () -> Unit,
+    selecting   : Boolean = false,
     playlistId  : String? = null,
     sharedScope : SharedTransitionScope? = null,
     animScope   : AnimatedContentScope? = null,
@@ -329,8 +388,11 @@ private fun TrackListHero(
     DetailArtHero(
         title       = name,
         subtitle    = if (trackCount > 0) pluralStringResource(R.plurals.library_track_count, trackCount, trackCount) else null,
-        onPlay      = onPlay,
-        onShuffle   = onShuffle,
+        // Play / Shuffle are suspended in selection mode — a tap in the list is a check, so
+        // starting playback from the hero mid-selection would be a mixed message. Passing null
+        // omits the cookie buttons entirely (the shared hero's own contract).
+        onPlay      = if (selecting) null else onPlay,
+        onShuffle   = if (selecting) null else onShuffle,
         artModifier = artModifier,
     ) {
         if (!artUrl.isNullOrBlank()) {
@@ -377,6 +439,8 @@ private fun TrackList(
     onTrackClick   : (com.crsmthw.lyra.data.remote.model.SpotifyTrack) -> Unit,
     modifier       : Modifier = Modifier,
     onTrackLongClick: ((com.crsmthw.lyra.data.remote.model.SpotifyTrack) -> Unit)? = null,
+    // null = not in selection mode; otherwise the checked uris (drives each row's check overlay).
+    selectedUris   : Set<String>? = null,
     contentPadding : PaddingValues = PaddingValues(bottom = 100.dp),
     listState      : androidx.compose.foundation.lazy.LazyListState = rememberLazyListState(),
     headerContent  : (@Composable () -> Unit)? = null,
@@ -414,6 +478,7 @@ private fun TrackList(
                 isPlaying   = currentTrackId == track.id && isPlaying,
                 onClick     = { onTrackClick(track) },
                 onLongClick = onTrackLongClick?.let { handler -> { handler(track) } },
+                selected    = selectedUris?.contains(track.uri),
             )
         }
         if (isLoadingMore) {

@@ -17,6 +17,7 @@ import com.crsmthw.lyra.ui.components.PlayerPanelHost
 import com.crsmthw.lyra.ui.components.TrackActionsHost
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import com.crsmthw.lyra.util.confirm
+import com.crsmthw.lyra.util.reject
 import com.crsmthw.lyra.util.threshold
 
 /** Pairs the search FAB with the Search screen's bar for the container transform — must match the
@@ -92,7 +93,35 @@ fun LibraryScreen(
         onGoToAlbum          = onOpenAlbum,
         onGoToArtist         = onOpenArtist,
         onRemoveFromPlaylist = viewModel::removeTrackFromCurrentPlaylist,
+        // Door 1 into multi-select: the long-pressed track becomes the first check. Only the
+        // Library supplies this, so the row is absent from the menu on every other screen.
+        onSelect             = { target -> viewModel.enterSelectionMode(target.uri) },
     )
+
+    // Outcome of a multi-select removal, reported ONCE at screen level rather than from inside the
+    // detail pane — that pane is rendered by both layouts (and, mid pane-swap, as both a live and a
+    // frozen copy), and only one of them may buzz.
+    val removeResult = state.removeResult
+    LaunchedEffect(removeResult) {
+        when (removeResult) {
+            is RemoveSelectionResult.Success -> { haptics.confirm(); viewModel.clearRemoveResult() }
+            is RemoveSelectionResult.Failure -> haptics.reject()   // the dialog below holds it
+            null                             -> Unit
+        }
+    }
+    if (removeResult is RemoveSelectionResult.Failure) {
+        AlertDialog(
+            onDismissRequest = viewModel::clearRemoveResult,
+            icon    = { Icon(Icons.Default.Warning, null, tint = MaterialTheme.colorScheme.error) },
+            title   = { Text(stringResource(R.string.library_selection_remove_failed)) },
+            text    = { Text(removeResult.message ?: stringResource(R.string.error_generic)) },
+            confirmButton = {
+                TextButton(onClick = viewModel::clearRemoveResult) {
+                    Text(stringResource(R.string.action_ok))
+                }
+            },
+        )
+    }
 }
 
 /** Fires a one-shot threshold haptic each time a pull-to-refresh drag crosses the trigger point. */

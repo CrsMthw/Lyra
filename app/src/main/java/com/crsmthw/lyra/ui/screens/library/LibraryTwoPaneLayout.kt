@@ -2,6 +2,7 @@
 
 package com.crsmthw.lyra.ui.screens.library
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedContentScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
@@ -57,6 +58,11 @@ internal fun TwoPaneLayout(
     val isLandscape = config.screenWidthDp > config.screenHeightDp
     val context   = LocalContext.current
     val mosaicDir = remember { File(context.filesDir, "mosaics") }
+
+    // Back exits multi-select instead of leaving the screen (the single-pane equivalent sits beside
+    // its predictive handler in `SinglePaneLayout`). Nothing else here handles back — both panes are
+    // always on screen, so there is no pane swap for the gesture to unwind.
+    BackHandler(enabled = state.selectionMode) { viewModel.exitSelectionMode() }
 
     // Auto-select Liked Songs on first load so right pane is never blank
     LaunchedEffect(state.isLoading) {

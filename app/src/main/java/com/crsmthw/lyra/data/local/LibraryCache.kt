@@ -230,17 +230,33 @@ class LibraryCache(context: Context) {
     }
 
     /** Removes a track from a playlist's cached track list if present (keeps the snapshot id). */
-    fun removeFromPlaylistTrackList(playlistId: String, trackUri: String) {
+    fun removeFromPlaylistTrackList(playlistId: String, trackUri: String) =
+        removeFromPlaylistTrackList(playlistId, listOf(trackUri))
+
+    /**
+     * Batch form of [removeFromPlaylistTrackList], for the Library's multi-select removal: the whole
+     * set is dropped in ONE cache load/save and ONE [trackListChanges] emission. Not just a
+     * convenience — per-uri calls would re-read and re-write the whole cache file N times, and
+     * [trackListChanges] is a `tryEmit` on a bounded buffer, so a large selection would start
+     * dropping notifications.
+     */
+    fun removeFromPlaylistTrackList(playlistId: String, trackUris: Collection<String>) {
         synchronized(lock) {
             val current  = loadLocked() ?: return
             val existing = current.trackLists[playlistId] ?: return
-            if (existing.tracks.none { it.uri == trackUri }) return
-            val newTracks = existing.tracks.filterNot { it.uri == trackUri }
+            val removing  = trackUris.toSet()
+            val newTracks = existing.tracks.filterNot { it.uri in removing }
+            // The count delta, not `removing.size` — a uri can appear more than once in a playlist
+            // (and Spotify's remove-by-uri drops every occurrence), and one that isn't cached at all
+            // must not decrement anything.
+            val removed   = existing.tracks.size - newTracks.size
+            if (removed == 0) return
             // Mirror the metadata count to the cache only when the cache held the full list; for a
             // partial cache its size isn't the total, so best-effort decrement and let the per-open
             // reconcile settle it.
             val metaNow  = current.playlists.firstOrNull { it.id == playlistId }?.trackCount ?: 0
-            val newTotal = if (existing.tracks.size >= metaNow) newTracks.size else (metaNow - 1).coerceAtLeast(0)
+            val newTotal = if (existing.tracks.size >= metaNow) newTracks.size
+                           else (metaNow - removed).coerceAtLeast(0)
             saveLocked(current.copy(
                 trackLists = current.trackLists + (playlistId to CachedTrackList(existing.snapshotId, newTracks)),
                 playlists  = current.playlists.withTrackCount(playlistId, newTotal),

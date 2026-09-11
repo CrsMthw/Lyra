@@ -2,6 +2,7 @@
 
 package com.crsmthw.lyra.ui.screens.library
 
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedContentScope
@@ -122,7 +123,13 @@ internal fun SinglePaneLayout(
     var backPhase    by remember { mutableStateOf(BackPhase.Idle) }
     var backProgress by remember { mutableFloatStateOf(0f) }
 
-    PredictiveBackHandler(enabled = isShowingDetail) { events ->
+    // Multi-select owns back while it is active: leaving the mode keeps the user IN the playlist, so
+    // the pane-swap seek must not start at all — hence the plain handler here AND the `!selectionMode`
+    // in the predictive handler's `enabled` below. The two are mutually exclusive on that flag, so
+    // the dispatcher never has to pick between them.
+    BackHandler(enabled = state.selectionMode) { viewModel.exitSelectionMode() }
+
+    PredictiveBackHandler(enabled = isShowingDetail && !state.selectionMode) { events ->
         backProgress = 0f
         backPhase    = BackPhase.Seeking   // set BEFORE collecting, so the first progress frame
         try {                              // can't race an animateTo against the seek
