@@ -12,8 +12,9 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.foundation.text.input.clearText
+import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
@@ -34,7 +35,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -74,6 +74,14 @@ fun SearchScreen(
     val keyboard        = LocalSoftwareKeyboardController.current
     val focusRequester  = remember { FocusRequester() }
     val haptics         = LocalHapticFeedback.current
+
+    // The input field owns its own text (M3's TextFieldState form). The ViewModel stays the source
+    // of truth for the *searched* query, fed from here so its 400 ms debounce is untouched; it is
+    // seeded from the VM so returning to a still-live Search entry keeps what was typed.
+    val queryState      = rememberTextFieldState(initialText = state.query)
+    LaunchedEffect(queryState, viewModel) {
+        snapshotFlow { queryState.text.toString() }.collect { viewModel.onQueryChange(it) }
+    }
 
     // Container transform: the floating bar shares bounds with the Library search FAB (same
     // SEARCH_BAR_SHARED_KEY) so tapping the FAB expands it into this bar. Null scopes (two-pane /
@@ -240,7 +248,9 @@ fun SearchScreen(
 
         // Recent searches — only while the query is blank. Lives in the outer (non-ime-padded) Box,
         // top-anchored, so the keyboard never lifts it; it vanishes the moment anything is typed.
-        if (state.query.isBlank() && recents.isNotEmpty()) {
+        // Gated on the *field's* text, not the ViewModel's: the VM is a debounce-coupled frame or
+        // two behind now, which would flash this list over the results on the first keystroke.
+        if (queryState.text.isBlank() && recents.isNotEmpty()) {
             Column(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
@@ -272,10 +282,9 @@ fun SearchScreen(
         // Floating M3 search bar. The back arrow is its own leading icon, so there is no separate
         // floating back pill — one element, which also keeps the FAB→bar morph clean.
         SearchInputBar(
-            query          = state.query,
-            onQueryChange  = viewModel::onQueryChange,
+            queryState     = queryState,
             onBack         = { keyboard?.hide(); haptics.confirm(); onBack() },
-            onClear        = viewModel::clearQuery,
+            onClear        = { queryState.clearText(); viewModel.clearQuery() },
             onSearch       = { keyboard?.hide() },
             focusRequester = focusRequester,
             modifier       = Modifier
@@ -480,18 +489,30 @@ private val SearchBarHeight = 56.dp
  * stadium [Surface] tinted to match the screen's other floating pills (`surfaceContainerHigh` + a
  * small shadow). The back arrow is the field's own leading icon — no separate back pill — so the
  * whole control is a single bounding box (which the FAB→bar container transform will share).
+ *
+ * The only non-deprecated `InputField` overload takes a [TextFieldState] **and** a [SearchBarState]
+ * (both the `query`/`onQueryChange` and the `expanded`/`onExpandedChange` forms are deprecated in
+ * Material3 1.5.0-alpha27). Lyra never expands into a full-screen search bar — there is no
+ * `ExpandedFullScreenSearchBar` anywhere — so the required state is created **already Expanded**
+ * and then left alone. That is deliberate, not cosmetic: starting it Collapsed makes the field
+ * (a) run `animateToExpanded()` on focus, whose `Animatable` is read during composition and so
+ * recomposes the field every frame for the length of a slow spatial spring, (b) keep a
+ * `snapshotFlow { text }` collector alive for the whole screen just to trigger that same expansion
+ * on the first keystroke, and (c) arm its clear-focus-on-collapse effect — all for an expansion
+ * nothing renders. Expanded short-circuits all three. Nothing in the field's *appearance* depends
+ * on the value (only key handling, the a11y state description, and that focus effect do).
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SearchInputBar(
-    query         : String,
-    onQueryChange : (String) -> Unit,
+    queryState    : TextFieldState,
     onBack        : () -> Unit,
     onClear       : () -> Unit,
     onSearch      : () -> Unit,
     focusRequester: FocusRequester,
     modifier      : Modifier = Modifier,
 ) {
+    val searchBarState = rememberSearchBarState(initialValue = SearchBarValue.Expanded)
+
     Surface(
         modifier        = modifier.fillMaxWidth().height(SearchBarHeight),
         shape           = CircleShape,
@@ -499,20 +520,18 @@ private fun SearchInputBar(
         shadowElevation = 3.dp,
     ) {
         SearchBarDefaults.InputField(
-            query            = query,
-            onQueryChange    = onQueryChange,
-            onSearch         = { onSearch() },
-            expanded         = false,
-            onExpandedChange = {},
-            modifier         = Modifier.fillMaxWidth().focusRequester(focusRequester),
-            placeholder      = { Text(stringResource(R.string.search_placeholder)) },
-            leadingIcon      = {
+            textFieldState = queryState,
+            searchBarState = searchBarState,
+            onSearch       = { onSearch() },
+            modifier       = Modifier.fillMaxWidth().focusRequester(focusRequester),
+            placeholder    = { Text(stringResource(R.string.search_placeholder)) },
+            leadingIcon    = {
                 IconButton(onClick = onBack) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = stringResource(R.string.nav_back))
                 }
             },
-            trailingIcon     = if (query.isNotBlank()) {
+            trailingIcon   = if (queryState.text.isNotBlank()) {
                 {
                     IconButton(onClick = onClear) {
                         Icon(Icons.Default.Close,
