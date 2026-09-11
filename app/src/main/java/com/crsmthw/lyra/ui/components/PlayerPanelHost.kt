@@ -17,7 +17,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
+import androidx.compose.material3.adaptive.currentWindowAdaptiveInfoV2
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalWindowInfo
@@ -50,7 +50,7 @@ fun PlayerPanelHost(
     val containerSize  = LocalWindowInfo.current.containerSize
     val screenWidthDp  = with(density) { containerSize.width.toDp() }
     val screenHeightDp = with(density) { containerSize.height.toDp() }
-    val isWideScreen   = currentWindowAdaptiveInfo().windowSizeClass.isWidthAtLeastBreakpoint(600)
+    val isWideScreen   = currentWindowAdaptiveInfoV2().windowSizeClass.isWidthAtLeastBreakpoint(600)
     val isShortScreen  = screenHeightDp < 500.dp
     val canShowPanel   = isWideScreen && !isShortScreen
     // Mirror of LyraNavGraph's docked-pane gate: when the docked third pane is up, drop the mini

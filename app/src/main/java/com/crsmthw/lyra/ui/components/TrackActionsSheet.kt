@@ -225,7 +225,7 @@ private fun ActionItem(
                                      else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
             )
         },
-        headlineContent = {
+        content         = {
             Text(
                 text  = text,
                 color = if (enabled) MaterialTheme.colorScheme.onSurface

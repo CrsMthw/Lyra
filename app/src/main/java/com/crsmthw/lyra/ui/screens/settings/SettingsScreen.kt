@@ -218,7 +218,6 @@ fun SettingsScreen(
                         Icon(Icons.Default.Timer, contentDescription = null,
                             tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     },
-                    headlineContent  = { Text(stringResource(R.string.settings_live_notifications)) },
                     supportingContent = {
                         Text(
                             stringResource(
@@ -257,6 +256,7 @@ fun SettingsScreen(
                             }
                         }
                     },
+                    content          = { Text(stringResource(R.string.settings_live_notifications)) },
                 )
 
                 if (showLiveNotifHelpDialog) {
@@ -289,7 +289,6 @@ fun SettingsScreen(
             ListItem(
                 leadingContent   = { Icon(Icons.Default.Image, contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant) },
-                headlineContent  = { Text(stringResource(R.string.settings_image_cache)) },
                 supportingContent = { Text(formatBytes(imageCacheBytes),
                     color = MaterialTheme.colorScheme.onSurfaceVariant) },
                 trailingContent  = {
@@ -298,6 +297,7 @@ fun SettingsScreen(
                         enabled  = imageCacheBytes > 0L,
                     ) { Text(stringResource(R.string.settings_clear)) }
                 },
+                content          = { Text(stringResource(R.string.settings_image_cache)) },
             )
 
             if (showClearCacheDialog) {
@@ -322,7 +322,6 @@ fun SettingsScreen(
             ListItem(
                 leadingContent   = { Icon(Icons.Default.LibraryMusic, contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant) },
-                headlineContent  = { Text(stringResource(R.string.settings_library_cache)) },
                 supportingContent = { Text(formatBytes(libraryCacheBytes),
                     color = MaterialTheme.colorScheme.onSurfaceVariant) },
                 trailingContent  = {
@@ -331,6 +330,7 @@ fun SettingsScreen(
                         enabled  = libraryCacheBytes > 0L,
                     ) { Text(stringResource(R.string.settings_clear)) }
                 },
+                content          = { Text(stringResource(R.string.settings_library_cache)) },
             )
 
             if (showClearLibraryDialog) {
@@ -984,12 +984,12 @@ private fun SettingsItem(
 
     ListItem(
         leadingContent   = { Icon(icon, contentDescription = null, tint = iconTint) },
-        headlineContent  = {
+        supportingContent= subtitle?.let { { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) } },
+        modifier         = if (onClick != null) Modifier.clickable { haptics.press(); onClick() } else Modifier,
+        content          = {
             Text(title, color = if (tintError) MaterialTheme.colorScheme.error
                                 else MaterialTheme.colorScheme.onSurface)
         },
-        supportingContent= subtitle?.let { { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) } },
-        modifier         = if (onClick != null) Modifier.clickable { haptics.press(); onClick() } else Modifier,
     )
 }
 
@@ -1006,11 +1006,11 @@ private fun SettingsToggleItem(
     ListItem(
         leadingContent   = { Icon(icon, contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurfaceVariant) },
-        headlineContent  = { Text(title) },
         supportingContent= subtitle?.let { { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) } },
         trailingContent  = {
             Switch(checked = checked, onCheckedChange = toggleWithHaptic)
         },
         modifier = Modifier.clickable { toggleWithHaptic(!checked) },
+        content  = { Text(title) },
     )
 }

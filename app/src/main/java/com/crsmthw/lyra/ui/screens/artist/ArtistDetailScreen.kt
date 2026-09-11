@@ -30,7 +30,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
+import androidx.compose.material3.adaptive.currentWindowAdaptiveInfoV2
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -76,7 +76,7 @@ fun ArtistDetailScreen(
     val statusBarTopDp = with(density) { WindowInsets.statusBars.getTop(this).toDp() }
     val scrimHeight    = 140.dp
     val background     = MaterialTheme.colorScheme.background
-    val isWideScreen   = currentWindowAdaptiveInfo().windowSizeClass.isWidthAtLeastBreakpoint(600)
+    val isWideScreen   = currentWindowAdaptiveInfoV2().windowSizeClass.isWidthAtLeastBreakpoint(600)
 
     PlayerPanelHost(
         playerViewModel          = playerViewModel,
@@ -459,7 +459,6 @@ private fun ArtistAlbumRow(
                 }
             }
         },
-        headlineContent   = { Text(album.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         supportingContent = {
             Text(
                 text  = album.releaseYear,
@@ -468,5 +467,6 @@ private fun ArtistAlbumRow(
             )
         },
         modifier = Modifier.clickable(onClick = onClick),
+        content  = { Text(album.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
     )
 }

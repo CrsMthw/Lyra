@@ -30,7 +30,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
+import androidx.compose.material3.adaptive.currentWindowAdaptiveInfoV2
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -83,7 +83,7 @@ fun AlbumDetailScreen(
     val statusBarTopDp = with(density) { WindowInsets.statusBars.getTop(this).toDp() }
     val scrimHeight    = 140.dp
     val background     = MaterialTheme.colorScheme.background
-    val isWideScreen   = currentWindowAdaptiveInfo().windowSizeClass.isWidthAtLeastBreakpoint(600)
+    val isWideScreen   = currentWindowAdaptiveInfoV2().windowSizeClass.isWidthAtLeastBreakpoint(600)
 
     PlayerPanelHost(
         playerViewModel          = playerViewModel,
@@ -448,20 +448,6 @@ private fun AlbumTrackRow(
                 modifier = Modifier.width(24.dp),
             )
         },
-        headlineContent = {
-            Row(
-                verticalAlignment     = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Text(
-                    text     = track.name,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
-                )
-                if (track.explicit) ExplicitBadge()
-            }
-        },
         supportingContent = {
             Text(
                 text     = track.allArtists,
@@ -485,6 +471,20 @@ private fun AlbumTrackRow(
                 handler()
             } },
         ),
+        content = {
+            Row(
+                verticalAlignment     = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    text     = track.name,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                if (track.explicit) ExplicitBadge()
+            }
+        },
     )
 }
 

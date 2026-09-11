@@ -240,13 +240,6 @@ private fun DeviceRow(
                                      else MaterialTheme.colorScheme.onSurfaceVariant,
             )
         },
-        headlineContent = {
-            Text(
-                text  = name,
-                color = if (isActive) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurface,
-            )
-        },
         trailingContent = {
             RadioButton(
                 selected = isActive,
@@ -254,6 +247,13 @@ private fun DeviceRow(
                 colors   = RadioButtonDefaults.colors(
                     selectedColor = MaterialTheme.colorScheme.primary,
                 ),
+            )
+        },
+        content         = {
+            Text(
+                text  = name,
+                color = if (isActive) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurface,
             )
         },
     )

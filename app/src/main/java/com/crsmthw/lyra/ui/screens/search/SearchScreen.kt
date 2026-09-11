@@ -319,7 +319,6 @@ private fun SectionHeader(title: String) {
 private fun RecentSearchRow(recent: RecentSearch, onClick: () -> Unit) {
     val artShape = if (recent.type == "artist") CircleShape else RoundedCornerShape(4.dp)
     ListItem(
-        headlineContent   = { Text(recent.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         supportingContent = {
             Text(
                 recent.subtitle,
@@ -350,6 +349,7 @@ private fun RecentSearchRow(recent: RecentSearch, onClick: () -> Unit) {
             }
         },
         modifier = Modifier.clickable(onClick = onClick),
+        content  = { Text(recent.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
     )
 }
 
@@ -400,7 +400,6 @@ private fun AlbumRow(album: SpotifyAlbum, onClick: () -> Unit) {
     val artistNames = album.artists?.joinToString(", ") { it.name } ?: ""
 
     ListItem(
-        headlineContent  = { Text(album.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         supportingContent= {
             Text(
                 artistNames.ifBlank { "Album" },
@@ -431,13 +430,13 @@ private fun AlbumRow(album: SpotifyAlbum, onClick: () -> Unit) {
             }
         },
         modifier = Modifier.clickable(onClick = onClick),
+        content  = { Text(album.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
     )
 }
 
 @Composable
 private fun PlaylistRow(playlist: SpotifyPlaylist, onClick: () -> Unit) {
     ListItem(
-        headlineContent  = { Text(playlist.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         supportingContent= {
             Text(
                 playlist.owner?.displayName ?: "Playlist",
@@ -469,6 +468,7 @@ private fun PlaylistRow(playlist: SpotifyPlaylist, onClick: () -> Unit) {
             }
         },
         modifier = Modifier.clickable(onClick = onClick),
+        content  = { Text(playlist.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
     )
 }
 
