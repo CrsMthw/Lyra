@@ -265,15 +265,31 @@ fun SearchScreen(
                                 }
                             }
 
-                            // Paging spinner — a small inline one, per MATERIAL3.md's loading
-                            // conventions (ContainedLoadingIndicator is for full-area states).
-                            if (state.isLoadingMore) {
+                            // Paging footer — spinner XOR retry, never both, so the one
+                            // `load_more` key is safe and the item count doesn't churn across the
+                            // loading→failed flip. The spinner is a small inline one, per
+                            // MATERIAL3.md's loading conventions (ContainedLoadingIndicator is for
+                            // full-area states). The retry row is the only way back from a failed
+                            // page: `canLoadMore` stays false while it is shown, so the scroll
+                            // trigger above cannot refire on its own.
+                            if (state.isLoadingMore || state.pagingFailed) {
                                 item(key = "load_more") {
                                     Box(
                                         modifier         = Modifier.fillMaxWidth().padding(16.dp),
                                         contentAlignment = Alignment.Center,
                                     ) {
-                                        CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                                        if (state.isLoadingMore) {
+                                            CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                                        } else {
+                                            TextButton(
+                                                onClick = {
+                                                    haptics.press()
+                                                    viewModel.retryLoadMore()
+                                                },
+                                            ) {
+                                                Text(stringResource(R.string.search_load_more_retry))
+                                            }
+                                        }
                                     }
                                 }
                             }
