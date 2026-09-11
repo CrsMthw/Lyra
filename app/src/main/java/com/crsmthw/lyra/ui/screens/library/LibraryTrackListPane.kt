@@ -138,6 +138,12 @@ internal fun RightPaneContent(
             isRefreshing = state.isRefreshing,
             onRefresh    = onRefresh,
             state        = pullToRefreshState,
+            // Refreshing replaces the list wholesale back to page 0, which would drop an
+            // in-progress selection's rows out from under it — so the gesture is out of the mode.
+            // Belt to the VM's braces: refreshCurrentTracks clears the selection anyway, for the
+            // case where the mode is entered from the song menu while a refresh is already in
+            // flight (nothing gates that on isRefreshing).
+            enabled      = !inSelection,
             modifier     = Modifier.fillMaxSize(),
             indicator    = {
                 if (state.isRefreshing) {

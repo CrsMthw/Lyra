@@ -93,8 +93,11 @@ val LibraryUiState.detailKey: String?
 /**
  * Drops any in-progress multi-select. The mode belongs to ONE open playlist, so every pane change
  * has to clear it — opening another playlist or Liked Songs, backing out to the browser, or the
- * playlist being deleted underneath it. Applied on top of the pane-changing `copy(...)` so the
- * clear lands in the SAME emission as the change (never as an extra one mid-transition).
+ * playlist being deleted underneath it. Also a pull-to-refresh, which isn't a pane change but
+ * replaces the track list wholesale back to page 0: a selection that survived it could point at
+ * rows no longer on screen, and the button it feeds is a DELETE. Applied on top of the replacing
+ * `copy(...)` so the clear lands in the SAME emission as the change (never as an extra one
+ * mid-transition).
  */
 private fun LibraryUiState.selectionCleared() =
     if (!selectionMode && selectedUris.isEmpty()) this
@@ -322,6 +325,15 @@ class LibraryViewModel(
                         playlistTracksOffset = cached.tracks.size,
                         playlistTracksTotal  = if (wasFullyLoaded) cached.tracks.size
                                                else maxOf(s.playlistTracksTotal, cached.tracks.size),
+                        // Unlike a pull-to-refresh this is someone else's edit landing, so it keeps
+                        // any in-progress multi-select rather than wiping it — but it intersects it
+                        // with the new list, so a selection can never point at rows that are gone
+                        // (the removal button reads the raw set, so an off-list uri would be an
+                        // invisible DELETE and would make the row-count delta compute 0). An emptied
+                        // set leaves a "0 selected" pill with Remove already disabled.
+                        selectedUris         = if (s.selectedUris.isEmpty()) s.selectedUris
+                                               else s.selectedUris intersect
+                                                    cached.tracks.mapTo(HashSet()) { it.uri },
                     )
                 }
             }
@@ -980,11 +992,18 @@ class LibraryViewModel(
                 repository.getPlaylistTracks(playlist.id).fold(
                     onSuccess = { resp ->
                         val tracks = (resp.items ?: emptyList()).mapNotNull { it.resolvedTrack }.filter { it.isPlayable != false }
+                        // selectionCleared() in the same emission: this replaces the list wholesale
+                        // back to page 0, so a selection made past page 0 would survive with no
+                        // checked row on screen while the pill still counted it — and the button it
+                        // feeds is a DELETE. The gesture is gated out of selection mode in
+                        // RightPaneContent, but the mode can still be entered from the song menu
+                        // while a refresh is already in flight, so the clear is the real fix.
+                        // (Liked Songs, the branch above, can never be in selection mode.)
                         _uiState.update { it.copy(
                             currentTracks        = tracks,
                             playlistTracksOffset = resp.items?.size ?: 0,   // reset paging to page 0
                             playlistTracksTotal  = resp.total,
-                        ) }
+                        ).selectionCleared() }
                         if (playlist.snapshotId != null) {
                             withContext(Dispatchers.IO) { cache.saveTrackList(playlist.id, playlist.snapshotId, tracks) }
                         }
