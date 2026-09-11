@@ -96,8 +96,6 @@ fun PlayerPanelHost(
         label         = "panelHostScrim",
     )
 
-    BackHandler(enabled = showPlayerPanel) { showPlayerPanel = false }
-
     // Opening the pop-out drops any text focus first. Under `enableEdgeToEdge()` the window is NOT
     // resized for the IME, and the panel below deliberately keeps plain `navigationBarsPadding()`
     // (see the comment there), so with a keyboard up the panel's lower half — seek bar, transport
@@ -214,6 +212,18 @@ fun PlayerPanelHost(
                         .navigationBarsPadding(),
                 )
             }
+
+            // Back closes the pop-out panel. POSITION IS LOAD-BEARING: BackHandler priority is
+            // REGISTRATION order — activity-compose dispatches to the handler composed LAST among
+            // the ENABLED ones — so this must come after `content(onRequestPlayer)`. Registered
+            // above it, a hosted screen's own handler (the Library's `selectionMode` one,
+            // LibraryTwoPaneLayout.kt) outranked it, and one back press cleared the selection
+            // behind the scrim while the panel stayed open. Keep the call unconditional and keep it
+            // last — BackHandler's KDoc warns that conditional calls change composition order, and
+            // `enabled` alone makes it yield when the panel is absent (on single-pane
+            // `canShowPanel` is false, so `showPlayerPanel` can never be true and
+            // LibrarySinglePaneLayout's PredictiveBackHandler still wins).
+            BackHandler(enabled = showPlayerPanel) { showPlayerPanel = false }
         }
     }
 }
