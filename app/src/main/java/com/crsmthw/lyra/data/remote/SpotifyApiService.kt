@@ -162,9 +162,10 @@ interface SpotifyApiService {
     // ── Search ───────────────────────────────────────────────────────────────
     @GET("search")
     suspend fun search(
-        @Query("q")     query: String,
-        @Query("type")  type : String,
-        @Query("limit") limit: Int,
+        @Query("q")      query : String,
+        @Query("type")   type  : String,
+        @Query("limit")  limit : Int,
+        @Query("offset") offset: Int = 0,
     ): SearchResponse
 
     // ── Token refresh (hits accounts endpoint, not api) ──────────────────────

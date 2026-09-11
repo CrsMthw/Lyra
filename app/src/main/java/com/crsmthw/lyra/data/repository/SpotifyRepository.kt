@@ -7,6 +7,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import retrofit2.HttpException
 
+/** Hard cap the Search endpoint puts on `limit` — also the step between search pages. */
+const val SEARCH_PAGE_SIZE = 10
+
 /**
  * Single source of truth for all Spotify data.
  * Returns [Result] so ViewModels never have to catch.
@@ -84,8 +87,12 @@ class SpotifyRepository(
         api.getArtistAlbums(id, offset = offset)
     }
 
-    suspend fun search(query: String): Result<SearchResponse> = safeCall {
-        api.search(query = query, type = "track,album,artist", limit = 10)
+    // The API caps `limit` at 10, so paging by `offset` is the only way past the first page. One
+    // offset covers all three types (the endpoint takes a single one) — a type that runs out just
+    // stops contributing items to later pages. No `playlist` type: the API returns no track
+    // contents for playlists you don't own, so finding them is pointless.
+    suspend fun search(query: String, offset: Int = 0): Result<SearchResponse> = safeCall {
+        api.search(query = query, type = "track,album,artist", limit = SEARCH_PAGE_SIZE, offset = offset)
     }
 
     suspend fun addToQueue(trackUri: String): Result<Unit> = safeCall {

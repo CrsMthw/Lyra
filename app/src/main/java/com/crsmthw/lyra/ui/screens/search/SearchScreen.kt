@@ -55,6 +55,7 @@ import com.crsmthw.lyra.util.ListScrollHaptics
 import com.crsmthw.lyra.util.confirm
 import com.crsmthw.lyra.util.press
 import com.crsmthw.lyra.util.rememberArtBoundsTransform
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import com.crsmthw.lyra.util.visualizer.FftWaveCanvas
 import com.crsmthw.lyra.util.visualizer.LocalVisualizerAccentColor
@@ -147,6 +148,23 @@ fun SearchScreen(
                     } else {
                         val resultsListState = rememberLazyListState()
                         ListScrollHaptics(resultsListState)
+
+                        // Lazy-load on scroll: the API caps a page at 10 per type, so the list
+                        // grows by `offset`. Every gate lives INSIDE the snapshotFlow rather than
+                        // in the collector, so `isLoadingMore` clearing re-emits and the next page
+                        // can follow while the user stays parked at the end of the list.
+                        LaunchedEffect(resultsListState, viewModel) {
+                            snapshotFlow {
+                                val info = resultsListState.layoutInfo
+                                val last = info.visibleItemsInfo.lastOrNull()?.index ?: -1
+                                state.canLoadMore && !state.isLoading && !state.isLoadingMore &&
+                                    info.totalItemsCount > 0 &&
+                                    last >= info.totalItemsCount - LOAD_MORE_THRESHOLD
+                            }
+                                .distinctUntilChanged()
+                                .collect { nearEnd -> if (nearEnd) viewModel.loadMore() }
+                        }
+
                         LazyColumn(
                             state          = resultsListState,
                             modifier       = Modifier.fillMaxSize(),
@@ -222,6 +240,19 @@ fun SearchScreen(
                                             onOpenPlayer()
                                         },
                                     )
+                                }
+                            }
+
+                            // Paging spinner — a small inline one, per MATERIAL3.md's loading
+                            // conventions (ContainedLoadingIndicator is for full-area states).
+                            if (state.isLoadingMore) {
+                                item(key = "load_more") {
+                                    Box(
+                                        modifier         = Modifier.fillMaxWidth().padding(16.dp),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                                    }
                                 }
                             }
 
@@ -341,6 +372,9 @@ fun SearchScreen(
 
 /** Pairs the Library search FAB with the Search screen's bar for the container transform. */
 private const val SEARCH_BAR_SHARED_KEY = "search-bar"
+
+/** How close to the end of the results list a scroll gets before the next page is requested. */
+private const val LOAD_MORE_THRESHOLD = 5
 
 @Composable
 private fun SectionHeader(title: String) {
