@@ -268,4 +268,6 @@
     <!-- Recent searches -->
     <string name="search_recent_remove">Remove from recent searches</string>
     <string name="search_recent_clear_all">Clear all</string>
+    <!-- TEMPORARY — podcast API spike, remove after go/no-go -->
+    <string name="settings_podcast_spike_title">Podcast API spike</string>
 </resources>
