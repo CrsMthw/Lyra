@@ -19,7 +19,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfoV2
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalWindowInfo
 import com.crsmthw.lyra.util.confirm
 import androidx.compose.ui.unit.dp
@@ -72,6 +74,8 @@ fun PlayerPanelHost(
     }
 
     val maxPanelHeight = screenHeightDp * 0.8f
+    val focusManager   = LocalFocusManager.current
+    val keyboard       = LocalSoftwareKeyboardController.current
 
     var showPlayerPanel by rememberSaveable { mutableStateOf(false) }
 
@@ -92,9 +96,22 @@ fun PlayerPanelHost(
         label         = "panelHostScrim",
     )
 
-    BackHandler(enabled = showPlayerPanel) { showPlayerPanel = false }
-
-    val onRequestPlayer: () -> Unit = { if (canShowPanel) showPlayerPanel = true else onOpenPlayer() }
+    // Opening the pop-out drops any text focus first. Under `enableEdgeToEdge()` the window is NOT
+    // resized for the IME, and the panel below deliberately keeps plain `navigationBarsPadding()`
+    // (see the comment there), so with a keyboard up the panel's lower half — seek bar, transport
+    // row, action row — would sit underneath it. Search auto-focuses its field, so that is the
+    // normal case there, not an edge case. `clearFocus(force = true)` is the load-bearing half:
+    // `hide()` alone leaves the field focused, and dismissing a sheet the action row opened can
+    // then hand focus back and re-show the IME under the panel. Unconditional inside `canShowPanel`
+    // — a no-op on Library/Album/Artist, where nothing is focused — rather than keyed on
+    // `miniPlayerAvoidsIme`, which describes the mini player's inset, not whether an IME is up.
+    val onRequestPlayer: () -> Unit = {
+        if (canShowPanel) {
+            focusManager.clearFocus(force = true)
+            keyboard?.hide()
+            showPlayerPanel = true
+        } else onOpenPlayer()
+    }
 
     SharedTransitionLayout {
         Box(modifier = modifier.fillMaxSize()) {
@@ -195,6 +212,18 @@ fun PlayerPanelHost(
                         .navigationBarsPadding(),
                 )
             }
+
+            // Back closes the pop-out panel. POSITION IS LOAD-BEARING: BackHandler priority is
+            // REGISTRATION order — activity-compose dispatches to the handler composed LAST among
+            // the ENABLED ones — so this must come after `content(onRequestPlayer)`. Registered
+            // above it, a hosted screen's own handler (the Library's `selectionMode` one,
+            // LibraryTwoPaneLayout.kt) outranked it, and one back press cleared the selection
+            // behind the scrim while the panel stayed open. Keep the call unconditional and keep it
+            // last — BackHandler's KDoc warns that conditional calls change composition order, and
+            // `enabled` alone makes it yield when the panel is absent (on single-pane
+            // `canShowPanel` is false, so `showPlayerPanel` can never be true and
+            // LibrarySinglePaneLayout's PredictiveBackHandler still wins).
+            BackHandler(enabled = showPlayerPanel) { showPlayerPanel = false }
         }
     }
 }

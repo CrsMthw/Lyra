@@ -90,6 +90,12 @@ fun SearchScreen(
     LaunchedEffect(queryState, viewModel) {
         snapshotFlow { queryState.text.toString() }.collect { viewModel.onQueryChange(it) }
     }
+    // Collapsed to a Boolean on purpose. `TextFieldState.text` reads one snapshot state carrying
+    // text PLUS selection PLUS composing region, so reading it directly in the content lambda below
+    // subscribed that whole scope — the results LazyColumn included — to cursor drags and IME
+    // composing updates. Derived, only a genuine blank↔non-blank flip invalidates it, and
+    // derivedStateOf adds no frame of lag (dependents are notified with the recomputed value).
+    val queryBlank by remember(queryState) { derivedStateOf { queryState.text.isBlank() } }
 
     // Container transform: the floating bar shares bounds with the Library search FAB (same
     // SEARCH_BAR_SHARED_KEY) so tapping the FAB expands it into this bar. Null scopes (two-pane /
@@ -265,15 +271,31 @@ fun SearchScreen(
                                 }
                             }
 
-                            // Paging spinner — a small inline one, per MATERIAL3.md's loading
-                            // conventions (ContainedLoadingIndicator is for full-area states).
-                            if (state.isLoadingMore) {
+                            // Paging footer — spinner XOR retry, never both, so the one
+                            // `load_more` key is safe and the item count doesn't churn across the
+                            // loading→failed flip. The spinner is a small inline one, per
+                            // MATERIAL3.md's loading conventions (ContainedLoadingIndicator is for
+                            // full-area states). The retry row is the only way back from a failed
+                            // page: `canLoadMore` stays false while it is shown, so the scroll
+                            // trigger above cannot refire on its own.
+                            if (state.isLoadingMore || state.pagingFailed) {
                                 item(key = "load_more") {
                                     Box(
                                         modifier         = Modifier.fillMaxWidth().padding(16.dp),
                                         contentAlignment = Alignment.Center,
                                     ) {
-                                        CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                                        if (state.isLoadingMore) {
+                                            CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                                        } else {
+                                            TextButton(
+                                                onClick = {
+                                                    haptics.press()
+                                                    viewModel.retryLoadMore()
+                                                },
+                                            ) {
+                                                Text(stringResource(R.string.search_load_more_retry))
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -306,7 +328,7 @@ fun SearchScreen(
         // top-anchored, so the keyboard never lifts it; it vanishes the moment anything is typed.
         // Gated on the *field's* text, not the ViewModel's: the VM is a debounce-coupled frame or
         // two behind now, which would flash this list over the results on the first keystroke.
-        if (queryState.text.isBlank() && recents.isNotEmpty()) {
+        if (queryBlank && recents.isNotEmpty()) {
             // A full cap-10 list plus its header and Clear all overruns the shorter geometries
             // (folded outer screen, any landscape), and Clear all sits at the END — so the column
             // scrolls. The bottom inset is max(IME, nav bar) and is applied OUTSIDE the scroll, so

@@ -36,8 +36,14 @@ data class SearchUiState(
     val isLoading     : Boolean         = false,
     /** A page is in flight *underneath* the live results — it never swaps the list out. */
     val isLoadingMore : Boolean         = false,
-    /** At least one type still has a `next`, so the list can still grow. */
+    /** At least one row-producing type still has a `next`, so the list can still grow. */
     val canLoadMore   : Boolean         = false,
+    /**
+     * The last page request failed, so paging is parked. Renders as an inline retry row at the end
+     * of the list — never as [error], which is a full-screen state that would replace the results.
+     * Mutually exclusive with [isLoadingMore], and always paired with `canLoadMore = false`.
+     */
+    val pagingFailed  : Boolean         = false,
     val error         : String?         = null,
 )
 
@@ -79,11 +85,16 @@ class SearchViewModel(
     private var resultsQuery = ""
 
     init {
-        // Debounce search input: wait 400 ms after last keystroke before hitting API
+        // Debounce search input: wait 400 ms after last keystroke before hitting API.
+        // `distinctUntilChanged` sits BEFORE the blank filter on purpose: a cleared field then
+        // consumes the distinct slot, so retyping the *same* query re-searches instead of being
+        // dropped against a retained value that survived the clear. (Filtering first left a
+        // cleared-then-retyped query with a filled bar over an empty background.) Narrow case that
+        // survives: retyping inside the 400 ms window, where `debounce` swallows the blank itself.
         _query
             .debounce(400L)
-            .filter { it.isNotBlank() }
             .distinctUntilChanged()
+            .filter { it.isNotBlank() }
             .onEach { doSearch(it) }
             .launchIn(viewModelScope)
 
@@ -131,7 +142,7 @@ class SearchViewModel(
             resultsQuery = ""
             _state.update {
                 it.copy(results = null, isLoading = false, isLoadingMore = false,
-                        canLoadMore = false, error = null)
+                        canLoadMore = false, pagingFailed = false, error = null)
             }
         }
     }
@@ -139,7 +150,10 @@ class SearchViewModel(
     private fun doSearch(query: String) {
         val epoch = ++searchEpoch
         viewModelScope.launch {
-            _state.update { it.copy(isLoading = true, isLoadingMore = false, canLoadMore = false, error = null) }
+            _state.update {
+                it.copy(isLoading = true, isLoadingMore = false, canLoadMore = false,
+                        pagingFailed = false, error = null)
+            }
             repository.search(query, offset = 0).fold(
                 onSuccess = { results ->
                     if (epoch != searchEpoch) return@fold
@@ -147,12 +161,13 @@ class SearchViewModel(
                     nextOffset   = SEARCH_PAGE_SIZE
                     _state.update {
                         it.copy(
-                            results     = results,
-                            isLoading   = false,
-                            // An all-empty first page is the end of the road whatever `next` says:
-                            // the screen renders that as the "No results" state, which composes no
-                            // LazyColumn — so the scroll trigger could never fire to page past it.
-                            canLoadMore = results.hasMore() && results.itemCount() > 0,
+                            results      = results,
+                            isLoading    = false,
+                            pagingFailed = false,
+                            // A first page that produced no ROW-item is the end of the road
+                            // whatever `next` says: the scroll trigger reads row geometry, so it
+                            // could never fire to page past it (see `itemCount` below).
+                            canLoadMore  = results.hasMore() && results.itemCount() > 0,
                         )
                     }
                 },
@@ -167,10 +182,12 @@ class SearchViewModel(
     /**
      * Appends the next page to the live results — the lazy-load-on-scroll path.
      *
-     * Deliberately touches **only** `isLoadingMore` / `canLoadMore`: the screen's `when` renders
-     * `isLoading` and `error` as full-screen states that *replace* the list, so writing either here
-     * would yank the results out from under a scrolling user. A page that fails (including the
-     * endpoint refusing an offset past its ceiling) just ends paging silently.
+     * Deliberately touches **only** `isLoadingMore` / `canLoadMore` / `pagingFailed`: the screen's
+     * `when` renders `isLoading` and `error` as full-screen states that *replace* the list, so
+     * writing either here would yank the results out from under a scrolling user. A page that fails
+     * (including the endpoint refusing an offset past its ceiling) ends paging and raises
+     * `pagingFailed`, which the screen shows as an inline retry row — [retryLoadMore] is the ONLY
+     * thing that re-arms `canLoadMore`, so the automatic scroll trigger cannot refire on its own.
      */
     fun loadMore() {
         val current = _state.value
@@ -196,8 +213,8 @@ class SearchViewModel(
                         it.copy(
                             results       = merged,
                             isLoadingMore = false,
-                            // A page whose every item was a duplicate would leave the scroll
-                            // trigger satisfied forever, so treat "nothing new" as the end.
+                            // A page that added no new ROW-item would leave the scroll trigger
+                            // satisfied forever, so treat "nothing new" as the end.
                             canLoadMore   = merged.hasMore() &&
                                             merged.itemCount() > results.itemCount() &&
                                             nextOffset <= MAX_SEARCH_OFFSET,
@@ -206,10 +223,25 @@ class SearchViewModel(
                 },
                 onFailure = {
                     if (epoch != searchEpoch) return@fold
-                    _state.update { it.copy(isLoadingMore = false, canLoadMore = false) }
+                    _state.update {
+                        it.copy(isLoadingMore = false, canLoadMore = false, pagingFailed = true)
+                    }
                 },
             )
         }
+    }
+
+    /**
+     * Re-arms paging after a failed page — the inline retry row's tap. `nextOffset` is only
+     * advanced on success, so this re-requests the SAME offset with no arithmetic.
+     *
+     * Synchronous on purpose: [loadMore] reads `_state.value` and flips `isLoadingMore` inline, so
+     * there is no frame where `canLoadMore` is true while `isLoadingMore` is false for the screen's
+     * scroll trigger to fire a duplicate page into.
+     */
+    fun retryLoadMore() {
+        _state.update { it.copy(canLoadMore = true, pagingFailed = false) }
+        loadMore()
     }
 
     fun clearQuery() {
@@ -245,12 +277,23 @@ private fun <T> Paged<T>.appendItems(page: Paged<T>?, id: (T) -> String): Paged<
     )
 }
 
-/** True while any type still has a further page. */
+// Both terminators below count only the ROW-PRODUCING types. Artists are excluded on purpose:
+// they render as exactly two fixed `LazyColumn` items (a section header plus one horizontal
+// `LazyRow`), so appending artists never grows `totalItemsCount` — and the screen's paging trigger
+// reads precisely that. Counting them left the trigger latched on an artists-only page and fired
+// back-to-back `/search` calls up to the offset ceiling with nothing changing on screen.
+// `playlists` is counted because it DOES render one row per item; it is simply always null today
+// (the search type is track,album,artist), which is also why `appendPage` passes it through
+// unmerged — merge it there before requesting it.
+// Deliberate consequence: once tracks and albums are exhausted the artists row stops growing too —
+// correct, since nothing in the UI can page artists into view anyway.
+
+/** True while any row-producing type still has a further page. */
 private fun SearchResponse.hasMore() =
-    tracks?.next != null || albums?.next != null || artists?.next != null
+    tracks?.next != null || albums?.next != null || playlists?.next != null
 
 private fun SearchResponse.itemCount() =
-    (tracks?.items?.size ?: 0) + (albums?.items?.size ?: 0) + (artists?.items?.size ?: 0)
+    (tracks?.items?.size ?: 0) + (albums?.items?.size ?: 0) + (playlists?.items?.size ?: 0)
 
 class SearchViewModelFactory(private val container: AppContainer) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
