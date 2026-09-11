@@ -42,6 +42,18 @@ import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 // doesn't slide/fade when navigating between browse screens. Here we just render the screen
 // content and suppress the mini player + pop-out so nothing competes with that docked pane.
 @OptIn(ExperimentalSharedTransitionApi::class)
+/**
+ * True while this host's pop-out player panel is open. A hosted screen that registers its own
+ * `BackHandler` MUST gate it on `!LocalPopOutPanelOpen.current`: `BackHandler` priority is
+ * registration order (the handler composed LAST among the enabled ones wins), and that order is
+ * not stable — a screen whose layout is (re)composed after this host already exists (unfolding from
+ * single- to two-pane composes `TwoPaneLayout` fresh) registers AFTER the host's handler and
+ * outranks it, so back cancelled a Library selection behind the panel's scrim while the panel
+ * stayed open (device pass 2026-09-12; a nav-mode switch recreated the Activity and "fixed" it).
+ * Making the two handlers mutually exclusive on this flag holds regardless of composition order.
+ */
+val LocalPopOutPanelOpen: ProvidableCompositionLocal<Boolean> = compositionLocalOf { false }
+
 @Composable
 fun PlayerPanelHost(
     playerViewModel         : PlayerViewModel,
@@ -115,7 +127,9 @@ fun PlayerPanelHost(
 
     SharedTransitionLayout {
         Box(modifier = modifier.fillMaxSize()) {
-            content(onRequestPlayer)
+            CompositionLocalProvider(LocalPopOutPanelOpen provides showPlayerPanel) {
+                content(onRequestPlayer)
+            }
 
             // Scrim behind the panel.
             //
@@ -213,16 +227,16 @@ fun PlayerPanelHost(
                 )
             }
 
-            // Back closes the pop-out panel. POSITION IS LOAD-BEARING: BackHandler priority is
-            // REGISTRATION order — activity-compose dispatches to the handler composed LAST among
-            // the ENABLED ones — so this must come after `content(onRequestPlayer)`. Registered
-            // above it, a hosted screen's own handler (the Library's `selectionMode` one,
-            // LibraryTwoPaneLayout.kt) outranked it, and one back press cleared the selection
-            // behind the scrim while the panel stayed open. Keep the call unconditional and keep it
-            // last — BackHandler's KDoc warns that conditional calls change composition order, and
-            // `enabled` alone makes it yield when the panel is absent (on single-pane
-            // `canShowPanel` is false, so `showPlayerPanel` can never be true and
-            // LibrarySinglePaneLayout's PredictiveBackHandler still wins).
+            // Back closes the pop-out panel. Registered LAST on purpose (BackHandler priority is
+            // registration order — the handler composed last among the ENABLED ones wins), but
+            // that order alone is NOT the guard: a hosted layout composed after this host exists
+            // (unfolding into TwoPaneLayout) registers later and outranks it. The real guard is
+            // [LocalPopOutPanelOpen] — hosted handlers gate themselves on it, so the two can never
+            // be enabled at once. Keep this call unconditional and last anyway (BackHandler's KDoc
+            // warns that conditional calls change composition order); `enabled` alone makes it
+            // yield when the panel is absent (on single-pane `canShowPanel` is false, so
+            // `showPlayerPanel` can never be true and LibrarySinglePaneLayout's
+            // PredictiveBackHandler still wins).
             BackHandler(enabled = showPlayerPanel) { showPlayerPanel = false }
         }
     }

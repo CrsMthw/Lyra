@@ -35,6 +35,7 @@ import com.crsmthw.lyra.util.rememberArtBoundsTransform
 import com.crsmthw.lyra.util.visualizer.FftWaveCanvas
 import com.crsmthw.lyra.util.visualizer.LocalVisualizerAccentColor
 import java.io.File
+import com.crsmthw.lyra.ui.components.LocalPopOutPanelOpen
 
 // ── Two-pane (unfolded / tablet) ─────────────────────────────────────────────
 
@@ -62,7 +63,10 @@ internal fun TwoPaneLayout(
     // Back exits multi-select instead of leaving the screen (the single-pane equivalent sits beside
     // its predictive handler in `SinglePaneLayout`). Nothing else here handles back — both panes are
     // always on screen, so there is no pane swap for the gesture to unwind.
-    BackHandler(enabled = state.selectionMode) { viewModel.exitSelectionMode() }
+    // Gated on the pop-out panel being closed: the host's own BackHandler must win while the panel
+    // is up, and registration order can't guarantee that (see LocalPopOutPanelOpen's KDoc).
+    val panelOpen = LocalPopOutPanelOpen.current
+    BackHandler(enabled = state.selectionMode && !panelOpen) { viewModel.exitSelectionMode() }
 
     // Auto-select Liked Songs on first load so right pane is never blank
     LaunchedEffect(state.isLoading) {

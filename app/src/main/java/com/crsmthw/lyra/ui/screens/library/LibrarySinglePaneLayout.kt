@@ -49,6 +49,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlin.coroutines.cancellation.CancellationException
+import com.crsmthw.lyra.ui.components.LocalPopOutPanelOpen
 
 // ── Single pane (phone / folded) ─────────────────────────────────────────────
 
@@ -127,7 +128,10 @@ internal fun SinglePaneLayout(
     // the pane-swap seek must not start at all — hence the plain handler here AND the `!selectionMode`
     // in the predictive handler's `enabled` below. The two are mutually exclusive on that flag, so
     // the dispatcher never has to pick between them.
-    BackHandler(enabled = state.selectionMode) { viewModel.exitSelectionMode() }
+    // The pop-out panel can't open in single-pane, so the gate is inert here — kept for symmetry
+    // with TwoPaneLayout (see LocalPopOutPanelOpen's KDoc).
+    val panelOpen = LocalPopOutPanelOpen.current
+    BackHandler(enabled = state.selectionMode && !panelOpen) { viewModel.exitSelectionMode() }
 
     PredictiveBackHandler(enabled = isShowingDetail && !state.selectionMode) { events ->
         backProgress = 0f

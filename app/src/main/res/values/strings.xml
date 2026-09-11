@@ -265,6 +265,12 @@
     <string name="library_selection_remove">Remove selected songs</string>
     <string name="library_selection_cancel">Cancel selection</string>
     <string name="library_selection_remove_failed">Couldn\'t remove the selected songs</string>
+    <string name="library_selection_confirm_title">Remove songs?</string>
+    <plurals name="library_selection_confirm_message">
+        <item quantity="one">Remove %1$d song from “%2$s”?</item>
+        <item quantity="other">Remove %1$d songs from “%2$s”?</item>
+    </plurals>
+    <string name="library_selection_confirm_button">Remove</string>
     <!-- Recent searches -->
     <string name="search_recent_remove">Remove from recent searches</string>
     <string name="search_recent_clear_all">Clear all</string>

@@ -87,6 +87,7 @@ internal fun RightPaneContent(
     val haptics      = LocalHapticFeedback.current
     var showOverflowMenu  by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    var showRemoveConfirm by remember { mutableStateOf(false) }
     val mosaicFile   = playlist?.let { p ->
         if (p.id in state.playlistsWithMosaics) File(mosaicDir, "${p.id}.png") else null
     }
@@ -269,10 +270,15 @@ internal fun RightPaneContent(
                 // press() only — the confirm/reject buzz reports what the API actually did and is
                 // fired once from LibraryScreen when `removeResult` lands.
                 IconButton(
-                    onClick = { haptics.press(); viewModel.removeSelectedTracks() },
+                    onClick = {
+                        haptics.press()
+                        // A batch is confirmed first; a single checked row is one deliberate tap
+                        // and goes straight through, like the song menu's own remove row.
+                        if (nSelected >= 2) showRemoveConfirm = true else viewModel.removeSelectedTracks()
+                    },
                     enabled = nSelected > 0 && !state.isRemovingSelection,
                 ) {
-                    Icon(Icons.Default.PlaylistRemove,
+                    Icon(Icons.Default.Delete,
                         contentDescription = stringResource(R.string.library_selection_remove))
                 }
             }
@@ -333,6 +339,34 @@ internal fun RightPaneContent(
                     }
                 }
             }
+        }
+        if (showRemoveConfirm && playlist != null) {
+            AlertDialog(
+                onDismissRequest = { showRemoveConfirm = false },
+                title   = { Text(stringResource(R.string.library_selection_confirm_title)) },
+                text    = {
+                    Text(pluralStringResource(
+                        R.plurals.library_selection_confirm_message, nSelected, nSelected, playlist.name,
+                    ))
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showRemoveConfirm = false
+                        haptics.press()   // the confirm/reject buzz fires when removeResult lands
+                        viewModel.removeSelectedTracks()
+                    }) {
+                        Text(
+                            text  = stringResource(R.string.library_selection_confirm_button),
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { haptics.press(); showRemoveConfirm = false }) {
+                        Text(stringResource(R.string.action_cancel))
+                    }
+                },
+            )
         }
         if (showDeleteConfirm && playlist != null) {
             AlertDialog(

@@ -252,9 +252,13 @@ class SpotifyRepository(
         line("Podcast API spike — token scopes as shipped (no user-read-playback-position).")
 
         // ── (1) Followed shows ───────────────────────────────────────────────
-        // savedLegOk stays false on failure: leg 4's positive control keys on it, and "leg 1
-        // failed" and "leg 1 said zero follows" both leave savedCandidates empty otherwise.
-        var savedLegOk      = false
+        // savedLegOk stays false on failure: leg 4's positive control keys on it. savedFollowCount
+        // is what leg 1 REPORTED (items.size) — deliberately separate from savedCandidates, which is
+        // only what parsed out to a show uri: "zero follows" and "follows exist but the payload
+        // shape parsed to nothing" must reach different control branches (the second must NOT
+        // authorise writes — it is exactly the unknown-shape case this spike exists to measure).
+        var savedLegOk       = false
+        var savedFollowCount = 0
         var savedId         : String? = null
         var savedCandidates : List<Pair<String, String>> = emptyList()   // uri to name
         getSavedShows().fold(
@@ -262,8 +266,9 @@ class SpotifyRepository(
                 val items = response.items.orEmpty()
                 val first = items.firstOrNull()?.show
                 line("1) GET me/shows?limit=5 -> 2xx OK, total=${response.total}, items=${items.size}, first=${first?.name ?: "-"}")
-                savedLegOk      = true
-                savedId         = first?.id
+                savedLegOk       = true
+                savedFollowCount = items.size
+                savedId          = first?.id
                 savedCandidates = items.mapNotNull { it.show }.mapNotNull { show ->
                     show.uri?.let { uri -> uri to (show.name ?: uri) }
                 }
@@ -360,9 +365,15 @@ class SpotifyRepository(
                     line("4-pre) control SKIPPED: leg 1 failed, so the follow-set is unknown and contains cannot be trusted — WRITE LEGS NOT EXERCISED.")
                     false
                 }
-                savedCandidates.isEmpty() -> {
-                    line("4-pre) control not needed: me/shows returned 2xx with no followed shows, so no candidate can be followed — a toggle cannot destroy a subscription.")
+                savedFollowCount == 0 -> {
+                    line("4-pre) control not needed: me/shows returned 2xx with items=0 (no followed shows), so no candidate can be followed — a toggle cannot destroy a subscription.")
                     true
+                }
+                savedCandidates.isEmpty() -> {
+                    // Leg 1 reported follows, yet nothing parsed to a show uri: the payload shape is
+                    // not what Shows.kt models. No control is available, so no write is safe.
+                    line("4-pre) control UNAVAILABLE: me/shows reported $savedFollowCount follow(s) but none parsed to a show uri (unexpected item shape — see the leg-1 line's first=) — WRITE LEGS NOT EXERCISED. Headline spike result: fix the show model before trusting any leg.")
+                    false
                 }
                 else -> {
                     val (controlUri, controlName) = savedCandidates[0]

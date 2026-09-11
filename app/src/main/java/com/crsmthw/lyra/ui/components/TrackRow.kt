@@ -8,7 +8,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -26,6 +25,8 @@ import com.crsmthw.lyra.util.confirm
 import com.crsmthw.lyra.util.longPress
 import com.crsmthw.lyra.util.tick
 import com.crsmthw.lyra.util.toTimeString
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -60,7 +61,7 @@ fun TrackRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // Album art — in selection mode it doubles as the checkbox (a tinted scrim + check when
-        // checked, a small hollow badge when not), so the row's layout never shifts as the mode
+        // checked, a small bordered badge when not), so the row's layout never shifts as the mode
         // turns on and off. Both overlays sit inside the art's own clip, keeping its rounding.
         Box(modifier = Modifier.size(48.dp).clip(RoundedCornerShape(4.dp))) {
             AsyncImage(
@@ -83,14 +84,16 @@ fun TrackRow(
                         modifier           = Modifier.size(26.dp),
                     )
                 }
-                false -> Icon(
-                    imageVector        = Icons.Default.RadioButtonUnchecked,
-                    contentDescription = null,
-                    tint               = MaterialTheme.colorScheme.surface,
-                    modifier           = Modifier
+                // A bordered surface disc, not a bare surface-tinted glyph: over dark art in the dark
+                // theme a single-colour outline vanished, while a filled disc with a contrasting
+                // border reads on any art (device pass 2026-09-12).
+                false -> Box(
+                    modifier = Modifier
                         .align(Alignment.BottomEnd)
-                        .padding(2.dp)
-                        .size(16.dp),
+                        .padding(3.dp)
+                        .size(18.dp)
+                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.92f), CircleShape)
+                        .border(1.5.dp, MaterialTheme.colorScheme.onSurfaceVariant, CircleShape),
                 )
                 null  -> Unit
             }
