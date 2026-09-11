@@ -7,11 +7,13 @@ import coil3.ImageLoader
 import com.crsmthw.lyra.data.local.EncryptedPrefs
 import com.crsmthw.lyra.data.local.LibraryCache
 import com.crsmthw.lyra.data.repository.SettingsRepository
+import com.crsmthw.lyra.data.repository.SpotifyRepository
 import com.crsmthw.lyra.di.AppContainer
 import com.crsmthw.lyra.util.MosaicGenerator
 import com.crsmthw.lyra.ui.theme.ThemeMode
 import com.crsmthw.lyra.util.visualizer.VisualizerStyle
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -24,6 +26,7 @@ class SettingsViewModel(
     private val imageLoader     : ImageLoader,
     private val libraryCache    : LibraryCache,
     private val mosaicGenerator : MosaicGenerator,
+    private val spotifyRepo     : SpotifyRepository,
 ) : ViewModel() {
 
     val themeMode: StateFlow<ThemeMode> = settingsRepo.themeMode
@@ -124,6 +127,24 @@ class SettingsViewModel(
         }
     }
 
+    // ── TEMPORARY — podcast API spike, remove after go/no-go ─────────────────
+    // Non-null while the spike dialog is up; the first emission is a placeholder line so the
+    // dialog appears on the long-press instead of after the network round trips.
+    private val _spikeLog = MutableStateFlow<List<String>?>(null)
+    val spikeLog: StateFlow<List<String>?> = _spikeLog
+
+    private var spikeJob: Job? = null
+
+    fun runPodcastSpike() {
+        if (spikeJob?.isActive == true) return   // a double long-press must not interleave the mutation legs
+        _spikeLog.value = listOf("Running podcast API spike…")
+        spikeJob = viewModelScope.launch {
+            _spikeLog.value = spotifyRepo.runPodcastSpike()
+        }
+    }
+
+    fun dismissSpike() { _spikeLog.value = null }
+
     private fun refreshCacheSizes() {
         viewModelScope.launch(Dispatchers.IO) {
             _imageCacheBytes.value   = imageLoader.diskCache?.size ?: 0L
@@ -142,5 +163,6 @@ class SettingsViewModelFactory(private val container: AppContainer) : ViewModelP
             container.imageLoader,
             container.libraryCache,
             container.mosaicGenerator,
+            container.spotifyRepository,
         ) as T
 }

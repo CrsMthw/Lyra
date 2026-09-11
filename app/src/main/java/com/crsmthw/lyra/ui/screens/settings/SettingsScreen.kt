@@ -13,12 +13,15 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import com.crsmthw.lyra.ui.components.CappedModalBottomSheet
 import com.crsmthw.lyra.ui.components.ConnectedChoiceRow
 import com.crsmthw.lyra.ui.components.sheetTopGap
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -37,6 +40,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import com.crsmthw.lyra.util.confirm
+import com.crsmthw.lyra.util.longPress
 import com.crsmthw.lyra.util.screenTransitionSpec
 import com.crsmthw.lyra.util.press
 import com.crsmthw.lyra.util.tick
@@ -85,6 +89,8 @@ fun SettingsScreen(
     val haptics              = LocalHapticFeedback.current
     val imageCacheBytes        by viewModel.imageCacheBytes.collectAsStateWithLifecycle()
     val libraryCacheBytes      by viewModel.libraryCacheBytes.collectAsStateWithLifecycle()
+    // TEMPORARY — podcast API spike, remove after go/no-go
+    val spikeLog               by viewModel.spikeLog.collectAsStateWithLifecycle()
     var showLogoutDialog  by remember { mutableStateOf(false) }
     var showThemeSheet    by remember { mutableStateOf(false) }
     var showVisualizerSheet by remember { mutableStateOf(false) }
@@ -352,7 +358,37 @@ fun SettingsScreen(
             }
 
             // ── About ─────────────────────────────────────────────────────────────
-            AboutSection()
+            // TEMPORARY — podcast API spike, remove after go/no-go: the hidden trigger is a
+            // long-press on the version line. Nothing in the UI hints at it.
+            AboutSection(onVersionLongPress = viewModel::runPodcastSpike)
+
+            // TEMPORARY — podcast API spike, remove after go/no-go. The body is RAW diagnostic
+            // text (the one place in the app exempt from the strings.xml rule) and scrolls,
+            // because the error bodies can be long.
+            spikeLog?.let { lines ->
+                AlertDialog(
+                    onDismissRequest = { viewModel.dismissSpike() },
+                    title            = { Text(stringResource(R.string.settings_podcast_spike_title)) },
+                    text             = {
+                        SelectionContainer {
+                            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                                lines.forEach { diagnosticLine ->
+                                    Text(
+                                        text  = diagnosticLine,
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                    Spacer(Modifier.height(8.dp))
+                                }
+                            }
+                        }
+                    },
+                    confirmButton    = {
+                        TextButton(onClick = { haptics.press(); viewModel.dismissSpike() }) {
+                            Text(stringResource(R.string.action_ok))
+                        }
+                    },
+                )
+            }
 
             Spacer(Modifier.height(scrimHeight))
             }
@@ -789,7 +825,10 @@ private fun GainSliderRow(prefix: String?, offset: Int, onOffset: (Int) -> Unit)
 // ── About section ────────────────────────────────────────────────────────────
 
 @Composable
-private fun AboutSection() {
+private fun AboutSection(
+    // TEMPORARY — podcast API spike, remove after go/no-go
+    onVersionLongPress: () -> Unit,
+) {
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
 
@@ -837,6 +876,14 @@ private fun AboutSection() {
             style     = MaterialTheme.typography.bodySmall,
             color     = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
+            // TEMPORARY — podcast API spike, remove after go/no-go. No indication and a no-op
+            // onClick so the row looks and feels exactly as it did before.
+            modifier  = Modifier.combinedClickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication        = null,
+                onClick           = { },
+                onLongClick       = { haptics.longPress(); onVersionLongPress() },
+            ),
         )
 
         Spacer(Modifier.height(20.dp))

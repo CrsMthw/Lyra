@@ -254,4 +254,7 @@
     <string name="widget_cd_previous">Previous</string>
     <string name="widget_cd_shuffle">Shuffle</string>
     <string name="widget_cd_repeat">Repeat</string>
+
+    <!-- TEMPORARY — podcast API spike, remove after go/no-go -->
+    <string name="settings_podcast_spike_title">Podcast API spike</string>
 </resources>

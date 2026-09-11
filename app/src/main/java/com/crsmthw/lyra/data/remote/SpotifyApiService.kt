@@ -169,4 +169,38 @@ interface SpotifyApiService {
 
     // ── Token refresh (hits accounts endpoint, not api) ──────────────────────
     // Note: handled by TokenManager via OkHttp directly (not Retrofit)
+
+    // ── Podcast shows ────────────────────────────────────────────────────────
+    // TEMPORARY — podcast API spike, remove after go/no-go
+    // All three reads are on the Feb-2026 "still available" list. The WRITE side (PUT/DELETE
+    // me/shows) is deprecated/removed — saving a show goes through the unified me/library
+    // endpoints above with a show uri, exactly like albums and artists.
+    @GET("me/shows")
+    suspend fun getSavedShows(
+        @Query("limit")  limit : Int = 5,
+        @Query("offset") offset: Int = 0,
+    ): SavedShowsResponse
+
+    @GET("shows/{id}")
+    suspend fun getShow(
+        @Path("id")      id     : String,
+        @Query("market") market : String? = null,
+    ): SpotifyShow
+
+    @GET("shows/{id}/episodes")
+    suspend fun getShowEpisodes(
+        @Path("id")      id     : String,
+        @Query("limit")  limit  : Int     = 5,
+        @Query("offset") offset : Int     = 0,
+        @Query("market") market : String? = null,
+    ): ShowPage<SpotifyEpisode>
+
+    // Separate from `search` so the spike owns its own response shape; folding `show` into
+    // SearchResponse is a GO-only follow-up (see the Tier 4 search-pagination item).
+    @GET("search")
+    suspend fun searchShows(
+        @Query("q")     query : String,
+        @Query("type")  type  : String = "show",
+        @Query("limit") limit : Int    = 3,
+    ): ShowSearchResponse
 }
