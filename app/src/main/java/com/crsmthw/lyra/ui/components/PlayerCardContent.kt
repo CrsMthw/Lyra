@@ -61,7 +61,22 @@ import com.crsmthw.lyra.util.rememberArtBoundsTransform
 import com.crsmthw.lyra.util.tick
 import com.crsmthw.lyra.util.toTimeString
 import com.crsmthw.lyra.util.toggle
+import com.crsmthw.lyra.util.visualizer.FftWaveCanvas
+import com.crsmthw.lyra.util.visualizer.LocalVisualizerConfig
 import kotlinx.coroutines.launch
+
+/**
+ * Height of the pop-out panel's bottom visualizer wave. Tall enough for the lobes to read, short
+ * enough that it stays mostly under the action row rather than washing over the controls.
+ */
+private val PanelWaveHeight = 48.dp
+
+/**
+ * Band cap for the panel's wave. The panel is only ~54% of a pane wide, so fewer, bigger lobes
+ * read far better here than the full-screen resolution the user picked in Settings; the setting
+ * still applies below this cap.
+ */
+private const val PanelWaveBands = 16
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class, ExperimentalSharedTransitionApi::class)
 @Composable
@@ -616,6 +631,39 @@ fun PlayerCardContent(
                     )
                 }
             }
+        }
+
+        // ── Bottom visualizer wave ──────────────────────────────────────────
+        // Overlaid at the card's bottom edge rather than added as a Column child. A child would
+        // have to be paid for in `reservedChrome` above — the one number in here that can overflow
+        // the card — and would float above the Column's 20dp bottom padding instead of sitting
+        // flush. This Spacer carries draw modifiers only, so it takes no pointer input and the
+        // action buttons under it stay tappable, and the Card's 24dp rounding clips its corners.
+        //
+        // No capture plumbing is needed and none should be added: VisualizerManager is started
+        // app-wide from PlayerViewModel on (isPlaying && visualizerEnabled), and this reads the
+        // same single Visualizer(0) instance the full PlayerScreen does — via LocalFftData, like
+        // every other bottom wave in the app. Without RECORD_AUDIO, tryInitialize() bails, fftData
+        // stays null and the painter never activates, so the panel just draws nothing; it must
+        // never prompt for the permission itself. And because the panel's content is composed only
+        // while it is visible (AnimatedVisibility in PlayerPopOutPanel), the per-frame loop is gone
+        // the moment it closes. FftWaveCanvas self-gates on LocalVisualizerBottomEnabled, so
+        // Settings → Visualizer → Surfaces = Circle hides this one too, as it does everywhere else.
+        val visualizerConfig = LocalVisualizerConfig.current
+        val panelWaveConfig  = remember(visualizerConfig) {
+            visualizerConfig.copy(
+                bottomBands = visualizerConfig.bottomBands.coerceAtMost(PanelWaveBands),
+            )
+        }
+        CompositionLocalProvider(LocalVisualizerConfig provides panelWaveConfig) {
+            FftWaveCanvas(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(PanelWaveHeight)
+                    .align(Alignment.BottomCenter),
+                color    = surfaceAccentColor,
+                alpha    = 0.20f,
+            )
         }
     }
 

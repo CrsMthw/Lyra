@@ -13,11 +13,27 @@ import androidx.core.content.ContextCompat
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
+/**
+ * One captured FFT frame, carried together with the **output-mix sample rate that produced it** so
+ * the bin→Hz mapping in [hzToFftIndex] is exact instead of assuming 48 kHz. Bundling the rate with
+ * the frame (rather than publishing it as a second flow) keeps the two atomically consistent and —
+ * because every consumer already collects [VisualizerManager.fftData] — costs no extra plumbing in
+ * `LyraNavGraph` or the CompositionLocals.
+ *
+ * Deliberately **not** a data class: [bytes] is an array, so a generated `equals` would compare it
+ * by identity anyway. Identity is exactly what is wanted here — `StateFlow` conflates by `equals`
+ * and every capture is a fresh `copyOf`, so every frame stays a distinct emission.
+ */
+class FftFrame(
+    val bytes        : ByteArray,
+    val sampleRateHz : Int,
+)
+
 class VisualizerManager(private val context: Context) {
     private var visualizer: Visualizer? = null
 
-    private val _fftData = MutableStateFlow<ByteArray?>(null)
-    val fftData: StateFlow<ByteArray?> = _fftData
+    private val _fftData = MutableStateFlow<FftFrame?>(null)
+    val fftData: StateFlow<FftFrame?> = _fftData
 
     private val _isAvailable = MutableStateFlow(false)
     val isAvailable: StateFlow<Boolean> = _isAvailable
@@ -67,7 +83,7 @@ class VisualizerManager(private val context: Context) {
                 object : Visualizer.OnDataCaptureListener {
                     override fun onWaveFormDataCapture(v: Visualizer, waveform: ByteArray, samplingRate: Int) {}
                     override fun onFftDataCapture(v: Visualizer, fft: ByteArray, samplingRate: Int) {
-                        _fftData.value = fft.copyOf()
+                        _fftData.value = FftFrame(fft.copyOf(), toSampleRateHz(samplingRate))
                     }
                 },
                 Visualizer.getMaxCaptureRate() / 2,
@@ -121,5 +137,24 @@ class VisualizerManager(private val context: Context) {
         runCatching { visualizer?.enabled = false; visualizer?.release() }
         visualizer = null
         tryInitialize()
+    }
+
+    /**
+     * Normalizes the `samplingRate` the capture listener hands us into plain Hz.
+     *
+     * `Visualizer.OnDataCaptureListener` documents it in **milliHertz** (48 kHz → 48_000_000),
+     * which is what `Visualizer.getSamplingRate()` returns and what devices do in practice. Since
+     * we cannot audit every OEM audio HAL, accept a plain-Hz value too and reject anything outside
+     * a plausible PCM range rather than mis-mapping every bin off a nonsense rate. An implausible
+     * value falls back to [DefaultSampleRateHz], i.e. exactly the old hardcoded behaviour.
+     */
+    private fun toSampleRateHz(reported: Int): Int {
+        val hz = if (reported >= MinSampleRateHz * 1000) reported / 1000 else reported
+        return if (hz in MinSampleRateHz..MaxSampleRateHz) hz else DefaultSampleRateHz
+    }
+
+    private companion object {
+        const val MinSampleRateHz =   8_000   // narrowband telephony — the lowest anything mixes at
+        const val MaxSampleRateHz = 384_000   // high-res USB DACs
     }
 }
