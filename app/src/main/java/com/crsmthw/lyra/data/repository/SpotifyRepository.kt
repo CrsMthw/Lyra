@@ -12,6 +12,18 @@ import retrofit2.HttpException
 const val SEARCH_PAGE_SIZE = 10
 
 /**
+ * A chunked playlist removal that got part of the way: [removed] is already gone server-side when
+ * a later chunk failed. Carried on the [Result.failure] so the caller can commit that subset before
+ * reporting the error, instead of telling the user nothing was removed while the playlist is
+ * already shorter. Reuses `cause.message` so the "HTTP <code>: <body>" text the error dialog shows
+ * is unchanged. See [SpotifyRepository.removeTracksFromPlaylist].
+ */
+class PartialRemovalException(
+    val removed: List<String>,
+    cause      : Throwable,
+) : Exception(cause.message, cause)
+
+/**
  * Single source of truth for all Spotify data.
  * Returns [Result] so ViewModels never have to catch.
  */
@@ -174,11 +186,25 @@ class SpotifyRepository(
      * parallel — each call moves the playlist's snapshot on). Duplicate uris are collapsed; as with
      * the single-track call no `positions` are sent, so a uri that appears twice in the playlist is
      * removed everywhere it appears.
+     *
+     * Each chunk gets its OWN [safeCall] rather than one around the loop, because a chunk that
+     * succeeds is already committed server-side: a throw on chunk 2 (a dropped connection, a 429)
+     * must not be reported as "nothing was removed" while chunk 1's 100 tracks are gone. The first
+     * failure stops the loop and returns a [PartialRemovalException] carrying what went — unless
+     * nothing went, in which case the bare cause is returned as before.
      */
-    suspend fun removeTracksFromPlaylist(playlistId: String, uris: List<String>): Result<Unit> = safeCall {
-        uris.distinct().chunked(100).forEach { chunk ->
-            api.removeItemsFromPlaylist(playlistId, RemoveItemsRequest(chunk.map { RemoveItemEntry(it) }))
+    suspend fun removeTracksFromPlaylist(playlistId: String, uris: List<String>): Result<Unit> {
+        val removed = mutableListOf<String>()
+        for (chunk in uris.distinct().chunked(100)) {
+            val cause = safeCall {
+                api.removeItemsFromPlaylist(playlistId, RemoveItemsRequest(chunk.map { RemoveItemEntry(it) }))
+            }.exceptionOrNull()
+            if (cause != null) return Result.failure(
+                if (removed.isEmpty()) cause else PartialRemovalException(removed, cause)
+            )
+            removed += chunk
         }
+        return Result.success(Unit)
     }
 
     suspend fun getQueue(): Result<QueueResponse?> = safeCall {

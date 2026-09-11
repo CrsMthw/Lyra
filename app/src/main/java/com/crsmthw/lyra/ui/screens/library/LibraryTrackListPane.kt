@@ -6,7 +6,7 @@ import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -138,6 +138,12 @@ internal fun RightPaneContent(
             isRefreshing = state.isRefreshing,
             onRefresh    = onRefresh,
             state        = pullToRefreshState,
+            // Refreshing replaces the list wholesale back to page 0, which would drop an
+            // in-progress selection's rows out from under it — so the gesture is out of the mode.
+            // Belt to the VM's braces: refreshCurrentTracks clears the selection anyway, for the
+            // case where the mode is entered from the song menu while a refresh is already in
+            // flight (nothing gates that on isRefreshing).
+            enabled      = !inSelection,
             modifier     = Modifier.fillMaxSize(),
             indicator    = {
                 if (state.isRefreshing) {
@@ -461,6 +467,26 @@ private fun TrackList(
         if (reachedBottom && canLoadMore && !isLoadingMore) onLoadMore()
     }
 
+    // A row's key must NOT depend on how many unrelated rows precede it. With the index baked in,
+    // a multi-select removal above the viewport changed the first-visible row's key, LazyList's
+    // findIndexByKey missed (an exact map lookup — no partial matching on the id half) and kept the
+    // raw index, so the list jumped forward by the number of rows removed above it and every
+    // visible row's remembered state was thrown away. Keying on the uri plus a per-uri occurrence
+    // ordinal is stable instead: remove-by-uri drops EVERY occurrence of the uri it names, so when
+    // a uri goes all of its rows go together and no surviving uri's ordinal shifts. The ordinal is
+    // mandatory, not tidy — a bare uri would trip SaveableStateHolder's duplicate-key `require`
+    // whenever both copies of a twice-added track are composed at once. Precomputed once per list
+    // instance (never inside the key lambda, which the nearest-range map re-invokes per item), and
+    // carried alongside each row so the keys can't desync from the content.
+    val keyedTracks = remember(tracks) {
+        val seen = HashMap<String, Int>(tracks.size)
+        tracks.map { t ->
+            val n = seen.getOrDefault(t.uri, 0)
+            seen[t.uri] = n + 1
+            "${t.uri}#$n" to t
+        }
+    }
+
     LazyColumn(
         state          = listState,
         modifier       = modifier,
@@ -472,7 +498,7 @@ private fun TrackList(
         if (tracks.isEmpty() && emptyContent != null) {
             item(key = "empty_state") { emptyContent() }
         }
-        itemsIndexed(tracks, key = { i, t -> "${i}_${t.id}" }) { _, track ->
+        items(keyedTracks, key = { it.first }) { (_, track) ->
             TrackRow(
                 track       = track,
                 isPlaying   = currentTrackId == track.id && isPlaying,
