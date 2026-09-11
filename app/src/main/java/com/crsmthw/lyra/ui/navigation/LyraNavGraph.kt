@@ -219,8 +219,11 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
     // ── Docked third pane (tablet in landscape) ──────────────────────────────
     // Gate on the MEASURED window width — NOT isWidthAtLeastBreakpoint(1200), whose default V1
     // width buckets cap at 840dp. The pane is hosted HERE, beside the NavHost and OUTSIDE the
-    // per-destination slide/fade, so it stays put while the browse screens animate. It shows only
-    // on the browse routes that have a left list to pair with (not on Player/Queue/Search/etc.).
+    // per-destination slide/fade, so it stays put while the browse screens animate. It shows on
+    // every screen that gets the floating mini player at narrower widths — the browse routes plus
+    // Stats and Search — and NOT on Player/Queue (which ARE the player) or Auth/Settings. Keeping
+    // Search in the set also keeps the NavHost width constant across the Library FAB→search-bar
+    // container transform, so the "search-bar" morph is measured in one pane geometry, not two.
     val windowContainer = LocalWindowInfo.current.containerSize
     val isExtraWide = with(LocalDensity.current) {
         windowContainer.width.toDp() >= 1200.dp && windowContainer.height.toDp() >= 600.dp
@@ -228,7 +231,9 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
     val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route
     val isBrowse = currentRoute == Screen.Library.route ||
                    currentRoute == Screen.AlbumDetail.route ||
-                   currentRoute == Screen.ArtistDetail.route
+                   currentRoute == Screen.ArtistDetail.route ||
+                   currentRoute == Screen.Stats.route ||
+                   currentRoute == Screen.Search.route
 
     SharedTransitionLayout {
       Row(modifier = Modifier.fillMaxSize()) {
