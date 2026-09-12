@@ -1031,17 +1031,44 @@ class LibraryViewModel(
         viewModelScope.launch {
             repository.getPlaylistTracks(playlist.id, limit = 50, offset = s.playlistTracksOffset).fold(
                 onSuccess = { resp ->
-                    if (_uiState.value.currentPlaylist?.id != playlist.id) {
+                    val live = _uiState.value
+                    if (live.currentPlaylist?.id != playlist.id) {
                         _uiState.update { it.copy(isLoadingMoreTracks = false) }
                         return@fold
                     }
-                    val newTracks = (resp.items ?: emptyList()).mapNotNull { it.resolvedTrack }.filter { it.isPlayable != false }
-                    val allTracks = _uiState.value.currentTracks + newTracks
+                    val newTracks   = (resp.items ?: emptyList()).mapNotNull { it.resolvedTrack }.filter { it.isPlayable != false }
+                    val rawPageSize = resp.items?.size ?: 0
+                    // De-dupe the page against what's already loaded, by uri. A playlist cannot hold
+                    // the same track twice — neither Lyra nor Spotify will add a duplicate (device-
+                    // confirmed 2026-09-11) — so a uri that comes back on a second page is ALWAYS an
+                    // artefact, never real content. The one that bites: a page fetched moments after
+                    // a removal can still be served from the PRE-removal list, where our loaded
+                    // prefix ends `removed` items earlier, so the page starts inside rows we already
+                    // have. `TrackList` keys rows on "<uri>#<ordinal>", so such a row really renders,
+                    // and `selectedUris` is a uri SET — which is why checking one of the twins
+                    // checked both, and why removing it then over-counted the rows that went.
+                    val have     = live.currentTracks.mapTo(HashSet(live.currentTracks.size)) { it.uri }
+                    val appended = newTracks.filterNot { it.uri in have }
+                    val dupes    = newTracks.size - appended.size
+                    val allTracks = live.currentTracks + appended
+                    // Offset advances by the RAW page size (so client-filtered items stay counted —
+                    // they are real API items) MINUS the overlap we just dropped (those are API items
+                    // an earlier page already counted; counting them twice would skip that many
+                    // tracks at the next page boundary).
+                    val nextOffset = (live.playlistTracksOffset + rawPageSize - dupes)
+                        .coerceAtLeast(allTracks.size)
+                    // `resp.total` is the server talking, so it normally wins — except while a
+                    // mutation reconcile for this playlist is still pending, when the page may be a
+                    // pre-mutation read and its total would undo the optimistic count. That case is
+                    // settled by applyServerTotal a moment later.
+                    val reconcilePending = totalReconciles[playlist.id]?.isActive == true
+                    val nextTotal = if (reconcilePending) maxOf(live.playlistTracksTotal, allTracks.size)
+                                    else                  maxOf(resp.total, allTracks.size)
                     _uiState.update { it.copy(
                         currentTracks        = allTracks,
                         isLoadingMoreTracks  = false,
-                        playlistTracksOffset = s.playlistTracksOffset + (resp.items?.size ?: 0),
-                        playlistTracksTotal  = resp.total,
+                        playlistTracksOffset = nextOffset,
+                        playlistTracksTotal  = nextTotal,
                     ) }
                     playlist.snapshotId?.let { snap ->
                         withContext(Dispatchers.IO) { cache.saveTrackList(playlist.id, snap, allTracks) }
