@@ -32,6 +32,7 @@ import com.crsmthw.lyra.R
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import com.crsmthw.lyra.util.screenTransitionSpec
 import com.crsmthw.lyra.util.rememberArtBoundsTransform
+import com.crsmthw.lyra.util.rememberSearchBarMorphClip
 import com.crsmthw.lyra.util.visualizer.FftWaveCanvas
 import com.crsmthw.lyra.util.visualizer.LocalVisualizerAccentColor
 import java.io.File
@@ -135,9 +136,11 @@ internal fun TwoPaneLayout(
                                 )
                             )
                     )
-                    // Same FAB→search-bar container transform as single-pane (shared key). The FAB
-                    // sits inside the left-pane Card, but sharedBounds renders in the overlay during
-                    // the transition, so the Card clip doesn't truncate the morph.
+                    // Same FAB→search-bar container transform as single-pane (shared key), same
+                    // outline morph (util/SearchBarMorph.kt — all three call sites must pass the
+                    // identical clip or the two ends get clipped to different paths). The FAB sits
+                    // inside the left-pane Card, but sharedBounds renders in the overlay during the
+                    // transition, so the Card clip doesn't truncate the morph.
                     val fabSharedModifier: Modifier =
                         if (sharedTransitionScope != null && animatedContentScope != null) {
                             with(sharedTransitionScope) {
@@ -145,6 +148,7 @@ internal fun TwoPaneLayout(
                                     sharedContentState      = rememberSharedContentState(key = SEARCH_BAR_SHARED_KEY),
                                     animatedVisibilityScope = animatedContentScope,
                                     boundsTransform         = rememberArtBoundsTransform(),
+                                    clipInOverlayDuringTransition = rememberSearchBarMorphClip(),
                                 )
                             }
                         } else Modifier

@@ -57,6 +57,7 @@ import com.crsmthw.lyra.util.ListScrollHaptics
 import com.crsmthw.lyra.util.confirm
 import com.crsmthw.lyra.util.press
 import com.crsmthw.lyra.util.rememberArtBoundsTransform
+import com.crsmthw.lyra.util.rememberSearchBarMorphClip
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import com.crsmthw.lyra.util.visualizer.FftWaveCanvas
@@ -99,7 +100,9 @@ fun SearchScreen(
 
     // Container transform: the floating bar shares bounds with the Library search FAB (same
     // SEARCH_BAR_SHARED_KEY) so tapping the FAB expands it into this bar. Null scopes (two-pane /
-    // previews) fall back to no morph.
+    // previews) fall back to no morph. clipInOverlayDuringTransition is the OUTLINE morph
+    // (stadium ↔ SoftBurst) — the identical clip both Library FAB call sites pass, so the exiting
+    // and entering halves are clipped to the same path on every frame. See util/SearchBarMorph.kt.
     val searchBarSharedModifier: Modifier =
         if (sharedTransitionScope != null && animatedContentScope != null) {
             with(sharedTransitionScope) {
@@ -107,6 +110,7 @@ fun SearchScreen(
                     sharedContentState      = rememberSharedContentState(key = SEARCH_BAR_SHARED_KEY),
                     animatedVisibilityScope = animatedContentScope,
                     boundsTransform         = rememberArtBoundsTransform(),
+                    clipInOverlayDuringTransition = rememberSearchBarMorphClip(),
                 )
             }
         } else Modifier
