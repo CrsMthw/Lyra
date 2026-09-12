@@ -53,6 +53,13 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="https" android:host="open.spotify.com" android:pathPrefix="/artist/" />
             </intent-filter>
+            <!-- open.spotify.com deep links — podcast shows -->
+            <intent-filter android:autoVerify="false">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="open.spotify.com" android:pathPrefix="/show/" />
+            </intent-filter>
         </activity>
 
         <service
