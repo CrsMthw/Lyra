@@ -333,6 +333,21 @@ class LibraryViewModel(
      */
     private val dedupePagesFor = mutableSetOf<String>()
 
+    /**
+     * Playlists showing a prefix seeded from a cache entry with NO recorded raw offset — written
+     * before [com.crsmthw.lyra.data.local.CachedTrackList.rawOffset] existed, so the boundary had to
+     * fall back to the filtered row count and is short by however many items the client dropped.
+     *
+     * That makes exactly ONE page suspect: the next one starts inside rows already on screen. So for
+     * that page [loadMorePlaylistTracks] de-dupes by uri (a one-page-wide version of what
+     * [dedupePagesFor] does for a mutation's stale-page window — deliberately not the session-wide
+     * set, which would collapse legitimately duplicated uris on every later page too), and advances
+     * the offset by the FULL raw page size with no overlap subtraction: the page really was served
+     * from `offset`, so `offset + raw` is the true next position whatever the seed was short by.
+     * That re-anchors the offset exactly, so the playlist leaves this set after one page.
+     */
+    private val untrustedOffsetFor = mutableSetOf<String>()
+
     private fun observePlaylistMutations() {
         viewModelScope.launch {
             cache.playlistMutations.collect { playlistId ->
@@ -818,10 +833,19 @@ class LibraryViewModel(
                     currentPlaylist      = playlist,
                     currentTracks        = cached.tracks,
                     isLoadingTracks      = false,
-                    playlistTracksOffset = cached.tracks.size,
+                    // The RAW offset the cache recorded, NOT the row count: the cached rows are the
+                    // filtered ones (unplayable / local / episode / null items are dropped), so on a
+                    // playlist holding k of them `tracks.size` is k short of the API position and the
+                    // next page re-fetches — and re-renders — k rows already on screen (checklist 24).
+                    playlistTracksOffset = cached.rawOffset ?: cached.tracks.size,
                     playlistTracksTotal  = maxOf(playlist.trackCount, cached.tracks.size),
                     error                = null,
                 ).selectionCleared() }
+                // Legacy entry, written before the cache recorded a raw offset: the boundary above is
+                // the old guess, so the next page needs the one-page de-dupe and re-anchor — see
+                // [untrustedOffsetFor].
+                if (cached.rawOffset == null) untrustedOffsetFor += playlist.id
+                else                          untrustedOffsetFor -= playlist.id
                 if (playlist.id !in _uiState.value.playlistsWithMosaics && playlist.thumbnailUrl.isBlank()) {
                     withContext(Dispatchers.IO) { mosaicGenerator.generate(playlist.id, cached.tracks) }
                     _uiState.update { s -> s.copy(playlistsWithMosaics = s.playlistsWithMosaics + playlist.id) }
@@ -860,8 +884,12 @@ class LibraryViewModel(
                         playlistTracksOffset = resp.items?.size ?: 0,
                         playlistTracksTotal  = resp.total,
                     ) }
+                    untrustedOffsetFor -= playlist.id   // this page anchored the offset on the API's own position
                     if (snapshotId != null) {
-                        withContext(Dispatchers.IO) { cache.saveTrackList(playlist.id, snapshotId, tracks) }
+                        val rawOffset = resp.items?.size ?: 0
+                        withContext(Dispatchers.IO) {
+                            cache.saveTrackList(playlist.id, snapshotId, tracks, rawOffset)
+                        }
                     }
                     if (playlist.thumbnailUrl.isBlank()) {
                         withContext(Dispatchers.IO) { mosaicGenerator.generate(playlist.id, tracks) }
@@ -1091,15 +1119,24 @@ class LibraryViewModel(
                     // An UNTOUCHED playlist is never de-duped: a uri that legitimately appears twice
                     // (Spotify's client adds behind an "already added" prompt; collaborative playlists)
                     // must keep both rows — that is what the ordinal in the row key exists for.
+                    // The same de-dupe covers this page when the offset it was fetched at came from a
+                    // legacy cache entry's guessed boundary — see [untrustedOffsetFor].
+                    val untrustedOffset = playlist.id in untrustedOffsetFor
                     val have     = live.currentTracks.mapTo(HashSet(live.currentTracks.size)) { it.uri }
-                    val appended = if (playlist.id in dedupePagesFor) newTracks.filterNot { it.uri in have } else newTracks
+                    val appended = if (playlist.id in dedupePagesFor || untrustedOffset)
+                                       newTracks.filterNot { it.uri in have } else newTracks
                     val dupes    = newTracks.size - appended.size
                     val allTracks = live.currentTracks + appended
                     // Offset advances by the RAW page size (so client-filtered items stay counted —
                     // they are real API items) MINUS the overlap we just dropped (those are API items
                     // an earlier page already counted; counting them twice would skip that many
                     // tracks at the next page boundary).
-                    val nextOffset = (live.playlistTracksOffset + rawPageSize - dupes)
+                    // NOT for an untrusted offset: there the overlap means the offset was SHORT, not
+                    // that the server's list shifted, and the page genuinely started where we asked —
+                    // so `offset + raw` is the true next position. Subtracting there would leave the
+                    // offset at (or below) where it started and re-fetch the same window on every
+                    // scroll to the bottom, which is how a fully-overlapping page would loop.
+                    val nextOffset = (live.playlistTracksOffset + rawPageSize - if (untrustedOffset) 0 else dupes)
                         .coerceAtLeast(allTracks.size)
                     // `resp.total` is the server talking, so it normally wins — except while a
                     // mutation reconcile for this playlist is still pending, when the page may be a
@@ -1114,8 +1151,13 @@ class LibraryViewModel(
                         playlistTracksOffset = nextOffset,
                         playlistTracksTotal  = nextTotal,
                     ) }
+                    untrustedOffsetFor -= playlist.id   // nextOffset is now anchored on a real page
                     playlist.snapshotId?.let { snap ->
-                        withContext(Dispatchers.IO) { cache.saveTrackList(playlist.id, snap, allTracks) }
+                        // Persist the RAW boundary with the rows, so the next open resumes from the
+                        // API position rather than re-deriving it from the filtered row count.
+                        withContext(Dispatchers.IO) {
+                            cache.saveTrackList(playlist.id, snap, allTracks, nextOffset)
+                        }
                     }
                 },
                 onFailure = {
@@ -1170,13 +1212,20 @@ class LibraryViewModel(
                         // Page 0 is fresh from the server, so the post-mutation stale-page window is
                         // over for this playlist — stop de-duping its pages (see dedupePagesFor).
                         dedupePagesFor -= playlist.id
+                        untrustedOffsetFor -= playlist.id   // offset is page 0's own raw size again
                         // Same server total through the single authoritative writer, so a refresh
                         // heals the browser/left-pane card and the cached metadata too — not just
                         // the hero. Writes nothing when they already agree (the copies are identity),
                         // so the common case adds no emission.
                         applyServerTotal(playlist.id, resp.total)
                         if (playlist.snapshotId != null) {
-                            withContext(Dispatchers.IO) { cache.saveTrackList(playlist.id, playlist.snapshotId, tracks) }
+                            // Page 0 again, so the raw boundary is this page's raw size — written in
+                            // the same breath as the de-dupe clear above, which is only safe BECAUSE
+                            // a trustworthy boundary lands with it.
+                            val rawOffset = resp.items?.size ?: 0
+                            withContext(Dispatchers.IO) {
+                                cache.saveTrackList(playlist.id, playlist.snapshotId, tracks, rawOffset)
+                            }
                         }
                         if (playlist.thumbnailUrl.isBlank()) {
                             withContext(Dispatchers.IO) { mosaicGenerator.generate(playlist.id, tracks) }
