@@ -364,6 +364,11 @@ class LibraryViewModel(
         val current = _uiState.value
         val total   = if (current.currentPlaylist?.id == playlistId)
                           maxOf(serverTotal, current.currentTracks.size) else serverTotal
+        // The in-memory list mirrors the cached one (every writer of the cached metadata bumps the
+        // revision this VM re-syncs from), so it can answer "does the disk already say this?" —
+        // worth asking, because setPlaylistTrackCount re-parses the WHOLE cache file to find out,
+        // and on the per-open and pull-to-refresh paths the answer is normally yes.
+        val diskNeedsIt = current.playlists.any { it.id == playlistId && it.trackCount != total }
         _uiState.update { s ->
             val open = s.currentPlaylist?.takeIf { it.id == playlistId }
             s.copy(
@@ -372,7 +377,7 @@ class LibraryViewModel(
                 playlists           = s.playlists.withTrackCount(playlistId, total),
             )
         }
-        withContext(Dispatchers.IO) { cache.setPlaylistTrackCount(playlistId, total) }
+        if (diskNeedsIt) withContext(Dispatchers.IO) { cache.setPlaylistTrackCount(playlistId, total) }
     }
 
     /**
