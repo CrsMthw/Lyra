@@ -18,6 +18,8 @@ import com.crsmthw.lyra.di.AppContainer
 import com.crsmthw.lyra.ui.components.TrackActionsController
 import com.crsmthw.lyra.util.MosaicGenerator
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.drop
@@ -109,6 +111,11 @@ private fun LibraryUiState.selectionCleared() =
  * and the partial one (a chunked removal whose later chunk failed after earlier chunks committed),
  * so the count arithmetic below exists once. Pure — the caller applies it inside its own
  * `_uiState.update`, so it never adds an emission.
+ *
+ * This is the INTERIM count, not the authority: it exists so the rows and the "N songs" line move
+ * together the instant the API returns. The real total lands a moment later from
+ * `LibraryViewModel.reconcilePlaylistTotal` (the server's own `total`), which every in-app mutation
+ * schedules.
  */
 private fun LibraryUiState.tracksRemoved(
     uris  : Collection<String>,
@@ -283,7 +290,94 @@ class LibraryViewModel(
         loadLibrary()
         observeCacheRevision()
         observeTrackListChanges()
+        observePlaylistMutations()
         observeForYouSetting()
+    }
+
+    // ── Track counts — the authoritative reconcile ────────────────────────────────────────────
+    //
+    // THE RULE: the server's `total` is the single source of truth for every "N songs" the app
+    // shows, and there is exactly ONE writer of it — [applyServerTotal], which writes all three
+    // sinks at once (the open detail's `playlistTracksTotal`, the browser/left-pane metadata in
+    // `currentPlaylist` + `playlists`, and the cached metadata on disk). A local ±delta is only the
+    // interim value that keeps the count moving with the rows; it is never the last word.
+    //
+    // Why that rule exists: the counts used to be maintained by three independent writers with
+    // three different arithmetics — the removal's list delta, the cache's metadata decrement, and
+    // this VM's cached-list re-read — none of which ever asked the server. They agree only while
+    // the rendered rows, the cached rows and the `/me/playlists` metadata all match, and they do
+    // NOT match for any playlist holding items the client filters out (unplayable / local files /
+    // episodes / null tracks), so the hero drifted one way and the browser card the other. Only
+    // re-opening the playlist or pulling to refresh healed it — because only those asked the server.
+
+    /**
+     * One in-flight reconcile per playlist id, so a mutation on playlist A can't cancel B's. The
+     * entry is left behind when the job completes — a handful of finished [Job] references, bounded
+     * by the number of playlists touched in a session, and [loadMorePlaylistTracks] reads `isActive`
+     * on it. Only ever touched from `viewModelScope` (main), so a plain map is enough.
+     */
+    private val totalReconciles = mutableMapOf<String, Job>()
+
+    /**
+     * Answers every in-app add/remove — from this screen's multi-select, the song menu's "Remove
+     * from this playlist", the add-to-playlist picker on any screen, or the player — with one
+     * authoritative re-read of the playlist's server total.
+     */
+    private fun observePlaylistMutations() {
+        viewModelScope.launch {
+            cache.playlistMutations.collect { playlistId -> reconcilePlaylistTotal(playlistId) }
+        }
+    }
+
+    /**
+     * Debounced `limit = 1` re-read of [playlistId]'s server total, applied to every count sink.
+     *
+     * The debounce both coalesces a burst of mutations (each cancels the previous job) and gives
+     * Spotify a beat to become read-after-write consistent: a `GET` issued immediately after a
+     * `DELETE` can still answer with the pre-removal total, and writing that back would undo the
+     * optimistic edit the user is looking at. One attempt, no retry loop — if a stale read does land
+     * it is a wrong count until the next mutation, open, or refresh, never a permanently wrong one.
+     */
+    private fun reconcilePlaylistTotal(playlistId: String) {
+        totalReconciles[playlistId]?.cancel()
+        totalReconciles[playlistId] = viewModelScope.launch {
+            delay(TOTAL_RECONCILE_DEBOUNCE_MS)
+            repository.getPlaylistTracks(playlistId, limit = 1, offset = 0).onSuccess { resp ->
+                applyServerTotal(playlistId, resp.total)
+            }
+        }
+    }
+
+    /**
+     * The ONE writer of an authoritative playlist total. Writes it to the open detail's
+     * `playlistTracksTotal` (so the hero's "N songs" is right), to the playlist metadata held in
+     * state (so the two-pane left card and the single-pane browser card update with no manual
+     * refresh) and to the cache (so the card is right on the next launch too) — all in a single
+     * `_uiState.update`, and never touching `currentPlaylist?.id`, so `detailKey` is unchanged and
+     * the pane transition can't see this (docs/MOTION.md → Predictive back).
+     *
+     * The loaded row count is a FLOOR, never a ceiling: a lagging server total can't drag the count
+     * below rows we can actually see, but it is allowed to be higher — rendered rows are the
+     * filtered list, so their number is not a valid total (see the filtering note above).
+     */
+    private suspend fun applyServerTotal(playlistId: String, serverTotal: Int) {
+        val current = _uiState.value
+        val total   = if (current.currentPlaylist?.id == playlistId)
+                          maxOf(serverTotal, current.currentTracks.size) else serverTotal
+        // The in-memory list mirrors the cached one (every writer of the cached metadata bumps the
+        // revision this VM re-syncs from), so it can answer "does the disk already say this?" —
+        // worth asking, because setPlaylistTrackCount re-parses the WHOLE cache file to find out,
+        // and on the per-open and pull-to-refresh paths the answer is normally yes.
+        val diskNeedsIt = current.playlists.any { it.id == playlistId && it.trackCount != total }
+        _uiState.update { s ->
+            val open = s.currentPlaylist?.takeIf { it.id == playlistId }
+            s.copy(
+                playlistTracksTotal = if (open != null) total else s.playlistTracksTotal,
+                currentPlaylist     = open?.withTrackCount(total) ?: s.currentPlaylist,
+                playlists           = s.playlists.withTrackCount(playlistId, total),
+            )
+        }
+        if (diskNeedsIt) withContext(Dispatchers.IO) { cache.setPlaylistTrackCount(playlistId, total) }
     }
 
     /**
@@ -316,15 +410,20 @@ class LibraryViewModel(
                 val cached = withContext(Dispatchers.IO) { cache.loadTrackList(playlistId) } ?: return@collect
                 _uiState.update { s ->
                     if (s.currentPlaylist?.id != playlistId) return@update s
-                    // When the list was fully loaded, the cache size IS the new authoritative total
-                    // (covers both add +1 and remove −1); for a partially-paged list keep the larger
-                    // value so lazy-loading isn't cut short.
-                    val wasFullyLoaded = s.playlistTracksOffset >= s.playlistTracksTotal
+                    // Move the counters by the DELTA between the rows we were showing and the rows
+                    // the cache now holds — never by adopting the cached list's SIZE as a counter.
+                    // `currentTracks`/`cached.tracks` are the FILTERED rows (unplayable, local files,
+                    // episodes and null tracks are dropped client-side) while `offset` and `total`
+                    // count every item the API returns, so assigning a list size to either silently
+                    // throws that gap away: the hero then under-counted by it (bug 36) and the next
+                    // page re-fetched it as duplicate rows (bug 37). The delta carries the gap
+                    // through untouched, and the server's own total lands right after this anyway —
+                    // the same cache call that emitted here also scheduled the reconcile.
+                    val delta = cached.tracks.size - s.currentTracks.size
                     s.copy(
                         currentTracks        = cached.tracks,
-                        playlistTracksOffset = cached.tracks.size,
-                        playlistTracksTotal  = if (wasFullyLoaded) cached.tracks.size
-                                               else maxOf(s.playlistTracksTotal, cached.tracks.size),
+                        playlistTracksOffset = (s.playlistTracksOffset + delta).coerceAtLeast(cached.tracks.size),
+                        playlistTracksTotal  = (s.playlistTracksTotal + delta).coerceAtLeast(cached.tracks.size),
                         // Unlike a pull-to-refresh this is someone else's edit landing, so it keeps
                         // any in-progress multi-select rather than wiping it — but it intersects it
                         // with the new list, so a selection can never point at rows that are gone
@@ -689,15 +788,13 @@ class LibraryViewModel(
                     withContext(Dispatchers.IO) { mosaicGenerator.generate(playlist.id, cached.tracks) }
                     _uiState.update { s -> s.copy(playlistsWithMosaics = s.playlistsWithMosaics + playlist.id) }
                 }
-                // Reconcile the authoritative total once per open (cheap limit=1): heals a drifted
-                // count — an in-app add that Spotify's /me/playlists metadata hasn't caught up on, or a
-                // change made on another device — without a manual refresh. maxOf with the loaded size
-                // so a lagging server total can never drag the count below what's actually cached.
+                // Reconcile the authoritative total once per open (limit=1): heals a drifted count —
+                // an in-app add that Spotify's /me/playlists metadata hasn't caught up on, or a
+                // change made on another device — without a manual refresh. Same single writer the
+                // post-mutation reconcile uses, so "open" and "just edited" can't disagree.
                 repository.getPlaylistTracks(playlist.id, limit = 1, offset = 0).onSuccess { resp ->
                     if (_uiState.value.currentPlaylist?.id != playlist.id) return@onSuccess
-                    val total = maxOf(resp.total, _uiState.value.currentTracks.size)
-                    _uiState.update { it.copy(playlistTracksTotal = total) }
-                    withContext(Dispatchers.IO) { cache.setPlaylistTrackCount(playlist.id, total) }
+                    applyServerTotal(playlist.id, resp.total)
                 }
                 return@launch
             }
@@ -939,17 +1036,44 @@ class LibraryViewModel(
         viewModelScope.launch {
             repository.getPlaylistTracks(playlist.id, limit = 50, offset = s.playlistTracksOffset).fold(
                 onSuccess = { resp ->
-                    if (_uiState.value.currentPlaylist?.id != playlist.id) {
+                    val live = _uiState.value
+                    if (live.currentPlaylist?.id != playlist.id) {
                         _uiState.update { it.copy(isLoadingMoreTracks = false) }
                         return@fold
                     }
-                    val newTracks = (resp.items ?: emptyList()).mapNotNull { it.resolvedTrack }.filter { it.isPlayable != false }
-                    val allTracks = _uiState.value.currentTracks + newTracks
+                    val newTracks   = (resp.items ?: emptyList()).mapNotNull { it.resolvedTrack }.filter { it.isPlayable != false }
+                    val rawPageSize = resp.items?.size ?: 0
+                    // De-dupe the page against what's already loaded, by uri. A playlist cannot hold
+                    // the same track twice — neither Lyra nor Spotify will add a duplicate (device-
+                    // confirmed 2026-09-11) — so a uri that comes back on a second page is ALWAYS an
+                    // artefact, never real content. The one that bites: a page fetched moments after
+                    // a removal can still be served from the PRE-removal list, where our loaded
+                    // prefix ends `removed` items earlier, so the page starts inside rows we already
+                    // have. `TrackList` keys rows on "<uri>#<ordinal>", so such a row really renders,
+                    // and `selectedUris` is a uri SET — which is why checking one of the twins
+                    // checked both, and why removing it then over-counted the rows that went.
+                    val have     = live.currentTracks.mapTo(HashSet(live.currentTracks.size)) { it.uri }
+                    val appended = newTracks.filterNot { it.uri in have }
+                    val dupes    = newTracks.size - appended.size
+                    val allTracks = live.currentTracks + appended
+                    // Offset advances by the RAW page size (so client-filtered items stay counted —
+                    // they are real API items) MINUS the overlap we just dropped (those are API items
+                    // an earlier page already counted; counting them twice would skip that many
+                    // tracks at the next page boundary).
+                    val nextOffset = (live.playlistTracksOffset + rawPageSize - dupes)
+                        .coerceAtLeast(allTracks.size)
+                    // `resp.total` is the server talking, so it normally wins — except while a
+                    // mutation reconcile for this playlist is still pending, when the page may be a
+                    // pre-mutation read and its total would undo the optimistic count. That case is
+                    // settled by applyServerTotal a moment later.
+                    val reconcilePending = totalReconciles[playlist.id]?.isActive == true
+                    val nextTotal = if (reconcilePending) maxOf(live.playlistTracksTotal, allTracks.size)
+                                    else                  maxOf(resp.total, allTracks.size)
                     _uiState.update { it.copy(
                         currentTracks        = allTracks,
                         isLoadingMoreTracks  = false,
-                        playlistTracksOffset = s.playlistTracksOffset + (resp.items?.size ?: 0),
-                        playlistTracksTotal  = resp.total,
+                        playlistTracksOffset = nextOffset,
+                        playlistTracksTotal  = nextTotal,
                     ) }
                     playlist.snapshotId?.let { snap ->
                         withContext(Dispatchers.IO) { cache.saveTrackList(playlist.id, snap, allTracks) }
@@ -1004,6 +1128,11 @@ class LibraryViewModel(
                             playlistTracksOffset = resp.items?.size ?: 0,   // reset paging to page 0
                             playlistTracksTotal  = resp.total,
                         ).selectionCleared() }
+                        // Same server total through the single authoritative writer, so a refresh
+                        // heals the browser/left-pane card and the cached metadata too — not just
+                        // the hero. Writes nothing when they already agree (the copies are identity),
+                        // so the common case adds no emission.
+                        applyServerTotal(playlist.id, resp.total)
                         if (playlist.snapshotId != null) {
                             withContext(Dispatchers.IO) { cache.saveTrackList(playlist.id, playlist.snapshotId, tracks) }
                         }
@@ -1023,6 +1152,29 @@ class LibraryViewModel(
 
 /** Cap on "Jump back in" tiles — enough for two swipes of the row, cheap to build. */
 private const val MAX_JUMP_BACK_IN = 10
+
+/**
+ * How long [LibraryViewModel.reconcilePlaylistTotal] waits before asking the server for a mutated
+ * playlist's total. Long enough to coalesce a burst of edits and to clear Spotify's read-after-write
+ * lag on the DELETE/POST that triggered it; short enough that the count settles while the user is
+ * still looking at the playlist.
+ */
+private const val TOTAL_RECONCILE_DEBOUNCE_MS = 600L
+
+/** Returns a copy with the metadata track count set to [total] (identity when already there). */
+private fun SpotifyPlaylist.withTrackCount(total: Int): SpotifyPlaylist =
+    if (trackCount == total) this
+    else copy(tracksMeta = (tracksMeta ?: PlaylistTracksMeta(0, null)).copy(total = total))
+
+/**
+ * Returns the list with [playlistId]'s metadata track count set to [total] — the same shape
+ * `LibraryCache` writes to disk, so the in-memory browser list and the cached one can't disagree.
+ * Returns `this` untouched when the playlist isn't in the list or already reads [total], so it
+ * never manufactures a state emission.
+ */
+private fun List<SpotifyPlaylist>.withTrackCount(playlistId: String, total: Int): List<SpotifyPlaylist> =
+    if (none { it.id == playlistId && it.trackCount != total }) this
+    else map { if (it.id == playlistId) it.withTrackCount(total) else it }
 
 private fun Throwable?.isTransientNetworkError(): Boolean =
     this?.cause is java.net.UnknownHostException ||

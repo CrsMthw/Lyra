@@ -208,10 +208,14 @@ class TrackActionsController(
                                 addResult             = AddToPlaylistResult.Added(playlist.name),
                             )
                         }
-                        t.track?.let { full ->
-                            withContext(Dispatchers.IO) {
-                                libraryCache.appendToPlaylistTrackList(playlist.id, playlist.trackCount, full)
-                            }
+                        withContext(Dispatchers.IO) {
+                            val full = t.track
+                            // The cached list can only take the new row when the full track is known;
+                            // either way the playlist just grew server-side, so the mutation is
+                            // always announced — that's what schedules the Library's authoritative
+                            // count reconcile (appendToPlaylistTrackList announces it itself).
+                            if (full != null) libraryCache.appendToPlaylistTrackList(playlist.id, playlist.trackCount, full)
+                            else              libraryCache.notePlaylistMutated(playlist.id)
                         }
                     },
                     onFailure = { e -> _pickerState.update { it.copy(addResult = errorResult(e)) } },

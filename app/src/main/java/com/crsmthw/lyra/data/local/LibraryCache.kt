@@ -99,6 +99,20 @@ class LibraryCache(context: Context) {
     private val _trackListChanges = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val trackListChanges: SharedFlow<String> = _trackListChanges
 
+    /**
+     * Emits a playlist id whenever that playlist was **mutated in-app** — a track added or removed
+     * from any screen — *whether or not* its cached list could be patched. [trackListChanges] is
+     * about the cached ROWS and stays silent when the patch is skipped (nothing cached, a partial
+     * page, the track already present); this one is about the playlist having CHANGED SIZE
+     * server-side, which is true either way.
+     *
+     * `LibraryViewModel` answers it with one authoritative `limit=1` re-read of the server total —
+     * the single source of truth for every "N songs" the app shows. Local ±deltas are only the
+     * interim value the rows already reflect; they are never the last word.
+     */
+    private val _playlistMutations = MutableSharedFlow<String>(extraBufferCapacity = 8)
+    val playlistMutations: SharedFlow<String> = _playlistMutations
+
     // ── Public API ────────────────────────────────────────────────────────────
 
     fun save(data: LibraryCacheData) = synchronized(lock) { saveLocked(data) }
@@ -199,6 +213,15 @@ class LibraryCache(context: Context) {
     }
 
     /**
+     * Announces an in-app add/remove on [playlistId] — see [playlistMutations]. Both surgical track
+     * methods call it themselves; call it directly only for a successful mutation whose cached-list
+     * patch was skipped before it could (e.g. an add whose full track object wasn't available).
+     */
+    fun notePlaylistMutated(playlistId: String) {
+        _playlistMutations.tryEmit(playlistId)
+    }
+
+    /**
      * Surgically appends [track] to a playlist's cached track list (mirrors [prependToLikedSongs],
      * but appends because Spotify adds to the END of a playlist). No-op when:
      *  - there's no cached list for the playlist (it'll be fetched fresh on open anyway),
@@ -210,6 +233,9 @@ class LibraryCache(context: Context) {
      * full library refresh sees the real new snapshot and reconciles by re-fetching.
      */
     fun appendToPlaylistTrackList(playlistId: String, knownTotal: Int, track: SpotifyTrack) {
+        // Outside the lock and BEFORE every early return: the playlist grew server-side even when
+        // the cached list can't take the new row, and the count reconcile must hear about it.
+        notePlaylistMutated(playlistId)
         synchronized(lock) {
             val current  = loadLocked() ?: return
             val existing = current.trackLists[playlistId] ?: return
@@ -241,6 +267,9 @@ class LibraryCache(context: Context) {
      * dropping notifications.
      */
     fun removeFromPlaylistTrackList(playlistId: String, trackUris: Collection<String>) {
+        // Outside the lock and BEFORE every early return (see appendToPlaylistTrackList): the
+        // removal already happened server-side even for a playlist with no cached track list.
+        notePlaylistMutated(playlistId)
         synchronized(lock) {
             val current  = loadLocked() ?: return
             val existing = current.trackLists[playlistId] ?: return
@@ -252,8 +281,11 @@ class LibraryCache(context: Context) {
             val removed   = existing.tracks.size - newTracks.size
             if (removed == 0) return
             // Mirror the metadata count to the cache only when the cache held the full list; for a
-            // partial cache its size isn't the total, so best-effort decrement and let the per-open
-            // reconcile settle it.
+            // partial cache its size isn't the total, so best-effort decrement. Either way this is
+            // the INTERIM value — the [playlistMutations] reconcile overwrites it with the server's
+            // total a moment later. (Note the full-list test is `cached rows >= metadata`: rows the
+            // client filters out — unplayable / local / episode — make the cached list legitimately
+            // SHORTER than the total, which is why its size must not be treated as one.)
             val metaNow  = current.playlists.firstOrNull { it.id == playlistId }?.trackCount ?: 0
             val newTotal = if (existing.tracks.size >= metaNow) newTracks.size
                            else (metaNow - removed).coerceAtLeast(0)
