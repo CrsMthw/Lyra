@@ -213,8 +213,19 @@ class PlayerViewModel(
         )
     }
 
-    fun recheckLiked(trackId: String) {
-        viewModelScope.launch { checkIsLiked(trackId) }
+    /**
+     * Re-reads the saved state for the item the full player is showing (it composes with whatever
+     * `currentTrack` already is, so it can arrive after the observer's own check).
+     *
+     * Takes the ITEM, not an id: an episode id is indistinguishable from a track id, and
+     * `me/library/contains` with `spotify:track:<episode id>` asks about a different (or
+     * non-existent) track — the same reason the observer, `toggleLike` and `playTrack` all branch
+     * on [SpotifyTrack.isEpisode]. The like affordance is hidden for episodes, so there is nothing
+     * to refresh behind it.
+     */
+    fun recheckLiked(track: SpotifyTrack) {
+        if (track.isEpisode) return
+        viewModelScope.launch { checkIsLiked(track.id) }
     }
 
     // ── Lyrics ────────────────────────────────────────────────────────────────

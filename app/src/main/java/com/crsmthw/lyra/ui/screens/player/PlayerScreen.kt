@@ -195,8 +195,10 @@ fun PlayerScreen(
         ImageRequest.Builder(context).data(displayedTrack?.artUrl).crossfade(200).build()
     }
 
+    // Keyed on the id, not the item: the art slide must run on every change of the playing item,
+    // episode or not. `recheckLiked` takes the whole item so it can skip episodes itself.
     LaunchedEffect(state.currentTrack?.id) {
-        state.currentTrack?.id?.let { viewModel.recheckLiked(it) }
+        state.currentTrack?.let { viewModel.recheckLiked(it) }
         val incoming = state.currentTrack
         if (incoming?.id != displayedTrack?.id) {
             if (incoming != null && displayedTrack != null) {
