@@ -189,7 +189,12 @@ internal fun RightPaneContent(
             onTrackLongClick = { track ->
                 if (inSelection) {
                     viewModel.toggleTrackSelection(track.uri)
-                } else {
+                } else if (!track.isEpisode) {
+                    // A playlist CAN hold a podcast episode, and every row in TrackActionsSheet
+                    // (like, add to playlist, go to album, go to artist) addresses a track-only
+                    // endpoint or an object an episode does not have — so the sheet stays shut
+                    // for one. Multi-select removal above is untouched: that is a by-uri
+                    // playlist-items DELETE, which removes an episode perfectly well.
                     val removable = playlist?.takeIf { it.owner?.id == state.user?.id }
                         ?.let { RemovablePlaylist(it.id, it.name) }
                     viewModel.trackActions.open(track.toTrackActionTarget(removable))

@@ -161,7 +161,13 @@ fun QueueScreen(
                             item(key = "now_playing_${track.id}") {
                                 NowPlayingCard(
                                     track       = track,
-                                    onLongClick = { viewModel.trackActions.open(track.toTrackActionTarget()) },
+                                    // No touch-and-hold menu on a podcast episode: every row in
+                                    // TrackActionsSheet (like, add to playlist, go to album, go
+                                    // to artist) addresses a track-only endpoint or an object an
+                                    // episode does not have. A null handler disables it.
+                                    onLongClick = if (track.isEpisode) null else {
+                                        { viewModel.trackActions.open(track.toTrackActionTarget()) }
+                                    },
                                 )
                             }
                         }
@@ -211,7 +217,10 @@ fun QueueScreen(
                             ) { track ->
                                 QueueTrackItem(
                                     track       = track,
-                                    onLongClick = { viewModel.trackActions.open(track.toTrackActionTarget()) },
+                                    // See NowPlayingCard above — episodes get no actions sheet.
+                                    onLongClick = if (track.isEpisode) null else {
+                                        { viewModel.trackActions.open(track.toTrackActionTarget()) }
+                                    },
                                 )
                             }
                         }

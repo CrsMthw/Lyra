@@ -132,7 +132,12 @@ class PlayerViewModel(
                 }
                 val newTrack = state.currentTrack
                 if (newTrack != null && newTrack.id != prevTrack?.id) {
-                    checkIsLiked(newTrack.id)
+                    // A podcast episode is not a track: `me/tracks/contains` with an episode id
+                    // answers about a DIFFERENT (or non-existent) track, so the heart would show
+                    // someone else's saved state. The like affordance is hidden for episodes;
+                    // this keeps the flag honest behind it.
+                    if (newTrack.isEpisode) _uiState.update { it.copy(isLiked = false) }
+                    else checkIsLiked(newTrack.id)
                     fetchLyricsForTrack(newTrack, state.durationMs)
                 } else if (newTrack == null && prevTrack != null) {
                     lyricsJob?.cancel()
@@ -232,8 +237,19 @@ class PlayerViewModel(
     }
 
     private fun fetchLyricsForTrack(track: SpotifyTrack, durationMs: Long) {
-        val artistName = track.artists?.firstOrNull()?.name
+        // Never query LRCLIB for a podcast episode: it is a LYRICS database, so an episode title
+        // can only ever produce a wrong match or a wasted round trip.
+        //
+        // NOTE the raw `artists` read below, deliberately NOT `primaryArtist`: that property now
+        // falls back to the show's name for an episode, and "tidying" this line into it would be
+        // exactly how a show name reaches LRCLIB. The explicit guard is what makes this safe,
+        // not the null check that happens to follow it.
         lyricsJob?.cancel()
+        if (track.isEpisode) {
+            _uiState.update { it.copy(lyricsState = LyricsState.None, currentLyricLineIndex = -1) }
+            return
+        }
+        val artistName = track.artists?.firstOrNull()?.name
         if (artistName == null) {
             _uiState.update { it.copy(lyricsState = LyricsState.None, currentLyricLineIndex = -1) }
             return
@@ -284,6 +300,7 @@ class PlayerViewModel(
     fun toggleLike() {
         val state    = _uiState.value
         val track    = state.currentTrack ?: return
+        if (track.isEpisode) return   // the like affordance is hidden for episodes; belt and braces
         val trackId  = track.id
         val newLiked = !state.isLiked
         _uiState.update { it.copy(isLiked = newLiked) }
@@ -318,6 +335,9 @@ class PlayerViewModel(
 
     fun loadOwnedPlaylists() {
         val track = _uiState.value.currentTrack ?: return
+        // Playlists hold tracks. The picker's membership check and its add/remove calls are all
+        // track-only, so an episode must never reach it (the button is disabled too).
+        if (track.isEpisode) return
         trackActions.openPlaylistPickerFor(track.toTrackActionTarget())
     }
 
@@ -401,8 +421,14 @@ class PlayerViewModel(
         playerStateManager.setOptimisticallyPlaying()
         playerStateManager.resetProgressForNewTrack()
         _uiState.update { it.copy(isPlaying = true, isLiked = false, error = null, isWakingUp = true) }
-        val trackId = uri.substringAfterLast(":")
-        viewModelScope.launch { checkIsLiked(trackId) }
+        // `isLiked` was just cleared above, which is already the right answer for an episode —
+        // and checkIsLiked would otherwise ask me/tracks/contains about `spotify:track:<episode
+        // id>`, i.e. about a different item entirely. me/player/play takes episode uris in `uris`
+        // (the `uri` branch of repository.play), so nothing else here needs to change.
+        if (!uri.startsWith("spotify:episode:")) {
+            val trackId = uri.substringAfterLast(":")
+            viewModelScope.launch { checkIsLiked(trackId) }
+        }
         viewModelScope.launch {
             repository.play(
                 uri        = uri,

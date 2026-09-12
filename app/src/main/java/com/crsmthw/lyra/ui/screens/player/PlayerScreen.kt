@@ -545,10 +545,10 @@ fun PlayerScreen(
                             onOpenAlbum        = onOpenAlbum,
                             onOpenArtist       = onOpenArtist,
                             onShare            = {
-                                state.currentTrack?.id?.let { id ->
+                                state.currentTrack?.let { item ->
                                     context.startActivity(Intent.createChooser(
                                         Intent(Intent.ACTION_SEND).apply {
-                                            putExtra(Intent.EXTRA_TEXT, "https://open.spotify.com/track/$id")
+                                            putExtra(Intent.EXTRA_TEXT, item.shareUrl)
                                             type = "text/plain"
                                         }, null
                                     ))
@@ -704,10 +704,10 @@ fun PlayerScreen(
                         onOpenAlbum        = onOpenAlbum,
                         onOpenArtist       = onOpenArtist,
                         onShare            = {
-                            state.currentTrack?.id?.let { id ->
+                            state.currentTrack?.let { item ->
                                 context.startActivity(Intent.createChooser(
                                     Intent(Intent.ACTION_SEND).apply {
-                                        putExtra(Intent.EXTRA_TEXT, "https://open.spotify.com/track/$id")
+                                        putExtra(Intent.EXTRA_TEXT, item.shareUrl)
                                         type = "text/plain"
                                     }, null
                                 ))
@@ -800,6 +800,9 @@ private fun PlayerControls(
     spacingSmall       : Dp = 12.dp,
 ) {
     val haptics = LocalHapticFeedback.current
+    // A podcast episode has no artists, no album and cannot be liked, added to a playlist or
+    // matched against LRCLIB — every one of those endpoints is track-specific.
+    val isEpisode = state.currentTrack?.isEpisode == true
     // Track name + like
     Row(
         modifier          = Modifier.fillMaxWidth(),
@@ -814,6 +817,9 @@ private fun PlayerControls(
                 modifier = Modifier.basicMarquee(),
             )
             val artists = state.currentTrack?.artists.orEmpty()
+            // An episode's subtitle is its show's name, and it is NOT tappable: there is no
+            // artist page behind it (the artist links stay a full-player-only affordance).
+            val showName = state.currentTrack?.show?.name?.takeIf { isEpisode && it.isNotBlank() }
             if (artists.isNotEmpty()) {
                 FlowRow {
                     artists.forEachIndexed { index, artist ->
@@ -836,6 +842,14 @@ private fun PlayerControls(
                         )
                     }
                 }
+            } else if (showName != null) {
+                Text(
+                    text     = showName,
+                    style    = MaterialTheme.typography.bodyMedium,
+                    color    = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             } else {
                 Text(
                     text  = "–",
@@ -843,6 +857,7 @@ private fun PlayerControls(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            // Null for an episode (no album object), so this link hides itself.
             val albumId   = state.currentTrack?.album?.id
             val albumName = state.currentTrack?.album?.name
             if (albumName != null && albumId != null && onOpenAlbum != null) {
@@ -856,12 +871,16 @@ private fun PlayerControls(
                 )
             }
         }
-        IconButton(onClick = { haptics.toggle(!state.isLiked); onToggleLike() }) {
-            Icon(
-                imageVector        = if (state.isLiked) Icons.Default.Favorite else Icons.Outlined.FavoriteBorder,
-                contentDescription = stringResource(R.string.cd_like),
-                tint               = if (state.isLiked) surfaceAccentColor else LocalContentColor.current,
-            )
+        // Hidden for an episode: `me/tracks` liking does not accept an episode. The unified
+        // library could save episodes, but that is a separate feature, not a re-used heart.
+        if (!isEpisode) {
+            IconButton(onClick = { haptics.toggle(!state.isLiked); onToggleLike() }) {
+                Icon(
+                    imageVector        = if (state.isLiked) Icons.Default.Favorite else Icons.Outlined.FavoriteBorder,
+                    contentDescription = stringResource(R.string.cd_like),
+                    tint               = if (state.isLiked) surfaceAccentColor else LocalContentColor.current,
+                )
+            }
         }
     }
 
@@ -1149,7 +1168,10 @@ private fun PlayerControls(
                 buttonGroupContent = {
                     FilledTonalIconButton(
                         onClick           = { haptics.press(); onAddToPlaylist() },
-                        enabled           = state.currentTrack != null,
+                        // Disabled rather than removed for an episode: dropping a segment from a
+                        // connected ButtonGroup would re-shape its neighbours (share would become
+                        // the trailing pill) every time the now-playing item changed type.
+                        enabled           = state.currentTrack != null && !isEpisode,
                         modifier          = Modifier.size(40.dp).animateWidth(addInteraction),
                         shape             = ButtonGroupDefaults.connectedTrailingButtonShape,
                         colors            = accentButtonColors,
@@ -1162,7 +1184,7 @@ private fun PlayerControls(
                     DropdownMenuItem(
                         text        = { Text(addToPlaylistLabel) },
                         leadingIcon = { Icon(Icons.Default.LibraryAdd, null) },
-                        enabled     = state.currentTrack != null,
+                        enabled     = state.currentTrack != null && !isEpisode,
                         onClick     = { haptics.press(); menuState.dismiss(); onAddToPlaylist() },
                     )
                 },

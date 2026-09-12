@@ -75,7 +75,13 @@ class LyraForegroundService : Service() {
                         NOTIFICATION_ID,
                         buildNotification(
                             trackName         = state.currentTrack?.name,
-                            artistName        = state.currentTrack?.artists?.firstOrNull()?.name,
+                            // A podcast episode has no artists — its show's name is the second
+                            // line. Deliberately not `primaryArtist`, which would substitute
+                            // "Unknown" where this has always passed null.
+                            artistName        = state.currentTrack?.let { item ->
+                                if (item.isEpisode) item.show?.name
+                                else item.artists?.firstOrNull()?.name
+                            },
                             sleepTimerMinutes = state.sleepTimerMinutes,
                         ),
                     )

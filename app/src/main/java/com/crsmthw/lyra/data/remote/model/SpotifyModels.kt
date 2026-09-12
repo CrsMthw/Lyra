@@ -116,6 +116,9 @@ data class SpotifyTrack(
                                          ?: images?.firstOrNull()?.url
                                          ?: show?.images?.firstOrNull()?.url
                                          ?: ""
+    /** The open.spotify.com page for this item — an episode's is `/episode/`, not `/track/`. */
+    val shareUrl       : String  get() =
+        "https://open.spotify.com/${if (isEpisode) "episode" else "track"}/$id"
 }
 
 // ── Saved track wrapper (for liked songs) ───────────────────────────────────
