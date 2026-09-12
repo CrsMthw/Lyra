@@ -429,51 +429,65 @@ class LibraryViewModel(
     /**
      * Live-refreshes the OPEN playlist's track list when its cached list changes from elsewhere —
      * e.g. adding/removing the current track via the full player or pop-out add-to-playlist sheet,
-     * or the song-menu picker on another screen. Re-reads the (already surgically updated) cache so
-     * the change shows without a manual pull-to-refresh. No-op unless the changed playlist is open.
+     * or the song-menu picker on another screen. The signal carries the edit itself
+     * ([com.crsmthw.lyra.data.local.TrackListChange]), so the change shows without a manual
+     * pull-to-refresh. No-op unless the changed playlist is open.
      *
-     * It APPLIES that change to the rows on screen rather than adopting the cached list wholesale —
-     * the two lists can legitimately differ by rows this edit had nothing to do with. See below.
+     * It APPLIES that edit to the rows on screen. It never diffs them against the cached list, and
+     * never reads the cache at all — the two can legitimately differ by rows this edit had nothing
+     * to do with. See below.
      */
     private fun observeTrackListChanges() {
         viewModelScope.launch {
-            cache.trackListChanges.collect { playlistId ->
-                if (_uiState.value.currentPlaylist?.id != playlistId) return@collect
-                val cached = withContext(Dispatchers.IO) { cache.loadTrackList(playlistId) } ?: return@collect
+            cache.trackListChanges.collect { change ->
+                if (_uiState.value.currentPlaylist?.id != change.playlistId) return@collect
                 _uiState.update { s ->
-                    if (s.currentPlaylist?.id != playlistId) return@update s
-                    // Move the counters by the rows that ACTUALLY left or joined THIS list — a set
-                    // difference against the cache — and never by comparing the two lists' SIZES.
+                    if (s.currentPlaylist?.id != change.playlistId) return@update s
+                    // Move the counters by the rows that ACTUALLY left or joined THIS list — the
+                    // uris the edit itself carries — and never by anything derived from the cached
+                    // list's contents or SIZE.
                     //
-                    // Neither list size is a counter to begin with: `currentTracks`/`cached.tracks`
-                    // are the FILTERED rows (unplayable, local files, episodes and null tracks are
-                    // dropped client-side) while `offset`/`total` count every item the API returns,
-                    // so adopting a size throws that gap away (bugs 36/37). A size DIFFERENCE is no
-                    // safer: it silently books any pre-existing gap between the rendered rows and
-                    // the cached ones onto this one edit. A cache holding one row FEWER than the UI
-                    // (a page the UI has that the cache never got — e.g. a library refresh's
-                    // read-modify-write over `trackLists` reverting a page save) therefore dropped
-                    // the hero one below the rows that were really removed, and `currentTracks =
-                    // cached.tracks` deleted a visible row along with it, until the server's total
-                    // landed ~600 ms later (checklist 21/23).
+                    // Neither list size is a counter to begin with: `currentTracks` and the cached
+                    // rows are both the FILTERED list (unplayable, local files, episodes and null
+                    // tracks are dropped client-side) while `offset`/`total` count every item the
+                    // API returns, so adopting a size throws that gap away (bugs 36/37). A size
+                    // DIFFERENCE is no safer — and neither is a set difference against the cache:
+                    // both book any pre-existing gap between the rendered rows and the cached ones
+                    // onto this one edit. With the cache holding a row FEWER than the UI (a page
+                    // the UI has that the cache never got), a set difference deletes that rendered
+                    // row and drags the hero below the rows that really went, until the server's
+                    // total lands ~600 ms later (checklist 21/23). Hence the carried mutation.
                     //
-                    // So: keep every row the cache still knows about (duplicates included — a uri
-                    // can legitimately appear twice), append the ones it gained at the end (where
-                    // Spotify adds them, matching `appendToPlaylistTrackList`), and derive the delta
-                    // from the UI list's own before/after size. A cache that is merely SHORTER than
-                    // the UI now moves nothing. This is still only the INTERIM value: the same cache
+                    // So: drop exactly the uris the caller asked Spotify to remove (every
+                    // occurrence, as remove-by-uri does), append the one it added at the end (where
+                    // Spotify puts it), and derive the delta from THIS list's own before/after size.
+                    // Cache/UI drift now moves nothing. Still only the INTERIM value: the same cache
                     // call that emitted here also scheduled the authoritative server reconcile.
-                    val cachedUris = cached.tracks.mapTo(HashSet(cached.tracks.size)) { it.uri }
-                    val shownUris  = s.currentTracks.mapTo(HashSet(s.currentTracks.size)) { it.uri }
-                    val kept       = s.currentTracks.filter { it.uri in cachedUris }
-                    val gained     = cached.tracks.filterNot { it.uri in shownUris }
-                    // Identity when nothing moved, so an already-applied edit (the multi-select
-                    // removal edits the state itself, then this collector runs over the same change)
-                    // produces a value-equal state that StateFlow conflates — no extra emission
-                    // mid-transition, and `tracksRemoved` stays idempotent.
-                    val newTracks  = if (gained.isEmpty() && kept.size == s.currentTracks.size) s.currentTracks
-                                     else kept + gained
-                    val delta      = newTracks.size - s.currentTracks.size
+                    val shown = s.currentTracks
+                    val left  = if (change.removedUris.isEmpty()) shown
+                                else shown.filterNot { it.uri in change.removedUris }
+                    // Identity when the removal matched no rendered row, so an already-applied edit
+                    // (the multi-select removal edits the state itself, then this collector runs
+                    // over the same change) keeps the SAME list instance.
+                    val kept  = if (left.size == shown.size) shown else left
+                    // Belt-and-braces, and not redundant: `appendToPlaylistTrackList` only refuses a
+                    // track the CACHE already holds, so this guards the case that is this signal's
+                    // whole subject — the rows on screen and the cached ones having drifted.
+                    val added = change.added?.takeIf { t -> kept.none { it.uri == t.uri } }
+                    val newTracks = if (added == null) kept else kept + added
+                    // Nothing to apply → the SAME state object, which StateFlow conflates, so no
+                    // extra emission. Both orderings of a multi-select removal (which edits the
+                    // state itself AND calls the cache) therefore land on the same number: collector
+                    // first → delta −3 → 128 becomes 125, then `tracksRemoved` finds 0 rows left to
+                    // drop and moves nothing; `tracksRemoved` first → 125, then this filter matches
+                    // nothing → identity → conflated. The partial-failure branch is the same shape
+                    // over its committed chunk, and the `selectedUris` intersect below composes with
+                    // its `- partial` in either order. The one extra emission the collector-first
+                    // ordering can add is harmless: neither writer touches `currentPlaylist?.id`, so
+                    // `detailKey` never moves and the single-pane seekable transition cannot see it
+                    // (docs/MOTION.md → Predictive back).
+                    if (newTracks === shown) return@update s
+                    val delta = newTracks.size - shown.size
                     s.copy(
                         currentTracks        = newTracks,
                         playlistTracksOffset = (s.playlistTracksOffset + delta).coerceAtLeast(newTracks.size),
