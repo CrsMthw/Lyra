@@ -157,14 +157,26 @@ fun SearchScreen(
         navSharedTransitionScope = sharedTransitionScope,
         navAnimatedContentScope  = animatedContentScope,
     ) { _ ->
-    Box(modifier = Modifier.fillMaxSize()) {
+    // THE screen's single horizontal inset. In landscape with 3-button navigation the nav bar sits
+    // on the left or right edge, and the search field, the Recent rows' X buttons and the result
+    // rows all ran underneath it — only the inner results Box carried a narrower nav-bars-only
+    // inset, and the bar and recents had none at all. Applied once here, every descendant clears
+    // it, and because `windowInsetsPadding` CONSUMES what it applies, the `navigationBarsPadding()`
+    // calls further down resolve to the remaining BOTTOM inset only, so there is no double padding
+    // (CLAUDE.md → Inset Rules). `displayCutout` joins the union for a landscape notch on the same
+    // edge. The scrims are inset along with everything else, which is invisible: nothing is drawn
+    // in that strip any more either. The mini player is NOT affected — `PlayerPanelHost` renders it
+    // outside this Box and handles its own insets.
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .windowInsetsPadding(
+                WindowInsets.systemBars.union(WindowInsets.displayCutout)
+                    .only(WindowInsetsSides.Horizontal)
+            ),
+    ) {
         // Scrolling content rides above the keyboard; the floating bar + tab chooser do not.
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal))
-                .imePadding(),
-        ) {
+        Box(modifier = Modifier.fillMaxSize().imePadding()) {
             when {
                 state.isLoading -> {
                     Box(Modifier.fillMaxSize().navigationBarsPadding(), contentAlignment = Alignment.Center) {
