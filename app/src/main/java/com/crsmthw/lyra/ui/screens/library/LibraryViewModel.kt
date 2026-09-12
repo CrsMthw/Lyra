@@ -752,9 +752,13 @@ class LibraryViewModel(
                         offset += items.size
                         if (page.next == null || items.isEmpty()) { albumsComplete = true; break }
                     }
-                    // Show a partial sweep's rows too — better than an empty grid — but only a
-                    // complete one is remembered or persisted.
-                    if (albumsComplete || albums.isNotEmpty()) _uiState.update { it.copy(savedAlbums = albums) }
+                    // A partial sweep's rows go only INTO AN EMPTY grid — better than nothing, but
+                    // never in place of the complete cached list already on screen (that list is
+                    // the stale-while-revalidate contract; a truncated prefix would read as "my
+                    // albums vanished"). Only a complete sweep is remembered or persisted.
+                    _uiState.update { s ->
+                        if (albumsComplete || (albums.isNotEmpty() && s.savedAlbums.isEmpty())) s.copy(savedAlbums = albums) else s
+                    }
                     albumsLoaded = albumsComplete
                 }
 
@@ -770,7 +774,9 @@ class LibraryViewModel(
                         after = page.cursors?.after
                         if (after == null || items.isEmpty()) { artistsComplete = true; break }
                     }
-                    if (artistsComplete || artists.isNotEmpty()) _uiState.update { it.copy(followedArtists = artists) }
+                    _uiState.update { s ->
+                        if (artistsComplete || (artists.isNotEmpty() && s.followedArtists.isEmpty())) s.copy(followedArtists = artists) else s
+                    }
                     artistsLoaded = artistsComplete
                 }
 
@@ -792,7 +798,9 @@ class LibraryViewModel(
                         showOffset += items.size
                         if (page.next == null || items.isEmpty()) { showsComplete = true; break }
                     }
-                    if (showsComplete || shows.isNotEmpty()) _uiState.update { it.copy(followedShows = shows) }
+                    _uiState.update { s ->
+                        if (showsComplete || (shows.isNotEmpty() && s.followedShows.isEmpty())) s.copy(followedShows = shows) else s
+                    }
                     showsLoaded = showsComplete
                 }
 

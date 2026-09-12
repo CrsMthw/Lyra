@@ -204,19 +204,23 @@ fun TrackActionsHost(
             )
         }
 
-        ActionItem(
-            icon = Icons.Default.Share,
-            text = stringResource(R.string.track_action_share),
-            onClick = {
-                controller.dismiss()
-                context.startActivity(Intent.createChooser(
-                    Intent(Intent.ACTION_SEND).apply {
-                        putExtra(Intent.EXTRA_TEXT, "https://open.spotify.com/track/${target.id}")
-                        type = "text/plain"
-                    }, null,
-                ))
-            },
-        )
+        // Hidden, not inert, for an item with no open.spotify.com page (a local file) — this menu
+        // already shows "Go to album" / "Go to artist" only when they lead somewhere.
+        target.shareUrl?.let { url ->
+            ActionItem(
+                icon = Icons.Default.Share,
+                text = stringResource(R.string.track_action_share),
+                onClick = {
+                    controller.dismiss()
+                    context.startActivity(Intent.createChooser(
+                        Intent(Intent.ACTION_SEND).apply {
+                            putExtra(Intent.EXTRA_TEXT, url)
+                            type = "text/plain"
+                        }, null,
+                    ))
+                },
+            )
+        }
 
         Spacer(Modifier.navigationBarsPadding())
         }

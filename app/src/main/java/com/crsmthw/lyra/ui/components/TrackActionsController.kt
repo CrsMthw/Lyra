@@ -29,7 +29,14 @@ data class TrackActionTarget(
     val removable : RemovablePlaylist? = null, // "Remove from <name>" shown only when non-null
     val track     : SpotifyTrack? = null,      // full track, when known — lets add-to-playlist
                                                // surgically append to the playlist's cached list
-)
+) {
+    /**
+     * The open.spotify.com page for the row, or null when there is none to share — a local file
+     * ([SpotifyTrack.shareUrl] is null there, and for a Gson-null id). Both builders below set
+     * [track], so the bare-id fallback only serves a target built by hand.
+     */
+    val shareUrl: String? get() = if (track != null) track.shareUrl else "https://open.spotify.com/track/$id"
+}
 
 /** The owned playlist the long-pressed row currently lives in, if any. */
 data class RemovablePlaylist(val id: String, val name: String)
