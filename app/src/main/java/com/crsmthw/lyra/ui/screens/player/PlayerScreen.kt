@@ -195,8 +195,10 @@ fun PlayerScreen(
         ImageRequest.Builder(context).data(displayedTrack?.artUrl).crossfade(200).build()
     }
 
+    // Keyed on the id, not the item: the art slide must run on every change of the playing item,
+    // episode or not. `recheckLiked` takes the whole item so it can skip episodes itself.
     LaunchedEffect(state.currentTrack?.id) {
-        state.currentTrack?.id?.let { viewModel.recheckLiked(it) }
+        state.currentTrack?.let { viewModel.recheckLiked(it) }
         val incoming = state.currentTrack
         if (incoming?.id != displayedTrack?.id) {
             if (incoming != null && displayedTrack != null) {
@@ -544,11 +546,13 @@ fun PlayerScreen(
                             onOpenQueue        = onOpenQueue,
                             onOpenAlbum        = onOpenAlbum,
                             onOpenArtist       = onOpenArtist,
+                            // Nothing to share for an item with no open.spotify.com page (a local
+                            // file) — `shareUrl` is null there and the button stays inert.
                             onShare            = {
-                                state.currentTrack?.let { item ->
+                                state.currentTrack?.shareUrl?.let { url ->
                                     context.startActivity(Intent.createChooser(
                                         Intent(Intent.ACTION_SEND).apply {
-                                            putExtra(Intent.EXTRA_TEXT, item.shareUrl)
+                                            putExtra(Intent.EXTRA_TEXT, url)
                                             type = "text/plain"
                                         }, null
                                     ))
@@ -703,11 +707,12 @@ fun PlayerScreen(
                         onOpenQueue        = onOpenQueue,
                         onOpenAlbum        = onOpenAlbum,
                         onOpenArtist       = onOpenArtist,
+                        // Same null-skip as the landscape layout above.
                         onShare            = {
-                            state.currentTrack?.let { item ->
+                            state.currentTrack?.shareUrl?.let { url ->
                                 context.startActivity(Intent.createChooser(
                                     Intent(Intent.ACTION_SEND).apply {
-                                        putExtra(Intent.EXTRA_TEXT, item.shareUrl)
+                                        putExtra(Intent.EXTRA_TEXT, url)
                                         type = "text/plain"
                                     }, null
                                 ))

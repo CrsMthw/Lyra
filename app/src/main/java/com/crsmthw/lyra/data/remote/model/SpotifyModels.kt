@@ -116,9 +116,20 @@ data class SpotifyTrack(
                                          ?: images?.firstOrNull()?.url
                                          ?: show?.images?.firstOrNull()?.url
                                          ?: ""
-    /** The open.spotify.com page for this item — an episode's is `/episode/`, not `/track/`. */
-    val shareUrl       : String  get() =
-        "https://open.spotify.com/${if (isEpisode) "episode" else "track"}/$id"
+    /**
+     * The open.spotify.com page for this item — an episode's is `/episode/`, not `/track/`.
+     *
+     * Null when there is no page to share. Gson allocates through `Unsafe` and bypasses the
+     * constructor, so the declared-non-null [id] can still arrive null (Spotify's player returns a
+     * local file with `"id": null`), and a local file has no web page even if it did carry one.
+     * The safe call on [id] is therefore a REAL runtime check, not the redundant one the compiler
+     * sees — and callers must keep their `?.let`, so a share is inert rather than offering
+     * `.../track/null`.
+     */
+    @Suppress("UNNECESSARY_SAFE_CALL")
+    val shareUrl       : String? get() =
+        if (isLocal) null
+        else id?.let { "https://open.spotify.com/${if (isEpisode) "episode" else "track"}/$it" }
 }
 
 // ── Saved track wrapper (for liked songs) ───────────────────────────────────

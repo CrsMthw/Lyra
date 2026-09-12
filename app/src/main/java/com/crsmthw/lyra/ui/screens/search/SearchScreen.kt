@@ -116,13 +116,24 @@ fun SearchScreen(
     val showsListState   = rememberLazyListState()
     // A new search starts at the top of every tab. The states are hoisted so each tab keeps its
     // scroll position across tab switches — which would also carry the previous query's position
-    // into the next one (new results landing mid-list, and an immediate page-2 fetch from the
-    // reached-bottom trigger). Keyed on the SEARCHED query, not the live field text.
+    // into the next one, i.e. new results landing mid-list. Keyed on the SEARCHED query, not the
+    // live field text. (The other half of that inheritance — an immediate page-2 fetch — is closed
+    // by the stale-layout guard inside `SearchResultsList`, not here.)
+    //
+    // `requestScrollToItem`, NOT the suspending `scrollToItem`, for the same reason the pager effect
+    // below uses `requestScrollToPage`: `LazyListState.scroll` waits for that list's FIRST layout
+    // before doing anything, and only the settled page is composed (`beyondViewportPageCount = 0`),
+    // so a tab that has never been laid out in this composition blocks forever — and blocks every
+    // call after it in this one coroutine. Reachable on an ordinary pop back into Search: the
+    // saveable-backed states restore a non-zero offset into brand-new, never-measured objects, so a
+    // restored Albums tab kept the previous query's offset because the Tracks reset above it never
+    // returned. The request form writes the position synchronously and schedules the remeasure, for
+    // composed and uncomposed tabs alike.
     LaunchedEffect(state.resultsQuery) {
-        tracksListState.scrollToItem(0)
-        albumsListState.scrollToItem(0)
-        artistsListState.scrollToItem(0)
-        showsListState.scrollToItem(0)
+        tracksListState.requestScrollToItem(0)
+        albumsListState.requestScrollToItem(0)
+        artistsListState.requestScrollToItem(0)
+        showsListState.requestScrollToItem(0)
     }
 
     // One page per tab, so the lists can be SWIPED between as well as tapped. The pager is
@@ -713,9 +724,24 @@ private fun SearchResultsList(
         val haptics = LocalHapticFeedback.current
         ListScrollHaptics(listState)
 
-        val reachedBottom by remember(listState) {
+        // Everything this `LazyColumn` declares below: the caller's rows, the optional paging
+        // footer, the trailing spacer. A measure of THESE contents reports exactly this many items.
+        val declaredItems = itemCount +
+                            (if (paging.isLoadingMore || paging.pagingFailed) 1 else 0) +
+                            1
+        val reachedBottom by remember(listState, declaredItems) {
             derivedStateOf {
-                val info        = listState.layoutInfo
+                val info = listState.layoutInfo
+                // Stale-layout guard. `layoutInfo` is the LAST measure and is never reset when the
+                // list leaves composition — a new query removes the pager while `isLoading`, so on
+                // the frame the new results compose it still describes the PREVIOUS query's rows,
+                // parked wherever the user left them (i.e. "at the bottom"). The per-query reset
+                // writes the new scroll position synchronously, but the measure that applies it
+                // runs in the traversal AFTER this effect, so without this every new query fired a
+                // page-2 fetch on its first frame. Comparing against the declared count makes the
+                // guard independent of effect ordering: it lets the trigger through only once a
+                // measure of the CURRENT contents exists, and it self-clears at that measure.
+                if (info.totalItemsCount != declaredItems) return@derivedStateOf false
                 val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: return@derivedStateOf false
                 lastVisible >= info.totalItemsCount - LOAD_MORE_THRESHOLD
             }
