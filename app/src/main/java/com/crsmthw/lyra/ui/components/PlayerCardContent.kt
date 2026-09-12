@@ -8,6 +8,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import kotlin.math.abs
 import androidx.compose.animation.animateColorAsState
@@ -61,22 +62,8 @@ import com.crsmthw.lyra.util.rememberArtBoundsTransform
 import com.crsmthw.lyra.util.tick
 import com.crsmthw.lyra.util.toTimeString
 import com.crsmthw.lyra.util.toggle
-import com.crsmthw.lyra.util.visualizer.FftWaveCanvas
-import com.crsmthw.lyra.util.visualizer.LocalVisualizerConfig
+import com.crsmthw.lyra.util.visualizer.FftCWaveCanvas
 import kotlinx.coroutines.launch
-
-/**
- * Height of the pop-out panel's bottom visualizer wave. Tall enough for the lobes to read, short
- * enough that it stays mostly under the action row rather than washing over the controls.
- */
-private val PanelWaveHeight = 48.dp
-
-/**
- * Band cap for the panel's wave. The panel is only ~54% of a pane wide, so fewer, bigger lobes
- * read far better here than the full-screen resolution the user picked in Settings; the setting
- * still applies below this cap.
- */
-private const val PanelWaveBands = 16
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class, ExperimentalSharedTransitionApi::class)
 @Composable
@@ -224,6 +211,25 @@ fun PlayerCardContent(
         }
     }
 
+    // ── Circle visualizer ────────────────────────────────────────────────────
+    // Same gate as PlayerScreen: shown only when the master toggle is on AND the chosen style
+    // includes the circle (Surfaces = Bottom hides it here too). The canvas must be *composed*
+    // conditionally — `enabled = false` alone would not suppress it, since the painter draws
+    // whenever it has a spline.
+    val circleVisible = state.visualizerEnabled && state.visualizerStyle.showCircle
+
+    // ── Art shrink when the circle visualizer is on ──────────────────────────
+    // A pure value animation on content that stays on screen, so a spring is correct here (see
+    // docs/MOTION.md → What springs). In practice it never runs in the panel: the visualizer
+    // toggle lives in the full player's menu and the panel content is composed fresh on each
+    // open, so this initialises at its target — which is what keeps the mini ↔ panel shared
+    // element's bounds stable from the first frame instead of fighting the bounds transform.
+    val artScale by animateFloatAsState(
+        targetValue   = if (circleVisible) 0.8f else 1.0f,
+        animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
+        label         = "panelArtScale",
+    )
+
     // ── Play/pause button shape (M3 Expressive cookie) ───────────────────────
     val squigglyShape = MaterialShapes.Cookie12Sided.toShape()
 
@@ -287,37 +293,62 @@ fun PlayerCardContent(
                 }
             } else Modifier
             val artSharedMod = localArtMod.then(navArtMod)
-            AsyncImage(
-                model              = artImageModel,
-                contentDescription = stringResource(R.string.cd_album_art),
-                contentScale       = ContentScale.Crop,
-                modifier           = artSharedMod
-                    .size(artSize)
-                    .clip(RoundedCornerShape(16.dp))
-                    .graphicsLayer { translationX = (artDragX * 0.3f).coerceIn(-80f, 80f) + artOffsetX.value }
-                    .pointerInput(Unit) {
-                        detectHorizontalDragGestures(
-                            onDragStart      = { artDragX = 0f },
-                            onDragEnd        = {
-                                when {
-                                    artDragX < -swipeThresholdPx -> {
-                                        val s = (artDragX * 0.3f).coerceIn(-80f, 80f); artDragX = 0f; skipDirection = 1
-                                        scope.launch { artOffsetX.snapTo(s); artOffsetX.animateTo(-1500f, tween(250, easing = FastOutLinearInEasing)) }
-                                        playerViewModel.skipNext()
+            // The art SLOT stays `artSize` whether or not the circle is on — the canvas fills it
+            // and the art shrinks inside it — so the Column's height is unchanged and
+            // `reservedChrome` above still describes the card. Exactly PlayerScreen's arrangement
+            // (canvas as a preceding sibling in the slot Box, `displaySide = side * artScale` on
+            // the art), so the shared-element modifiers keep their place at the head of the art's
+            // chain and the mini ↔ panel / panel ↔ full-player morphs are untouched.
+            val displaySide = artSize * artScale
+            Box(Modifier.size(artSize), contentAlignment = Alignment.Center) {
+                // No capture plumbing is needed and none should be added: PlayerViewModel starts
+                // the single app-wide Visualizer(0) on (isPlaying && visualizerEnabled), and this
+                // reads the same instance the full player does via LocalFftData. Without
+                // RECORD_AUDIO, tryInitialize() bails and fftData stays null, so the painter never
+                // activates and only the static base disc is drawn — the panel must never prompt
+                // for the permission itself. The canvas is a draw-only Spacer (no pointer input),
+                // so the art's swipe-to-skip gesture below is unaffected. Composed only while the
+                // panel is visible, so its per-frame loop dies with it.
+                if (circleVisible) {
+                    FftCWaveCanvas(
+                        modifier = Modifier.fillMaxSize(),
+                        color    = surfaceAccentColor,
+                        alpha    = 0.40f,
+                        enabled  = true,
+                    )
+                }
+                AsyncImage(
+                    model              = artImageModel,
+                    contentDescription = stringResource(R.string.cd_album_art),
+                    contentScale       = ContentScale.Crop,
+                    modifier           = artSharedMod
+                        .size(displaySide)
+                        .clip(RoundedCornerShape(16.dp))
+                        .graphicsLayer { translationX = (artDragX * 0.3f).coerceIn(-80f, 80f) + artOffsetX.value }
+                        .pointerInput(Unit) {
+                            detectHorizontalDragGestures(
+                                onDragStart      = { artDragX = 0f },
+                                onDragEnd        = {
+                                    when {
+                                        artDragX < -swipeThresholdPx -> {
+                                            val s = (artDragX * 0.3f).coerceIn(-80f, 80f); artDragX = 0f; skipDirection = 1
+                                            scope.launch { artOffsetX.snapTo(s); artOffsetX.animateTo(-1500f, tween(250, easing = FastOutLinearInEasing)) }
+                                            playerViewModel.skipNext()
+                                        }
+                                        artDragX > swipeThresholdPx -> {
+                                            val s = (artDragX * 0.3f).coerceIn(-80f, 80f); artDragX = 0f; skipDirection = -1
+                                            scope.launch { artOffsetX.snapTo(s); artOffsetX.animateTo(1500f, tween(250, easing = FastOutLinearInEasing)) }
+                                            playerViewModel.skipPrevious()
+                                        }
+                                        else -> artDragX = 0f
                                     }
-                                    artDragX > swipeThresholdPx -> {
-                                        val s = (artDragX * 0.3f).coerceIn(-80f, 80f); artDragX = 0f; skipDirection = -1
-                                        scope.launch { artOffsetX.snapTo(s); artOffsetX.animateTo(1500f, tween(250, easing = FastOutLinearInEasing)) }
-                                        playerViewModel.skipPrevious()
-                                    }
-                                    else -> artDragX = 0f
-                                }
-                            },
-                            onDragCancel     = { artDragX = 0f },
-                            onHorizontalDrag = { _, amount -> artDragX += amount },
-                        )
-                    },
-            )
+                                },
+                                onDragCancel     = { artDragX = 0f },
+                                onHorizontalDrag = { _, amount -> artDragX += amount },
+                            )
+                        },
+                )
+            }
 
             Spacer(Modifier.height(16.dp))
 
@@ -631,39 +662,6 @@ fun PlayerCardContent(
                     )
                 }
             }
-        }
-
-        // ── Bottom visualizer wave ──────────────────────────────────────────
-        // Overlaid at the card's bottom edge rather than added as a Column child. A child would
-        // have to be paid for in `reservedChrome` above — the one number in here that can overflow
-        // the card — and would float above the Column's 20dp bottom padding instead of sitting
-        // flush. This Spacer carries draw modifiers only, so it takes no pointer input and the
-        // action buttons under it stay tappable, and the Card's 24dp rounding clips its corners.
-        //
-        // No capture plumbing is needed and none should be added: VisualizerManager is started
-        // app-wide from PlayerViewModel on (isPlaying && visualizerEnabled), and this reads the
-        // same single Visualizer(0) instance the full PlayerScreen does — via LocalFftData, like
-        // every other bottom wave in the app. Without RECORD_AUDIO, tryInitialize() bails, fftData
-        // stays null and the painter never activates, so the panel just draws nothing; it must
-        // never prompt for the permission itself. And because the panel's content is composed only
-        // while it is visible (AnimatedVisibility in PlayerPopOutPanel), the per-frame loop is gone
-        // the moment it closes. FftWaveCanvas self-gates on LocalVisualizerBottomEnabled, so
-        // Settings → Visualizer → Surfaces = Circle hides this one too, as it does everywhere else.
-        val visualizerConfig = LocalVisualizerConfig.current
-        val panelWaveConfig  = remember(visualizerConfig) {
-            visualizerConfig.copy(
-                bottomBands = visualizerConfig.bottomBands.coerceAtMost(PanelWaveBands),
-            )
-        }
-        CompositionLocalProvider(LocalVisualizerConfig provides panelWaveConfig) {
-            FftWaveCanvas(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(PanelWaveHeight)
-                    .align(Alignment.BottomCenter),
-                color    = surfaceAccentColor,
-                alpha    = 0.20f,
-            )
         }
     }
 
