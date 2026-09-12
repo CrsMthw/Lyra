@@ -323,9 +323,22 @@ class LibraryViewModel(
      * from this playlist", the add-to-playlist picker on any screen, or the player — with one
      * authoritative re-read of the playlist's server total.
      */
+    /**
+     * Playlists mutated in-app this session. Only for these does [loadMorePlaylistTracks] de-dupe an
+     * appended page by uri: the artefact it guards against — a page served from Spotify's PRE-mutation
+     * list right after a DELETE/POST — can only exist after a mutation, while a uri repeating across
+     * pages on an untouched playlist is real content (Spotify's own client adds a duplicate behind an
+     * "already added" confirmation; collaborative playlists and imports carry them) that must render
+     * twice. Cleared by a pull-to-refresh, which re-reads page 0 from the server.
+     */
+    private val dedupePagesFor = mutableSetOf<String>()
+
     private fun observePlaylistMutations() {
         viewModelScope.launch {
-            cache.playlistMutations.collect { playlistId -> reconcilePlaylistTotal(playlistId) }
+            cache.playlistMutations.collect { playlistId ->
+                dedupePagesFor += playlistId
+                reconcilePlaylistTotal(playlistId)
+            }
         }
     }
 
@@ -1043,17 +1056,18 @@ class LibraryViewModel(
                     }
                     val newTracks   = (resp.items ?: emptyList()).mapNotNull { it.resolvedTrack }.filter { it.isPlayable != false }
                     val rawPageSize = resp.items?.size ?: 0
-                    // De-dupe the page against what's already loaded, by uri. A playlist cannot hold
-                    // the same track twice — neither Lyra nor Spotify will add a duplicate (device-
-                    // confirmed 2026-09-11) — so a uri that comes back on a second page is ALWAYS an
-                    // artefact, never real content. The one that bites: a page fetched moments after
-                    // a removal can still be served from the PRE-removal list, where our loaded
-                    // prefix ends `removed` items earlier, so the page starts inside rows we already
-                    // have. `TrackList` keys rows on "<uri>#<ordinal>", so such a row really renders,
-                    // and `selectedUris` is a uri SET — which is why checking one of the twins
-                    // checked both, and why removing it then over-counted the rows that went.
+                    // De-dupe the page against what's already loaded, by uri — but ONLY for a playlist
+                    // this session mutated in-app (`dedupePagesFor`). The artefact: a page fetched
+                    // moments after a removal can still be served from Spotify's PRE-removal list,
+                    // where our loaded prefix ends `removed` items earlier, so the page starts inside
+                    // rows we already have. `TrackList` keys rows on "<uri>#<ordinal>", so such a row
+                    // really renders, and `selectedUris` is a uri SET — which is why checking one of
+                    // the twins checked both, and why removing it then over-counted the rows that went.
+                    // An UNTOUCHED playlist is never de-duped: a uri that legitimately appears twice
+                    // (Spotify's client adds behind an "already added" prompt; collaborative playlists)
+                    // must keep both rows — that is what the ordinal in the row key exists for.
                     val have     = live.currentTracks.mapTo(HashSet(live.currentTracks.size)) { it.uri }
-                    val appended = newTracks.filterNot { it.uri in have }
+                    val appended = if (playlist.id in dedupePagesFor) newTracks.filterNot { it.uri in have } else newTracks
                     val dupes    = newTracks.size - appended.size
                     val allTracks = live.currentTracks + appended
                     // Offset advances by the RAW page size (so client-filtered items stay counted —
@@ -1128,6 +1142,9 @@ class LibraryViewModel(
                             playlistTracksOffset = resp.items?.size ?: 0,   // reset paging to page 0
                             playlistTracksTotal  = resp.total,
                         ).selectionCleared() }
+                        // Page 0 is fresh from the server, so the post-mutation stale-page window is
+                        // over for this playlist — stop de-duping its pages (see dedupePagesFor).
+                        dedupePagesFor -= playlist.id
                         // Same server total through the single authoritative writer, so a refresh
                         // heals the browser/left-pane card and the cached metadata too — not just
                         // the hero. Writes nothing when they already agree (the copies are identity),

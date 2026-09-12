@@ -70,6 +70,8 @@ data class SearchUiState(
     /** Result type on screen. Not persisted across process death — a fresh search starts on Tracks. */
     val tab      : SearchTab                = SearchTab.TRACKS,
     val paging   : Map<SearchTab, TabPaging> = emptyMap(),
+    /** The query the on-screen results were fetched for (the live field text runs ahead of it). */
+    val resultsQuery: String                = "",
     val isLoading: Boolean                  = false,
     val error    : String?                  = null,
 ) {
@@ -180,8 +182,8 @@ class SearchViewModel(
             searchEpoch++
             resultsQuery = ""
             _state.update {
-                it.copy(results = null, tab = SearchTab.TRACKS, paging = emptyMap(),
-                        isLoading = false, error = null)
+                it.copy(results = null, resultsQuery = "", tab = SearchTab.TRACKS,
+                        paging = emptyMap(), isLoading = false, error = null)
             }
         }
     }
@@ -199,8 +201,9 @@ class SearchViewModel(
                     resultsQuery = query
                     _state.update {
                         it.copy(
-                            results   = results,
-                            isLoading = false,
+                            results      = results,
+                            resultsQuery = query,
+                            isLoading    = false,
                             // REPLACES the map rather than merging into it: a `pagingFailed` or
                             // `isLoadingMore` left behind by the previous query (whose in-flight
                             // response the epoch guard dropped without clearing its flag) would

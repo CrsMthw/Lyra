@@ -102,6 +102,15 @@ fun SearchScreen(
     val tracksListState  = rememberLazyListState()
     val albumsListState  = rememberLazyListState()
     val artistsListState = rememberLazyListState()
+    // A new search starts at the top of every tab. The three states are hoisted so each tab keeps
+    // its scroll position across tab switches — which would also carry the previous query's position
+    // into the next one (new results landing mid-list, and an immediate page-2 fetch from the
+    // reached-bottom trigger). Keyed on the SEARCHED query, not the live field text.
+    LaunchedEffect(state.resultsQuery) {
+        tracksListState.scrollToItem(0)
+        albumsListState.scrollToItem(0)
+        artistsListState.scrollToItem(0)
+    }
 
     val tracksLabel  = stringResource(R.string.search_tab_tracks)
     val albumsLabel  = stringResource(R.string.search_tab_albums)
@@ -490,7 +499,12 @@ private fun SearchResultsList(
             }
         }
 
-        LaunchedEffect(reachedBottom, tab) {
+        // The paging flags are KEYS, not just reads: a page that adds fewer rows than the threshold
+        // leaves `reachedBottom` latched true, so without them the effect would never re-run and the
+        // tab would stop paging until the user scrolled away and back. With them the sequence is
+        // loop-free — fire → isLoadingMore=true (restart, no-op) → page lands → isLoadingMore=false
+        // (restart, fires again only while canLoadMore is still true).
+        LaunchedEffect(reachedBottom, tab, paging.canLoadMore, paging.isLoadingMore) {
             if (reachedBottom && paging.canLoadMore && !isLoading && !paging.isLoadingMore) {
                 onLoadMore(tab)
             }
