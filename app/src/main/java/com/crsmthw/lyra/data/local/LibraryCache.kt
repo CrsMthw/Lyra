@@ -158,9 +158,42 @@ class LibraryCache(context: Context) {
 
     // ── Public API ────────────────────────────────────────────────────────────
 
+    /**
+     * Wholesale replace. Prefer a patching writer — [saveLibraryMeta], [saveCollections],
+     * [saveForYou], [saveTrackList]: a `load()` … `save()` pair spans TWO lock acquisitions, so any
+     * surgical edit landing between them (a page append, an add/remove) is silently reverted to
+     * whatever the read saw.
+     */
     fun save(data: LibraryCacheData) = synchronized(lock) { saveLocked(data) }
 
     fun load(): LibraryCacheData? = synchronized(lock) { loadLocked() }
+
+    /**
+     * Patches ONLY the library metadata — the playlist list, the liked-song count and the user —
+     * inside ONE lock acquisition, leaving track lists, the For-you band and the Albums/Artists/
+     * Shows lists exactly as they are on disk.
+     *
+     * This is what `loadLibrary`/`refreshLibrary` must use. Reading the cache and saving a rebuilt
+     * [LibraryCacheData] back was two separate lock acquisitions, so a `saveTrackList` page append
+     * or a surgical add/remove that landed in between was reverted to the stale map — the UI then
+     * held rows the cache did not, which is the drift [TrackListChange] exists to survive. It also
+     * preserves the legacy `featuredPlaylists` field, which the rebuilt-object form dropped on
+     * every refresh.
+     */
+    fun saveLibraryMeta(
+        playlists      : List<SpotifyPlaylist>,
+        likedSongCount : Int,
+        user           : SpotifyUser?,
+    ) {
+        synchronized(lock) {
+            val current = loadLocked() ?: LibraryCacheData()
+            saveLocked(current.copy(
+                playlists      = playlists,
+                likedSongCount = likedSongCount,
+                user           = user,
+            ))
+        }
+    }
 
     /** Persists just the For-you band (jump-back-in + top tracks), leaving the rest untouched. */
     fun saveForYou(forYou: ForYouCacheData) {

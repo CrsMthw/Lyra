@@ -7,7 +7,6 @@ import com.crsmthw.lyra.data.local.CachedTrackList
 import com.crsmthw.lyra.data.local.ForYouCacheData
 import com.crsmthw.lyra.data.local.JumpBackInItem
 import com.crsmthw.lyra.data.local.LibraryCache
-import com.crsmthw.lyra.data.local.LibraryCacheData
 import com.crsmthw.lyra.data.player.PlayerStateManager
 import com.crsmthw.lyra.data.remote.SpotifyRemoteManager
 import com.crsmthw.lyra.data.remote.model.*
@@ -583,20 +582,12 @@ class LibraryViewModel(
 
             loadForYou()   // after playlists so jump-back-in context lookup can resolve
 
-            // Persist refreshed data, preserving existing track list + For-you cache
+            // Persist refreshed data. ONE patching write, never a read-then-replace: the track
+            // lists, the For-you band and the collection lists are left on disk untouched, so a
+            // page append or a surgical add/remove landing mid-refresh can't be reverted under us.
             val s = _uiState.value
             withContext(Dispatchers.IO) {
-                val existing = cache.load()
-                cache.save(LibraryCacheData(
-                    playlists         = s.playlists,
-                    likedSongCount    = s.likedSongCount,
-                    user              = s.user,
-                    trackLists        = existing?.trackLists ?: emptyMap(),
-                    forYou            = existing?.forYou,
-                    savedAlbums       = existing?.savedAlbums,
-                    followedArtists   = existing?.followedArtists,
-                    followedShows     = existing?.followedShows,
-                ))
+                cache.saveLibraryMeta(s.playlists, s.likedSongCount, s.user)
             }
             // Generate mosaics for any new playlists that now have cached track lists
             generateMissingMosaicsAsync(s.playlists, cache.load()?.trackLists ?: emptyMap())
@@ -859,19 +850,10 @@ class LibraryViewModel(
             // so refreshing Playlists never kicks off sweeps the user hasn't asked for.
             if (_uiState.value.libraryFilter != LibraryFilter.PLAYLISTS) loadCollections()
 
+            // Same patching write as loadLibrary — see the note there.
             val s = _uiState.value
             withContext(Dispatchers.IO) {
-                val existing = cache.load()
-                cache.save(LibraryCacheData(
-                    playlists         = s.playlists,
-                    likedSongCount    = s.likedSongCount,
-                    user              = s.user,
-                    trackLists        = existing?.trackLists ?: emptyMap(),
-                    forYou            = existing?.forYou,
-                    savedAlbums       = existing?.savedAlbums,
-                    followedArtists   = existing?.followedArtists,
-                    followedShows     = existing?.followedShows,
-                ))
+                cache.saveLibraryMeta(s.playlists, s.likedSongCount, s.user)
             }
             generateMissingMosaicsAsync(s.playlists, cache.load()?.trackLists ?: emptyMap())
         }
