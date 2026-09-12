@@ -9,8 +9,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -22,7 +23,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -37,8 +37,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
@@ -46,7 +46,7 @@ import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.local.RecentSearch
 import com.crsmthw.lyra.data.remote.model.SpotifyAlbum
 import com.crsmthw.lyra.data.remote.model.SpotifyArtist
-import com.crsmthw.lyra.data.remote.model.SpotifyPlaylist
+import com.crsmthw.lyra.ui.components.ConnectedChoiceRow
 import com.crsmthw.lyra.ui.components.PlayerPanelHost
 import com.crsmthw.lyra.ui.components.TopScrim
 import com.crsmthw.lyra.ui.components.TrackActionsHost
@@ -57,7 +57,6 @@ import com.crsmthw.lyra.util.ListScrollHaptics
 import com.crsmthw.lyra.util.confirm
 import com.crsmthw.lyra.util.press
 import com.crsmthw.lyra.util.rememberArtBoundsTransform
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import com.crsmthw.lyra.util.visualizer.FftWaveCanvas
 import com.crsmthw.lyra.util.visualizer.LocalVisualizerAccentColor
@@ -97,6 +96,24 @@ fun SearchScreen(
     // derivedStateOf adds no frame of lag (dependents are notified with the recomputed value).
     val queryBlank by remember(queryState) { derivedStateOf { queryState.text.isBlank() } }
 
+    // One scroll position per tab, kept at screen scope so switching away and back lands where you
+    // left off — only the active tab's list is composed at a time. `rememberLazyListState` is
+    // already `rememberSaveable`-backed, and three distinct call sites get three distinct keys.
+    val tracksListState  = rememberLazyListState()
+    val albumsListState  = rememberLazyListState()
+    val artistsListState = rememberLazyListState()
+
+    val tracksLabel  = stringResource(R.string.search_tab_tracks)
+    val albumsLabel  = stringResource(R.string.search_tab_albums)
+    val artistsLabel = stringResource(R.string.search_tab_artists)
+    val tabOptions = remember(tracksLabel, albumsLabel, artistsLabel) {
+        listOf(
+            SearchTab.TRACKS  to tracksLabel,
+            SearchTab.ALBUMS  to albumsLabel,
+            SearchTab.ARTISTS to artistsLabel,
+        )
+    }
+
     // Container transform: the floating bar shares bounds with the Library search FAB (same
     // SEARCH_BAR_SHARED_KEY) so tapping the FAB expands it into this bar. Null scopes (two-pane /
     // previews) fall back to no morph.
@@ -118,8 +135,12 @@ fun SearchScreen(
     val navBarBottomDp = with(density) { WindowInsets.navigationBars.getBottom(this).toDp() }
     val scrimHeight    = navBarBottomDp + 48.dp
     val background     = MaterialTheme.colorScheme.background
-    // Top content inset clears the floating bar: status bar + top margin + bar height + a gap.
-    val topInset       = statusBarTopDp + 8.dp + SearchBarHeight + 12.dp
+    // Two different top insets, because the two things that live under the bar are mutually
+    // exclusive: the Recent list only exists while the query is BLANK, which is exactly when the
+    // tab chooser is absent — so handing it the results' inset would shove it down by a row height
+    // with nothing above it.
+    val barInset       = statusBarTopDp + SearchBarBlockHeight
+    val resultsInset   = barInset + SearchTabRowHeight + SearchTabRowGap
 
     // The mini player / pop-out panel wrap the whole screen, as on Library/Album/Artist. The
     // "search-bar" container transform is unaffected: it is built against the NAV shared-transition
@@ -137,7 +158,7 @@ fun SearchScreen(
         navAnimatedContentScope  = animatedContentScope,
     ) { _ ->
     Box(modifier = Modifier.fillMaxSize()) {
-        // Scrolling content rides above the keyboard; the floating bar + top scrim do not.
+        // Scrolling content rides above the keyboard; the floating bar + tab chooser do not.
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -156,76 +177,33 @@ fun SearchScreen(
                     }
                 }
                 state.results != null -> {
-                    val results   = state.results!!
-                    val tracks    = results.tracks?.items    ?: emptyList()
-                    val albums    = results.albums?.items    ?: emptyList()
-                    val artists   = results.artists?.items   ?: emptyList()
-                    val playlists = results.playlists?.items ?: emptyList()
+                    val results     = state.results!!
+                    val paging      = state.pagingFor(state.tab)
+                    val emptyText   = stringResource(R.string.search_no_results, state.query)
+                    val listPadding = remember(resultsInset, navBarBottomDp) {
+                        // 100dp of mini-player clearance on top of the nav bar, so the last row
+                        // scrolls clear of the floating bar (UI_PATTERNS.md → "LazyColumn bottom
+                        // padding must include nav bar height").
+                        PaddingValues(top = resultsInset, bottom = 100.dp + navBarBottomDp)
+                    }
 
-                    val hasAny = tracks.isNotEmpty() || albums.isNotEmpty() ||
-                                 artists.isNotEmpty() || playlists.isNotEmpty()
-
-                    if (!hasAny) {
-                        Box(Modifier.fillMaxSize().navigationBarsPadding(), contentAlignment = Alignment.Center) {
-                            Text(stringResource(R.string.search_no_results, state.query),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    } else {
-                        val resultsListState = rememberLazyListState()
-                        ListScrollHaptics(resultsListState)
-
-                        // Lazy-load on scroll: the API caps a page at 10 per type, so the list
-                        // grows by `offset`. Every gate lives INSIDE the snapshotFlow rather than
-                        // in the collector, so `isLoadingMore` clearing re-emits and the next page
-                        // can follow while the user stays parked at the end of the list.
-                        LaunchedEffect(resultsListState, viewModel) {
-                            snapshotFlow {
-                                val info = resultsListState.layoutInfo
-                                val last = info.visibleItemsInfo.lastOrNull()?.index ?: -1
-                                state.canLoadMore && !state.isLoading && !state.isLoadingMore &&
-                                    info.totalItemsCount > 0 &&
-                                    last >= info.totalItemsCount - LOAD_MORE_THRESHOLD
-                            }
-                                .distinctUntilChanged()
-                                .collect { nearEnd -> if (nearEnd) viewModel.loadMore() }
-                        }
-
-                        LazyColumn(
-                            state          = resultsListState,
-                            modifier       = Modifier.fillMaxSize(),
-                            // 100dp of mini-player clearance on top of the nav bar, so the last row
-                            // scrolls clear of the floating bar (UI_PATTERNS.md → "LazyColumn bottom
-                            // padding must include nav bar height").
-                            contentPadding = PaddingValues(top = topInset, bottom = 100.dp + navBarBottomDp),
-                        ) {
-
-                            // ── Artists — horizontal stories row ──────────────
-                            if (artists.isNotEmpty()) {
-                                item(key = "section_artists") {
-                                    SectionHeader("Artists")
-                                }
-                                item(key = "artists_row") {
-                                    LazyRow(
-                                        contentPadding = PaddingValues(horizontal = 8.dp),
-                                    ) {
-                                        items(artists, key = { "artist_${it.id}" }) { artist ->
-                                            ArtistChip(
-                                                artist  = artist,
-                                                onClick = {
-                                                    viewModel.addRecentSearch(artist.toRecentSearch())
-                                                    onArtistClick(artist.id)
-                                                },
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-
-                            // ── Tracks ────────────────────────────────────────
-                            if (tracks.isNotEmpty()) {
-                                item(key = "section_tracks") {
-                                    SectionHeader("Tracks")
-                                }
+                    // One vertical list per type. A plain swap, not an `AnimatedContent`: nothing
+                    // here needs a content-swap transition, and any that does must ride the single
+                    // finite `screenTransitionSpec()` (docs/MOTION.md → THE HARD RULE).
+                    when (state.tab) {
+                        SearchTab.TRACKS -> {
+                            val tracks = results.tracks?.items ?: emptyList()
+                            SearchResultsList(
+                                tab            = SearchTab.TRACKS,
+                                listState      = tracksListState,
+                                itemCount      = tracks.size,
+                                paging         = paging,
+                                isLoading      = state.isLoading,
+                                emptyText      = emptyText,
+                                contentPadding = listPadding,
+                                onLoadMore     = viewModel::loadMore,
+                                onRetry        = viewModel::retryLoadMore,
+                            ) {
                                 items(tracks, key = { "track_${it.id}" }) { track ->
                                     TrackRow(
                                         track   = track,
@@ -238,12 +216,21 @@ fun SearchScreen(
                                     )
                                 }
                             }
+                        }
 
-                            // ── Albums ────────────────────────────────────────
-                            if (albums.isNotEmpty()) {
-                                item(key = "section_albums") {
-                                    SectionHeader("Albums")
-                                }
+                        SearchTab.ALBUMS -> {
+                            val albums = results.albums?.items ?: emptyList()
+                            SearchResultsList(
+                                tab            = SearchTab.ALBUMS,
+                                listState      = albumsListState,
+                                itemCount      = albums.size,
+                                paging         = paging,
+                                isLoading      = state.isLoading,
+                                emptyText      = emptyText,
+                                contentPadding = listPadding,
+                                onLoadMore     = viewModel::loadMore,
+                                onRetry        = viewModel::retryLoadMore,
+                            ) {
                                 items(albums, key = { "album_${it.id}" }) { album ->
                                     AlbumRow(
                                         album   = album,
@@ -254,53 +241,31 @@ fun SearchScreen(
                                     )
                                 }
                             }
+                        }
 
-                            // ── Playlists ─────────────────────────────────────
-                            if (playlists.isNotEmpty()) {
-                                item(key = "section_playlists") {
-                                    SectionHeader("Playlists")
-                                }
-                                items(playlists, key = { "playlist_${it.id}" }) { playlist ->
-                                    PlaylistRow(
-                                        playlist = playlist,
-                                        onClick  = {
-                                            viewModel.addRecentSearch(playlist.toRecentSearch())
-                                            onOpenPlayer()
+                        SearchTab.ARTISTS -> {
+                            val artists = results.artists?.items ?: emptyList()
+                            SearchResultsList(
+                                tab            = SearchTab.ARTISTS,
+                                listState      = artistsListState,
+                                itemCount      = artists.size,
+                                paging         = paging,
+                                isLoading      = state.isLoading,
+                                emptyText      = emptyText,
+                                contentPadding = listPadding,
+                                onLoadMore     = viewModel::loadMore,
+                                onRetry        = viewModel::retryLoadMore,
+                            ) {
+                                items(artists, key = { "artist_${it.id}" }) { artist ->
+                                    ArtistRow(
+                                        artist  = artist,
+                                        onClick = {
+                                            viewModel.addRecentSearch(artist.toRecentSearch())
+                                            onArtistClick(artist.id)
                                         },
                                     )
                                 }
                             }
-
-                            // Paging footer — spinner XOR retry, never both, so the one
-                            // `load_more` key is safe and the item count doesn't churn across the
-                            // loading→failed flip. The spinner is a small inline one, per
-                            // MATERIAL3.md's loading conventions (ContainedLoadingIndicator is for
-                            // full-area states). The retry row is the only way back from a failed
-                            // page: `canLoadMore` stays false while it is shown, so the scroll
-                            // trigger above cannot refire on its own.
-                            if (state.isLoadingMore || state.pagingFailed) {
-                                item(key = "load_more") {
-                                    Box(
-                                        modifier         = Modifier.fillMaxWidth().padding(16.dp),
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        if (state.isLoadingMore) {
-                                            CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                                        } else {
-                                            TextButton(
-                                                onClick = {
-                                                    haptics.press()
-                                                    viewModel.retryLoadMore()
-                                                },
-                                            ) {
-                                                Text(stringResource(R.string.search_load_more_retry))
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            item(key = "footer_space") { Spacer(Modifier.height(16.dp)) }
                         }
                     }
                 }
@@ -340,7 +305,7 @@ fun SearchScreen(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .fillMaxWidth()
-                    .padding(top = topInset)
+                    .padding(top = barInset)
                     .windowInsetsPadding(
                         WindowInsets.ime.union(WindowInsets.navigationBars)
                             .only(WindowInsetsSides.Bottom)
@@ -399,6 +364,23 @@ fun SearchScreen(
                 .padding(start = 16.dp, end = 16.dp, top = 8.dp)
                 .then(searchBarSharedModifier),
         )
+
+        // Result-type chooser, FIXED in the same floating layer as the bar so it stays put while a
+        // list scrolls underneath it. Results used to be one LazyColumn of stacked sections, so
+        // every appended page of tracks pushed Albums further out of reach; each type is now its
+        // own list. Only shown once something is typed — the Recent list owns the blank state. The
+        // `press` haptic comes from ConnectedChoiceRow, and only on a genuine change of selection.
+        if (!queryBlank) {
+            ConnectedChoiceRow(
+                options  = tabOptions,
+                selected = state.tab,
+                onSelect = viewModel::selectTab,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .padding(start = 16.dp, end = 16.dp, top = SearchBarBlockHeight),
+            )
+        }
     }
     } // PlayerPanelHost
 
@@ -421,8 +403,107 @@ fun SearchScreen(
 /** Pairs the Library search FAB with the Search screen's bar for the container transform. */
 private const val SEARCH_BAR_SHARED_KEY = "search-bar"
 
-/** How close to the end of the results list a scroll gets before the next page is requested. */
+/** How close to the end of a results list a scroll gets before the next page is requested. */
 private const val LOAD_MORE_THRESHOLD = 5
+
+/** Height of the floating search bar — matches the M3 search input-field height. */
+private val SearchBarHeight = 56.dp
+
+/** Top margin + bar + gap: where the next floating element starts, measured below the status bar. */
+private val SearchBarBlockHeight: Dp = 8.dp + SearchBarHeight + 12.dp
+
+/** `ToggleButtonDefaults.MinHeight` — what one row of [ConnectedChoiceRow] segments measures. */
+private val SearchTabRowHeight = 40.dp
+
+/** Breathing room between the tab chooser and the first result row. */
+private val SearchTabRowGap = 12.dp
+
+/**
+ * One tab's results list — the rows are the caller's, everything around them is shared: the
+ * per-tab empty state, scroll haptics, the paging trigger and the paging footer.
+ *
+ * The trigger is the Library's house pattern (`LibraryTrackListPane.TrackList`): a `derivedStateOf`
+ * Boolean plus a `LaunchedEffect` keyed on it (and on [tab], so switching lists re-evaluates for
+ * the new one). Every tab appends its rows at the bottom of its OWN list now, so an append always
+ * grows `totalItemsCount` past the threshold and un-latches the trigger — the old "artists render
+ * as two fixed items, so appending them never grew the count and the trigger stayed satisfied"
+ * failure mode (docs/UI_PATTERNS.md → Search pagination) is closed by construction.
+ */
+@Composable
+private fun SearchResultsList(
+    tab           : SearchTab,
+    listState     : LazyListState,
+    itemCount     : Int,
+    paging        : TabPaging,
+    isLoading     : Boolean,
+    emptyText     : String,
+    contentPadding: PaddingValues,
+    onLoadMore    : (SearchTab) -> Unit,
+    onRetry       : (SearchTab) -> Unit,
+    rows          : LazyListScope.() -> Unit,
+) {
+    if (itemCount == 0) {
+        // Per-tab: the other two are unaffected, and the query may well have results in them.
+        Box(Modifier.fillMaxSize().navigationBarsPadding(), contentAlignment = Alignment.Center) {
+            Text(emptyText, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    } else {
+        val haptics = LocalHapticFeedback.current
+        ListScrollHaptics(listState)
+
+        val reachedBottom by remember(listState) {
+            derivedStateOf {
+                val info        = listState.layoutInfo
+                val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: return@derivedStateOf false
+                lastVisible >= info.totalItemsCount - LOAD_MORE_THRESHOLD
+            }
+        }
+
+        LaunchedEffect(reachedBottom, tab) {
+            if (reachedBottom && paging.canLoadMore && !isLoading && !paging.isLoadingMore) {
+                onLoadMore(tab)
+            }
+        }
+
+        LazyColumn(
+            state          = listState,
+            modifier       = Modifier.fillMaxSize(),
+            contentPadding = contentPadding,
+        ) {
+            rows()
+
+            // Paging footer — spinner XOR retry, never both, so the one `load_more` key is safe and
+            // the item count doesn't churn across the loading→failed flip. The spinner is a small
+            // inline one, per MATERIAL3.md's loading conventions (ContainedLoadingIndicator is for
+            // full-area states). The retry row is the only way back from a failed page: this tab's
+            // `canLoadMore` stays false while it is shown, so the trigger above cannot refire on
+            // its own — and it re-arms the tab it belongs to, not "whichever tab is showing now".
+            if (paging.isLoadingMore || paging.pagingFailed) {
+                item(key = "load_more") {
+                    Box(
+                        modifier         = Modifier.fillMaxWidth().padding(16.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (paging.isLoadingMore) {
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                        } else {
+                            TextButton(
+                                onClick = {
+                                    haptics.press()
+                                    onRetry(tab)
+                                },
+                            ) {
+                                Text(stringResource(R.string.search_load_more_retry))
+                            }
+                        }
+                    }
+                }
+            }
+
+            item(key = "footer_space") { Spacer(Modifier.height(16.dp)) }
+        }
+    }
+}
 
 @Composable
 private fun SectionHeader(title: String) {
@@ -482,56 +563,60 @@ private fun RecentSearchRow(recent: RecentSearch, onClick: () -> Unit, onRemove:
     )
 }
 
+/**
+ * An artist result, as a full-width row. Artists used to be a horizontal `LazyRow` of circular
+ * chips pinned above the tracks; with a tab of their own they page like everything else, so they
+ * read as ordinary rows — circular art (the one thing kept from the chips), the name, and an
+ * "Artist" subtitle, matching what [RecentSearchRow] renders for an artist entry.
+ */
 @Composable
-private fun ArtistChip(artist: SpotifyArtist, onClick: () -> Unit) {
-    Column(
-        modifier            = Modifier
-            .width(88.dp)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        val imageUrl = artist.images?.firstOrNull()?.url
-        if (imageUrl != null) {
-            AsyncImage(
-                model              = imageUrl,
-                contentDescription = artist.name,
-                contentScale       = ContentScale.Crop,
-                modifier           = Modifier.size(64.dp).clip(CircleShape),
+private fun ArtistRow(artist: SpotifyArtist, onClick: () -> Unit) {
+    val imageUrl = artist.images?.firstOrNull()?.url
+    ListItem(
+        supportingContent = {
+            Text(
+                stringResource(R.string.search_type_artist),
+                color    = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
-        } else {
-            Surface(
-                modifier = Modifier.size(64.dp),
-                shape    = CircleShape,
-                color    = MaterialTheme.colorScheme.surfaceVariant,
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Default.Person, contentDescription = null,
-                        modifier = Modifier.size(28.dp),
-                        tint     = MaterialTheme.colorScheme.onSurfaceVariant)
+        },
+        leadingContent = {
+            if (imageUrl != null) {
+                AsyncImage(
+                    model              = imageUrl,
+                    contentDescription = artist.name,
+                    contentScale       = ContentScale.Crop,
+                    modifier           = Modifier.size(52.dp).clip(CircleShape),
+                )
+            } else {
+                Surface(
+                    modifier = Modifier.size(52.dp),
+                    shape    = CircleShape,
+                    color    = MaterialTheme.colorScheme.surfaceVariant,
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Default.Person, contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
             }
-        }
-        Spacer(Modifier.height(6.dp))
-        Text(
-            text      = artist.name,
-            style     = MaterialTheme.typography.labelSmall,
-            maxLines  = 2,
-            overflow  = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-        )
-    }
+        },
+        modifier = Modifier.clickable(onClick = onClick),
+        content  = { Text(artist.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+    )
 }
 
 @Composable
 private fun AlbumRow(album: SpotifyAlbum, onClick: () -> Unit) {
     val imageUrl    = album.images?.firstOrNull()?.url
     val artistNames = album.artists?.joinToString(", ") { it.name } ?: ""
+    val fallback    = stringResource(R.string.search_type_album)
 
     ListItem(
         supportingContent= {
             Text(
-                artistNames.ifBlank { "Album" },
+                artistNames.ifBlank { fallback },
                 color    = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -562,47 +647,6 @@ private fun AlbumRow(album: SpotifyAlbum, onClick: () -> Unit) {
         content  = { Text(album.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
     )
 }
-
-@Composable
-private fun PlaylistRow(playlist: SpotifyPlaylist, onClick: () -> Unit) {
-    ListItem(
-        supportingContent= {
-            Text(
-                playlist.owner?.displayName ?: "Playlist",
-                color    = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        },
-        leadingContent = {
-            val imageUrl = playlist.thumbnailUrl.ifBlank { null }
-            if (imageUrl != null) {
-                AsyncImage(
-                    model              = imageUrl,
-                    contentDescription = playlist.name,
-                    contentScale       = ContentScale.Crop,
-                    modifier           = Modifier.size(52.dp).clip(RoundedCornerShape(4.dp)),
-                )
-            } else {
-                Surface(
-                    modifier = Modifier.size(52.dp),
-                    shape    = RoundedCornerShape(4.dp),
-                    color    = MaterialTheme.colorScheme.surfaceVariant,
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.Default.MusicNote, contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-            }
-        },
-        modifier = Modifier.clickable(onClick = onClick),
-        content  = { Text(playlist.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-    )
-}
-
-/** Height of the floating search bar — matches the M3 search input-field height. */
-private val SearchBarHeight = 56.dp
 
 /**
  * Floating Material 3 search bar. A `SearchBarDefaults.InputField` (transparent container) inside a

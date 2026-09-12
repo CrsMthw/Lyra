@@ -276,6 +276,12 @@
     <string name="search_recent_clear_all">Clear all</string>
     <!-- Search result paging -->
     <string name="search_load_more_retry">Couldn\'t load more — tap to retry</string>
+    <!-- Search result type chooser -->
+    <string name="search_tab_tracks">Tracks</string>
+    <string name="search_tab_albums">Albums</string>
+    <string name="search_tab_artists">Artists</string>
+    <string name="search_type_artist">Artist</string>
+    <string name="search_type_album">Album</string>
     <!-- TEMPORARY — podcast API spike, remove after go/no-go -->
     <string name="settings_podcast_spike_title">Podcast API spike</string>
 </resources>

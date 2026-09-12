@@ -100,12 +100,19 @@ class SpotifyRepository(
         api.getArtistAlbums(id, offset = offset)
     }
 
-    // The API caps `limit` at 10, so paging by `offset` is the only way past the first page. One
-    // offset covers all three types (the endpoint takes a single one) — a type that runs out just
-    // stops contributing items to later pages. No `playlist` type: the API returns no track
+    // The API caps `limit` at 10, so paging by `offset` is the only way past the first page. The
+    // endpoint takes a SINGLE offset for however many types it is asked for, which is why [type] is
+    // a parameter: the Search screen's FIRST page asks for all three at once at offset 0 (one round
+    // trip fills all three tabs, so switching tabs is instant), and every page after that asks for
+    // exactly ONE type at that type's own offset — so the three tabs page independently instead of
+    // sharing a cursor and dragging each other along. No `playlist` type: the API returns no track
     // contents for playlists you don't own, so finding them is pointless.
-    suspend fun search(query: String, offset: Int = 0): Result<SearchResponse> = safeCall {
-        api.search(query = query, type = "track,album,artist", limit = SEARCH_PAGE_SIZE, offset = offset)
+    suspend fun search(
+        query : String,
+        type  : String = "track,album,artist",
+        offset: Int    = 0,
+    ): Result<SearchResponse> = safeCall {
+        api.search(query = query, type = type, limit = SEARCH_PAGE_SIZE, offset = offset)
     }
 
     suspend fun addToQueue(trackUri: String): Result<Unit> = safeCall {
