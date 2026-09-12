@@ -1,5 +1,6 @@
 package com.crsmthw.lyra.ui.screens.search
 
+import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedContentScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
@@ -13,6 +14,8 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.input.TextFieldState
@@ -46,7 +49,6 @@ import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.local.RecentSearch
 import com.crsmthw.lyra.data.remote.model.SpotifyAlbum
 import com.crsmthw.lyra.data.remote.model.SpotifyArtist
-import com.crsmthw.lyra.ui.components.ConnectedChoiceRow
 import com.crsmthw.lyra.ui.components.PlayerPanelHost
 import com.crsmthw.lyra.ui.components.TrackActionsHost
 import com.crsmthw.lyra.ui.components.TrackRow
@@ -97,8 +99,9 @@ fun SearchScreen(
     val queryBlank by remember(queryState) { derivedStateOf { queryState.text.isBlank() } }
 
     // One scroll position per tab, kept at screen scope so switching away and back lands where you
-    // left off — only the active tab's list is composed at a time. `rememberLazyListState` is
-    // already `rememberSaveable`-backed, and three distinct call sites get three distinct keys.
+    // left off — the pager composes only the settled page plus, mid-swipe, its neighbour.
+    // `rememberLazyListState` is already `rememberSaveable`-backed, and three distinct call sites
+    // get three distinct keys.
     val tracksListState  = rememberLazyListState()
     val albumsListState  = rememberLazyListState()
     val artistsListState = rememberLazyListState()
@@ -112,15 +115,28 @@ fun SearchScreen(
         artistsListState.scrollToItem(0)
     }
 
-    val tracksLabel  = stringResource(R.string.search_tab_tracks)
-    val albumsLabel  = stringResource(R.string.search_tab_albums)
-    val artistsLabel = stringResource(R.string.search_tab_artists)
-    val tabOptions = remember(tracksLabel, albumsLabel, artistsLabel) {
-        listOf(
-            SearchTab.TRACKS  to tracksLabel,
-            SearchTab.ALBUMS  to albumsLabel,
-            SearchTab.ARTISTS to artistsLabel,
-        )
+    // One page per tab, so the three lists can be SWIPED between as well as tapped. The pager is
+    // composed only in the results branch below, which is exactly `pagerVisible`.
+    val pagerState   = rememberPagerState(initialPage = state.tab.ordinal) { SearchTab.entries.size }
+    val pagerVisible = !state.isLoading && state.error == null && state.results != null
+
+    // Swipe → tab. `settledPage` changes only once a drag or a programmatic scroll comes to rest:
+    // while one runs it holds the page the scroll STARTED from, which is the value this collector
+    // has already seen, so a tab tap's own `animateScrollToPage` can never write the old tab back
+    // mid-flight. `selectTab` no-ops on an unchanged tab, so the settle after a tap is silent too.
+    LaunchedEffect(pagerState, viewModel) {
+        snapshotFlow { pagerState.settledPage }
+            .collect { viewModel.selectTab(SearchTab.entries[it]) }
+    }
+    // Tab tap → pager, plus the reset to Tracks that clearing the field performs. The pager is not
+    // composed while there are no results (or while a new query is loading), and a suspending
+    // `animateScrollToPage` would park on the pager's first-layout wait and then animate that reset
+    // in front of the user the moment the next query's results appeared — so jump the state instead.
+    LaunchedEffect(state.tab, pagerVisible) {
+        val target = state.tab.ordinal
+        if (pagerState.currentPage == target) return@LaunchedEffect
+        if (pagerVisible) pagerState.animateScrollToPage(target)
+        else              pagerState.requestScrollToPage(target)
     }
 
     // Container transform: the floating bar shares bounds with the Library search FAB (same
@@ -149,10 +165,16 @@ fun SearchScreen(
     val background     = MaterialTheme.colorScheme.background
     // Two different top insets, because the two things that live under the bar are mutually
     // exclusive: the Recent list only exists while the query is BLANK, which is exactly when the
-    // tab chooser is absent — so handing it the results' inset would shove it down by a row height
+    // tab row is absent — so handing it the results' inset would shove it down by a row height
     // with nothing above it.
     val barInset       = statusBarTopDp + SearchBarBlockHeight
-    val resultsInset   = barInset + SearchTabRowHeight + SearchTabRowGap
+    val tabRowBottom   = barInset + SearchTabRowHeight
+    val resultsInset   = tabRowBottom + SearchTabRowGap
+    // Where the full-area states (spinner, error) must start so they centre in the VISIBLE area
+    // rather than in the whole screen: half of a `ContainedLoadingIndicator` used to sit behind the
+    // bar and the type chooser (device pass 2026-09-12, checklist 1). The per-tab "No results"
+    // message takes the same inset from its list's own `contentPadding`.
+    val fullAreaInset  = if (queryBlank) barInset else resultsInset
 
     // The mini player / pop-out panel wrap the whole screen, as on Library/Album/Artist. The
     // "search-bar" container transform is unaffected: it is built against the NAV shared-transition
@@ -187,22 +209,29 @@ fun SearchScreen(
                     .only(WindowInsetsSides.Horizontal)
             ),
     ) {
-        // Scrolling content rides above the keyboard; the floating bar + tab chooser do not.
+        // Scrolling content rides above the keyboard; the floating bar + tab row do not.
         Box(modifier = Modifier.fillMaxSize().imePadding()) {
             when {
                 state.isLoading -> {
-                    Box(Modifier.fillMaxSize().navigationBarsPadding(), contentAlignment = Alignment.Center) {
+                    Box(
+                        modifier         = Modifier.fillMaxSize()
+                            .padding(top = fullAreaInset).navigationBarsPadding(),
+                        contentAlignment = Alignment.Center,
+                    ) {
                         ContainedLoadingIndicator(modifier = Modifier.size(90.dp))
                     }
                 }
                 state.error != null -> {
-                    Box(Modifier.fillMaxSize().navigationBarsPadding(), contentAlignment = Alignment.Center) {
+                    Box(
+                        modifier         = Modifier.fillMaxSize()
+                            .padding(top = fullAreaInset).navigationBarsPadding(),
+                        contentAlignment = Alignment.Center,
+                    ) {
                         Text(state.error!!, color = MaterialTheme.colorScheme.error)
                     }
                 }
                 state.results != null -> {
                     val results     = state.results!!
-                    val paging      = state.pagingFor(state.tab)
                     val emptyText   = stringResource(R.string.search_no_results, state.query)
                     val listPadding = remember(resultsInset, navBarBottomDp) {
                         // 100dp of mini-player clearance on top of the nav bar, so the last row
@@ -211,83 +240,104 @@ fun SearchScreen(
                         PaddingValues(top = resultsInset, bottom = 100.dp + navBarBottomDp)
                     }
 
-                    // One vertical list per type. A plain swap, not an `AnimatedContent`: nothing
-                    // here needs a content-swap transition, and any that does must ride the single
-                    // finite `screenTransitionSpec()` (docs/MOTION.md → THE HARD RULE).
-                    when (state.tab) {
-                        SearchTab.TRACKS -> {
-                            val tracks = results.tracks?.items ?: emptyList()
-                            SearchResultsList(
-                                tab            = SearchTab.TRACKS,
-                                listState      = tracksListState,
-                                itemCount      = tracks.size,
-                                paging         = paging,
-                                isLoading      = state.isLoading,
-                                emptyText      = emptyText,
-                                contentPadding = listPadding,
-                                onLoadMore     = viewModel::loadMore,
-                                onRetry        = viewModel::retryLoadMore,
-                            ) {
-                                items(tracks, key = { "track_${it.id}" }) { track ->
-                                    TrackRow(
-                                        track   = track,
-                                        onClick = {
-                                            viewModel.addRecentSearch(track.toRecentSearch())
-                                            val idx = tracks.indexOfFirst { it.uri == track.uri }.coerceAtLeast(0)
-                                            onTrackClick(track.uri, tracks.drop(idx).map { it.uri })
-                                        },
-                                        onLongClick = { viewModel.trackActions.open(track.toTrackActionTarget()) },
-                                    )
+                    // One vertical list per type, one page each, so the tabs can be swiped as well
+                    // as tapped. Not an `AnimatedContent`: the pager's own snap IS the swap, it is
+                    // gesture-driven rather than a content-swap transition, so the finite
+                    // `screenTransitionSpec()` rule (docs/MOTION.md → THE HARD RULE) is not in play.
+                    HorizontalPager(
+                        state                   = pagerState,
+                        modifier                = Modifier.fillMaxSize(),
+                        // Neighbours compose only while a drag is actually in flight; the `isActive`
+                        // gate below is what stops one of them paging itself as it slides into view.
+                        beyondViewportPageCount = 0,
+                    ) { page ->
+                        val pageTab  = SearchTab.entries[page]
+                        // The paging trigger belongs to the tab the user has SETTLED on. Without
+                        // this a 10px drag toward a short tab (fewer rows than the threshold) would
+                        // compose it, satisfy `reachedBottom` immediately and fetch its page 2 for a
+                        // tab the user never arrived at — then spring back, leaving a spinner and a
+                        // mutated list behind on an off-screen tab.
+                        val isActive = pagerState.settledPage == page
+                        val paging   = state.pagingFor(pageTab)
+
+                        when (pageTab) {
+                            SearchTab.TRACKS -> {
+                                val tracks = results.tracks?.items ?: emptyList()
+                                SearchResultsList(
+                                    tab            = SearchTab.TRACKS,
+                                    listState      = tracksListState,
+                                    itemCount      = tracks.size,
+                                    paging         = paging,
+                                    isActive       = isActive,
+                                    isLoading      = state.isLoading,
+                                    emptyText      = emptyText,
+                                    contentPadding = listPadding,
+                                    onLoadMore     = viewModel::loadMore,
+                                    onRetry        = viewModel::retryLoadMore,
+                                ) {
+                                    items(tracks, key = { "track_${it.id}" }) { track ->
+                                        TrackRow(
+                                            track   = track,
+                                            onClick = {
+                                                viewModel.addRecentSearch(track.toRecentSearch())
+                                                val idx = tracks.indexOfFirst { it.uri == track.uri }.coerceAtLeast(0)
+                                                onTrackClick(track.uri, tracks.drop(idx).map { it.uri })
+                                            },
+                                            onLongClick = { viewModel.trackActions.open(track.toTrackActionTarget()) },
+                                        )
+                                    }
                                 }
                             }
-                        }
 
-                        SearchTab.ALBUMS -> {
-                            val albums = results.albums?.items ?: emptyList()
-                            SearchResultsList(
-                                tab            = SearchTab.ALBUMS,
-                                listState      = albumsListState,
-                                itemCount      = albums.size,
-                                paging         = paging,
-                                isLoading      = state.isLoading,
-                                emptyText      = emptyText,
-                                contentPadding = listPadding,
-                                onLoadMore     = viewModel::loadMore,
-                                onRetry        = viewModel::retryLoadMore,
-                            ) {
-                                items(albums, key = { "album_${it.id}" }) { album ->
-                                    AlbumRow(
-                                        album   = album,
-                                        onClick = {
-                                            viewModel.addRecentSearch(album.toRecentSearch())
-                                            onAlbumClick(album.id)
-                                        },
-                                    )
+                            SearchTab.ALBUMS -> {
+                                val albums = results.albums?.items ?: emptyList()
+                                SearchResultsList(
+                                    tab            = SearchTab.ALBUMS,
+                                    listState      = albumsListState,
+                                    itemCount      = albums.size,
+                                    paging         = paging,
+                                    isActive       = isActive,
+                                    isLoading      = state.isLoading,
+                                    emptyText      = emptyText,
+                                    contentPadding = listPadding,
+                                    onLoadMore     = viewModel::loadMore,
+                                    onRetry        = viewModel::retryLoadMore,
+                                ) {
+                                    items(albums, key = { "album_${it.id}" }) { album ->
+                                        AlbumRow(
+                                            album   = album,
+                                            onClick = {
+                                                viewModel.addRecentSearch(album.toRecentSearch())
+                                                onAlbumClick(album.id)
+                                            },
+                                        )
+                                    }
                                 }
                             }
-                        }
 
-                        SearchTab.ARTISTS -> {
-                            val artists = results.artists?.items ?: emptyList()
-                            SearchResultsList(
-                                tab            = SearchTab.ARTISTS,
-                                listState      = artistsListState,
-                                itemCount      = artists.size,
-                                paging         = paging,
-                                isLoading      = state.isLoading,
-                                emptyText      = emptyText,
-                                contentPadding = listPadding,
-                                onLoadMore     = viewModel::loadMore,
-                                onRetry        = viewModel::retryLoadMore,
-                            ) {
-                                items(artists, key = { "artist_${it.id}" }) { artist ->
-                                    ArtistRow(
-                                        artist  = artist,
-                                        onClick = {
-                                            viewModel.addRecentSearch(artist.toRecentSearch())
-                                            onArtistClick(artist.id)
-                                        },
-                                    )
+                            SearchTab.ARTISTS -> {
+                                val artists = results.artists?.items ?: emptyList()
+                                SearchResultsList(
+                                    tab            = SearchTab.ARTISTS,
+                                    listState      = artistsListState,
+                                    itemCount      = artists.size,
+                                    paging         = paging,
+                                    isActive       = isActive,
+                                    isLoading      = state.isLoading,
+                                    emptyText      = emptyText,
+                                    contentPadding = listPadding,
+                                    onLoadMore     = viewModel::loadMore,
+                                    onRetry        = viewModel::retryLoadMore,
+                                ) {
+                                    items(artists, key = { "artist_${it.id}" }) { artist ->
+                                        ArtistRow(
+                                            artist  = artist,
+                                            onClick = {
+                                                viewModel.addRecentSearch(artist.toRecentSearch())
+                                                onArtistClick(artist.id)
+                                            },
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -371,23 +421,35 @@ fun SearchScreen(
             }
         }
 
-        // Top scrim — fades content under the status bar (covers the bar; no statusBarsPadding).
-        // Not the shared `TopScrim`, because this one has to grow: while the chooser is showing it
-        // fades all the way past the BOTTOM of it. The chooser's ButtonGroup is width-capped at
-        // 420dp and centred, so on an unfolded pane there is ~120dp of empty space either side of
-        // it, in a horizontal band that result rows scroll straight through. Extending the same
-        // gradient down past the chooser keeps the scroll-under look (no hard band edge) while
-        // pushing what shows through it most of the way to the background colour. Same brush and
-        // same 24dp tail as `TopScrim` otherwise, so the blank-query state is pixel-identical.
-        val topScrimHeight =
-            if (queryBlank) statusBarTopDp + 24.dp
-            else            statusBarTopDp + SearchBarBlockHeight + SearchTabRowHeight + 24.dp
+        // Top scrim — fades content out under the floating controls (covers the status bar; no
+        // statusBarsPadding). Not the shared `TopScrim`, because this one has to reach the tab row:
+        // with full-width tabs, rows scroll under BOTH the bar and the tabs, and a plain
+        // top-to-transparent gradient was already spent by the time it got there — rows slid
+        // visibly past the tab labels and the fade read as aimed at the status bar instead (device
+        // pass 2026-09-12, checklist 10). So while the tabs are up the gradient stays fully opaque
+        // down to the tab row's BOTTOM edge and only fades out over a `TopScrimTail` below it, and
+        // rows dissolve into the tabs. A blank query has no tab row and keeps `TopScrim`'s exact
+        // two-stop brush and height, so that state is pixel-identical.
+        val (topScrimHeight, topScrimBrush) =
+            remember(queryBlank, statusBarTopDp, tabRowBottom, background) {
+                if (queryBlank) {
+                    (statusBarTopDp + TopScrimTail) to
+                        Brush.verticalGradient(listOf(background, Color.Transparent))
+                } else {
+                    val height = tabRowBottom + TopScrimTail
+                    height to Brush.verticalGradient(
+                        0f                       to background,
+                        (tabRowBottom / height)  to background,
+                        1f                       to Color.Transparent,
+                    )
+                }
+            }
         Box(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
                 .height(topScrimHeight)
-                .background(Brush.verticalGradient(listOf(background, Color.Transparent)))
+                .background(topScrimBrush)
         )
 
         // Floating M3 search bar. The back arrow is its own leading icon, so there is no separate
@@ -405,20 +467,19 @@ fun SearchScreen(
                 .then(searchBarSharedModifier),
         )
 
-        // Result-type chooser, FIXED in the same floating layer as the bar so it stays put while a
-        // list scrolls underneath it. Results used to be one LazyColumn of stacked sections, so
+        // Result-type tabs, FIXED in the same floating layer as the bar so they stay put while a
+        // list scrolls underneath them. Results used to be one LazyColumn of stacked sections, so
         // every appended page of tracks pushed Albums further out of reach; each type is now its
-        // own list. Only shown once something is typed — the Recent list owns the blank state. The
-        // `press` haptic comes from ConnectedChoiceRow, and only on a genuine change of selection.
+        // own list, and its own pager page. Only shown once something is typed — the Recent list
+        // owns the blank state.
         if (!queryBlank) {
-            ConnectedChoiceRow(
-                options  = tabOptions,
+            SearchTabRow(
                 selected = state.tab,
                 onSelect = viewModel::selectTab,
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .statusBarsPadding()
-                    .padding(start = 16.dp, end = 16.dp, top = SearchBarBlockHeight),
+                    .padding(top = SearchBarBlockHeight),
             )
         }
     }
@@ -452,11 +513,78 @@ private val SearchBarHeight = 56.dp
 /** Top margin + bar + gap: where the next floating element starts, measured below the status bar. */
 private val SearchBarBlockHeight: Dp = 8.dp + SearchBarHeight + 12.dp
 
-/** `ToggleButtonDefaults.MinHeight` — what one row of [ConnectedChoiceRow] segments measures. */
-private val SearchTabRowHeight = 40.dp
+/**
+ * What a [PrimaryTabRow] of text-only [Tab]s measures — `PrimaryNavigationTabTokens.ContainerHeight`
+ * read off the Material3 1.5.0-alpha27 sources (the token is internal). Re-check on a BOM bump.
+ */
+private val SearchTabRowHeight = 48.dp
 
-/** Breathing room between the tab chooser and the first result row. */
+/** Breathing room between the tab row and the first result row. */
 private val SearchTabRowGap = 12.dp
+
+/** How far past its opaque end the top scrim fades out — the shared `TopScrim`'s own tail. */
+private val TopScrimTail = 24.dp
+
+/** The tab label for each result type. */
+@get:StringRes
+private val SearchTab.labelRes: Int
+    get() = when (this) {
+        SearchTab.TRACKS  -> R.string.search_tab_tracks
+        SearchTab.ALBUMS  -> R.string.search_tab_albums
+        SearchTab.ARTISTS -> R.string.search_tab_artists
+    }
+
+/**
+ * The result-type tabs — a Material 3 [PrimaryTabRow], full width, floating over the results.
+ *
+ * Two deliberate departures from the defaults:
+ * - **`containerColor = Color.Transparent`**, so the screen's own growing top scrim (which fades the
+ *   scrolling rows out into this row's bottom edge) shows through instead of a flat surface band.
+ * - **no `divider`**. The default `HorizontalDivider` would draw a hard line exactly where the scrim
+ *   turns transparent, reinstating the band edge the scrim exists to avoid.
+ *
+ * `unselectedContentColor` is passed explicitly because M3's own default for it is
+ * `selectedContentColor` — which `PrimaryTabRow` sets to `primary` for the whole row, so leaving it
+ * alone renders the two unselected tabs in the accent colour as well. The value here is the
+ * `InactiveLabelTextColor` token (`onSurfaceVariant`) that default is presumably meant to resolve to.
+ */
+@Composable
+private fun SearchTabRow(
+    selected: SearchTab,
+    onSelect: (SearchTab) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val haptics = LocalHapticFeedback.current
+    PrimaryTabRow(
+        selectedTabIndex = selected.ordinal,
+        modifier         = modifier,
+        containerColor   = Color.Transparent,
+        divider          = {},
+    ) {
+        SearchTab.entries.forEach { tab ->
+            Tab(
+                selected = tab == selected,
+                // Fired from the gesture, and only on a genuine change — re-tapping the active tab
+                // is intentionally silent, matching the picker this replaced.
+                onClick  = {
+                    if (tab != selected) {
+                        haptics.press()
+                        onSelect(tab)
+                    }
+                },
+                text     = {
+                    Text(
+                        stringResource(tab.labelRes),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
+                selectedContentColor   = MaterialTheme.colorScheme.primary,
+                unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
 
 /**
  * One tab's results list — the rows are the caller's, everything around them is shared: the
@@ -468,6 +596,11 @@ private val SearchTabRowGap = 12.dp
  * grows `totalItemsCount` past the threshold and un-latches the trigger — the old "artists render
  * as two fixed items, so appending them never grew the count and the trigger stayed satisfied"
  * failure mode (docs/UI_PATTERNS.md → Search pagination) is closed by construction.
+ *
+ * [isActive] is the pager's doing: a neighbouring page composes while a swipe is in flight, so
+ * without it a short tab would page itself the moment it slid into view, for a tab the user may
+ * never settle on. It is both a key and part of the condition — a page that becomes the settled one
+ * must get its chance to fire.
  */
 @Composable
 private fun SearchResultsList(
@@ -475,6 +608,7 @@ private fun SearchResultsList(
     listState     : LazyListState,
     itemCount     : Int,
     paging        : TabPaging,
+    isActive      : Boolean,
     isLoading     : Boolean,
     emptyText     : String,
     contentPadding: PaddingValues,
@@ -483,8 +617,16 @@ private fun SearchResultsList(
     rows          : LazyListScope.() -> Unit,
 ) {
     if (itemCount == 0) {
-        // Per-tab: the other two are unaffected, and the query may well have results in them.
-        Box(Modifier.fillMaxSize().navigationBarsPadding(), contentAlignment = Alignment.Center) {
+        // Per-tab: the other two are unaffected, and the query may well have results in them. The
+        // top inset is the list's own, so the message centres in the area BELOW the tabs rather
+        // than behind them.
+        Box(
+            modifier         = Modifier
+                .fillMaxSize()
+                .padding(top = contentPadding.calculateTopPadding())
+                .navigationBarsPadding(),
+            contentAlignment = Alignment.Center,
+        ) {
             Text(emptyText, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     } else {
@@ -504,8 +646,8 @@ private fun SearchResultsList(
         // tab would stop paging until the user scrolled away and back. With them the sequence is
         // loop-free — fire → isLoadingMore=true (restart, no-op) → page lands → isLoadingMore=false
         // (restart, fires again only while canLoadMore is still true).
-        LaunchedEffect(reachedBottom, tab, paging.canLoadMore, paging.isLoadingMore) {
-            if (reachedBottom && paging.canLoadMore && !isLoading && !paging.isLoadingMore) {
+        LaunchedEffect(reachedBottom, tab, isActive, paging.canLoadMore, paging.isLoadingMore) {
+            if (isActive && reachedBottom && paging.canLoadMore && !isLoading && !paging.isLoadingMore) {
                 onLoadMore(tab)
             }
         }
