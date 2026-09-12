@@ -4,8 +4,10 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContentScope
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionDefaults
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.SharedTransitionScope
+import androidx.compose.animation.SharedTransitionScope.SharedContentState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.updateTransition
@@ -53,6 +55,42 @@ import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
  * Making the two handlers mutually exclusive on this flag holds regardless of composition order.
  */
 val LocalPopOutPanelOpen: ProvidableCompositionLocal<Boolean> = compositionLocalOf { false }
+
+/**
+ * True while `PlayerScreen` is one of the two ends of the nav transition running right now — it
+ * stays listed as a visible nav entry for the whole of its enter OR exit transition, so this covers
+ * both directions. Provided by `LyraNavGraph`; read here to decide whether the mini player's
+ * `"album-art"` shared element may MATCH — see the Nav Scope Gate comment inside [PlayerPanelHost].
+ *
+ * Defaults to `true` so that anywhere the provider is out of scope (a preview, a future host) the
+ * mini player behaves exactly as it did before the gate existed.
+ */
+val LocalPlayerRouteVisible: ProvidableCompositionLocal<Boolean> = compositionLocalOf { true }
+
+/**
+ * A [SharedTransitionScope.SharedContentConfig] that enables the shared element only while
+ * [enabled] is true — WITHOUT ever adding or removing the modifier.
+ *
+ * That distinction is the whole point. A shared element added to an already-composed screen at the
+ * instant a transition begins is too late to be captured as the EXIT participant (this is exactly
+ * what made an earlier `isRunning` scope gate morph on push but not back). Here the node stays
+ * attached for the screen's whole life and only its `isEnabled` flips; `SharedContentNode` observes
+ * that read (`observeReads(sharedElement.observingVisibilityChange)`, which reads
+ * `SharedElementEntry.isEnabled`), so the match is re-evaluated in the layout pass instead of
+ * waiting on a recomposition to install a node.
+ *
+ * `shouldKeepEnabledForOngoingAnimation` is left at its default `true`, so flipping [enabled] off
+ * mid-morph cannot strand a half-finished animation.
+ */
+@Composable
+private fun rememberMatchWhenConfig(enabled: Boolean): SharedTransitionScope.SharedContentConfig {
+    val enabledState = rememberUpdatedState(enabled)
+    return remember {
+        object : SharedTransitionScope.SharedContentConfig {
+            override val SharedContentState.isEnabled: Boolean get() = enabledState.value
+        }
+    }
+}
 
 @Composable
 fun PlayerPanelHost(
@@ -204,6 +242,17 @@ fun PlayerPanelHost(
             val miniNeedsNavScope = canShowPanel && !panelPresent
             val miniNavScope: SharedTransitionScope? = if (miniNeedsNavScope) navSharedTransitionScope else null
             val miniNavVisScope: AnimatedVisibilityScope? = if (miniNeedsNavScope) navAnimatedContentScope as? AnimatedVisibilityScope else null
+
+            // ...and WHICH nav transition it may morph across is a second, independent gate. The scope
+            // above stays put (see why in [rememberMatchWhenConfig]); this config decides whether the
+            // entry may MATCH. Only PlayerScreen's big art is a wanted partner: every browse screen
+            // carries this same mini player, so a browse→browse push/pop used to put two matched
+            // "album-art" entries on screen, hoist the art into the shared-transition overlay and pin
+            // it there while the bar it belongs to slid away underneath — a visible detach-and-snap,
+            // worst over the search FAB↔bar morph, which sweeps right past it (device pass 2026-09-12).
+            // It is deliberately NOT applied to the mini's primary scope on WIDE screens: there the
+            // primary is the LOCAL mini↔pop-out morph, which has nothing to do with nav transitions.
+            val navArtConfig = rememberMatchWhenConfig(LocalPlayerRouteVisible.current)
             MiniPlayerHolder(
                 playerViewModel            = playerViewModel,
                 onExpand                   = onRequestPlayer,
@@ -211,8 +260,10 @@ fun PlayerPanelHost(
                 modifier                   = miniPlacement.then(miniBottomInset),
                 sharedTransitionScope      = if (canShowPanel) this@SharedTransitionLayout else navSharedTransitionScope,
                 animatedVisibilityScope    = if (canShowPanel) null else navAnimatedContentScope as? AnimatedVisibilityScope,
+                sharedContentConfig        = if (canShowPanel) SharedTransitionDefaults.SharedContentConfig else navArtConfig,
                 navSharedTransitionScope   = miniNavScope,
                 navAnimatedVisibilityScope = miniNavVisScope,
+                navSharedContentConfig     = navArtConfig,
             )
 
             // Pop-out panel (wide non-short screens only)

@@ -3,6 +3,7 @@ package com.crsmthw.lyra.ui.components
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionDefaults
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
@@ -63,9 +64,14 @@ fun MiniPlayer(
     surfaceAccentColor      : Color = Color.Unspecified,
     sharedTransitionScope      : SharedTransitionScope? = null,
     animatedVisibilityScope    : AnimatedVisibilityScope? = null,
+    // Each scope pair gets its own SharedContentConfig, so the caller can leave the modifier in
+    // place for the composable's whole life and still say WHICH transitions the "album-art" element
+    // may match across — see PlayerPanelHost's rememberMatchWhenConfig.
+    sharedContentConfig        : SharedTransitionScope.SharedContentConfig = SharedTransitionDefaults.SharedContentConfig,
     // Secondary scope — used when both local (mini↔panel) and nav (mini↔PlayerScreen) are needed.
     navSharedTransitionScope   : SharedTransitionScope? = null,
     navAnimatedVisibilityScope : AnimatedVisibilityScope? = null,
+    navSharedContentConfig     : SharedTransitionScope.SharedContentConfig = SharedTransitionDefaults.SharedContentConfig,
 ) {
     val haptics               = LocalHapticFeedback.current
     val resolvedAccent        = if (accentColor == Color.Unspecified) MaterialTheme.colorScheme.primary else accentColor
@@ -107,7 +113,7 @@ fun MiniPlayer(
                 val artModifier = if (sharedTransitionScope != null) {
                     with(sharedTransitionScope) {
                         Modifier.sharedElement(
-                            sharedContentState      = rememberSharedContentState(key = "album-art"),
+                            sharedContentState      = rememberSharedContentState("album-art", sharedContentConfig),
                             animatedVisibilityScope = effectiveScope,
                             boundsTransform         = rememberArtBoundsTransform(),
                         )
@@ -116,7 +122,7 @@ fun MiniPlayer(
                 val navArtModifier = if (navSharedTransitionScope != null && navAnimatedVisibilityScope != null) {
                     with(navSharedTransitionScope) {
                         Modifier.sharedElement(
-                            sharedContentState      = rememberSharedContentState(key = "album-art"),
+                            sharedContentState      = rememberSharedContentState("album-art", navSharedContentConfig),
                             animatedVisibilityScope = navAnimatedVisibilityScope,
                             boundsTransform         = rememberArtBoundsTransform(),
                         )

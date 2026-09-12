@@ -2,6 +2,7 @@ package com.crsmthw.lyra.ui.components
 
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionDefaults
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
@@ -23,8 +24,10 @@ fun MiniPlayerHolder(
     visible                    : Boolean = true,
     sharedTransitionScope      : SharedTransitionScope? = null,
     animatedVisibilityScope    : AnimatedVisibilityScope? = null,
+    sharedContentConfig        : SharedTransitionScope.SharedContentConfig = SharedTransitionDefaults.SharedContentConfig,
     navSharedTransitionScope   : SharedTransitionScope? = null,
     navAnimatedVisibilityScope : AnimatedVisibilityScope? = null,
+    navSharedContentConfig     : SharedTransitionScope.SharedContentConfig = SharedTransitionDefaults.SharedContentConfig,
 ) {
     val playerState by playerViewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -71,7 +74,9 @@ fun MiniPlayerHolder(
         modifier                   = modifier,
         sharedTransitionScope      = sharedTransitionScope,
         animatedVisibilityScope    = animatedVisibilityScope,
+        sharedContentConfig        = sharedContentConfig,
         navSharedTransitionScope   = navSharedTransitionScope,
         navAnimatedVisibilityScope = navAnimatedVisibilityScope,
+        navSharedContentConfig     = navSharedContentConfig,
     )
 }
