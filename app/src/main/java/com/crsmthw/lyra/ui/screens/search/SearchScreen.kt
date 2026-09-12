@@ -34,6 +34,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.graphics.Brush
@@ -50,6 +51,7 @@ import com.crsmthw.lyra.data.local.RecentSearch
 import com.crsmthw.lyra.data.remote.model.SpotifyAlbum
 import com.crsmthw.lyra.data.remote.model.SpotifyArtist
 import com.crsmthw.lyra.ui.components.PlayerPanelHost
+import com.crsmthw.lyra.ui.components.TrackActionTarget
 import com.crsmthw.lyra.ui.components.TrackActionsHost
 import com.crsmthw.lyra.ui.components.TrackRow
 import com.crsmthw.lyra.ui.components.toTrackActionTarget
@@ -60,6 +62,7 @@ import com.crsmthw.lyra.util.press
 import com.crsmthw.lyra.util.rememberArtBoundsTransform
 import com.crsmthw.lyra.util.rememberSearchBarMorphClip
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import com.crsmthw.lyra.util.visualizer.FftWaveCanvas
 import com.crsmthw.lyra.util.visualizer.LocalVisualizerAccentColor
 
@@ -81,6 +84,7 @@ fun SearchScreen(
     val state          by viewModel.uiState.collectAsStateWithLifecycle()
     val recents        by viewModel.recentSearches.collectAsStateWithLifecycle()
     val keyboard        = LocalSoftwareKeyboardController.current
+    val focusManager    = LocalFocusManager.current
     val focusRequester  = remember { FocusRequester() }
     val haptics         = LocalHapticFeedback.current
 
@@ -175,6 +179,26 @@ fun SearchScreen(
     // bar and the type chooser (device pass 2026-09-12, checklist 1). The per-tab "No results"
     // message takes the same inset from its list's own `contentPadding`.
     val fullAreaInset  = if (queryBlank) barInset else resultsInset
+
+    // Long-press on a result opens the song menu — but not until the keyboard is gone. The menu is a
+    // ModalBottomSheet in its own dialog window, and when that window appears in the same frame the
+    // IME starts hiding, the sheet's enter animation stalls behind the IME hide animation (device
+    // pass 2026-09-12: "the bottom sheet slide out lags for a second"). Search is the only screen in
+    // the app with a keyboard up over a track list, so this stays local to it.
+    var pendingTrackAction by remember { mutableStateOf<TrackActionTarget?>(null) }
+    val imeInsets = WindowInsets.ime
+    LaunchedEffect(pendingTrackAction) {
+        val target = pendingTrackAction ?: return@LaunchedEffect
+        // Reading the inset through a snapshotFlow rather than the composable `isImeVisible` keeps
+        // the IME's per-frame inset changes out of this screen's content lambda. An already-hidden
+        // keyboard resolves on the first emission, so a long-press with no keyboard up adds no
+        // delay; the timeout covers a device that never reports the inset reaching zero.
+        withTimeoutOrNull(ImeHideTimeoutMs) {
+            snapshotFlow { imeInsets.getBottom(density) }.first { it == 0 }
+        }
+        viewModel.trackActions.open(target)
+        pendingTrackAction = null
+    }
 
     // The mini player / pop-out panel wrap the whole screen, as on Library/Album/Artist. The
     // "search-bar" container transform is unaffected: it is built against the NAV shared-transition
@@ -283,7 +307,15 @@ fun SearchScreen(
                                                 val idx = tracks.indexOfFirst { it.uri == track.uri }.coerceAtLeast(0)
                                                 onTrackClick(track.uri, tracks.drop(idx).map { it.uri })
                                             },
-                                            onLongClick = { viewModel.trackActions.open(track.toTrackActionTarget()) },
+                                            // Drop the keyboard HERE, from the gesture, then hand
+                                            // the target to the effect above — it opens the sheet
+                                            // once the IME inset is actually back to zero. TrackRow
+                                            // still fires its own long-press haptic on the gesture.
+                                            onLongClick = {
+                                                focusManager.clearFocus(force = true)
+                                                keyboard?.hide()
+                                                pendingTrackAction = track.toTrackActionTarget()
+                                            },
                                         )
                                     }
                                 }
@@ -524,6 +556,13 @@ private val SearchTabRowGap = 12.dp
 
 /** How far past its opaque end the top scrim fades out — the shared `TopScrim`'s own tail. */
 private val TopScrimTail = 24.dp
+
+/**
+ * Upper bound on how long a long-press waits for the keyboard to finish hiding before opening the
+ * song menu anyway. The IME hide animation is well under this; the timeout only exists so a device
+ * that never reports the inset back at zero still gets its sheet.
+ */
+private const val ImeHideTimeoutMs = 300L
 
 /** The tab label for each result type. */
 @get:StringRes
