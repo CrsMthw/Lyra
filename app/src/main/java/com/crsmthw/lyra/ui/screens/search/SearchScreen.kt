@@ -48,7 +48,6 @@ import com.crsmthw.lyra.data.remote.model.SpotifyAlbum
 import com.crsmthw.lyra.data.remote.model.SpotifyArtist
 import com.crsmthw.lyra.ui.components.ConnectedChoiceRow
 import com.crsmthw.lyra.ui.components.PlayerPanelHost
-import com.crsmthw.lyra.ui.components.TopScrim
 import com.crsmthw.lyra.ui.components.TrackActionsHost
 import com.crsmthw.lyra.ui.components.TrackRow
 import com.crsmthw.lyra.ui.components.toTrackActionTarget
@@ -360,7 +359,23 @@ fun SearchScreen(
         }
 
         // Top scrim — fades content under the status bar (covers the bar; no statusBarsPadding).
-        TopScrim(color = background, modifier = Modifier.align(Alignment.TopCenter))
+        // Not the shared `TopScrim`, because this one has to grow: while the chooser is showing it
+        // fades all the way past the BOTTOM of it. The chooser's ButtonGroup is width-capped at
+        // 420dp and centred, so on an unfolded pane there is ~120dp of empty space either side of
+        // it, in a horizontal band that result rows scroll straight through. Extending the same
+        // gradient down past the chooser keeps the scroll-under look (no hard band edge) while
+        // pushing what shows through it most of the way to the background colour. Same brush and
+        // same 24dp tail as `TopScrim` otherwise, so the blank-query state is pixel-identical.
+        val topScrimHeight =
+            if (queryBlank) statusBarTopDp + 24.dp
+            else            statusBarTopDp + SearchBarBlockHeight + SearchTabRowHeight + 24.dp
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .height(topScrimHeight)
+                .background(Brush.verticalGradient(listOf(background, Color.Transparent)))
+        )
 
         // Floating M3 search bar. The back arrow is its own leading icon, so there is no separate
         // floating back pill — one element, which also keeps the FAB→bar morph clean.
