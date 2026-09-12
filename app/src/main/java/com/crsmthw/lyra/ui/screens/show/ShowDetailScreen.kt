@@ -402,6 +402,11 @@ fun ShowDetailScreen(
 /**
  * The episode rows plus the list's empty / loading-more states, shared by both layouts so the two
  * can't drift. Keyed on the episode id (ids are de-duped in the ViewModel before they get here).
+ *
+ * Id-less episodes are filtered out ONCE and the filtered list drives both the empty-state gate and
+ * the rows: an episode with no id cannot be keyed, and gating on the raw list while rendering the
+ * filtered one would paint a blank list with no empty state for a page that happened to be all
+ * id-less. Same rule as the Search screen's Shows tab.
  */
 private fun LazyListScope.episodeItems(
     episodes      : List<SpotifyEpisode>,
@@ -409,11 +414,12 @@ private fun LazyListScope.episodeItems(
     isLoadingMore : Boolean,
     onPlay        : (SpotifyEpisode) -> Unit,
 ) {
-    if (episodes.isEmpty()) {
+    val keyed = episodes.filter { !it.id.isNullOrBlank() }
+    if (keyed.isEmpty()) {
         item(key = "episodes_empty") { EpisodesEmptyState() }
         return
     }
-    items(episodes.filter { !it.id.isNullOrBlank() }, key = { "episode-${it.id}" }) { episode ->
+    items(keyed, key = { "episode-${it.id}" }) { episode ->
         EpisodeRow(episode = episode, show = show, onClick = { onPlay(episode) })
     }
     if (isLoadingMore) {

@@ -193,8 +193,9 @@ internal fun RightPaneContent(
                     // A playlist CAN hold a podcast episode, and every row in TrackActionsSheet
                     // (like, add to playlist, go to album, go to artist) addresses a track-only
                     // endpoint or an object an episode does not have — so the sheet stays shut
-                    // for one. Multi-select removal above is untouched: that is a by-uri
-                    // playlist-items DELETE, which removes an episode perfectly well.
+                    // for one. The row below never even calls this for an episode; this is the
+                    // belt to that braces. Multi-select removal above is untouched: that is a
+                    // by-uri playlist-items DELETE, which removes an episode perfectly well.
                     val removable = playlist?.takeIf { it.owner?.id == state.user?.id }
                         ?.let { RemovablePlaylist(it.id, it.name) }
                     viewModel.trackActions.open(track.toTrackActionTarget(removable))
@@ -542,7 +543,14 @@ private fun TrackList(
                 track       = track,
                 isPlaying   = currentTrackId == track.id && isPlaying,
                 onClick     = { onTrackClick(track) },
-                onLongClick = onTrackLongClick?.let { handler -> { handler(track) } },
+                // A podcast episode gets NO long-press outside selection mode. The handler
+                // ignores one anyway (every row of TrackActionsSheet is track-only), but a
+                // present handler still fires TrackRow's long-press haptic — a buzz for a
+                // gesture that does nothing. `selectedUris != null` IS selection mode, where a
+                // long-press is just another way to check the row and works fine for an episode.
+                onLongClick = onTrackLongClick
+                    ?.takeIf { selectedUris != null || !track.isEpisode }
+                    ?.let { handler -> { handler(track) } },
                 selected    = selectedUris?.contains(track.uri),
             )
         }

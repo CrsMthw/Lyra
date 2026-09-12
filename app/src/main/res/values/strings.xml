@@ -107,7 +107,6 @@
     </plurals>
     <string name="show_no_episodes">No episodes yet</string>
     <string name="show_fallback_title">Podcast</string>
-    <string name="show_play_latest">Play latest episode</string>
 
     <!-- Player labels -->
     <string name="player_now_playing_label">NOW PLAYING</string>
