@@ -164,11 +164,15 @@ class ShowDetailViewModel(
      * One episodes page, with the documented one-shot `market=from_token` retry.
      *
      * "If neither market nor user country are provided, the content is considered unavailable for
-     * the client" — so a 200 with zero items is ambiguous. The retry is gated on
-     * `offset < total`, NOT merely on "empty with a non-zero total": an EXHAUSTED page (offset ==
-     * total) answers empty perfectly legitimately, and retrying it would double every last page's
-     * traffic. The retry's own failure is swallowed and the original 2xx page returned, so a
-     * market the modern API rejects with a 400 can never turn a good empty page into an error.
+     * the client" — so a 200 with zero items is ambiguous. The FIRST page therefore always gets
+     * its one retry, including (especially) when the response reports `total: 0` or omits `total`
+     * entirely: that is exactly what "considered unavailable" looks like, so gating page 0 on a
+     * non-zero total would skip the one case the retry exists for. Later pages are gated on
+     * `offset < total`, because an EXHAUSTED page (offset == total) answers empty perfectly
+     * legitimately and retrying it would double every last page's traffic.
+     *
+     * The retry's own failure is swallowed and the original 2xx page returned, so a market the
+     * modern API rejects with a 400 can never turn a good empty page into an error.
      *
      * This lives here rather than in the repository so every repository method stays 1:1 with one
      * request — which is also what keeps the TEMPORARY spike's "(no market)" leg honest.
@@ -177,7 +181,7 @@ class ShowDetailViewModel(
         val result = repository.getShowEpisodes(showId, limit = EPISODE_PAGE_SIZE, offset = offset)
         val page   = result.getOrNull() ?: return result
         if (!page.items.isNullOrEmpty()) return result
-        if (offset >= (page.total ?: 0)) return result
+        if (offset > 0 && offset >= (page.total ?: 0)) return result
         val retried = repository.getShowEpisodes(
             showId, limit = EPISODE_PAGE_SIZE, offset = offset, market = EPISODE_MARKET_FALLBACK,
         ).getOrNull()

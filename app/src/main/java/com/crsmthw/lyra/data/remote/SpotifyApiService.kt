@@ -3,6 +3,23 @@ package com.crsmthw.lyra.data.remote
 import com.crsmthw.lyra.data.remote.model.*
 import retrofit2.http.*
 
+/**
+ * The item types the client can render, for `me/player`'s `additional_types`.
+ *
+ * **Not optional.** The parameter's default is `track` ALONE: without opting in to `episode`,
+ * `GET me/player` answers 200 with `item: null` the whole time a podcast is playing, which
+ * `PlayerStateManager` reads as "nothing playing" — a blank player over audible playback. Spotify
+ * documents the parameter as existing purely so pre-podcast clients keep their old behaviour, and
+ * warns it "might be deprecated in the future", i.e. episodes eventually arrive regardless.
+ *
+ * `me/player/queue` takes NO query parameters and already returns `TrackObject | EpisodeObject`,
+ * so it needs nothing (what filtered episodes out there was our own uri filter, not the API).
+ * `playlists/{id}/items` also accepts this parameter and is deliberately NOT opted in: playlist
+ * track lists stay track-only for now, since their cached rows feed mosaics, play-queue uri lists
+ * and counts.
+ */
+const val PLAYER_ADDITIONAL_TYPES = "track,episode"
+
 interface SpotifyApiService {
 
     // ── User ─────────────────────────────────────────────────────────────────
@@ -80,7 +97,9 @@ interface SpotifyApiService {
 
     // ── Player ───────────────────────────────────────────────────────────────
     @GET("me/player")
-    suspend fun getPlayerState(): PlayerStateResponse?
+    suspend fun getPlayerState(
+        @Query("additional_types") additionalTypes: String = PLAYER_ADDITIONAL_TYPES,
+    ): PlayerStateResponse?
 
     @PUT("me/player/play")
     suspend fun resumePlayback()

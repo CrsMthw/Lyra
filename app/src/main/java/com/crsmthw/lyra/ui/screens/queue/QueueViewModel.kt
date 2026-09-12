@@ -63,10 +63,15 @@ class QueueViewModel(
                     } else {
                         it.copy(
                             isLoading        = false,
-                            currentlyPlaying = response.currentlyPlaying
-                                ?.takeIf { t -> t.uri.startsWith("spotify:track:") },
+                            // `me/player/queue` returns TrackObject | EpisodeObject and takes no
+                            // additional_types parameter, so podcast episodes have always been in
+                            // this payload — the old `spotify:track:` filter is what dropped them.
+                            // The allowlist keeps that filter's real purpose (excluding ads and
+                            // local files, which can't be rendered or acted on) while letting
+                            // episodes through; QueueScreen suppresses their actions sheet.
+                            currentlyPlaying = response.currentlyPlaying?.takeIf { t -> t.isQueueable },
                             queue            = response.queue
-                                .filter { t -> t.uri.startsWith("spotify:track:") && t.isPlayable != false }
+                                .filter { t -> t.isQueueable && t.isPlayable != false }
                                 .distinctBy { it.uri },
                             error            = null,
                         )
@@ -79,6 +84,10 @@ class QueueViewModel(
         )
     }
 }
+
+/** Renderable in the queue: a catalogue track or a podcast episode — not an ad or a local file. */
+private val SpotifyTrack.isQueueable: Boolean
+    get() = uri.startsWith("spotify:track:") || uri.startsWith("spotify:episode:")
 
 class QueueViewModelFactory(private val container: AppContainer) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
