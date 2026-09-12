@@ -76,6 +76,25 @@ data class ForYouCacheData(
     val topTracks  : List<SpotifyTrack>?   = null,
 )
 
+/**
+ * One surgical edit to a playlist's cached track list, as announced by
+ * [LibraryCache.trackListChanges]. It carries the MUTATION, not just the playlist id, so a listener
+ * can apply exactly what changed to whatever rows it is showing instead of diffing its list against
+ * the cache's — the two can legitimately differ by rows this edit had nothing to do with, and a diff
+ * books that gap onto the edit (the 128→124 hero dip, 2026-09-12).
+ *
+ * [removedUris] is the set the caller ASKED to remove, never what the cache managed to drop:
+ * deriving it from cache contents would reintroduce exactly that dependence. Spotify's remove-by-uri
+ * drops every occurrence, so a listener filters by uri membership and lets the row count say how
+ * many actually went. [added] is the single appended track ([LibraryCache.appendToPlaylistTrackList]
+ * appends one at a time, and only when the cache holds the whole list).
+ */
+data class TrackListChange(
+    val playlistId  : String,
+    val removedUris : Set<String>   = emptySet(),
+    val added       : SpotifyTrack? = null,
+)
+
 data class LibraryCacheData(
     val playlists         : List<SpotifyPlaylist>          = emptyList(),
     // Dead since the featured-playlists endpoint stopped returning editorial content (removed
@@ -109,15 +128,19 @@ class LibraryCache(context: Context) {
     val revision: StateFlow<Int> = _revision
 
     /**
-     * Emits a playlist id whenever its cached track list is surgically changed via
+     * Emits a [TrackListChange] whenever a playlist's cached track list is surgically changed via
      * [appendToPlaylistTrackList] / [removeFromPlaylistTrackList] — i.e. add/remove from any screen,
      * including the full player and pop-out add-to-playlist sheets. LibraryViewModel collects this
      * to live-refresh that playlist when it's the one currently open, so the change shows without a
      * manual pull-to-refresh. Deliberately NOT emitted by [saveTrackList] (which loading/pagination
      * call), so the Library's own loading doesn't loop.
+     *
+     * The payload is the edit itself, not just the id: a listener applies those uris to its own rows
+     * rather than diffing them against the cached list, so the two drifting apart (a page the UI has
+     * that the cache never got) can no longer delete a rendered row. See [TrackListChange].
      */
-    private val _trackListChanges = MutableSharedFlow<String>(extraBufferCapacity = 8)
-    val trackListChanges: SharedFlow<String> = _trackListChanges
+    private val _trackListChanges = MutableSharedFlow<TrackListChange>(extraBufferCapacity = 8)
+    val trackListChanges: SharedFlow<TrackListChange> = _trackListChanges
 
     /**
      * Emits a playlist id whenever that playlist was **mutated in-app** — a track added or removed
@@ -135,9 +158,42 @@ class LibraryCache(context: Context) {
 
     // ── Public API ────────────────────────────────────────────────────────────
 
+    /**
+     * Wholesale replace. Prefer a patching writer — [saveLibraryMeta], [saveCollections],
+     * [saveForYou], [saveTrackList]: a `load()` … `save()` pair spans TWO lock acquisitions, so any
+     * surgical edit landing between them (a page append, an add/remove) is silently reverted to
+     * whatever the read saw.
+     */
     fun save(data: LibraryCacheData) = synchronized(lock) { saveLocked(data) }
 
     fun load(): LibraryCacheData? = synchronized(lock) { loadLocked() }
+
+    /**
+     * Patches ONLY the library metadata — the playlist list, the liked-song count and the user —
+     * inside ONE lock acquisition, leaving track lists, the For-you band and the Albums/Artists/
+     * Shows lists exactly as they are on disk.
+     *
+     * This is what `loadLibrary`/`refreshLibrary` must use. Reading the cache and saving a rebuilt
+     * [LibraryCacheData] back was two separate lock acquisitions, so a `saveTrackList` page append
+     * or a surgical add/remove that landed in between was reverted to the stale map — the UI then
+     * held rows the cache did not, which is the drift [TrackListChange] exists to survive. It also
+     * preserves the legacy `featuredPlaylists` field, which the rebuilt-object form dropped on
+     * every refresh.
+     */
+    fun saveLibraryMeta(
+        playlists      : List<SpotifyPlaylist>,
+        likedSongCount : Int,
+        user           : SpotifyUser?,
+    ) {
+        synchronized(lock) {
+            val current = loadLocked() ?: LibraryCacheData()
+            saveLocked(current.copy(
+                playlists      = playlists,
+                likedSongCount = likedSongCount,
+                user           = user,
+            ))
+        }
+    }
 
     /** Persists just the For-you band (jump-back-in + top tracks), leaving the rest untouched. */
     fun saveForYou(forYou: ForYouCacheData) {
@@ -147,18 +203,25 @@ class LibraryCache(context: Context) {
         }
     }
 
-    /** Persists the Albums/Artists/Shows filter content, leaving the rest untouched. */
+    /**
+     * Persists the Albums/Artists/Shows filter content, leaving the rest untouched.
+     *
+     * A `null` argument means "leave that list exactly as it is", and each of the three is
+     * independent: a paginated sweep that died part-way must not overwrite a COMPLETE cached list
+     * with its truncated prefix, and a leg that was never fetched this session must not blank one
+     * (`LibraryViewModel.loadCollections` passes null for every leg it didn't complete).
+     */
     fun saveCollections(
-        savedAlbums     : List<SpotifyAlbum>,
-        followedArtists : List<SpotifyArtist>,
-        followedShows   : List<SpotifyShow>,
+        savedAlbums     : List<SpotifyAlbum>?  = null,
+        followedArtists : List<SpotifyArtist>? = null,
+        followedShows   : List<SpotifyShow>?   = null,
     ) {
         synchronized(lock) {
             val current = loadLocked() ?: LibraryCacheData()
             saveLocked(current.copy(
-                savedAlbums     = savedAlbums,
-                followedArtists = followedArtists,
-                followedShows   = followedShows,
+                savedAlbums     = savedAlbums     ?: current.savedAlbums,
+                followedArtists = followedArtists ?: current.followedArtists,
+                followedShows   = followedShows   ?: current.followedShows,
             ))
         }
     }
@@ -312,7 +375,11 @@ class LibraryCache(context: Context) {
                 // pre-existing drift). Fixes the left-pane count lagging the header after an in-app add.
                 playlists  = current.playlists.withTrackCount(playlistId, newTracks.size),
             ))
-            _trackListChanges.tryEmit(playlistId)   // refresh the open playlist's track list
+            // Carries the appended track, and only from HERE — past the completeness guard above.
+            // A partially-paged cache stays silent on purpose: the open list is a prefix, so an
+            // "appended" row would land hundreds of rows before its real position and the next page
+            // would render it a second time. It simply loads with that page instead.
+            _trackListChanges.tryEmit(TrackListChange(playlistId, added = track))
             _revision.value++                        // refresh the My Playlists list count
         }
     }
@@ -361,7 +428,10 @@ class LibraryCache(context: Context) {
                     CachedTrackList(existing.snapshotId, newTracks, newRawOffset)),
                 playlists  = current.playlists.withTrackCount(playlistId, newTotal),
             ))
-            _trackListChanges.tryEmit(playlistId)
+            // The REQUESTED set, not `existing.tracks.filter { … }`: the listener applies it to its
+            // own rows, and deriving the payload from cache contents would make it depend on the
+            // cache and the UI holding the same rows — the very assumption this signal drops.
+            _trackListChanges.tryEmit(TrackListChange(playlistId, removedUris = removing))
             _revision.value++
         }
     }
