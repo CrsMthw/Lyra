@@ -57,6 +57,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import androidx.navigation.navDeepLink
 import com.crsmthw.lyra.di.AppContainer
+import com.crsmthw.lyra.ui.components.LocalPlayerRouteVisible
 import com.crsmthw.lyra.ui.screens.album.AlbumDetailScreen
 import com.crsmthw.lyra.ui.screens.deeplink.TrackDeepLinkScreen
 import com.crsmthw.lyra.ui.screens.album.AlbumDetailViewModel
@@ -189,11 +190,32 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
         dramatic      = vDramatic,
     )
 
+    // Is PlayerScreen one of the two ends of the nav transition that is running right now?
+    //
+    // Every hosted browse screen (Library / Album / Artist / Stats / Search) carries a mini player
+    // whose album art registers the "album-art" shared element in THIS SharedTransitionLayout, so a
+    // browse→browse navigation puts TWO matched entries on screen at once and the art gets hoisted
+    // into the shared-transition overlay — where it stays pinned in place while the mini-player bar
+    // it belongs to slides away with its screen, then snaps back in at the end. That is the glitch
+    // Cris saw backing out of Search with a track playing (and it was silently there on
+    // Library↔Album/Stats too); with no track playing there is no art to match and it was clean.
+    //
+    // The match is only ever WANTED against PlayerScreen's big art, so gate it on that. `visibleEntries`
+    // is what NavHost itself renders from and, per its KDoc, keeps an entry listed for the whole of its
+    // exit transition — including one already popped off the back stack — so this is true from the first
+    // frame of a push to Player AND for the whole pop back off it. It reaches the mini player as
+    // [LocalPlayerRouteVisible]; PlayerPanelHost turns it into a SharedContentConfig rather than
+    // adding/removing the modifier, which would be too late to be captured on a pop (see the Nav Scope
+    // Gate comment there).
+    val navVisibleEntries by navController.visibleEntries.collectAsStateWithLifecycle()
+    val playerRouteVisible = navVisibleEntries.any { it.destination.route == Screen.Player.route }
+
     CompositionLocalProvider(
         LocalFftData provides container.visualizerManager.fftData,
         LocalVisualizerAccentColor provides visualizerAccentColor,
         LocalVisualizerBottomEnabled provides bottomVisualizerEnabled,
         LocalVisualizerConfig provides visualizerConfig,
+        LocalPlayerRouteVisible provides playerRouteVisible,
     ) {
     // Screen push/pop transitions use FINITE, MATCHED durations — deliberately NOT a spring, and a
     // considered exception to the "route spatial motion through motionScheme.*SpatialSpec()" rule in
