@@ -415,6 +415,9 @@ class LibraryViewModel(
      * e.g. adding/removing the current track via the full player or pop-out add-to-playlist sheet,
      * or the song-menu picker on another screen. Re-reads the (already surgically updated) cache so
      * the change shows without a manual pull-to-refresh. No-op unless the changed playlist is open.
+     *
+     * It APPLIES that change to the rows on screen rather than adopting the cached list wholesale —
+     * the two lists can legitimately differ by rows this edit had nothing to do with. See below.
      */
     private fun observeTrackListChanges() {
         viewModelScope.launch {
@@ -423,20 +426,42 @@ class LibraryViewModel(
                 val cached = withContext(Dispatchers.IO) { cache.loadTrackList(playlistId) } ?: return@collect
                 _uiState.update { s ->
                     if (s.currentPlaylist?.id != playlistId) return@update s
-                    // Move the counters by the DELTA between the rows we were showing and the rows
-                    // the cache now holds — never by adopting the cached list's SIZE as a counter.
-                    // `currentTracks`/`cached.tracks` are the FILTERED rows (unplayable, local files,
-                    // episodes and null tracks are dropped client-side) while `offset` and `total`
-                    // count every item the API returns, so assigning a list size to either silently
-                    // throws that gap away: the hero then under-counted by it (bug 36) and the next
-                    // page re-fetched it as duplicate rows (bug 37). The delta carries the gap
-                    // through untouched, and the server's own total lands right after this anyway —
-                    // the same cache call that emitted here also scheduled the reconcile.
-                    val delta = cached.tracks.size - s.currentTracks.size
+                    // Move the counters by the rows that ACTUALLY left or joined THIS list — a set
+                    // difference against the cache — and never by comparing the two lists' SIZES.
+                    //
+                    // Neither list size is a counter to begin with: `currentTracks`/`cached.tracks`
+                    // are the FILTERED rows (unplayable, local files, episodes and null tracks are
+                    // dropped client-side) while `offset`/`total` count every item the API returns,
+                    // so adopting a size throws that gap away (bugs 36/37). A size DIFFERENCE is no
+                    // safer: it silently books any pre-existing gap between the rendered rows and
+                    // the cached ones onto this one edit. A cache holding one row FEWER than the UI
+                    // (a page the UI has that the cache never got — e.g. a library refresh's
+                    // read-modify-write over `trackLists` reverting a page save) therefore dropped
+                    // the hero one below the rows that were really removed, and `currentTracks =
+                    // cached.tracks` deleted a visible row along with it, until the server's total
+                    // landed ~600 ms later (checklist 21/23).
+                    //
+                    // So: keep every row the cache still knows about (duplicates included — a uri
+                    // can legitimately appear twice), append the ones it gained at the end (where
+                    // Spotify adds them, matching `appendToPlaylistTrackList`), and derive the delta
+                    // from the UI list's own before/after size. A cache that is merely SHORTER than
+                    // the UI now moves nothing. This is still only the INTERIM value: the same cache
+                    // call that emitted here also scheduled the authoritative server reconcile.
+                    val cachedUris = cached.tracks.mapTo(HashSet(cached.tracks.size)) { it.uri }
+                    val shownUris  = s.currentTracks.mapTo(HashSet(s.currentTracks.size)) { it.uri }
+                    val kept       = s.currentTracks.filter { it.uri in cachedUris }
+                    val gained     = cached.tracks.filterNot { it.uri in shownUris }
+                    // Identity when nothing moved, so an already-applied edit (the multi-select
+                    // removal edits the state itself, then this collector runs over the same change)
+                    // produces a value-equal state that StateFlow conflates — no extra emission
+                    // mid-transition, and `tracksRemoved` stays idempotent.
+                    val newTracks  = if (gained.isEmpty() && kept.size == s.currentTracks.size) s.currentTracks
+                                     else kept + gained
+                    val delta      = newTracks.size - s.currentTracks.size
                     s.copy(
-                        currentTracks        = cached.tracks,
-                        playlistTracksOffset = (s.playlistTracksOffset + delta).coerceAtLeast(cached.tracks.size),
-                        playlistTracksTotal  = (s.playlistTracksTotal + delta).coerceAtLeast(cached.tracks.size),
+                        currentTracks        = newTracks,
+                        playlistTracksOffset = (s.playlistTracksOffset + delta).coerceAtLeast(newTracks.size),
+                        playlistTracksTotal  = (s.playlistTracksTotal + delta).coerceAtLeast(newTracks.size),
                         // Unlike a pull-to-refresh this is someone else's edit landing, so it keeps
                         // any in-progress multi-select rather than wiping it — but it intersects it
                         // with the new list, so a selection can never point at rows that are gone
@@ -445,7 +470,7 @@ class LibraryViewModel(
                         // set leaves a "0 selected" pill with Remove already disabled.
                         selectedUris         = if (s.selectedUris.isEmpty()) s.selectedUris
                                                else s.selectedUris intersect
-                                                    cached.tracks.mapTo(HashSet()) { it.uri },
+                                                    newTracks.mapTo(HashSet()) { it.uri },
                     )
                 }
             }
