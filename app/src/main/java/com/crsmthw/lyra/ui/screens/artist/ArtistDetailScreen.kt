@@ -51,6 +51,7 @@ import com.crsmthw.lyra.ui.components.rememberHeroScrollProgress
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import com.crsmthw.lyra.util.ListScrollHaptics
 import com.crsmthw.lyra.util.confirm
+import com.crsmthw.lyra.util.horizontalSystemBarsPadding
 import com.crsmthw.lyra.util.press
 import com.crsmthw.lyra.util.toggle
 import com.crsmthw.lyra.util.visualizer.FftWaveCanvas
@@ -149,7 +150,7 @@ fun ArtistDetailScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal)),
+                            .horizontalSystemBarsPadding(),
                     ) {
                         Row(
                             modifier = Modifier
@@ -273,7 +274,7 @@ fun ArtistDetailScreen(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(paddingValues)
-                            .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal)),
+                            .horizontalSystemBarsPadding(),
                     ) {
                         val albumsListState = rememberLazyListState()
                         ListScrollHaptics(albumsListState)
@@ -372,7 +373,7 @@ fun ArtistDetailScreen(
                     modifier = Modifier
                         .align(Alignment.TopStart)
                         .statusBarsPadding()
-                        .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal))
+                        .horizontalSystemBarsPadding()
                         .padding(
                             start = if (isWideScreen) 8.dp + 12.dp else 16.dp,
                             top   = if (isWideScreen) 8.dp + 8.dp  else 8.dp,

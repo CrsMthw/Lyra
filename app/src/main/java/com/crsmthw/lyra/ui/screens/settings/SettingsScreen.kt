@@ -40,6 +40,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import com.crsmthw.lyra.util.confirm
+import com.crsmthw.lyra.util.horizontalSystemBarsPadding
 import com.crsmthw.lyra.util.longPress
 import com.crsmthw.lyra.util.screenTransitionSpec
 import com.crsmthw.lyra.util.press
@@ -106,10 +107,15 @@ fun SettingsScreen(
         val heroHeight     = HeroBandHeight
         val titlePillAlpha = rememberHeroScrollProgress(scrollState, heroHeight)
 
+        // Horizontal system-bar inset, applied ONCE here on the outermost content container — in
+        // landscape with 3-button navigation the nav bar sits on a side edge, and the settings
+        // rows (switches, pickers) plus the floating back/title pills would run under it.
+        // The sheets opened from here are separate windows and inset themselves.
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(paddingValues),
+                .padding(paddingValues)
+                .horizontalSystemBarsPadding(),
         ) {
             Column(
                 modifier = Modifier

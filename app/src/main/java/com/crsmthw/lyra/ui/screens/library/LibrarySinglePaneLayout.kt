@@ -40,6 +40,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.crsmthw.lyra.R
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import com.crsmthw.lyra.util.NavTransitionMillis
+import com.crsmthw.lyra.util.horizontalSystemBarsPadding
 import com.crsmthw.lyra.util.screenTransitionSpec
 import com.crsmthw.lyra.util.rememberArtBoundsTransform
 import com.crsmthw.lyra.util.visualizer.FftWaveCanvas
@@ -199,7 +200,7 @@ internal fun SinglePaneLayout(
 
     Box(modifier = Modifier
         .fillMaxSize()
-        .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal))
+        .horizontalSystemBarsPadding()
     ) {
         // Browser ↔ detail swap as a CONTAINER TRANSFORM: a local SharedTransitionLayout wraps the
         // AnimatedContent so the tapped card's art (`lib-art-<id>`) flies into the detail hero and

@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.crsmthw.lyra.R
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
+import com.crsmthw.lyra.util.horizontalSystemBarsPadding
 import com.crsmthw.lyra.util.screenTransitionSpec
 import com.crsmthw.lyra.util.rememberArtBoundsTransform
 import com.crsmthw.lyra.util.visualizer.FftWaveCanvas
@@ -84,7 +85,7 @@ internal fun TwoPaneLayout(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal)),
+            .horizontalSystemBarsPadding(),
     ) {
         Row(
             modifier = Modifier

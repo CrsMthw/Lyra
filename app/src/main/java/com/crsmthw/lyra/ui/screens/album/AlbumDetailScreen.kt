@@ -55,6 +55,7 @@ import com.crsmthw.lyra.ui.components.toTrackActionTarget
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import com.crsmthw.lyra.util.ListScrollHaptics
 import com.crsmthw.lyra.util.confirm
+import com.crsmthw.lyra.util.horizontalSystemBarsPadding
 import com.crsmthw.lyra.util.longPress
 import com.crsmthw.lyra.util.press
 import com.crsmthw.lyra.util.toggle
@@ -171,7 +172,7 @@ fun AlbumDetailScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal)),
+                            .horizontalSystemBarsPadding(),
                     ) {
                         Row(
                             modifier = Modifier
@@ -302,7 +303,7 @@ fun AlbumDetailScreen(
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(paddingValues)
-                            .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal)),
+                            .horizontalSystemBarsPadding(),
                     ) {
                         val tracksListState = rememberLazyListState()
                         ListScrollHaptics(tracksListState)
@@ -408,7 +409,7 @@ fun AlbumDetailScreen(
                     modifier = Modifier
                         .align(Alignment.TopStart)
                         .statusBarsPadding()
-                        .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal))
+                        .horizontalSystemBarsPadding()
                         .padding(
                             start = if (isWideScreen) 8.dp + 12.dp else 16.dp,
                             top   = if (isWideScreen) 8.dp + 8.dp  else 8.dp,
