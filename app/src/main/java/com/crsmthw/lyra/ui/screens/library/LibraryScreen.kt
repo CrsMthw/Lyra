@@ -3,6 +3,7 @@ package com.crsmthw.lyra.ui.screens.library
 import androidx.compose.animation.AnimatedContentScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -50,6 +51,18 @@ fun LibraryScreen(
     val haptics       = LocalHapticFeedback.current
     val onOpenSearchHaptic = { haptics.confirm(); onOpenSearch() }
 
+    // The browser list's scroll position, hoisted to the SCREEN so it outlives the pane it scrolls.
+    // `rememberLazyListState` is `rememberSaveable(saver = LazyListState.Saver)`, but inside
+    // `LibraryBrowserPane` that bought nothing: the single-pane browser lives in `SinglePaneLayout`'s
+    // `AnimatedContent`, which simply disposes the pane when a playlist opens (it is not a
+    // `SaveableStateHolder`), so backing out always landed at the top. Held here it survives both the
+    // detail↔browser pane swap AND navigating away — the Library's own `NavBackStackEntry` saves this
+    // screen's `rememberSaveable` values, so Album/Artist/Search/Stats/Settings and back restore it too.
+    // A `LazyListState` restores its index/offset at construction, so the position is on the FIRST
+    // frame, with no scroll animation. Both layouts get the same instance (only one is composed at a
+    // time), so the position also carries across a fold/unfold.
+    val browserListState = rememberLazyListState()
+
     PlayerPanelHost(
         playerViewModel          = playerViewModel,
         onOpenPlayer             = onOpenPlayer,
@@ -60,6 +73,7 @@ fun LibraryScreen(
         if (isWideScreen) {
             TwoPaneLayout(
                 state                 = state,
+                browserListState      = browserListState,
                 viewModel             = viewModel,
                 playerViewModel       = playerViewModel,
                 onOpenSearch          = onOpenSearchHaptic,
@@ -74,6 +88,7 @@ fun LibraryScreen(
         } else {
             SinglePaneLayout(
                 state                 = state,
+                browserListState      = browserListState,
                 viewModel             = viewModel,
                 playerViewModel       = playerViewModel,
                 onOpenSearch          = onOpenSearchHaptic,

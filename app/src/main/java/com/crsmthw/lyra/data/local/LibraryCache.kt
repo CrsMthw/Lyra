@@ -14,9 +14,27 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.io.File
 
+/**
+ * One playlist's (or Liked Songs') cached track list.
+ *
+ * [tracks] are the FILTERED rows — `mapNotNull { resolvedTrack }` + `isPlayable != false` — so the
+ * list size is NOT a position in the endpoint's own numbering. [rawOffset] is: it is the API
+ * `offset` the next page must be fetched at, counting every item the endpoint returned, including
+ * the ones dropped client-side. Seeding pagination from `tracks.size` instead re-fetches one row
+ * per dropped item at the page boundary and renders it twice (see CACHING.md, "Pagination offset
+ * must use the RAW page size").
+ *
+ * Nullable on purpose, and new fields here must be too: Gson allocates via `Unsafe` and bypasses
+ * the Kotlin constructor, so a field absent from a cache file written by an older build lands as
+ * `null` whatever its declared type (see [LibraryCacheData]). `null` therefore means "legacy entry,
+ * boundary unknown" — callers fall back to `tracks.size` and guard the next page against
+ * duplicates. Only the playlist paths maintain it; Liked Songs tracks its raw offset elsewhere
+ * (`LibraryViewModel.likedSongsOffset`, the background fetcher's own loop variable).
+ */
 data class CachedTrackList(
     val snapshotId : String,
     val tracks     : List<SpotifyTrack>,
+    val rawOffset  : Int? = null,
 )
 
 /**
@@ -174,10 +192,22 @@ class LibraryCache(context: Context) {
         }
     }
 
-    fun saveTrackList(playlistId: String, snapshotId: String, tracks: List<SpotifyTrack>) {
+    /**
+     * Persists a track list. [rawOffset] is the API offset the next page starts at — see
+     * [CachedTrackList]. **Every playlist caller must pass it**; omitting it stores `null`, which
+     * costs the next open its de-duplication guard. The Liked-Songs callers omit it deliberately.
+     */
+    fun saveTrackList(
+        playlistId : String,
+        snapshotId : String,
+        tracks     : List<SpotifyTrack>,
+        rawOffset  : Int? = null,
+    ) {
         synchronized(lock) {
             val current = loadLocked() ?: LibraryCacheData()
-            saveLocked(current.copy(trackLists = current.trackLists + (playlistId to CachedTrackList(snapshotId, tracks))))
+            saveLocked(current.copy(
+                trackLists = current.trackLists + (playlistId to CachedTrackList(snapshotId, tracks, rawOffset)),
+            ))
         }
     }
 
@@ -243,7 +273,10 @@ class LibraryCache(context: Context) {
             if (existing.tracks.size < knownTotal) return
             val newTracks = existing.tracks + track
             saveLocked(current.copy(
-                trackLists = current.trackLists + (playlistId to CachedTrackList(existing.snapshotId, newTracks)),
+                // +1 raw item as well: the guard above means the cache holds the whole list, so the
+                // boundary sits at the end and the new row moves it by exactly one.
+                trackLists = current.trackLists + (playlistId to
+                    CachedTrackList(existing.snapshotId, newTracks, existing.rawOffset?.plus(1))),
                 // Keep the My Playlists metadata count in lockstep with the cached list. The guard
                 // above guarantees the cache holds the full list, so newTracks.size IS the new
                 // authoritative total — an absolute value, never a ±1 delta (which would compound any
@@ -289,8 +322,14 @@ class LibraryCache(context: Context) {
             val metaNow  = current.playlists.firstOrNull { it.id == playlistId }?.trackCount ?: 0
             val newTotal = if (existing.tracks.size >= metaNow) newTracks.size
                            else (metaNow - removed).coerceAtLeast(0)
+            // The removed rows are real API items, so the boundary moves back by the same count —
+            // floored at the rows we still hold, since an offset below them would re-fetch rows that
+            // are already on screen. Left null for a legacy entry: it stays "unknown", it does not
+            // become a guess.
+            val newRawOffset = existing.rawOffset?.let { (it - removed).coerceAtLeast(newTracks.size) }
             saveLocked(current.copy(
-                trackLists = current.trackLists + (playlistId to CachedTrackList(existing.snapshotId, newTracks)),
+                trackLists = current.trackLists + (playlistId to
+                    CachedTrackList(existing.snapshotId, newTracks, newRawOffset)),
                 playlists  = current.playlists.withTrackCount(playlistId, newTotal),
             ))
             _trackListChanges.tryEmit(playlistId)
