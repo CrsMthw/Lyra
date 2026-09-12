@@ -219,11 +219,22 @@ data class PlayRequest(
 )
 
 // ── Search results ───────────────────────────────────────────────────────────
+/**
+ * Every bucket is nullable because `search` only returns the ones the request asked for in `type`:
+ * a per-type page (`type=show`) carries `shows` alone, and the Search screen's page merge depends
+ * on that — see `SearchViewModel.appendPage`.
+ *
+ * [shows] holds podcast shows, a full search type like any other (`type=show` survived February
+ * 2026). It uses the ordinary [Paged] wrapper rather than `Shows.kt`'s null-tolerant `ShowPage`:
+ * the documented "200 with an empty page" caveat belongs to the *episode* endpoints, which want a
+ * market — a search page has the same shape here as it does for tracks, albums and artists.
+ */
 data class SearchResponse(
     val tracks    : Paged<SpotifyTrack>?    = null,
     val albums    : Paged<SpotifyAlbum>?    = null,
     val artists   : Paged<SpotifyArtist>?   = null,
     val playlists : Paged<SpotifyPlaylist>? = null,
+    val shows     : Paged<SpotifyShow>?     = null,
 )
 
 // ── API list wrappers ────────────────────────────────────────────────────────

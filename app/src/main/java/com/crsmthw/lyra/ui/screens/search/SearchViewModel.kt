@@ -9,6 +9,7 @@ import com.crsmthw.lyra.data.remote.model.Paged
 import com.crsmthw.lyra.data.remote.model.SearchResponse
 import com.crsmthw.lyra.data.remote.model.SpotifyAlbum
 import com.crsmthw.lyra.data.remote.model.SpotifyArtist
+import com.crsmthw.lyra.data.remote.model.SpotifyShow
 import com.crsmthw.lyra.data.remote.model.SpotifyTrack
 import com.crsmthw.lyra.data.repository.SEARCH_PAGE_SIZE
 import com.crsmthw.lyra.data.repository.SpotifyRepository
@@ -34,7 +35,7 @@ private const val MAX_SEARCH_OFFSET = 1000 - SEARCH_PAGE_SIZE
  * scroll position and its own paging cursor — results used to be one list of stacked sections, and
  * paging tracks pushed the Albums section further out of reach with every page.
  */
-enum class SearchTab { TRACKS, ALBUMS, ARTISTS }
+enum class SearchTab { TRACKS, ALBUMS, ARTISTS, SHOWS }
 
 /** The `type` value a per-type page request sends for this tab. */
 private val SearchTab.apiType: String
@@ -42,10 +43,19 @@ private val SearchTab.apiType: String
         SearchTab.TRACKS  -> "track"
         SearchTab.ALBUMS  -> "album"
         SearchTab.ARTISTS -> "artist"
+        SearchTab.SHOWS   -> "show"
     }
 
 /**
- * One tab's paging cursor and flags. The three are fully independent: a page in flight for one type
+ * The `type` list the FIRST page asks for — one call that fills every tab.
+ *
+ * Derived from [SearchTab] rather than spelled out, so a new tab cannot be added to the enum and
+ * then silently left out of the request (which would show it a permanent "No results").
+ */
+private val ALL_SEARCH_TYPES: String = SearchTab.entries.joinToString(",") { it.apiType }
+
+/**
+ * One tab's paging cursor and flags. They are fully independent: a page in flight for one type
  * neither blocks nor is blocked by the others, and a type that runs out parks only its own tab.
  */
 data class TabPaging(
@@ -192,10 +202,12 @@ class SearchViewModel(
         val epoch = ++searchEpoch
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true, paging = emptyMap(), error = null) }
-            // The first page is ONE call for all three types at offset 0, so every tab is filled in
+            // The first page is ONE call for every type at offset 0, so all four tabs are filled in
             // a single round trip and switching between them is instant. Only pages after this one
-            // are per-type.
-            repository.search(query, offset = 0).fold(
+            // are per-type. The type list is passed explicitly rather than left to the repository
+            // default, so adding a tab here can't quietly change what other callers of
+            // `repository.search` ask for.
+            repository.search(query, type = ALL_SEARCH_TYPES, offset = 0).fold(
                 onSuccess = { results ->
                     if (epoch != searchEpoch) return@fold
                     resultsQuery = query
@@ -319,6 +331,7 @@ private fun SearchResponse.bucket(tab: SearchTab): Paged<*>? = when (tab) {
     SearchTab.TRACKS  -> tracks
     SearchTab.ALBUMS  -> albums
     SearchTab.ARTISTS -> artists
+    SearchTab.SHOWS   -> shows
 }
 
 private fun SearchResponse.count(tab: SearchTab) = bucket(tab)?.items?.size ?: 0
@@ -341,16 +354,21 @@ private fun SearchResponse.firstPage(tab: SearchTab) = TabPaging(
 // in a `LazyColumn` — so each append de-dupes against the ids already on screen.
 
 /**
- * Merges a ONE-TYPE page into the bucket it belongs to and leaves the other two untouched.
+ * Merges a ONE-TYPE page into the bucket it belongs to and leaves the others untouched.
  *
- * That last part is load-bearing: a `type=track` response carries null `albums`/`artists`, and
- * [appendItems]' "a missing bucket means this type is exhausted" rule — correct for the all-types
- * first page — would null out the other two tabs' `next` and silently end their paging.
+ * That last part is load-bearing: a `type=track` response carries null `albums`/`artists`/`shows`,
+ * and [appendItems]' "a missing bucket means this type is exhausted" rule — correct for the
+ * all-types first page — would null out the other tabs' `next` and silently end their paging.
+ *
+ * Shows de-dupe on `id.orEmpty()` because `SpotifyShow.id` is nullable (every field on the podcast
+ * models is — Gson bypasses the constructor). Id-less shows are dropped at render time, so
+ * collapsing them onto one key here costs nothing.
  */
 private fun SearchResponse.appendPage(tab: SearchTab, page: SearchResponse) = when (tab) {
     SearchTab.TRACKS  -> copy(tracks  = tracks?.appendItems(page.tracks) { it.id }   ?: page.tracks)
     SearchTab.ALBUMS  -> copy(albums  = albums?.appendItems(page.albums) { it.id }   ?: page.albums)
     SearchTab.ARTISTS -> copy(artists = artists?.appendItems(page.artists) { it.id } ?: page.artists)
+    SearchTab.SHOWS   -> copy(shows   = shows?.appendItems(page.shows) { it.id.orEmpty() } ?: page.shows)
 }
 
 private fun <T> Paged<T>.appendItems(page: Paged<T>?, id: (T) -> String): Paged<T> {
@@ -387,3 +405,20 @@ fun SpotifyAlbum.toRecentSearch() =
 
 fun SpotifyArtist.toRecentSearch() =
     RecentSearch("artist", id, "", name, "Artist", images?.firstOrNull()?.url)
+
+/**
+ * Only ever called for a show that survived the render-time `id` filter, so [id] is present — the
+ * `orEmpty()` calls just satisfy [RecentSearch]'s non-null fields against the nullable podcast
+ * model. The subtitle is a plain literal, like "Album"/"Artist" above: the list is persisted JSON,
+ * so its subtitle is frozen at the moment of the tap and can't be a `pluralStringResource` episode
+ * count that would go stale (and there is no Context here to resolve one with).
+ */
+fun SpotifyShow.toRecentSearch() =
+    RecentSearch(
+        type     = "show",
+        id       = id.orEmpty(),
+        uri      = "",
+        name     = name.orEmpty(),
+        subtitle = "Podcast",
+        imageUrl = images?.firstOrNull()?.url,
+    )

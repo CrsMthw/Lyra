@@ -364,6 +364,7 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
                     onOpenPlayer          = { safePush(Screen.Player.route) },
                     onAlbumClick          = { albumId -> safePush(Screen.AlbumDetail.createRoute(albumId)) },
                     onArtistClick         = { artistId -> safePush(Screen.ArtistDetail.createRoute(artistId)) },
+                    onShowClick           = { showId -> safePush(Screen.ShowDetail.createRoute(showId)) },
                     onTrackClick          = { uri, uris ->
                         playerVm.playTrack(uri, uris = uris)
                         safePush(Screen.Player.route)
