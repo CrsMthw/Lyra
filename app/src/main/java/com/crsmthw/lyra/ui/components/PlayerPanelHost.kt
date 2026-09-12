@@ -174,13 +174,21 @@ fun PlayerPanelHost(
             // above the keyboard would squash it and make it jump every time the IME toggles.
             // Horizontal stays in the side list: the IME has no horizontal inset, so this keeps the
             // side nav bar clearance `navigationBarsPadding()` gives in landscape.
+            // Both branches also union the DISPLAY CUTOUT: in landscape the hole-punch camera sits
+            // on a side edge, and screen content clears it via horizontalSystemBarsPadding() — the
+            // mini player must indent the same way or it pokes out past the content on that side
+            // (device pass 2026-09-12, items 36). Horizontal + Bottom only: the top stays with the
+            // content above.
             val miniBottomInset = if (miniPlayerAvoidsIme)
                 Modifier.windowInsetsPadding(
-                    WindowInsets.ime.union(WindowInsets.navigationBars)
+                    WindowInsets.ime.union(WindowInsets.navigationBars).union(WindowInsets.displayCutout)
                         .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)
                 )
             else
-                Modifier.navigationBarsPadding()
+                Modifier.windowInsetsPadding(
+                    WindowInsets.navigationBars.union(WindowInsets.displayCutout)
+                        .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)
+                )
 
             // The mini player's SECONDARY nav scope (wide screens only) is held CONTINUOUSLY while the
             // pop-out panel is fully closed, and dropped only while it is open/animating. Continuous-
@@ -223,7 +231,11 @@ fun PlayerPanelHost(
                         .padding(start = 8.dp, end = 16.dp, bottom = 16.dp)
                         .fillMaxWidth(0.54f)
                         .heightIn(max = maxPanelHeight)
-                        .navigationBarsPadding(),
+                        // nav bar + camera cutout on the side/bottom edges — never the IME (see above)
+                        .windowInsetsPadding(
+                            WindowInsets.navigationBars.union(WindowInsets.displayCutout)
+                                .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)
+                        ),
                 )
             }
 

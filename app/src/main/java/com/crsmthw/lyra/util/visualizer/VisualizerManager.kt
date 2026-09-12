@@ -99,6 +99,10 @@ class VisualizerManager(private val context: Context) {
 
     fun start() {
         started = true
+        // Lazily create the instance: an earlier tryInitialize() may have bailed on a missing
+        // RECORD_AUDIO grant, and the permission can arrive later (Settings' master toggle now asks
+        // for it too). tryInitialize() is a no-op while an instance exists or the grant is absent.
+        if (visualizer == null) tryInitialize()
         if (routeDirty) { recreate(); routeDirty = false }
         runCatching { visualizer?.enabled = true }
     }

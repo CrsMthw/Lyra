@@ -65,6 +65,11 @@ import com.crsmthw.lyra.ui.components.rememberHeroScrollProgress
 import com.crsmthw.lyra.ui.theme.ThemeMode
 import com.crsmthw.lyra.util.visualizer.VisualizerStyle
 import kotlin.math.roundToInt
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -77,6 +82,13 @@ fun SettingsScreen(
     val amoledBlack         by viewModel.amoledBlack.collectAsStateWithLifecycle()
     val dynamicColor        by viewModel.dynamicColor.collectAsStateWithLifecycle()
     val visualizerEnabled   by viewModel.visualizerEnabled.collectAsStateWithLifecycle()
+    // The master toggle asks for RECORD_AUDIO exactly like the player's own toggle: flipping the
+    // setting on without the permission left the visualizer silently enabled-but-inert (device pass
+    // 2026-09-12, item 44). Denied → the toggle stays off.
+    val context             = LocalContext.current
+    val recordAudioLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted -> if (granted) viewModel.setVisualizerEnabled(true) }
     val visualizerStyle     by viewModel.visualizerStyle.collectAsStateWithLifecycle()
     val visualizerResolution by viewModel.visualizerResolution.collectAsStateWithLifecycle()
     val visualizerDramatic  by viewModel.visualizerDramatic.collectAsStateWithLifecycle()
@@ -197,7 +209,17 @@ fun SettingsScreen(
                 title           = stringResource(R.string.player_visualizer),
                 subtitle        = stringResource(R.string.settings_visualizer_desc),
                 checked         = visualizerEnabled,
-                onCheckedChange = viewModel::setVisualizerEnabled,
+                onCheckedChange = { enable ->
+                    if (!enable) {
+                        viewModel.setVisualizerEnabled(false)
+                    } else {
+                        val granted = ContextCompat.checkSelfPermission(
+                            context, Manifest.permission.RECORD_AUDIO,
+                        ) == PackageManager.PERMISSION_GRANTED
+                        if (granted) viewModel.setVisualizerEnabled(true)
+                        else recordAudioLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    }
+                },
             )
 
             // Advanced visualizer settings — revealed only when the visualizer is on; opens a
