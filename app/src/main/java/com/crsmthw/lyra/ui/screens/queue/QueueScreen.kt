@@ -38,6 +38,7 @@ import com.crsmthw.lyra.ui.components.rememberHeroScrollProgress
 import com.crsmthw.lyra.ui.components.toTrackActionTarget
 import com.crsmthw.lyra.util.ListScrollHaptics
 import com.crsmthw.lyra.util.confirm
+import com.crsmthw.lyra.util.horizontalSystemBarsPadding
 import com.crsmthw.lyra.util.longPress
 import com.crsmthw.lyra.util.toTimeString
 import com.crsmthw.lyra.util.visualizer.FftWaveCanvas
@@ -74,10 +75,15 @@ fun QueueScreen(
         ListScrollHaptics(queueListState)
         val titlePillAlpha = rememberHeroScrollProgress(queueListState)
 
+        // Horizontal system-bar inset, applied ONCE here on the outermost content container — with
+        // 3-button navigation the nav bar sits on a SIDE edge in landscape (either one, depending
+        // on the rotation direction), and the queue rows plus the floating back/title pills would
+        // otherwise run underneath it. Everything below inherits it; the scrims are decoration.
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(paddingValues),
+                .padding(paddingValues)
+                .horizontalSystemBarsPadding(),
         ) {
             when {
                 state.isLoading -> {

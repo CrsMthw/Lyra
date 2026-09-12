@@ -51,6 +51,7 @@ import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import com.crsmthw.lyra.ui.components.toTrackActionTarget
 import com.crsmthw.lyra.util.ListScrollHaptics
 import com.crsmthw.lyra.util.confirm
+import com.crsmthw.lyra.util.horizontalSystemBarsPadding
 import com.crsmthw.lyra.util.longPress
 import com.crsmthw.lyra.util.press
 
@@ -101,10 +102,17 @@ fun StatsScreen(
         ListScrollHaptics(listState)
         val titlePillAlpha = rememberHeroScrollProgress(listState)
 
+        // Horizontal system-bar inset, applied ONCE here on the outermost content container: with
+        // 3-button navigation the nav bar sits on the left or right edge in landscape, and every
+        // child below it has to clear it — the range picker, the top-artists `LazyRow` (whose own
+        // `contentPadding` is not an inset), the track rows, and the floating back/title pills.
+        // `paddingValues` is all-zero (`contentWindowInsets = WindowInsets(0)`, no bars), so this
+        // is not the double-padding bug — it is the chain Album/Artist single-pane already use.
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(paddingValues),
+                .padding(paddingValues)
+                .horizontalSystemBarsPadding(),
         ) {
             LazyColumn(
                 state          = listState,
