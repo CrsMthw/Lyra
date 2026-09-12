@@ -746,7 +746,11 @@ class LibraryViewModel(
                 val page = repository.getSavedShows(limit = 50, offset = showOffset).getOrNull()
                 if (page == null) { showsOk = shows.isNotEmpty(); break }
                 val items = page.items.orEmpty()
-                shows += items.mapNotNull { it.show }
+                // `episodes = null` as insurance: `me/shows` returns the SIMPLIFIED show object
+                // (no embedded episodes page), but the cache file is read whole on every library
+                // paint, so a shape change that started embedding 50 episodes per show must not
+                // silently bloat it. Mirrors ShowDetailViewModel's own cache write.
+                shows += items.mapNotNull { it.show?.copy(episodes = null) }
                 showOffset += items.size
                 if (page.next == null || items.isEmpty()) break
             }

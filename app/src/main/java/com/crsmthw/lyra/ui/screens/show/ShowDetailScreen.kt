@@ -523,7 +523,6 @@ private fun ShowDescription(show: SpotifyShow) {
     )
 }
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun EpisodesEmptyState() {
     Box(
