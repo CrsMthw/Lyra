@@ -577,12 +577,16 @@ fun PlayerCardContent(
                 // PlayerScreen and docs/MATERIAL3.md → ButtonGroup: the old plain-Row workaround
                 // only existed because a DISABLED overflow (empty overflowIndicator) mis-measures
                 // in tight columns. customItem + animateWidth restores the press-squeeze.
+
+                // `shareUrl` is null for an item with no open.spotify.com page (a local file), so
+                // the chooser is skipped there. The press tick stays OUTSIDE the skip: haptics fire
+                // from the gesture, not from state (CLAUDE.md → Haptics).
                 val shareTrack = {
                     haptics.press()
-                    state.currentTrack?.let { item ->
+                    state.currentTrack?.shareUrl?.let { url ->
                         context.startActivity(Intent.createChooser(
                             Intent(Intent.ACTION_SEND).apply {
-                                putExtra(Intent.EXTRA_TEXT, item.shareUrl)
+                                putExtra(Intent.EXTRA_TEXT, url)
                                 type = "text/plain"
                             }, null
                         ))

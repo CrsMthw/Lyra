@@ -546,11 +546,13 @@ fun PlayerScreen(
                             onOpenQueue        = onOpenQueue,
                             onOpenAlbum        = onOpenAlbum,
                             onOpenArtist       = onOpenArtist,
+                            // Nothing to share for an item with no open.spotify.com page (a local
+                            // file) — `shareUrl` is null there and the button stays inert.
                             onShare            = {
-                                state.currentTrack?.let { item ->
+                                state.currentTrack?.shareUrl?.let { url ->
                                     context.startActivity(Intent.createChooser(
                                         Intent(Intent.ACTION_SEND).apply {
-                                            putExtra(Intent.EXTRA_TEXT, item.shareUrl)
+                                            putExtra(Intent.EXTRA_TEXT, url)
                                             type = "text/plain"
                                         }, null
                                     ))
@@ -705,11 +707,12 @@ fun PlayerScreen(
                         onOpenQueue        = onOpenQueue,
                         onOpenAlbum        = onOpenAlbum,
                         onOpenArtist       = onOpenArtist,
+                        // Same null-skip as the landscape layout above.
                         onShare            = {
-                            state.currentTrack?.let { item ->
+                            state.currentTrack?.shareUrl?.let { url ->
                                 context.startActivity(Intent.createChooser(
                                     Intent(Intent.ACTION_SEND).apply {
-                                        putExtra(Intent.EXTRA_TEXT, item.shareUrl)
+                                        putExtra(Intent.EXTRA_TEXT, url)
                                         type = "text/plain"
                                     }, null
                                 ))
