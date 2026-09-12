@@ -8,10 +8,10 @@ import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -51,6 +51,8 @@ import java.io.File
 @Composable
 internal fun LibraryBrowserPane(
     state                 : LibraryUiState,
+    /** Hoisted to `LibraryScreen` so the scroll position outlives this pane — see its KDoc there. */
+    listState             : LazyListState,
     viewModel             : LibraryViewModel,
     onOpenSettings        : () -> Unit,
     isLandscape           : Boolean,
@@ -67,7 +69,6 @@ internal fun LibraryBrowserPane(
     val haptics        = LocalHapticFeedback.current
     val scrimColor     = if (containerColor == Color.Unspecified)
                              MaterialTheme.colorScheme.background else containerColor
-    val listState      = rememberLazyListState()
     ListScrollHaptics(listState)
     val density        = LocalDensity.current
     val navBarBottomDp = with(density) { WindowInsets.navigationBars.getBottom(this).toDp() }

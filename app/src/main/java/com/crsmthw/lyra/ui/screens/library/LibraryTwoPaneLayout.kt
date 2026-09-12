@@ -12,6 +12,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.toShape
@@ -46,6 +47,9 @@ import com.crsmthw.lyra.ui.components.LocalPopOutPanelOpen
 @Composable
 internal fun TwoPaneLayout(
     state                 : LibraryUiState,
+    /** Browser scroll position, owned by `LibraryScreen` — the same instance the single-pane layout
+     *  gets, so the position also survives a fold/unfold. */
+    browserListState      : LazyListState,
     viewModel             : LibraryViewModel,
     playerViewModel       : PlayerViewModel,
     onOpenSearch          : () -> Unit,
@@ -108,6 +112,7 @@ internal fun TwoPaneLayout(
                 Box(modifier = Modifier.fillMaxSize()) {
                     LibraryBrowserPane(
                         state                 = state,
+                        listState             = browserListState,
                         viewModel             = viewModel,
                         onOpenSettings        = onOpenSettings,
                         isLandscape           = isLandscape,
