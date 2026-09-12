@@ -43,6 +43,7 @@ import com.crsmthw.lyra.util.NavTransitionMillis
 import com.crsmthw.lyra.util.horizontalSystemBarsPadding
 import com.crsmthw.lyra.util.screenTransitionSpec
 import com.crsmthw.lyra.util.rememberArtBoundsTransform
+import com.crsmthw.lyra.util.rememberSearchBarMorphClip
 import com.crsmthw.lyra.util.visualizer.FftWaveCanvas
 import com.crsmthw.lyra.util.visualizer.LocalVisualizerAccentColor
 import java.io.File
@@ -310,6 +311,10 @@ internal fun SinglePaneLayout(
         if (!isShowingDetail) {
             // Container transform: shares bounds with the Search screen's floating bar (same
             // SEARCH_BAR_SHARED_KEY) so tapping expands the FAB into the bar. Null scopes → no morph.
+            // clipInOverlayDuringTransition morphs the OUTLINE (SoftBurst ↔ stadium): sharedBounds
+            // on its own only lerps the bounds and cross-fades the two contents, so the silhouette
+            // stayed bar-shaped and then snapped to the full cookie. The bar end passes the same
+            // clip, so it is continuous in both directions — see util/SearchBarMorph.kt.
             val fabSharedModifier: Modifier =
                 if (sharedTransitionScope != null && animatedContentScope != null) {
                     with(sharedTransitionScope) {
@@ -317,6 +322,7 @@ internal fun SinglePaneLayout(
                             sharedContentState      = rememberSharedContentState(key = SEARCH_BAR_SHARED_KEY),
                             animatedVisibilityScope = animatedContentScope,
                             boundsTransform         = rememberArtBoundsTransform(),
+                            clipInOverlayDuringTransition = rememberSearchBarMorphClip(),
                         )
                     }
                 } else Modifier
