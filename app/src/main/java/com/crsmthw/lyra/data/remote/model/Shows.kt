@@ -2,10 +2,13 @@ package com.crsmthw.lyra.data.remote.model
 
 import com.google.gson.annotations.SerializedName
 
-// Gson models for the podcast surface (`me/shows`, `shows/{id}`, `shows/{id}/episodes`, and
-// `search?type=show`). They live in their own file rather than in SpotifyModels.kt purely so the
-// podcast feature stays greppable; ProGuard already keeps `com.crsmthw.lyra.data.remote.model.**`,
-// so no new keep rule is needed — including for the [SpotifyShow] list the library cache persists.
+// Gson models for the podcast surface (`me/shows`, `shows/{id}` and `shows/{id}/episodes`).
+// `search?type=show` needs no wrapper of its own — its hits are podcast shows in the ordinary
+// search envelope, so they arrive as `SearchResponse.shows`.
+//
+// These live in their own file rather than in SpotifyModels.kt purely so the podcast feature stays
+// greppable; ProGuard already keeps `com.crsmthw.lyra.data.remote.model.**`, so no new keep rule is
+// needed — including for the [SpotifyShow] list the library cache persists.
 //
 // EVERY field is nullable with a default. That is not defensive padding: Gson allocates via
 // `Unsafe` and bypasses the Kotlin constructor, so a key the payload omits lands as `null`
@@ -103,14 +106,4 @@ data class SavedShowsResponse(
 data class SavedShowItem(
     @SerializedName("added_at") val addedAt : String?      = null,
     val show                                : SpotifyShow? = null,
-)
-
-/**
- * `GET search?type=show` — only the `shows` bucket is parsed.
- *
- * Separate from [SearchResponse] because the show type is requested on its own call; folding
- * `shows` into [SearchResponse] is a Search-screen follow-up, not a model change here.
- */
-data class ShowSearchResponse(
-    val shows: ShowPage<SpotifyShow>? = null,
 )

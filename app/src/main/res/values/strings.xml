@@ -295,6 +295,4 @@
     <string name="search_type_artist">Artist</string>
     <string name="search_type_album">Album</string>
     <string name="search_type_show">Podcast</string>
-    <!-- TEMPORARY — podcast API spike, remove after go/no-go -->
-    <string name="settings_podcast_spike_title">Podcast API spike</string>
 </resources>

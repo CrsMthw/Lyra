@@ -219,14 +219,4 @@ interface SpotifyApiService {
         @Query("offset") offset : Int     = 0,
         @Query("market") market : String? = null,
     ): ShowPage<SpotifyEpisode>
-
-    // Shows are asked for on their own call rather than folded into `search`'s type list, so the
-    // response keeps its own shape. `limit` caps at 10 post-Feb-2026, same as every other type.
-    @GET("search")
-    suspend fun searchShows(
-        @Query("q")      query : String,
-        @Query("type")   type  : String = "show",
-        @Query("limit")  limit : Int    = 10,
-        @Query("offset") offset: Int    = 0,
-    ): ShowSearchResponse
 }
