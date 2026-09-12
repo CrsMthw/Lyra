@@ -61,6 +61,20 @@ data class SpotifyAlbum(
 }
 
 // ── Track ────────────────────────────────────────────────────────────────────
+/**
+ * A playable item. Despite the name this also models a podcast **episode**: `me/player`,
+ * `me/player/queue` and `me/player/recently-played` all put whatever is playing in the same `item`
+ * slot, and when that is an episode the payload has no `album` and no `artists` — it carries its
+ * own [images] plus an embedded [show] instead. Rather than fork the player state, the queue, the
+ * widget and the library cache onto a sealed now-playing type, the episode-only keys are parsed
+ * here and the DISPLAY-ONLY derived properties below fall back through them.
+ *
+ * That fallback is safe precisely because [artUrl], [thumbnailUrl], [primaryArtist] and
+ * [allArtists] are never used to address the API — every call site is an `AsyncImage` model or a
+ * subtitle `Text`. Anything that *does* address the API (liking, add-to-playlist, lyrics, the
+ * share url, the artist/album links) must branch on [isEpisode] instead, because those endpoints
+ * are track-specific.
+ */
 data class SpotifyTrack(
     val id          : String,
     val name        : String,
@@ -72,12 +86,36 @@ data class SpotifyTrack(
     @SerializedName("explicit")     val explicit    : Boolean  = false,
     @SerializedName("preview_url")  val previewUrl  : String?  = null,
     @SerializedName("is_playable")  val isPlayable  : Boolean? = null,
+    // ── Episode-only keys (absent on tracks, hence nullable with defaults) ──
+    /** Spotify's own object type: `"track"` or `"episode"`. */
+    val type        : String?              = null,
+    /** The episode's own artwork — a track's art lives on its [album] instead. */
+    val images      : List<SpotifyImage>?  = null,
+    /** The episode's parent show, embedded by the player and queue endpoints. */
+    val show        : SpotifyShow?         = null,
 ) {
-    val primaryArtist  : String  get() = artists?.firstOrNull()?.name ?: "Unknown"
+    /**
+     * True when this item is a podcast episode.
+     *
+     * Derived from the ITEM, never from the player response's `currently_playing_type`: the
+     * transfer lock in `PlayerStateManager.fetchPlayerState` deliberately keeps the PREVIOUS item
+     * while taking the new scalars, so a flag carried beside the item would desync from it during
+     * a device switch. The uri is checked as well as `type` so rows cached before `type` was
+     * parsed still resolve correctly.
+     */
+    val isEpisode      : Boolean get() = type == "episode" || uri.startsWith("spotify:episode:")
+    val primaryArtist  : String  get() = artists?.firstOrNull()?.name ?: show?.name ?: "Unknown"
+    /** Null for an episode — there is no artist page to navigate to. */
     val primaryArtistId: String? get() = artists?.firstOrNull()?.id
     val allArtists     : String  get() = artists?.joinToString(" · ") { it.name } ?: primaryArtist
-    val thumbnailUrl   : String  get() = album?.images?.lastOrNull()?.url ?: ""
-    val artUrl         : String  get() = album?.images?.firstOrNull()?.url ?: ""
+    val thumbnailUrl   : String  get() = album?.images?.lastOrNull()?.url
+                                         ?: images?.lastOrNull()?.url
+                                         ?: show?.images?.lastOrNull()?.url
+                                         ?: ""
+    val artUrl         : String  get() = album?.images?.firstOrNull()?.url
+                                         ?: images?.firstOrNull()?.url
+                                         ?: show?.images?.firstOrNull()?.url
+                                         ?: ""
 }
 
 // ── Saved track wrapper (for liked songs) ───────────────────────────────────

@@ -119,6 +119,45 @@ class SpotifyRepository(
         api.addToQueue(trackUri)
     }
 
+    // ── Podcast shows ─────────────────────────────────────────────────────────
+    // One method per endpoint, no hidden retries: the `market=from_token` fallback documented in
+    // docs/SPOTIFY.md is a screen-level policy (see `ShowDetailViewModel.fetchEpisodePage`), not a
+    // repository one, so a caller asking for one page still makes exactly one request and the
+    // spike's leg-2 "(no market)" line keeps meaning what it says.
+    //
+    // Follow / unfollow / followed-status for a show are deliberately NOT here: they are the
+    // unified saveToLibrary / removeFromLibrary / isInLibrary below with `spotify:show:<id>` —
+    // the same path albums and artists take, since PUT/DELETE me/shows are deprecated.
+
+    /** `GET me/shows` — the user's followed podcasts, offset-paged (`limit` caps at 50). */
+    suspend fun getSavedShows(limit: Int = 50, offset: Int = 0): Result<SavedShowsResponse> = safeCall {
+        api.getSavedShows(limit, offset)
+    }
+
+    /** `GET shows/{id}` — the full show; also embeds its first page of episodes. */
+    suspend fun getShow(id: String, market: String? = null): Result<SpotifyShow> = safeCall {
+        api.getShow(id, market)
+    }
+
+    /** `GET shows/{id}/episodes` — newest first, offset-paged (`limit` caps at 50). */
+    suspend fun getShowEpisodes(
+        id     : String,
+        limit  : Int     = 50,
+        offset : Int     = 0,
+        market : String? = null,
+    ): Result<ShowPage<SpotifyEpisode>> = safeCall {
+        api.getShowEpisodes(id, limit, offset, market)
+    }
+
+    /** `GET search?type=show` — paged like every other search type (`limit` caps at 10). */
+    suspend fun searchShows(
+        query : String,
+        limit : Int = SEARCH_PAGE_SIZE,
+        offset: Int = 0,
+    ): Result<ShowSearchResponse> = safeCall {
+        api.searchShows(query = query, limit = limit, offset = offset)
+    }
+
     // ── Unified library save/remove/check — works for ANY Spotify uri (track, album, artist,
     //    show…); the Feb-2026 API folded all follows/saves into me/library. The api methods are
     //    named for tracks (their original use) but just pass the uris through.
@@ -268,11 +307,11 @@ class SpotifyRepository(
         var savedFollowCount = 0
         var savedId         : String? = null
         var savedCandidates : List<Pair<String, String>> = emptyList()   // uri to name
-        getSavedShows().fold(
+        getSavedShows(limit = SPIKE_PAGE).fold(
             onSuccess = { response ->
                 val items = response.items.orEmpty()
                 val first = items.firstOrNull()?.show
-                line("1) GET me/shows?limit=5 -> 2xx OK, total=${response.total}, items=${items.size}, first=${first?.name ?: "-"}")
+                line("1) GET me/shows?limit=$SPIKE_PAGE -> 2xx OK, total=${response.total}, items=${items.size}, first=${first?.name ?: "-"}")
                 savedLegOk       = true
                 savedFollowCount = items.size
                 savedId          = first?.id
@@ -280,17 +319,17 @@ class SpotifyRepository(
                     show.uri?.let { uri -> uri to (show.name ?: uri) }
                 }
             },
-            onFailure = { line("1) GET me/shows?limit=5 -> ${fail(it)}") },
+            onFailure = { line("1) GET me/shows?limit=$SPIKE_PAGE -> ${fail(it)}") },
         )
 
         // ── (3) Search for shows ─────────────────────────────────────────────
         var searchId         : String? = null
         var searchCandidates : List<Pair<String, String>> = emptyList()   // uri to name
-        searchShows(SPIKE_QUERY).fold(
+        searchShows(SPIKE_QUERY, limit = SPIKE_SEARCH_LIMIT).fold(
             onSuccess = { response ->
                 val items = response.shows?.items.orEmpty()
                 val first = items.firstOrNull()
-                line("3) GET search?q=\"$SPIKE_QUERY\"&type=show&limit=3 -> 2xx OK, total=${response.shows?.total}, items=${items.size}, first=${first?.name ?: "-"}")
+                line("3) GET search?q=\"$SPIKE_QUERY\"&type=show&limit=$SPIKE_SEARCH_LIMIT -> 2xx OK, total=${response.shows?.total}, items=${items.size}, first=${first?.name ?: "-"}")
                 searchId         = first?.id
                 searchCandidates = items.mapNotNull { show ->
                     show.uri?.let { uri -> uri to (show.name ?: uri) }
@@ -304,15 +343,15 @@ class SpotifyRepository(
         if (probeId == null) {
             line("2) GET shows/{id}/episodes -> SKIPPED (legs 1 and 3 yielded no show id)")
         } else {
-            getShowEpisodes(probeId).fold(
+            getShowEpisodes(probeId, limit = SPIKE_PAGE).fold(
                 onSuccess = { page ->
                     val items = page.items.orEmpty()
-                    line("2) GET shows/$probeId/episodes?limit=5 (no market) -> 2xx OK, total=${page.total}, items=${items.size}, first=${items.firstOrNull()?.name ?: "-"}")
+                    line("2) GET shows/$probeId/episodes?limit=$SPIKE_PAGE (no market) -> 2xx OK, total=${page.total}, items=${items.size}, first=${items.firstOrNull()?.name ?: "-"}")
                     // A 200 with zero items is ambiguous: a hollow endpoint, or the documented
                     // "no market and no user country -> content considered unavailable". Retry with
                     // the market value the app already uses on getArtistAlbums to tell them apart.
                     if (items.isEmpty()) {
-                        getShowEpisodes(probeId, market = SPIKE_MARKET).fold(
+                        getShowEpisodes(probeId, limit = SPIKE_PAGE, market = SPIKE_MARKET).fold(
                             onSuccess = { retry ->
                                 val retryItems = retry.items.orEmpty()
                                 line("2b) same call with market=$SPIKE_MARKET -> 2xx OK, total=${retry.total}, items=${retryItems.size}, first=${retryItems.firstOrNull()?.name ?: "-"}")
@@ -473,22 +512,6 @@ class SpotifyRepository(
         return log
     }
 
-    private suspend fun getSavedShows(): Result<SavedShowsResponse> = safeCall {
-        api.getSavedShows()
-    }
-
-    private suspend fun getShow(id: String): Result<SpotifyShow> = safeCall {
-        api.getShow(id)
-    }
-
-    private suspend fun getShowEpisodes(id: String, market: String? = null): Result<ShowPage<SpotifyEpisode>> = safeCall {
-        api.getShowEpisodes(id, market = market)
-    }
-
-    private suspend fun searchShows(query: String): Result<ShowSearchResponse> = safeCall {
-        api.searchShows(query = query)
-    }
-
     // TEMPORARY — podcast API spike, remove after go/no-go
     // The spike's own read of me/library/contains. Unlike the production isInLibrary (which two
     // saved-state UIs depend on, so its type must not widen), a 2xx whose body does not answer
@@ -518,3 +541,5 @@ class SpotifyRepository(
 private const val SPIKE_TAG    = "PodcastSpike"
 private const val SPIKE_QUERY  = "the daily"
 private const val SPIKE_MARKET = "from_token"   // same value the app already sends on getArtistAlbums
+private const val SPIKE_PAGE   = 5              // the GO/NO-GO matrix keys on leg 1's logged shape
+private const val SPIKE_SEARCH_LIMIT = 3
