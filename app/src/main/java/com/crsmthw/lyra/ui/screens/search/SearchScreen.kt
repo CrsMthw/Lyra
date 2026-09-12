@@ -26,6 +26,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Podcasts
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -40,6 +41,7 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -50,6 +52,7 @@ import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.local.RecentSearch
 import com.crsmthw.lyra.data.remote.model.SpotifyAlbum
 import com.crsmthw.lyra.data.remote.model.SpotifyArtist
+import com.crsmthw.lyra.data.remote.model.SpotifyShow
 import com.crsmthw.lyra.ui.components.PlayerPanelHost
 import com.crsmthw.lyra.ui.components.TrackActionTarget
 import com.crsmthw.lyra.ui.components.TrackActionsHost
@@ -76,6 +79,7 @@ fun SearchScreen(
     onOpenPlayer          : () -> Unit,
     onAlbumClick          : (albumId: String) -> Unit,
     onArtistClick         : (artistId: String) -> Unit,
+    onShowClick           : (showId: String) -> Unit,
     onTrackClick          : (uri: String, allUris: List<String>) -> Unit,
     onOpenQueue           : () -> Unit = {},
     sharedTransitionScope : SharedTransitionScope? = null,
@@ -109,17 +113,19 @@ fun SearchScreen(
     val tracksListState  = rememberLazyListState()
     val albumsListState  = rememberLazyListState()
     val artistsListState = rememberLazyListState()
-    // A new search starts at the top of every tab. The three states are hoisted so each tab keeps
-    // its scroll position across tab switches — which would also carry the previous query's position
+    val showsListState   = rememberLazyListState()
+    // A new search starts at the top of every tab. The states are hoisted so each tab keeps its
+    // scroll position across tab switches — which would also carry the previous query's position
     // into the next one (new results landing mid-list, and an immediate page-2 fetch from the
     // reached-bottom trigger). Keyed on the SEARCHED query, not the live field text.
     LaunchedEffect(state.resultsQuery) {
         tracksListState.scrollToItem(0)
         albumsListState.scrollToItem(0)
         artistsListState.scrollToItem(0)
+        showsListState.scrollToItem(0)
     }
 
-    // One page per tab, so the three lists can be SWIPED between as well as tapped. The pager is
+    // One page per tab, so the lists can be SWIPED between as well as tapped. The pager is
     // composed only in the results branch below, which is exactly `pagerVisible`.
     val pagerState   = rememberPagerState(initialPage = state.tab.ordinal) { SearchTab.entries.size }
     val pagerVisible = !state.isLoading && state.error == null && state.results != null
@@ -372,6 +378,39 @@ fun SearchScreen(
                                     }
                                 }
                             }
+
+                            SearchTab.SHOWS -> {
+                                // Id-less shows are dropped once, up front: every podcast field is
+                                // nullable (Gson bypasses the constructor), and a show with no id
+                                // can neither be opened nor keyed. Deriving the list here keeps
+                                // `itemCount` in step with what is actually rendered — pass the
+                                // unfiltered size and an all-id-less page would show a blank list
+                                // with no empty state.
+                                val shows = results.shows?.items?.filter { !it.id.isNullOrBlank() }
+                                            ?: emptyList()
+                                SearchResultsList(
+                                    tab            = SearchTab.SHOWS,
+                                    listState      = showsListState,
+                                    itemCount      = shows.size,
+                                    paging         = paging,
+                                    isActive       = isActive,
+                                    isLoading      = state.isLoading,
+                                    emptyText      = emptyText,
+                                    contentPadding = listPadding,
+                                    onLoadMore     = viewModel::loadMore,
+                                    onRetry        = viewModel::retryLoadMore,
+                                ) {
+                                    items(shows, key = { "show_${it.id}" }) { show ->
+                                        ShowRow(
+                                            show    = show,
+                                            onClick = {
+                                                viewModel.addRecentSearch(show.toRecentSearch())
+                                                show.id?.let(onShowClick)
+                                            },
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -429,6 +468,7 @@ fun SearchScreen(
                                 "track"    -> onTrackClick(recent.uri, listOf(recent.uri))
                                 "album"    -> onAlbumClick(recent.id)
                                 "artist"   -> onArtistClick(recent.id)
+                                "show"     -> onShowClick(recent.id)
                                 "playlist" -> onOpenPlayer()
                             }
                         },
@@ -571,6 +611,7 @@ private val SearchTab.labelRes: Int
         SearchTab.TRACKS  -> R.string.search_tab_tracks
         SearchTab.ALBUMS  -> R.string.search_tab_albums
         SearchTab.ARTISTS -> R.string.search_tab_artists
+        SearchTab.SHOWS   -> R.string.search_tab_shows
     }
 
 /**
@@ -584,7 +625,7 @@ private val SearchTab.labelRes: Int
  *
  * `unselectedContentColor` is passed explicitly because M3's own default for it is
  * `selectedContentColor` — which `PrimaryTabRow` sets to `primary` for the whole row, so leaving it
- * alone renders the two unselected tabs in the accent colour as well. The value here is the
+ * alone renders the unselected tabs in the accent colour as well. The value here is the
  * `InactiveLabelTextColor` token (`onSurfaceVariant`) that default is presumably meant to resolve to.
  */
 @Composable
@@ -741,9 +782,10 @@ private fun SectionHeader(title: String) {
 }
 
 /**
- * One row of the "Recent" list — mirrors [AlbumRow]'s look; artist art is a circle. The remove X
- * goes in `trailingContent`, not inside the row's own clickable area: the [IconButton] consumes
- * the tap there, so removing an entry can't also navigate to it.
+ * One row of the "Recent" list — mirrors [AlbumRow]'s look; artist art is a circle, everything
+ * else (tracks, albums, shows) a rounded square. The remove X goes in `trailingContent`, not inside
+ * the row's own clickable area: the [IconButton] consumes the tap there, so removing an entry can't
+ * also navigate to it.
  */
 @Composable
 private fun RecentSearchRow(recent: RecentSearch, onClick: () -> Unit, onRemove: () -> Unit) {
@@ -770,7 +812,11 @@ private fun RecentSearchRow(recent: RecentSearch, onClick: () -> Unit, onRemove:
                     color = MaterialTheme.colorScheme.surfaceVariant) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
-                            if (recent.type == "artist") Icons.Default.Person else Icons.Default.MusicNote,
+                            when (recent.type) {
+                                "artist" -> Icons.Default.Person
+                                "show"   -> Icons.Default.Podcasts
+                                else     -> Icons.Default.MusicNote
+                            },
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -871,6 +917,61 @@ private fun AlbumRow(album: SpotifyAlbum, onClick: () -> Unit) {
         },
         modifier = Modifier.clickable(onClick = onClick),
         content  = { Text(album.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+    )
+}
+
+/**
+ * A podcast show result — [AlbumRow]'s twin: square art, the show name, and an "N episodes"
+ * subtitle. Deliberately NOT the Library's `ShowListCard`, which is a `Card` in the Library's own
+ * browser style; Search renders every type as a plain `ListItem` row.
+ *
+ * The subtitle is the episode count and never the publisher — February 2026 deprecated
+ * `show.publisher` and the device spike confirmed it is absent from live responses. A show that
+ * omits `total_episodes` falls back to a plain "Podcast", the same shape [AlbumRow] uses when a
+ * result has no artists.
+ *
+ * Only ever handed shows with a non-blank id (filtered at the call site), so the tap can navigate.
+ */
+@Composable
+private fun ShowRow(show: SpotifyShow, onClick: () -> Unit) {
+    val imageUrl = show.images?.firstOrNull()?.url
+    val fallback = stringResource(R.string.search_type_show)
+    val subtitle = show.totalEpisodes
+        ?.let { pluralStringResource(R.plurals.show_episode_count, it, it) }
+        ?: fallback
+
+    ListItem(
+        supportingContent = {
+            Text(
+                subtitle,
+                color    = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+        leadingContent = {
+            if (imageUrl != null) {
+                AsyncImage(
+                    model              = imageUrl,
+                    contentDescription = show.name,
+                    contentScale       = ContentScale.Crop,
+                    modifier           = Modifier.size(52.dp).clip(RoundedCornerShape(4.dp)),
+                )
+            } else {
+                Surface(
+                    modifier = Modifier.size(52.dp),
+                    shape    = RoundedCornerShape(4.dp),
+                    color    = MaterialTheme.colorScheme.surfaceVariant,
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Default.Podcasts, contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        },
+        modifier = Modifier.clickable(onClick = onClick),
+        content  = { Text(show.name.orEmpty(), maxLines = 1, overflow = TextOverflow.Ellipsis) },
     )
 }
 

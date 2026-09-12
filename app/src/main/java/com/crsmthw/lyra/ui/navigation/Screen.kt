@@ -24,6 +24,10 @@ sealed class Screen(val route: String) {
         fun createRoute(id: String) = "artist/$id"
     }
 
+    data object ShowDetail : Screen("show/{id}") {
+        fun createRoute(id: String) = "show/$id"
+    }
+
     data object TrackDeepLink : Screen("deeplink/track/{id}") {
         fun createRoute(id: String) = "deeplink/track/$id"
     }

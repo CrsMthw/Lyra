@@ -3,6 +3,23 @@ package com.crsmthw.lyra.data.remote
 import com.crsmthw.lyra.data.remote.model.*
 import retrofit2.http.*
 
+/**
+ * The item types the client can render, for `me/player`'s `additional_types`.
+ *
+ * **Not optional.** The parameter's default is `track` ALONE: without opting in to `episode`,
+ * `GET me/player` answers 200 with `item: null` the whole time a podcast is playing, which
+ * `PlayerStateManager` reads as "nothing playing" — a blank player over audible playback. Spotify
+ * documents the parameter as existing purely so pre-podcast clients keep their old behaviour, and
+ * warns it "might be deprecated in the future", i.e. episodes eventually arrive regardless.
+ *
+ * `me/player/queue` takes NO query parameters and already returns `TrackObject | EpisodeObject`,
+ * so it needs nothing (what filtered episodes out there was our own uri filter, not the API).
+ * `playlists/{id}/items` also accepts this parameter and is deliberately NOT opted in: playlist
+ * track lists stay track-only for now, since their cached rows feed mosaics, play-queue uri lists
+ * and counts.
+ */
+const val PLAYER_ADDITIONAL_TYPES = "track,episode"
+
 interface SpotifyApiService {
 
     // ── User ─────────────────────────────────────────────────────────────────
@@ -80,7 +97,9 @@ interface SpotifyApiService {
 
     // ── Player ───────────────────────────────────────────────────────────────
     @GET("me/player")
-    suspend fun getPlayerState(): PlayerStateResponse?
+    suspend fun getPlayerState(
+        @Query("additional_types") additionalTypes: String = PLAYER_ADDITIONAL_TYPES,
+    ): PlayerStateResponse?
 
     @PUT("me/player/play")
     suspend fun resumePlayback()
@@ -172,13 +191,18 @@ interface SpotifyApiService {
     // Note: handled by TokenManager via OkHttp directly (not Retrofit)
 
     // ── Podcast shows ────────────────────────────────────────────────────────
-    // TEMPORARY — podcast API spike, remove after go/no-go
-    // All three reads are on the Feb-2026 "still available" list. The WRITE side (PUT/DELETE
-    // me/shows) is deprecated/removed — saving a show goes through the unified me/library
-    // endpoints above with a show uri, exactly like albums and artists.
+    // All three reads are on the Feb-2026 "still available" list, and the on-device spike proved
+    // each answers 2xx with the token Lyra ships (no `user-read-playback-position`). The WRITE
+    // side (PUT/DELETE me/shows) is deprecated/removed — following a show goes through the
+    // unified me/library endpoints above with a show uri, exactly like albums and artists.
+    //
+    // `market` is optional on both show reads and is deliberately NOT sent by default: the spike
+    // came back with a full episode list without it. It stays a parameter only so a caller can
+    // make the documented one-shot `from_token` retry when a page answers empty (see
+    // docs/SPOTIFY.md → Podcast shows, "Market caveat").
     @GET("me/shows")
     suspend fun getSavedShows(
-        @Query("limit")  limit : Int = 5,
+        @Query("limit")  limit : Int = 50,
         @Query("offset") offset: Int = 0,
     ): SavedShowsResponse
 
@@ -191,17 +215,8 @@ interface SpotifyApiService {
     @GET("shows/{id}/episodes")
     suspend fun getShowEpisodes(
         @Path("id")      id     : String,
-        @Query("limit")  limit  : Int     = 5,
+        @Query("limit")  limit  : Int     = 50,
         @Query("offset") offset : Int     = 0,
         @Query("market") market : String? = null,
     ): ShowPage<SpotifyEpisode>
-
-    // Separate from `search` so the spike owns its own response shape; folding `show` into
-    // SearchResponse is a GO-only follow-up (see the Tier 4 search-pagination item).
-    @GET("search")
-    suspend fun searchShows(
-        @Query("q")     query : String,
-        @Query("type")  type  : String = "show",
-        @Query("limit") limit : Int    = 3,
-    ): ShowSearchResponse
 }

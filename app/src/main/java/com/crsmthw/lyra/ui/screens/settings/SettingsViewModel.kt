@@ -7,13 +7,11 @@ import coil3.ImageLoader
 import com.crsmthw.lyra.data.local.EncryptedPrefs
 import com.crsmthw.lyra.data.local.LibraryCache
 import com.crsmthw.lyra.data.repository.SettingsRepository
-import com.crsmthw.lyra.data.repository.SpotifyRepository
 import com.crsmthw.lyra.di.AppContainer
 import com.crsmthw.lyra.util.MosaicGenerator
 import com.crsmthw.lyra.ui.theme.ThemeMode
 import com.crsmthw.lyra.util.visualizer.VisualizerStyle
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -26,7 +24,6 @@ class SettingsViewModel(
     private val imageLoader     : ImageLoader,
     private val libraryCache    : LibraryCache,
     private val mosaicGenerator : MosaicGenerator,
-    private val spotifyRepo     : SpotifyRepository,
 ) : ViewModel() {
 
     val themeMode: StateFlow<ThemeMode> = settingsRepo.themeMode
@@ -127,36 +124,6 @@ class SettingsViewModel(
         }
     }
 
-    // ── TEMPORARY — podcast API spike, remove after go/no-go ─────────────────
-    // Non-null while the spike dialog is up; the first emission is a placeholder line so the
-    // dialog appears on the long-press instead of after the network round trips. Null also means
-    // "dismissed", which is what gates the result write-back below.
-    private val _spikeLog = MutableStateFlow<List<String>?>(null)
-    val spikeLog: StateFlow<List<String>?> = _spikeLog
-
-    private var spikeJob: Job? = null
-
-    fun runPodcastSpike() {
-        // Show the dialog FIRST, before the re-entrancy guard: if it was dismissed while a run is
-        // still in flight, the gate below would throw that run's result away, so a second
-        // long-press has to be able to re-open the dialog for the run already going.
-        _spikeLog.value = listOf("Running podcast API spike…")
-        if (spikeJob?.isActive == true) return   // a double long-press must not interleave the mutation legs
-        spikeJob = viewModelScope.launch {
-            val result = spotifyRepo.runPodcastSpike()
-            // A dismissed dialog stays dismissed instead of popping back up over whatever the
-            // tester moved on to. The run is deliberately NOT cancelled on dismiss: a cancel
-            // landing between leg 4's PUT and DELETE would kill the undo and leave the library
-            // dirty with no line anywhere. Nothing is lost either way — every line is also in
-            // logcat under "PodcastSpike", including the !! LIBRARY LEFT DIRTY warning.
-            // Safe unsynchronised: viewModelScope dispatches on Main.immediate and dismissSpike()
-            // is called from the UI thread, so both touch the flow on the main thread.
-            if (_spikeLog.value != null) _spikeLog.value = result
-        }
-    }
-
-    fun dismissSpike() { _spikeLog.value = null }
-
     private fun refreshCacheSizes() {
         viewModelScope.launch(Dispatchers.IO) {
             _imageCacheBytes.value   = imageLoader.diskCache?.size ?: 0L
@@ -175,6 +142,5 @@ class SettingsViewModelFactory(private val container: AppContainer) : ViewModelP
             container.imageLoader,
             container.libraryCache,
             container.mosaicGenerator,
-            container.spotifyRepository,
         ) as T
 }

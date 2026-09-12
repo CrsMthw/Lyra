@@ -81,6 +81,8 @@ fun PlayerCardContent(
 ) {
     val state by playerViewModel.uiState.collectAsStateWithLifecycle()
     val pickerState by playerViewModel.pickerState.collectAsStateWithLifecycle()
+    // A podcast episode can't be liked or added to a playlist — both endpoints are track-only.
+    val isEpisode = state.currentTrack?.isEpisode == true
     var showDevicePicker by remember { mutableStateOf(false) }
     var showPlaylistPicker by remember { mutableStateOf(false) }
 
@@ -352,7 +354,8 @@ fun PlayerCardContent(
 
             Spacer(Modifier.height(16.dp))
 
-            // Track info + like
+            // Track info + like. `allArtists` already resolves to the show's name for a podcast
+            // episode (see SpotifyTrack), so only the like button needs an episode branch.
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(state.currentTrack?.name ?: "Nothing playing",
@@ -360,14 +363,18 @@ fun PlayerCardContent(
                         overflow = TextOverflow.Clip, modifier = Modifier.basicMarquee())
                     Text(state.currentTrack?.allArtists ?: "–",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,
+                        overflow = TextOverflow.Ellipsis)
                 }
-                IconButton(onClick = { haptics.toggle(!state.isLiked); playerViewModel.toggleLike() }) {
-                    Icon(
-                        imageVector        = if (state.isLiked) Icons.Default.Favorite else Icons.Outlined.FavoriteBorder,
-                        contentDescription = stringResource(R.string.cd_like),
-                        tint               = if (state.isLiked) surfaceAccentColor else LocalContentColor.current,
-                    )
+                // Hidden for an episode — `me/tracks` liking does not accept one.
+                if (!isEpisode) {
+                    IconButton(onClick = { haptics.toggle(!state.isLiked); playerViewModel.toggleLike() }) {
+                        Icon(
+                            imageVector        = if (state.isLiked) Icons.Default.Favorite else Icons.Outlined.FavoriteBorder,
+                            contentDescription = stringResource(R.string.cd_like),
+                            tint               = if (state.isLiked) surfaceAccentColor else LocalContentColor.current,
+                        )
+                    }
                 }
             }
 
@@ -515,6 +522,10 @@ fun PlayerCardContent(
 
             // Action bar — device chip left, S-size icon-only connected button group right
             val enabled = state.currentTrack != null
+            // Add-to-playlist is disabled rather than removed for an episode: dropping a segment
+            // from a connected ButtonGroup would re-shape its neighbours whenever the now-playing
+            // item changed type. The playlist endpoints are track-only.
+            val addEnabled = enabled && !isEpisode
             val deviceIcon = when (state.currentDevice?.type?.lowercase()) {
                 "computer"               -> Icons.Default.Computer
                 "smartphone"             -> Icons.Default.PhoneAndroid
@@ -568,10 +579,10 @@ fun PlayerCardContent(
                 // in tight columns. customItem + animateWidth restores the press-squeeze.
                 val shareTrack = {
                     haptics.press()
-                    state.currentTrack?.id?.let { id ->
+                    state.currentTrack?.let { item ->
                         context.startActivity(Intent.createChooser(
                             Intent(Intent.ACTION_SEND).apply {
-                                putExtra(Intent.EXTRA_TEXT, "https://open.spotify.com/track/$id")
+                                putExtra(Intent.EXTRA_TEXT, item.shareUrl)
                                 type = "text/plain"
                             }, null
                         ))
@@ -642,7 +653,7 @@ fun PlayerCardContent(
                         buttonGroupContent = {
                             FilledTonalIconButton(
                                 onClick           = { haptics.press(); playerViewModel.loadOwnedPlaylists(); showPlaylistPicker = true },
-                                enabled           = enabled,
+                                enabled           = addEnabled,
                                 modifier          = Modifier.size(40.dp).animateWidth(addInteraction),
                                 shape             = ButtonGroupDefaults.connectedTrailingButtonShape,
                                 colors            = accentButtonColors,
@@ -655,7 +666,7 @@ fun PlayerCardContent(
                             DropdownMenuItem(
                                 text        = { Text(addToPlaylistLabel) },
                                 leadingIcon = { Icon(Icons.Default.LibraryAdd, null) },
-                                enabled     = enabled,
+                                enabled     = addEnabled,
                                 onClick     = { haptics.press(); menuState.dismiss(); playerViewModel.loadOwnedPlaylists(); showPlaylistPicker = true },
                             )
                         },

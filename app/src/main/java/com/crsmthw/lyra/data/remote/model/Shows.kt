@@ -2,49 +2,93 @@ package com.crsmthw.lyra.data.remote.model
 
 import com.google.gson.annotations.SerializedName
 
-// TEMPORARY — podcast API spike, remove after go/no-go
+// Gson models for the podcast surface (`me/shows`, `shows/{id}` and `shows/{id}/episodes`).
+// `search?type=show` needs no wrapper of its own — its hits are podcast shows in the ordinary
+// search envelope, so they arrive as `SearchResponse.shows`.
 //
-// Minimal Gson models for the Tier-3 podcast API spike. They live in their OWN file rather than
-// appended to SpotifyModels.kt so that a NO-GO verdict is a single-file delete. ProGuard already
-// keeps `com.crsmthw.lyra.data.remote.model.**`, so no new keep rule is needed.
+// These live in their own file rather than in SpotifyModels.kt purely so the podcast feature stays
+// greppable; ProGuard already keeps `com.crsmthw.lyra.data.remote.model.**`, so no new keep rule is
+// needed — including for the [SpotifyShow] list the library cache persists.
 //
-// Every field is nullable with a default: the spike must report "200 but empty" rather than blow
-// up on a shape we haven't seen before.
+// EVERY field is nullable with a default. That is not defensive padding: Gson allocates via
+// `Unsafe` and bypasses the Kotlin constructor, so a key the payload omits lands as `null`
+// whatever the declared type (the same hazard documented on [SpotifyPlaylist] and
+// [com.crsmthw.lyra.data.local.LibraryCacheData]). The podcast payloads omit plenty — `publisher`
+// is already gone, episode `images` can be absent, and `me/shows` can answer 200 with no `items`.
 
 /**
- * A podcast show. Fields limited to what a future show-detail screen would need.
+ * A podcast show — the simplified object from `me/shows` / `search?type=show`, and the full object
+ * from `GET shows/{id}` (which additionally embeds the first page of [episodes]).
  *
- * `publisher` is marked **deprecated** on the show object by the February-2026 API — it is read
- * here only so the spike can report whether it still arrives; no UI should depend on it.
+ * **Do not build UI on [publisher].** February 2026 deprecated it and the on-device spike confirmed
+ * it is absent from live responses; the field survives only so the spike can keep reporting that.
+ * A show's subtitle is its episode count, never its publisher.
  */
 data class SpotifyShow(
-    val id            : String?              = null,
-    val name          : String?              = null,
-    val publisher     : String?              = null,   // deprecated by Spotify (Feb 2026)
-    val description   : String?              = null,
-    val images        : List<SpotifyImage>?  = null,
-    val uri           : String?              = null,
+    val id              : String?             = null,
+    val name            : String?             = null,
+    val description     : String?             = null,
+    @SerializedName("html_description")
+    val htmlDescription : String?             = null,
+    val images          : List<SpotifyImage>? = null,
+    val uri             : String?             = null,
     @SerializedName("total_episodes")
-    val totalEpisodes : Int?                 = null,
+    val totalEpisodes   : Int?                = null,
+    val explicit        : Boolean?            = null,
+    @SerializedName("media_type")
+    val mediaType       : String?             = null,
+    /** Deprecated by Spotify (Feb 2026) and absent in practice — never read by UI. */
+    val publisher       : String?             = null,
     /** Only present on `GET shows/{id}`, which embeds the first page of episodes. */
-    val episodes      : ShowPage<SpotifyEpisode>? = null,
-)
+    val episodes        : ShowPage<SpotifyEpisode>? = null,
+) {
+    val artUrl      : String  get() = images?.firstOrNull()?.url.orEmpty()
+    val thumbnailUrl: String  get() = images?.lastOrNull()?.url.orEmpty()
+    /** The uri the unified `me/library` follow/unfollow/contains calls take. */
+    val libraryUri  : String? get() = uri ?: id?.let { "spotify:show:$it" }
+}
 
+/**
+ * One podcast episode. [show] is the embedded parent-show summary, which `shows/{id}/episodes`
+ * does NOT send (the caller already knows the show) but `me/player` and `me/player/queue` DO —
+ * it is what gives an episode a subtitle and a fallback image when it is the now-playing item.
+ *
+ * [resumePoint] needs the `user-read-playback-position` scope, which Lyra does not request, so it
+ * arrives null; it is modelled only so the field parses if that scope is ever added.
+ */
 data class SpotifyEpisode(
-    val id          : String?             = null,
-    val name        : String?             = null,
+    val id                  : String?             = null,
+    val name                : String?             = null,
+    val description         : String?             = null,
+    val images              : List<SpotifyImage>? = null,
+    val uri                 : String?             = null,
     @SerializedName("duration_ms")
-    val durationMs  : Long?               = null,
+    val durationMs          : Long?               = null,
     @SerializedName("release_date")
-    val releaseDate : String?             = null,
-    val uri         : String?             = null,
-    val images      : List<SpotifyImage>? = null,
+    val releaseDate         : String?             = null,
+    @SerializedName("release_date_precision")
+    val releaseDatePrecision: String?             = null,
+    val explicit            : Boolean?            = null,
+    @SerializedName("resume_point")
+    val resumePoint         : EpisodeResumePoint? = null,
+    val show                : SpotifyShow?        = null,
+) {
+    val artUrl      : String get() = images?.firstOrNull()?.url ?: show?.artUrl.orEmpty()
+    val thumbnailUrl: String get() = images?.lastOrNull()?.url ?: show?.thumbnailUrl.orEmpty()
+}
+
+data class EpisodeResumePoint(
+    @SerializedName("fully_played")       val fullyPlayed     : Boolean? = null,
+    @SerializedName("resume_position_ms") val resumePositionMs: Long?    = null,
 )
 
 /**
- * A null-tolerant paged wrapper. The shared [Paged] declares `items`/`total`/`limit`/`offset` as
- * non-null, which is fine for endpoints we already trust; the spike deliberately tolerates a
- * missing key so it can distinguish "no items" from "unparseable".
+ * A null-tolerant paged wrapper for the podcast endpoints.
+ *
+ * Deliberately NOT the shared [Paged], which declares `items`/`total`/`limit`/`offset` non-null.
+ * That is safe for endpoints we already trust; it is not safe here, because "200 with no items" is
+ * a real, documented outcome for episode lists (the market caveat — see docs/SPOTIFY.md → Podcast
+ * shows) and must stay distinguishable from a parse failure.
  */
 data class ShowPage<T>(
     val items : List<T>? = null,
@@ -52,7 +96,7 @@ data class ShowPage<T>(
     val next  : String?  = null,
 )
 
-/** `GET me/shows` — items are `{ added_at, show }` wrappers. */
+/** `GET me/shows` — items are `{ added_at, show }` wrappers; the page itself can arrive itemless. */
 data class SavedShowsResponse(
     val items : List<SavedShowItem>? = null,
     val total : Int?                 = null,
@@ -62,9 +106,4 @@ data class SavedShowsResponse(
 data class SavedShowItem(
     @SerializedName("added_at") val addedAt : String?      = null,
     val show                                : SpotifyShow? = null,
-)
-
-/** `GET search?type=show` — only the `shows` bucket is parsed. */
-data class ShowSearchResponse(
-    val shows: ShowPage<SpotifyShow>? = null,
 )

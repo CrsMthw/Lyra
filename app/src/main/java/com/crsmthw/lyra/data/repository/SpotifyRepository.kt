@@ -1,6 +1,5 @@
 package com.crsmthw.lyra.data.repository
 
-import android.util.Log
 import com.crsmthw.lyra.data.local.EncryptedPrefs
 import com.crsmthw.lyra.data.remote.SpotifyApiService
 import com.crsmthw.lyra.data.remote.model.*
@@ -119,6 +118,36 @@ class SpotifyRepository(
         api.addToQueue(trackUri)
     }
 
+    // ── Podcast shows ─────────────────────────────────────────────────────────
+    // One method per endpoint, no hidden retries: the `market=from_token` fallback documented in
+    // docs/SPOTIFY.md is a screen-level policy (see `ShowDetailViewModel.fetchEpisodePage`), not a
+    // repository one, so a caller asking for one page still makes exactly one request and the
+    // spike's leg-2 "(no market)" line keeps meaning what it says.
+    //
+    // Follow / unfollow / followed-status for a show are deliberately NOT here: they are the
+    // unified saveToLibrary / removeFromLibrary / isInLibrary below with `spotify:show:<id>` —
+    // the same path albums and artists take, since PUT/DELETE me/shows are deprecated.
+
+    /** `GET me/shows` — the user's followed podcasts, offset-paged (`limit` caps at 50). */
+    suspend fun getSavedShows(limit: Int = 50, offset: Int = 0): Result<SavedShowsResponse> = safeCall {
+        api.getSavedShows(limit, offset)
+    }
+
+    /** `GET shows/{id}` — the full show; also embeds its first page of episodes. */
+    suspend fun getShow(id: String, market: String? = null): Result<SpotifyShow> = safeCall {
+        api.getShow(id, market)
+    }
+
+    /** `GET shows/{id}/episodes` — newest first, offset-paged (`limit` caps at 50). */
+    suspend fun getShowEpisodes(
+        id     : String,
+        limit  : Int     = 50,
+        offset : Int     = 0,
+        market : String? = null,
+    ): Result<ShowPage<SpotifyEpisode>> = safeCall {
+        api.getShowEpisodes(id, limit, offset, market)
+    }
+
     // ── Unified library save/remove/check — works for ANY Spotify uri (track, album, artist,
     //    show…); the Feb-2026 API folded all follows/saves into me/library. The api methods are
     //    named for tracks (their original use) but just pass the uris through.
@@ -234,269 +263,6 @@ class SpotifyRepository(
     suspend fun setRepeat(state: String): Result<Unit>         = safeCall { api.setRepeat(state) }
     suspend fun setVolume(volumePercent: Int): Result<Unit>    = safeCall { api.setVolume(volumePercent) }
 
-    // ── TEMPORARY — podcast API spike, remove after go/no-go ─────────────────
-    //
-    // A one-shot probe of the whole podcast surface with the app's real dev-mode token, because
-    // "documented" ≠ "returns content" (featured-playlists taught us that) and the token lives in
-    // EncryptedPrefs on the device, so these calls cannot be made from a desktop.
-    //
-    // Reads the legs in spec order but EXECUTES in dependency order (1 → 3 → 2 → 5 → 4): leg 2
-    // needs a show id and its fallback source is the search in leg 3.
-    //
-    // Every leg goes through safeCall, so a failure line already carries "HTTP <code>: <body>" —
-    // which is the load-bearing detail: a plain 403 "Forbidden" means the endpoint is gone for our
-    // app tier (NO-GO), while 403 "Insufficient client scope" is a one-line SCOPES fix (GO).
-    // Never touch errorBody() here — safeCall has already consumed that stream.
-    suspend fun runPodcastSpike(): List<String> {
-        val log = mutableListOf<String>()
-        fun line(text: String) {
-            log += text
-            Log.i(SPIKE_TAG, text)
-        }
-
-        fun fail(t: Throwable): String = "FAIL ${t::class.java.simpleName}: ${t.message}"
-
-        line("Podcast API spike — token scopes as shipped (no user-read-playback-position).")
-
-        // ── (1) Followed shows ───────────────────────────────────────────────
-        // savedLegOk stays false on failure: leg 4's positive control keys on it. savedFollowCount
-        // is what leg 1 REPORTED (items.size) — deliberately separate from savedCandidates, which is
-        // only what parsed out to a show uri: "zero follows" and "follows exist but the payload
-        // shape parsed to nothing" must reach different control branches (the second must NOT
-        // authorise writes — it is exactly the unknown-shape case this spike exists to measure).
-        var savedLegOk       = false
-        var savedFollowCount = 0
-        var savedId         : String? = null
-        var savedCandidates : List<Pair<String, String>> = emptyList()   // uri to name
-        getSavedShows().fold(
-            onSuccess = { response ->
-                val items = response.items.orEmpty()
-                val first = items.firstOrNull()?.show
-                line("1) GET me/shows?limit=5 -> 2xx OK, total=${response.total}, items=${items.size}, first=${first?.name ?: "-"}")
-                savedLegOk       = true
-                savedFollowCount = items.size
-                savedId          = first?.id
-                savedCandidates = items.mapNotNull { it.show }.mapNotNull { show ->
-                    show.uri?.let { uri -> uri to (show.name ?: uri) }
-                }
-            },
-            onFailure = { line("1) GET me/shows?limit=5 -> ${fail(it)}") },
-        )
-
-        // ── (3) Search for shows ─────────────────────────────────────────────
-        var searchId         : String? = null
-        var searchCandidates : List<Pair<String, String>> = emptyList()   // uri to name
-        searchShows(SPIKE_QUERY).fold(
-            onSuccess = { response ->
-                val items = response.shows?.items.orEmpty()
-                val first = items.firstOrNull()
-                line("3) GET search?q=\"$SPIKE_QUERY\"&type=show&limit=3 -> 2xx OK, total=${response.shows?.total}, items=${items.size}, first=${first?.name ?: "-"}")
-                searchId         = first?.id
-                searchCandidates = items.mapNotNull { show ->
-                    show.uri?.let { uri -> uri to (show.name ?: uri) }
-                }
-            },
-            onFailure = { line("3) GET search?type=show -> ${fail(it)}") },
-        )
-
-        // ── (2) Episodes of a show ───────────────────────────────────────────
-        val probeId = savedId ?: searchId
-        if (probeId == null) {
-            line("2) GET shows/{id}/episodes -> SKIPPED (legs 1 and 3 yielded no show id)")
-        } else {
-            getShowEpisodes(probeId).fold(
-                onSuccess = { page ->
-                    val items = page.items.orEmpty()
-                    line("2) GET shows/$probeId/episodes?limit=5 (no market) -> 2xx OK, total=${page.total}, items=${items.size}, first=${items.firstOrNull()?.name ?: "-"}")
-                    // A 200 with zero items is ambiguous: a hollow endpoint, or the documented
-                    // "no market and no user country -> content considered unavailable". Retry with
-                    // the market value the app already uses on getArtistAlbums to tell them apart.
-                    if (items.isEmpty()) {
-                        getShowEpisodes(probeId, market = SPIKE_MARKET).fold(
-                            onSuccess = { retry ->
-                                val retryItems = retry.items.orEmpty()
-                                line("2b) same call with market=$SPIKE_MARKET -> 2xx OK, total=${retry.total}, items=${retryItems.size}, first=${retryItems.firstOrNull()?.name ?: "-"}")
-                            },
-                            onFailure = { line("2b) same call with market=$SPIKE_MARKET -> ${fail(it)}") },
-                        )
-                    }
-                },
-                onFailure = { line("2) GET shows/$probeId/episodes -> ${fail(it)}") },
-            )
-        }
-
-        // ── (5) Single show (a future detail screen needs this) ──────────────
-        if (probeId == null) {
-            line("5) GET shows/{id} -> SKIPPED (no show id)")
-        } else {
-            getShow(probeId).fold(
-                onSuccess = { show ->
-                    line("5) GET shows/$probeId -> 2xx OK, name=${show.name ?: "-"}, total_episodes=${show.totalEpisodes}, embedded episodes=${show.episodes?.items.orEmpty().size}, publisher=${show.publisher ?: "(absent)"}")
-                },
-                onFailure = { line("5) GET shows/$probeId -> ${fail(it)}") },
-            )
-        }
-
-        // ── (4) Library membership, then a net-zero save/remove round trip ───
-        // ONLY leg-3 search hits are ever mutated, minus anything leg 1 reported as followed.
-        // A leg-1 show can only reach the write legs in the state where me/library/contains
-        // disagrees with me/shows — i.e. it reads `false` for a show the user genuinely follows —
-        // and that is exactly the disagreement this spike exists to measure, so contains cannot
-        // be the guard for itself: the PUT would be a no-op on an already-saved show and the
-        // DELETE would unfollow a real subscription. Zero diagnostic value, real data loss.
-        //
-        // The `followed` filter is insurance only (me/shows is read at limit=5, so it is not a
-        // complete follow-set — and the limit must stay 5 because the GO/NO-GO matrix keys on
-        // leg 1's logged shape). The load-bearing guard is the 4-pre positive control below.
-        //
-        // Both the 4a pre-check and the 4d re-check go through containsShowRaw, not the
-        // production isInLibrary: isInLibrary launders a 2xx that does not answer for this uri
-        // into `false`, which is what would authorise the wrong DELETE (4a) and what would let
-        // "no answer" read as "net state unchanged" (4d).
-        val followed    = savedCandidates.map { it.first }.toSet()
-        val candidates  = searchCandidates.filterNot { it.first in followed }
-        val filteredOut = searchCandidates.size - candidates.size
-        line("4) mutation candidates: leg-3 search hits ONLY (leg-1 followed shows are never mutated) -> ${candidates.size} candidate(s), $filteredOut filtered out as already followed (leg 1 ${if (savedLegOk) "ok" else "FAILED, so nothing could be filtered"}).")
-        if (candidates.isEmpty()) {
-            if (searchCandidates.isEmpty()) {
-                line("4) me/library -> SKIPPED (leg 3 yielded no show uri, so there is no show safe to toggle)")
-            } else {
-                line("4) me/library -> SKIPPED (every one of leg 3's ${searchCandidates.size} hits is already followed — unfollow one in Spotify and run the spike again)")
-            }
-        } else {
-            // ── (4-pre) Read-only positive control on contains ───────────────
-            // Before any write, prove contains answers `true` for a show me/shows just said the
-            // user follows. If it does not, contains cannot guard the write legs at all.
-            val controlPassed: Boolean = when {
-                !savedLegOk -> {
-                    line("4-pre) control SKIPPED: leg 1 failed, so the follow-set is unknown and contains cannot be trusted — WRITE LEGS NOT EXERCISED.")
-                    false
-                }
-                savedFollowCount == 0 -> {
-                    line("4-pre) control not needed: me/shows returned 2xx with items=0 (no followed shows), so no candidate can be followed — a toggle cannot destroy a subscription.")
-                    true
-                }
-                savedCandidates.isEmpty() -> {
-                    // Leg 1 reported follows, yet nothing parsed to a show uri: the payload shape is
-                    // not what Shows.kt models. No control is available, so no write is safe.
-                    line("4-pre) control UNAVAILABLE: me/shows reported $savedFollowCount follow(s) but none parsed to a show uri (unexpected item shape — see the leg-1 line's first=) — WRITE LEGS NOT EXERCISED. Headline spike result: fix the show model before trusting any leg.")
-                    false
-                }
-                else -> {
-                    val (controlUri, controlName) = savedCandidates[0]
-                    containsShowRaw(controlUri).fold(
-                        onSuccess = { answer ->
-                            if (answer == true) {
-                                line("4-pre) control OK: contains=true for \"$controlName\", a show me/shows reports as followed — contains sees legacy show follows, so contains=false on a candidate is trustworthy.")
-                                true
-                            } else {
-                                line("4-pre) contains disagrees with me/shows for a known-followed show (${answer ?: "2xx OK but EMPTY/NULL body"}) for \"$controlName\" — WRITE LEGS NOT EXERCISED, contains cannot guard them. Headline spike result: the unified library does NOT answer for legacy show follows.")
-                                false
-                            }
-                        },
-                        onFailure = {
-                            line("4-pre) control read -> ${fail(it)} — WRITE LEGS NOT EXERCISED, contains cannot guard them.")
-                            false
-                        },
-                    )
-                }
-            }
-            // A failed control has already logged "WRITE LEGS NOT EXERCISED", so seed the loop as
-            // already resolved: no candidate is read or touched, and no summary line is added.
-            var resolved = !controlPassed
-            for ((uri, name) in candidates) {
-                if (resolved) break
-                val check = containsShowRaw(uri)
-                val error = check.exceptionOrNull()
-                if (error != null) {
-                    line("4a) GET me/library/contains?uris=$uri -> ${fail(error)}")
-                    line("4) WRITE LEGS NOT EXERCISED: the contains read failed, so a save/remove round trip would prove nothing.")
-                    resolved = true
-                    break
-                }
-                // Errors are handled above, so null here is a 2xx that did not answer for this uri.
-                val contained = check.getOrNull()
-                line("4a) GET me/library/contains?uris=$uri -> 2xx OK, contains=${contained ?: "no answer (EMPTY/NULL body)"} (\"$name\")")
-                if (contained == null) {
-                    line("4b) contains returned 2xx but did not answer for this show uri — skipped mutation for \"$name\" (a PUT/DELETE pair on an unanswered check could unfollow a real subscription); trying the next candidate")
-                    continue
-                }
-                if (contained) {
-                    line("4b) contains=true, skipped mutation for \"$name\" — trying the next candidate")
-                    continue
-                }
-                val preCheckWasConfirmedFalse = contained == false
-                val put = saveToLibrary(uri)
-                line("4b) PUT me/library?uris=$uri -> ${put.fold({ "2xx OK" }, { fail(it) })}  (\"$name\")")
-                if (put.isFailure) {
-                    line("4c) DELETE me/library -> SKIPPED (the PUT failed, nothing to undo)")
-                } else {
-                    if (!preCheckWasConfirmedFalse) {
-                        // Defensive, and unreachable while the 4-pre control gates this loop and
-                        // 4a `continue`s on anything but a confirmed false. If it ever fires, the
-                        // PUT may have saved a show the user already followed, so the DELETE
-                        // below is not a safe undo.
-                        line("!! LIBRARY LEFT DIRTY (maybe): \"$name\" ($uri) was SAVED on a contains pre-check that could not be trusted — verify it by hand in Spotify.")
-                    }
-                    val delete = removeFromLibrary(uri)
-                    line("4c) DELETE me/library?uris=$uri -> ${delete.fold({ "2xx OK" }, { fail(it) })}")
-                    if (delete.isFailure) {
-                        line("!! LIBRARY LEFT DIRTY: \"$name\" ($uri) was SAVED and the DELETE failed — unfollow it by hand in Spotify.")
-                    }
-                    containsShowRaw(uri).fold(
-                        onSuccess = { after ->
-                            line(
-                                when {
-                                    after == false && preCheckWasConfirmedFalse ->
-                                        "4d) contains re-check -> false, and the pre-check was a confirmed false: net state unchanged."
-                                    after == false ->
-                                        "4d) contains re-check -> false, but the pre-check was not a confirmed false — net state NOT proven unchanged."
-                                    after == true ->
-                                        "4d) contains re-check -> true: \"$name\" is STILL in the library after the DELETE — verify it by hand in Spotify."
-                                    else ->
-                                        "4d) contains re-check -> 2xx OK but EMPTY/NULL body: the net state cannot be confirmed — verify \"$name\" by hand in Spotify."
-                                }
-                            )
-                        },
-                        onFailure = { line("4d) contains re-check -> ${fail(it)} — the net state cannot be confirmed; verify \"$name\" by hand in Spotify.") },
-                    )
-                }
-                resolved = true
-                break
-            }
-            if (!resolved) {
-                line("4) WRITE LEGS NOT EXERCISED: none of the ${candidates.size} candidate shows could be toggled (each read back as already saved, or contains did not answer for it).")
-            }
-        }
-
-        line("Spike done. A 429 on any leg means inconclusive — wait a minute and run it again.")
-        return log
-    }
-
-    private suspend fun getSavedShows(): Result<SavedShowsResponse> = safeCall {
-        api.getSavedShows()
-    }
-
-    private suspend fun getShow(id: String): Result<SpotifyShow> = safeCall {
-        api.getShow(id)
-    }
-
-    private suspend fun getShowEpisodes(id: String, market: String? = null): Result<ShowPage<SpotifyEpisode>> = safeCall {
-        api.getShowEpisodes(id, market = market)
-    }
-
-    private suspend fun searchShows(query: String): Result<ShowSearchResponse> = safeCall {
-        api.searchShows(query = query)
-    }
-
-    // TEMPORARY — podcast API spike, remove after go/no-go
-    // The spike's own read of me/library/contains. Unlike the production isInLibrary (which two
-    // saved-state UIs depend on, so its type must not widen), a 2xx whose body does not answer
-    // for this uri — [] or [null] — stays distinguishable from a real `false`: laundering "no
-    // answer" into false is what would authorise a PUT/DELETE pair on a show the user follows.
-    private suspend fun containsShowRaw(uri: String): Result<Boolean?> =
-        safeCall { api.checkSavedTracks(uri) }.map { it.firstOrNull() }
-
     // ── Helpers ──────────────────────────────────────────────────────────────
 
     private suspend fun <T> safeCall(block: suspend () -> T): Result<T> =
@@ -513,8 +279,3 @@ class SpotifyRepository(
             }
         }
 }
-
-// TEMPORARY — podcast API spike, remove after go/no-go
-private const val SPIKE_TAG    = "PodcastSpike"
-private const val SPIKE_QUERY  = "the daily"
-private const val SPIKE_MARKET = "from_token"   // same value the app already sends on getArtistAlbums

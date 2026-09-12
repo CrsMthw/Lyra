@@ -180,6 +180,69 @@ internal fun PlaylistListCard(
     }
 }
 
+/**
+ * One followed podcast row (Shows filter) — mirrors [AlbumListCard]: square art, show name, and
+ * an "N episodes" subtitle.
+ *
+ * The subtitle is the episode count and NOT the publisher: February 2026 deprecated
+ * `show.publisher` and the device spike confirmed it is absent from live responses, so a
+ * publisher subtitle would render blank for every show.
+ */
+@Composable
+internal fun ShowListCard(
+    show    : com.crsmthw.lyra.data.remote.model.SpotifyShow,
+    onClick : () -> Unit,
+) {
+    Card(
+        onClick   = onClick,
+        modifier  = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        shape     = RoundedCornerShape(16.dp),
+        colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+    ) {
+        Row(
+            modifier          = Modifier.fillMaxWidth().padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val artUrl = show.artUrl.takeIf { it.isNotBlank() }
+            if (artUrl != null) {
+                AsyncImage(
+                    model              = artUrl,
+                    contentDescription = show.name,
+                    contentScale       = ContentScale.Crop,
+                    modifier           = Modifier.size(56.dp).clip(RoundedCornerShape(12.dp)),
+                )
+            } else {
+                Box(
+                    modifier = Modifier.size(56.dp).clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Default.Podcasts, contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(show.name.orEmpty(), style = MaterialTheme.typography.titleMedium,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                val episodes = show.totalEpisodes
+                if (episodes != null) {
+                    Text(
+                        text     = pluralStringResource(R.plurals.show_episode_count, episodes, episodes),
+                        style    = MaterialTheme.typography.bodySmall,
+                        color    = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+    }
+}
+
 /** One saved album row (Albums filter) — mirrors PlaylistListCard's layout. */
 @Composable
 internal fun AlbumListCard(

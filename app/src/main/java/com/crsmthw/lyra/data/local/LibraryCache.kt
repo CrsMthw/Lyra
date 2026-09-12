@@ -5,6 +5,7 @@ import com.crsmthw.lyra.data.remote.model.PlaylistTracksMeta
 import com.crsmthw.lyra.data.remote.model.SpotifyAlbum
 import com.crsmthw.lyra.data.remote.model.SpotifyArtist
 import com.crsmthw.lyra.data.remote.model.SpotifyPlaylist
+import com.crsmthw.lyra.data.remote.model.SpotifyShow
 import com.crsmthw.lyra.data.remote.model.SpotifyTrack
 import com.crsmthw.lyra.data.remote.model.SpotifyUser
 import com.google.gson.Gson
@@ -87,6 +88,7 @@ data class LibraryCacheData(
     val forYou            : ForYouCacheData?               = null,
     val savedAlbums       : List<SpotifyAlbum>?            = null,
     val followedArtists   : List<SpotifyArtist>?           = null,
+    val followedShows     : List<SpotifyShow>?             = null,
 )
 
 class LibraryCache(context: Context) {
@@ -145,11 +147,19 @@ class LibraryCache(context: Context) {
         }
     }
 
-    /** Persists the Albums/Artists filter content, leaving the rest untouched. */
-    fun saveCollections(savedAlbums: List<SpotifyAlbum>, followedArtists: List<SpotifyArtist>) {
+    /** Persists the Albums/Artists/Shows filter content, leaving the rest untouched. */
+    fun saveCollections(
+        savedAlbums     : List<SpotifyAlbum>,
+        followedArtists : List<SpotifyArtist>,
+        followedShows   : List<SpotifyShow>,
+    ) {
         synchronized(lock) {
             val current = loadLocked() ?: LibraryCacheData()
-            saveLocked(current.copy(savedAlbums = savedAlbums, followedArtists = followedArtists))
+            saveLocked(current.copy(
+                savedAlbums     = savedAlbums,
+                followedArtists = followedArtists,
+                followedShows   = followedShows,
+            ))
         }
     }
 
@@ -188,6 +198,25 @@ class LibraryCache(context: Context) {
             val current = loadLocked() ?: return
             if (current.followedArtists.orEmpty().none { it.id == artistId }) return
             saveLocked(current.copy(followedArtists = current.followedArtists.orEmpty().filterNot { it.id == artistId }))
+            _revision.value++
+        }
+    }
+
+    fun addFollowedShow(show: SpotifyShow) {
+        val id = show.id ?: return
+        synchronized(lock) {
+            val current = loadLocked() ?: LibraryCacheData()
+            if (current.followedShows.orEmpty().any { it.id == id }) return
+            saveLocked(current.copy(followedShows = listOf(show) + current.followedShows.orEmpty()))
+            _revision.value++
+        }
+    }
+
+    fun removeFollowedShow(showId: String) {
+        synchronized(lock) {
+            val current = loadLocked() ?: return
+            if (current.followedShows.orEmpty().none { it.id == showId }) return
+            saveLocked(current.copy(followedShows = current.followedShows.orEmpty().filterNot { it.id == showId }))
             _revision.value++
         }
     }

@@ -91,12 +91,22 @@
     <string name="library_filter_playlists">Playlists</string>
     <string name="library_filter_albums">Albums</string>
     <string name="library_filter_artists">Artists</string>
+    <string name="library_filter_shows">Shows</string>
     <string name="library_no_albums">No saved albums</string>
     <string name="library_no_artists">No followed artists</string>
+    <string name="library_no_shows">No followed shows</string>
     <plurals name="library_track_count">
         <item quantity="one">%1$d track</item>
         <item quantity="other">%1$d tracks</item>
     </plurals>
+
+    <!-- Podcast shows -->
+    <plurals name="show_episode_count">
+        <item quantity="one">%1$d episode</item>
+        <item quantity="other">%1$d episodes</item>
+    </plurals>
+    <string name="show_no_episodes">No episodes yet</string>
+    <string name="show_fallback_title">Podcast</string>
 
     <!-- Player labels -->
     <string name="player_now_playing_label">NOW PLAYING</string>
@@ -280,8 +290,8 @@
     <string name="search_tab_tracks">Tracks</string>
     <string name="search_tab_albums">Albums</string>
     <string name="search_tab_artists">Artists</string>
+    <string name="search_tab_shows">Shows</string>
     <string name="search_type_artist">Artist</string>
     <string name="search_type_album">Album</string>
-    <!-- TEMPORARY — podcast API spike, remove after go/no-go -->
-    <string name="settings_podcast_spike_title">Podcast API spike</string>
+    <string name="search_type_show">Podcast</string>
 </resources>

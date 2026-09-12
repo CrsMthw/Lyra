@@ -65,6 +65,9 @@ import com.crsmthw.lyra.ui.screens.album.AlbumDetailViewModelFactory
 import com.crsmthw.lyra.ui.screens.artist.ArtistDetailScreen
 import com.crsmthw.lyra.ui.screens.artist.ArtistDetailViewModel
 import com.crsmthw.lyra.ui.screens.artist.ArtistDetailViewModelFactory
+import com.crsmthw.lyra.ui.screens.show.ShowDetailScreen
+import com.crsmthw.lyra.ui.screens.show.ShowDetailViewModel
+import com.crsmthw.lyra.ui.screens.show.ShowDetailViewModelFactory
 import com.crsmthw.lyra.ui.screens.auth.AuthScreen
 import com.crsmthw.lyra.ui.screens.library.LibraryScreen
 import com.crsmthw.lyra.ui.screens.library.LibraryViewModel
@@ -254,6 +257,7 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
     val isBrowse = currentRoute == Screen.Library.route ||
                    currentRoute == Screen.AlbumDetail.route ||
                    currentRoute == Screen.ArtistDetail.route ||
+                   currentRoute == Screen.ShowDetail.route ||
                    currentRoute == Screen.Stats.route ||
                    currentRoute == Screen.Search.route
 
@@ -307,6 +311,7 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
                     onOpenQueue           = { safePush(Screen.Queue.route) },
                     onOpenAlbum           = { albumId -> safePush(Screen.AlbumDetail.createRoute(albumId)) },
                     onOpenArtist          = { artistId -> safePush(Screen.ArtistDetail.createRoute(artistId)) },
+                    onOpenShow            = { showId -> safePush(Screen.ShowDetail.createRoute(showId)) },
                     onOpenStats           = { safePush(Screen.Stats.route) },
                     sharedTransitionScope = this@SharedTransitionLayout,
                     animatedContentScope  = this@composable,
@@ -359,6 +364,7 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
                     onOpenPlayer          = { safePush(Screen.Player.route) },
                     onAlbumClick          = { albumId -> safePush(Screen.AlbumDetail.createRoute(albumId)) },
                     onArtistClick         = { artistId -> safePush(Screen.ArtistDetail.createRoute(artistId)) },
+                    onShowClick           = { showId -> safePush(Screen.ShowDetail.createRoute(showId)) },
                     onTrackClick          = { uri, uris ->
                         playerVm.playTrack(uri, uris = uris)
                         safePush(Screen.Player.route)
@@ -405,6 +411,26 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
                     onBack                = ::safeNavigateUp,
                     onOpenAlbum           = { albumId -> safePush(Screen.AlbumDetail.createRoute(albumId)) },
                     onOpenPlayer          = { safePush(Screen.Player.route) },
+                    onOpenQueue           = { safePush(Screen.Queue.route) },
+                    sharedTransitionScope = this@SharedTransitionLayout,
+                    animatedContentScope  = this@composable,
+                )
+            }
+
+            composable(
+                route      = Screen.ShowDetail.route,
+                arguments  = listOf(navArgument("id") { type = NavType.StringType }),
+                deepLinks  = listOf(navDeepLink { uriPattern = "https://open.spotify.com/show/{id}" }),
+            ) { backStackEntry ->
+                val showId = backStackEntry.arguments?.getString("id") ?: return@composable
+                val vm = viewModel<ShowDetailViewModel>(
+                    factory = ShowDetailViewModelFactory(container, showId)
+                )
+                ShowDetailScreen(
+                    viewModel             = vm,
+                    playerViewModel       = playerVm,
+                    onBack                = ::safeNavigateUp,
+                    onNavigateToPlayer    = { safePush(Screen.Player.route) },
                     onOpenQueue           = { safePush(Screen.Queue.route) },
                     sharedTransitionScope = this@SharedTransitionLayout,
                     animatedContentScope  = this@composable,

@@ -61,6 +61,20 @@ data class SpotifyAlbum(
 }
 
 // ── Track ────────────────────────────────────────────────────────────────────
+/**
+ * A playable item. Despite the name this also models a podcast **episode**: `me/player`,
+ * `me/player/queue` and `me/player/recently-played` all put whatever is playing in the same `item`
+ * slot, and when that is an episode the payload has no `album` and no `artists` — it carries its
+ * own [images] plus an embedded [show] instead. Rather than fork the player state, the queue, the
+ * widget and the library cache onto a sealed now-playing type, the episode-only keys are parsed
+ * here and the DISPLAY-ONLY derived properties below fall back through them.
+ *
+ * That fallback is safe precisely because [artUrl], [thumbnailUrl], [primaryArtist] and
+ * [allArtists] are never used to address the API — every call site is an `AsyncImage` model or a
+ * subtitle `Text`. Anything that *does* address the API (liking, add-to-playlist, lyrics, the
+ * share url, the artist/album links) must branch on [isEpisode] instead, because those endpoints
+ * are track-specific.
+ */
 data class SpotifyTrack(
     val id          : String,
     val name        : String,
@@ -72,12 +86,39 @@ data class SpotifyTrack(
     @SerializedName("explicit")     val explicit    : Boolean  = false,
     @SerializedName("preview_url")  val previewUrl  : String?  = null,
     @SerializedName("is_playable")  val isPlayable  : Boolean? = null,
+    // ── Episode-only keys (absent on tracks, hence nullable with defaults) ──
+    /** Spotify's own object type: `"track"` or `"episode"`. */
+    val type        : String?              = null,
+    /** The episode's own artwork — a track's art lives on its [album] instead. */
+    val images      : List<SpotifyImage>?  = null,
+    /** The episode's parent show, embedded by the player and queue endpoints. */
+    val show        : SpotifyShow?         = null,
 ) {
-    val primaryArtist  : String  get() = artists?.firstOrNull()?.name ?: "Unknown"
+    /**
+     * True when this item is a podcast episode.
+     *
+     * Derived from the ITEM, never from the player response's `currently_playing_type`: the
+     * transfer lock in `PlayerStateManager.fetchPlayerState` deliberately keeps the PREVIOUS item
+     * while taking the new scalars, so a flag carried beside the item would desync from it during
+     * a device switch. The uri is checked as well as `type` so rows cached before `type` was
+     * parsed still resolve correctly.
+     */
+    val isEpisode      : Boolean get() = type == "episode" || uri.startsWith("spotify:episode:")
+    val primaryArtist  : String  get() = artists?.firstOrNull()?.name ?: show?.name ?: "Unknown"
+    /** Null for an episode — there is no artist page to navigate to. */
     val primaryArtistId: String? get() = artists?.firstOrNull()?.id
     val allArtists     : String  get() = artists?.joinToString(" · ") { it.name } ?: primaryArtist
-    val thumbnailUrl   : String  get() = album?.images?.lastOrNull()?.url ?: ""
-    val artUrl         : String  get() = album?.images?.firstOrNull()?.url ?: ""
+    val thumbnailUrl   : String  get() = album?.images?.lastOrNull()?.url
+                                         ?: images?.lastOrNull()?.url
+                                         ?: show?.images?.lastOrNull()?.url
+                                         ?: ""
+    val artUrl         : String  get() = album?.images?.firstOrNull()?.url
+                                         ?: images?.firstOrNull()?.url
+                                         ?: show?.images?.firstOrNull()?.url
+                                         ?: ""
+    /** The open.spotify.com page for this item — an episode's is `/episode/`, not `/track/`. */
+    val shareUrl       : String  get() =
+        "https://open.spotify.com/${if (isEpisode) "episode" else "track"}/$id"
 }
 
 // ── Saved track wrapper (for liked songs) ───────────────────────────────────
@@ -178,11 +219,22 @@ data class PlayRequest(
 )
 
 // ── Search results ───────────────────────────────────────────────────────────
+/**
+ * Every bucket is nullable because `search` only returns the ones the request asked for in `type`:
+ * a per-type page (`type=show`) carries `shows` alone, and the Search screen's page merge depends
+ * on that — see `SearchViewModel.appendPage`.
+ *
+ * [shows] holds podcast shows, a full search type like any other (`type=show` survived February
+ * 2026). It uses the ordinary [Paged] wrapper rather than `Shows.kt`'s null-tolerant `ShowPage`:
+ * the documented "200 with an empty page" caveat belongs to the *episode* endpoints, which want a
+ * market — a search page has the same shape here as it does for tracks, albums and artists.
+ */
 data class SearchResponse(
     val tracks    : Paged<SpotifyTrack>?    = null,
     val albums    : Paged<SpotifyAlbum>?    = null,
     val artists   : Paged<SpotifyArtist>?   = null,
     val playlists : Paged<SpotifyPlaylist>? = null,
+    val shows     : Paged<SpotifyShow>?     = null,
 )
 
 // ── API list wrappers ────────────────────────────────────────────────────────
