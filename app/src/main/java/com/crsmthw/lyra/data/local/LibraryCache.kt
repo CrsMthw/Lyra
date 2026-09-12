@@ -170,18 +170,25 @@ class LibraryCache(context: Context) {
         }
     }
 
-    /** Persists the Albums/Artists/Shows filter content, leaving the rest untouched. */
+    /**
+     * Persists the Albums/Artists/Shows filter content, leaving the rest untouched.
+     *
+     * A `null` argument means "leave that list exactly as it is", and each of the three is
+     * independent: a paginated sweep that died part-way must not overwrite a COMPLETE cached list
+     * with its truncated prefix, and a leg that was never fetched this session must not blank one
+     * (`LibraryViewModel.loadCollections` passes null for every leg it didn't complete).
+     */
     fun saveCollections(
-        savedAlbums     : List<SpotifyAlbum>,
-        followedArtists : List<SpotifyArtist>,
-        followedShows   : List<SpotifyShow>,
+        savedAlbums     : List<SpotifyAlbum>?  = null,
+        followedArtists : List<SpotifyArtist>? = null,
+        followedShows   : List<SpotifyShow>?   = null,
     ) {
         synchronized(lock) {
             val current = loadLocked() ?: LibraryCacheData()
             saveLocked(current.copy(
-                savedAlbums     = savedAlbums,
-                followedArtists = followedArtists,
-                followedShows   = followedShows,
+                savedAlbums     = savedAlbums     ?: current.savedAlbums,
+                followedArtists = followedArtists ?: current.followedArtists,
+                followedShows   = followedShows   ?: current.followedShows,
             ))
         }
     }

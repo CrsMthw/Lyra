@@ -706,79 +706,120 @@ class LibraryViewModel(
 
     // ── Library filter (Playlists / Albums / Artists / Shows) ────────────────
 
-    /** Once-per-session network refresh guard for the Albums/Artists/Shows filter content. */
-    private var collectionsLoaded = false
+    // ── Albums / Artists / Shows: once-per-session network refresh, PER LEG ──────────────────────
+    //
+    // Each leg is marked loaded only when its paginated sweep ran to COMPLETION — the loop exiting
+    // on `page.next == null || items.isEmpty()`. A sweep that stopped because a page came back null
+    // (a 429 on the third back-to-back sweep is the likely one) leaves its flag false, so the next
+    // segment tap — or a pull-to-refresh while a non-Playlists filter is showing — re-fetches just
+    // that leg while the complete ones stay put. One shared flag used to mean a single failed leg
+    // rendered its empty state for the rest of the session, with no way back but a restart.
+    //
+    // "Did it come back empty?" is NOT the same question and must not stand in for it: an empty
+    // library completes legitimately, and a sweep that died on page 2 with 100 rows in hand is
+    // truncated, not done — persisting that would overwrite a complete cached list with a prefix.
+    private var albumsLoaded  = false
+    private var artistsLoaded = false
+    private var showsLoaded   = false
+
+    /**
+     * Re-entry guard, flipped on the main thread BEFORE the launch: the per-leg flags above are
+     * only settled inside the coroutine, so without this two rapid segment taps would start two
+     * concurrent sweeps.
+     */
+    private var collectionsInFlight = false
 
     fun setLibraryFilter(filter: LibraryFilter) {
         _uiState.update { it.copy(libraryFilter = filter) }
         // Cached content (if any) is already in state from loadLibrary; refresh from the network
-        // the first time either non-playlist filter is opened this session.
+        // the first time each non-playlist filter's content is needed this session.
         if (filter != LibraryFilter.PLAYLISTS) loadCollections()
     }
 
     private fun loadCollections() {
-        if (collectionsLoaded) return
-        collectionsLoaded = true
+        if (collectionsInFlight) return
+        if (albumsLoaded && artistsLoaded && showsLoaded) return
+        collectionsInFlight = true
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoadingCollections = true) }
+            // A leg that is skipped (already complete) or that failed leaves its `…Complete` false,
+            // so the persist step below passes null for it and the cache keeps what it has.
+            var albumsComplete  = false
+            var artistsComplete = false
+            var showsComplete   = false
+            try {
+                _uiState.update { it.copy(isLoadingCollections = true) }
 
-            // Saved albums — offset-paged.
-            val albums = mutableListOf<SpotifyAlbum>()
-            var offset = 0
-            var albumsOk = true
-            while (true) {
-                val page = repository.getSavedAlbums(limit = 50, offset = offset).getOrNull()
-                if (page == null) { albumsOk = albums.isNotEmpty(); break }
-                val items = page.items.orEmpty()
-                albums += items.mapNotNull { it.album }
-                offset += items.size
-                if (page.next == null || items.isEmpty()) break
-            }
-            if (albumsOk) _uiState.update { it.copy(savedAlbums = albums) }
-
-            // Followed artists — cursor-paged, nested under "artists".
-            val artists = mutableListOf<SpotifyArtist>()
-            var after: String? = null
-            var artistsOk = true
-            while (true) {
-                val page = repository.getFollowedArtists(after).getOrNull()?.artists
-                if (page == null) { artistsOk = artists.isNotEmpty(); break }
-                val items = page.items.orEmpty()
-                artists += items
-                after = page.cursors?.after
-                if (after == null || items.isEmpty()) break
-            }
-            if (artistsOk) _uiState.update { it.copy(followedArtists = artists) }
-
-            // Followed podcasts — offset-paged like albums. `me/shows` is the only read side;
-            // the per-show follow toggle lives on the show detail screen and patches the cache
-            // surgically (LibraryCache.add/removeFollowedShow), same as albums and artists.
-            val shows = mutableListOf<SpotifyShow>()
-            var showOffset = 0
-            var showsOk = true
-            while (true) {
-                val page = repository.getSavedShows(limit = 50, offset = showOffset).getOrNull()
-                if (page == null) { showsOk = shows.isNotEmpty(); break }
-                val items = page.items.orEmpty()
-                // `episodes = null` as insurance: `me/shows` returns the SIMPLIFIED show object
-                // (no embedded episodes page), but the cache file is read whole on every library
-                // paint, so a shape change that started embedding 50 episodes per show must not
-                // silently bloat it. Mirrors ShowDetailViewModel's own cache write.
-                shows += items.mapNotNull { it.show?.copy(episodes = null) }
-                showOffset += items.size
-                if (page.next == null || items.isEmpty()) break
-            }
-            if (showsOk) _uiState.update { it.copy(followedShows = shows) }
-
-            _uiState.update { it.copy(isLoadingCollections = false) }
-
-            if (albumsOk || artistsOk || showsOk) {
-                val s = _uiState.value
-                withContext(Dispatchers.IO) {
-                    cache.saveCollections(s.savedAlbums, s.followedArtists, s.followedShows)
+                // Saved albums — offset-paged.
+                if (!albumsLoaded) {
+                    val albums = mutableListOf<SpotifyAlbum>()
+                    var offset = 0
+                    while (true) {
+                        val page = repository.getSavedAlbums(limit = 50, offset = offset).getOrNull()
+                        if (page == null) break                  // partial or failed — retry later
+                        val items = page.items.orEmpty()
+                        albums += items.mapNotNull { it.album }
+                        offset += items.size
+                        if (page.next == null || items.isEmpty()) { albumsComplete = true; break }
+                    }
+                    // Show a partial sweep's rows too — better than an empty grid — but only a
+                    // complete one is remembered or persisted.
+                    if (albumsComplete || albums.isNotEmpty()) _uiState.update { it.copy(savedAlbums = albums) }
+                    albumsLoaded = albumsComplete
                 }
-            } else {
-                collectionsLoaded = false   // every fetch failed with nothing cached — allow a retry
+
+                // Followed artists — cursor-paged, nested under "artists".
+                if (!artistsLoaded) {
+                    val artists = mutableListOf<SpotifyArtist>()
+                    var after: String? = null
+                    while (true) {
+                        val page = repository.getFollowedArtists(after).getOrNull()?.artists
+                        if (page == null) break
+                        val items = page.items.orEmpty()
+                        artists += items
+                        after = page.cursors?.after
+                        if (after == null || items.isEmpty()) { artistsComplete = true; break }
+                    }
+                    if (artistsComplete || artists.isNotEmpty()) _uiState.update { it.copy(followedArtists = artists) }
+                    artistsLoaded = artistsComplete
+                }
+
+                // Followed podcasts — offset-paged like albums. `me/shows` is the only read side;
+                // the per-show follow toggle lives on the show detail screen and patches the cache
+                // surgically (LibraryCache.add/removeFollowedShow), same as albums and artists.
+                if (!showsLoaded) {
+                    val shows = mutableListOf<SpotifyShow>()
+                    var showOffset = 0
+                    while (true) {
+                        val page = repository.getSavedShows(limit = 50, offset = showOffset).getOrNull()
+                        if (page == null) break
+                        val items = page.items.orEmpty()
+                        // `episodes = null` as insurance: `me/shows` returns the SIMPLIFIED show
+                        // object (no embedded episodes page), but the cache file is read whole on
+                        // every library paint, so a shape change that started embedding 50 episodes
+                        // per show must not silently bloat it. Mirrors ShowDetailViewModel's write.
+                        shows += items.mapNotNull { it.show?.copy(episodes = null) }
+                        showOffset += items.size
+                        if (page.next == null || items.isEmpty()) { showsComplete = true; break }
+                    }
+                    if (showsComplete || shows.isNotEmpty()) _uiState.update { it.copy(followedShows = shows) }
+                    showsLoaded = showsComplete
+                }
+
+                // Persist COMPLETE legs only — null leaves the cached list alone, so a truncated
+                // sweep can never overwrite a whole one and a skipped leg can never blank it.
+                if (albumsComplete || artistsComplete || showsComplete) {
+                    val s = _uiState.value
+                    withContext(Dispatchers.IO) {
+                        cache.saveCollections(
+                            savedAlbums     = s.savedAlbums.takeIf     { albumsComplete },
+                            followedArtists = s.followedArtists.takeIf { artistsComplete },
+                            followedShows   = s.followedShows.takeIf   { showsComplete },
+                        )
+                    }
+                }
+            } finally {
+                collectionsInFlight = false
+                _uiState.update { it.copy(isLoadingCollections = false) }
             }
         }
     }
@@ -811,6 +852,12 @@ class LibraryViewModel(
             _uiState.update { it.copy(isLibraryRefreshing = false) }
 
             loadForYou()
+
+            // Give a leg that failed earlier this session another go — a pull-to-refresh on an
+            // empty Shows/Albums/Artists grid is exactly the gesture for it, and `loadCollections`
+            // returns immediately for the legs that already completed. Gated on the visible filter
+            // so refreshing Playlists never kicks off sweeps the user hasn't asked for.
+            if (_uiState.value.libraryFilter != LibraryFilter.PLAYLISTS) loadCollections()
 
             val s = _uiState.value
             withContext(Dispatchers.IO) {
