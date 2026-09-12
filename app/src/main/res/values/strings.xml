@@ -91,12 +91,23 @@
     <string name="library_filter_playlists">Playlists</string>
     <string name="library_filter_albums">Albums</string>
     <string name="library_filter_artists">Artists</string>
+    <string name="library_filter_shows">Shows</string>
     <string name="library_no_albums">No saved albums</string>
     <string name="library_no_artists">No followed artists</string>
+    <string name="library_no_shows">No followed shows</string>
     <plurals name="library_track_count">
         <item quantity="one">%1$d track</item>
         <item quantity="other">%1$d tracks</item>
     </plurals>
+
+    <!-- Podcast shows -->
+    <plurals name="show_episode_count">
+        <item quantity="one">%1$d episode</item>
+        <item quantity="other">%1$d episodes</item>
+    </plurals>
+    <string name="show_no_episodes">No episodes yet</string>
+    <string name="show_fallback_title">Podcast</string>
+    <string name="show_play_latest">Play latest episode</string>
 
     <!-- Player labels -->
     <string name="player_now_playing_label">NOW PLAYING</string>

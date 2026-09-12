@@ -57,6 +57,7 @@ internal fun TwoPaneLayout(
     onRequestPlayer       : () -> Unit,
     onOpenAlbum           : (String) -> Unit = {},
     onOpenArtist          : (String) -> Unit = {},
+    onOpenShow            : (String) -> Unit = {},
     onOpenStats           : () -> Unit = {},
     sharedTransitionScope : SharedTransitionScope? = null,
     animatedContentScope  : AnimatedContentScope? = null,
@@ -118,6 +119,7 @@ internal fun TwoPaneLayout(
                         isLandscape           = isLandscape,
                         onOpenAlbum           = onOpenAlbum,
                         onOpenArtist          = onOpenArtist,
+                        onOpenShow            = onOpenShow,
                         onOpenStats           = onOpenStats,
                         onPlayTopTrack        = { idx ->
                             state.topTracks.getOrNull(idx)?.let { tapped ->

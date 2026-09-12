@@ -29,7 +29,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** Which content type the Library browser shows. */
-enum class LibraryFilter { PLAYLISTS, ALBUMS, ARTISTS }
+enum class LibraryFilter { PLAYLISTS, ALBUMS, ARTISTS, SHOWS }
 
 data class LibraryUiState(
     val playlists             : List<SpotifyPlaylist>  = emptyList(),
@@ -39,6 +39,7 @@ data class LibraryUiState(
     val libraryFilter         : LibraryFilter          = LibraryFilter.PLAYLISTS,
     val savedAlbums           : List<SpotifyAlbum>     = emptyList(),
     val followedArtists       : List<SpotifyArtist>    = emptyList(),
+    val followedShows         : List<SpotifyShow>      = emptyList(),
     val isLoadingCollections  : Boolean                = false,
     val likedSongCount        : Int                    = 0,
     val currentPlaylist       : SpotifyPlaylist?        = null,
@@ -507,6 +508,7 @@ class LibraryViewModel(
                     playlists       = cached.playlists,
                     savedAlbums     = cached.savedAlbums.orEmpty(),
                     followedArtists = cached.followedArtists.orEmpty(),
+                    followedShows   = cached.followedShows.orEmpty(),
                 ) }
             }
         }
@@ -526,6 +528,7 @@ class LibraryViewModel(
                     topTracks         = cached.forYou?.topTracks.orEmpty(),
                     savedAlbums       = cached.savedAlbums.orEmpty(),
                     followedArtists   = cached.followedArtists.orEmpty(),
+                    followedShows     = cached.followedShows.orEmpty(),
                     likedSongCount    = cached.likedSongCount,
                     user              = cached.user,
                     isLoading         = false,
@@ -578,6 +581,7 @@ class LibraryViewModel(
                     forYou            = existing?.forYou,
                     savedAlbums       = existing?.savedAlbums,
                     followedArtists   = existing?.followedArtists,
+                    followedShows     = existing?.followedShows,
                 ))
             }
             // Generate mosaics for any new playlists that now have cached track lists
@@ -686,9 +690,9 @@ class LibraryViewModel(
         return items
     }
 
-    // ── Library filter (Playlists / Albums / Artists) ────────────────────────
+    // ── Library filter (Playlists / Albums / Artists / Shows) ────────────────
 
-    /** Once-per-session network refresh guard for the Albums/Artists filter content. */
+    /** Once-per-session network refresh guard for the Albums/Artists/Shows filter content. */
     private var collectionsLoaded = false
 
     fun setLibraryFilter(filter: LibraryFilter) {
@@ -732,13 +736,31 @@ class LibraryViewModel(
             }
             if (artistsOk) _uiState.update { it.copy(followedArtists = artists) }
 
+            // Followed podcasts — offset-paged like albums. `me/shows` is the only read side;
+            // the per-show follow toggle lives on the show detail screen and patches the cache
+            // surgically (LibraryCache.add/removeFollowedShow), same as albums and artists.
+            val shows = mutableListOf<SpotifyShow>()
+            var showOffset = 0
+            var showsOk = true
+            while (true) {
+                val page = repository.getSavedShows(limit = 50, offset = showOffset).getOrNull()
+                if (page == null) { showsOk = shows.isNotEmpty(); break }
+                val items = page.items.orEmpty()
+                shows += items.mapNotNull { it.show }
+                showOffset += items.size
+                if (page.next == null || items.isEmpty()) break
+            }
+            if (showsOk) _uiState.update { it.copy(followedShows = shows) }
+
             _uiState.update { it.copy(isLoadingCollections = false) }
 
-            if (albumsOk || artistsOk) {
+            if (albumsOk || artistsOk || showsOk) {
                 val s = _uiState.value
-                withContext(Dispatchers.IO) { cache.saveCollections(s.savedAlbums, s.followedArtists) }
+                withContext(Dispatchers.IO) {
+                    cache.saveCollections(s.savedAlbums, s.followedArtists, s.followedShows)
+                }
             } else {
-                collectionsLoaded = false   // both fetches failed with nothing cached — allow a retry
+                collectionsLoaded = false   // every fetch failed with nothing cached — allow a retry
             }
         }
     }
@@ -783,6 +805,7 @@ class LibraryViewModel(
                     forYou            = existing?.forYou,
                     savedAlbums       = existing?.savedAlbums,
                     followedArtists   = existing?.followedArtists,
+                    followedShows     = existing?.followedShows,
                 ))
             }
             generateMissingMosaicsAsync(s.playlists, cache.load()?.trackLists ?: emptyMap())

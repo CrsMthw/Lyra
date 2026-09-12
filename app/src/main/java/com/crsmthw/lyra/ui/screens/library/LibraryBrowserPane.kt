@@ -59,6 +59,7 @@ internal fun LibraryBrowserPane(
     modifier              : Modifier = Modifier,
     onOpenAlbum           : (String) -> Unit = {},
     onOpenArtist          : (String) -> Unit = {},
+    onOpenShow            : (String) -> Unit = {},
     onOpenStats           : () -> Unit = {},
     onPlayTopTrack        : (Int) -> Unit = {},
     containerColor        : Color = Color.Unspecified,   // top-scrim target; defaults to background
@@ -85,7 +86,7 @@ internal fun LibraryBrowserPane(
 
     // Shared list items — identical in both portrait and landscape LazyColumns
     val listBody: LazyListScope.() -> Unit = {
-        // Content-type filter (Playlists / Albums / Artists) — connected M3 ButtonGroup.
+        // Content-type filter (Playlists / Albums / Artists / Shows) — connected M3 ButtonGroup.
         item(key = "filter") {
             LibraryFilterRow(
                 selected = state.libraryFilter,
@@ -107,6 +108,28 @@ internal fun LibraryBrowserPane(
                         AlbumListCard(
                             album   = album,
                             onClick = { haptics.confirm(); onOpenAlbum(album.id) },
+                        )
+                    }
+                }
+            }
+            LibraryFilter.SHOWS -> {
+                if (state.followedShows.isEmpty()) {
+                    item(key = "shows_empty") {
+                        CollectionEmptyState(
+                            isLoading = state.isLoadingCollections,
+                            text      = stringResource(R.string.library_no_shows),
+                        )
+                    }
+                } else {
+                    // A show with no id can't be opened or keyed, and `me/shows` is null-tolerant
+                    // by design — drop those rather than crash on a duplicate blank LazyColumn key.
+                    items(
+                        items = state.followedShows.filter { !it.id.isNullOrBlank() },
+                        key   = { "show-${it.id}" },
+                    ) { show ->
+                        ShowListCard(
+                            show    = show,
+                            onClick = { haptics.confirm(); show.id?.let(onOpenShow) },
                         )
                     }
                 }
@@ -493,7 +516,7 @@ internal fun LibraryBrowserPane(
     }
 }
 
-// ── Library filter (Playlists / Albums / Artists) ─────────────────────────────
+// ── Library filter (Playlists / Albums / Artists / Shows) ─────────────────────
 
 /** Connected single-choice picker for the Library content type — see [ConnectedChoiceRow]. */
 @Composable
@@ -507,6 +530,7 @@ private fun LibraryFilterRow(
             LibraryFilter.PLAYLISTS to stringResource(R.string.library_filter_playlists),
             LibraryFilter.ALBUMS    to stringResource(R.string.library_filter_albums),
             LibraryFilter.ARTISTS   to stringResource(R.string.library_filter_artists),
+            LibraryFilter.SHOWS     to stringResource(R.string.library_filter_shows),
         ),
         selected = selected,
         onSelect = onSelect,
@@ -514,7 +538,7 @@ private fun LibraryFilterRow(
     )
 }
 
-/** Loading / empty placeholder for the Albums and Artists filters. */
+/** Loading / empty placeholder for the Albums, Artists and Shows filters. */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun CollectionEmptyState(isLoading: Boolean, text: String) {
