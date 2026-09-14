@@ -100,6 +100,9 @@ private fun rememberMatchWhenConfig(enabled: Boolean): SharedTransitionScope.Sha
     }
 }
 
+/** Non-snapshot cell for the mini player's last on-screen width fraction — see its use site. */
+private class MiniWidthHolder(var value: Float)
+
 @Composable
 fun PlayerPanelHost(
     playerViewModel         : PlayerViewModel,
@@ -231,8 +234,22 @@ fun PlayerPanelHost(
                 // `screenTransitionSpec()`, never a spring — it runs during a nav content swap
                 // (docs/MOTION.md → THE HARD RULE). `animateFloatAsState` does not animate its
                 // first value, so the bar is born at the right width.
+                //
+                // The target is FROZEN while the bar is hidden. Without that, pushing Search →
+                // Player on a wide screen retargets 1f → 0.58f (the Player route is not
+                // `miniPlayerFullWidth`) at the exact moment the bar starts sliding out, so it
+                // shrinks diagonally on the way off and grows on the way back — the same
+                // retarget-mid-transition bug as the search FAB's bottom padding. Held, the resize
+                // only ever runs between two routes that both show the bar, which is the case it
+                // exists for. Assigned DURING composition and deliberately NOT snapshot-backed: the
+                // scope that writes it also reads `visible`/`miniPlayerFullWidth`, so it can never
+                // be stale, and a `MutableState` write read in the same pass would schedule an
+                // extra recomposition (same reasoning as the Library's `PaneStateHolder`).
+                val widthTarget = if (isWideScreen && !miniPlayerFullWidth) 0.58f else 1f
+                val heldWidth   = remember { MiniWidthHolder(widthTarget) }
+                if (visible) heldWidth.value = widthTarget
                 val miniWidthFraction by animateFloatAsState(
-                    targetValue   = if (isWideScreen && !miniPlayerFullWidth) 0.58f else 1f,
+                    targetValue   = heldWidth.value,
                     animationSpec = screenTransitionSpec(),
                     label         = "miniWidth",
                 )
