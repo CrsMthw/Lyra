@@ -34,6 +34,15 @@ import kotlinx.coroutines.withContext
 private const val TAG = "PlayerVM"
 
 /**
+ * How long to let a freshly App-Remote-started item load before seeking into it. `playerApi.play()`
+ * is fire-and-forget IPC (the SDK's `CallResult` is discarded), so the call returning says only
+ * that Spotify received it; a seek that arrives before the item is loaded is dropped and the item
+ * plays from 0:00. It does not disturb the restore loop's clock: `sdkStartedAt` is captured after
+ * this delay, and an episode's restore call sends no `position_ms` anyway.
+ */
+private const val SDK_SEEK_SETTLE_MS = 1_200L
+
+/**
  * "No active device" — `me/player/play` answers 404 when Spotify is not running anywhere. It is the
  * trigger for the App Remote fallback, NOT a rejection of the request body, so nothing may degrade
  * on it. Matches the long-standing `message.contains("404")` test: `SpotifyRepository.safeCall`
@@ -468,7 +477,23 @@ class PlayerViewModel(
 
     // ── Play track (keeps SDK fallback logic, always user-initiated) ──────────
 
-    fun playTrack(uri: String, contextUri: String? = null, uris: List<String>? = null, index: Int? = null) {
+    /**
+     * @param startPositionMs where the caller knows this item should start — an episode's
+     *   `resume_point` (`ShowDetailScreen`), or null to let the API decide. It is deliberately NOT
+     *   forwarded to `me/player/play`: the server resumes an episode from its own authoritative
+     *   position, which a cached page's resume point can be stale against. It is used ONLY on the
+     *   App Remote fallback, whose `play(uri)` always starts at 0:00 and has no server point to
+     *   consult. **Inert in production today** — `resume_point` needs the
+     *   `user-read-playback-position` scope, which `SpotifyAuthManager.SCOPES` does not request, so
+     *   every caller passes null and the episode relies on the restore loop below instead.
+     */
+    fun playTrack(
+        uri            : String,
+        contextUri     : String?       = null,
+        uris           : List<String>? = null,
+        index          : Int?          = null,
+        startPositionMs: Long?         = null,
+    ) {
         val isEpisode = uri.startsWith("spotify:episode:")
         playerStateManager.setOptimisticallyPlaying()
         playerStateManager.resetProgressForNewTrack()
@@ -548,7 +573,21 @@ class PlayerViewModel(
                                 if (ok) remoteManager.skipToIndex(contextUri, index)
                                 ok
                             }
-                            else -> remoteManager.connectAndPlay(uri)
+                            else -> {
+                                val ok = remoteManager.connectAndPlay(uri)
+                                // The SDK's play() starts an episode at 0:00 — unlike the Web API
+                                // it does not consult the server-side resume point. When the caller
+                                // knows the position, seek to it rather than waiting for the restore
+                                // loop's first attempt. The settle delay is required, not defensive:
+                                // connectAndPlay returns when the IPC call has been DISPATCHED, not
+                                // when playback has started, so a seek in the same breath arrives
+                                // before the item does and is dropped.
+                                if (ok && startPositionMs != null) {
+                                    delay(SDK_SEEK_SETTLE_MS)
+                                    remoteManager.seekTo(startPositionMs)
+                                }
+                                ok
+                            }
                         }
                         // Cancel the 3.5s fallback timer — we own the clear from here.
                         clearWakingUpJob?.cancel()
