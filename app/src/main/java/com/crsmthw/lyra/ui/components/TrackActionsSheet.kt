@@ -51,8 +51,13 @@ import com.crsmthw.lyra.util.toggle
  *
  * [onSelect] is the touch-and-hold front door to multi-select removal. It is offered on the same
  * condition as "Remove from <playlist>" — the row lives in an OWNED playlist — and only the Library
- * supplies it, so the row is absent on every other screen. The sheet dismisses itself first and
+ * supplies it, so the row is absent on every other screen. The sheet animates itself away first and
  * hands the target over, so the caller can enter selection mode with that track pre-checked.
+ *
+ * **Every action that closes the sheet goes through [LocalSheetDismissal]**, whose `then` runs once
+ * the sheet is down: the sheet slides away, *then* the screen navigates / removes / shares. Calling
+ * `controller.dismiss()` from a row instead would null the target in the same frame, dropping the
+ * sheet's window out of composition with no hide animation at all.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -89,19 +94,14 @@ fun TrackActionsHost(
         }
     }
 
-    // Add-to-queue outcome: toast + haptic, then close the sheet (mirrors the add flow above).
+    // Add-to-queue outcome: toast + haptic, then close the sheet (mirrors the add flow above). The
+    // effect that consumes it sits INSIDE the sheet content below, where [LocalSheetDismissal] is
+    // provided, so the close animates instead of the sheet blinking out from under the toast.
     val queueResult = state.queueResult
     val queueResultMsg = when (queueResult) {
         true  -> stringResource(R.string.track_action_queued)
         false -> stringResource(R.string.track_action_queue_failed)
         null  -> null
-    }
-    LaunchedEffect(queueResult) {
-        queueResultMsg?.let {
-            if (queueResult == true) haptics.confirm() else haptics.reject()
-            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
-            controller.dismiss()
-        }
     }
 
     if (state.showPlaylistPicker) {
@@ -115,6 +115,21 @@ fun TrackActionsHost(
     }
 
     CappedModalBottomSheet(onDismissRequest = controller::dismiss) {
+      // Closing the sheet from a row goes through this, never straight to controller.dismiss():
+      // nulling the target would drop the ModalBottomSheet out of composition with no hide
+      // animation, leaving the destination to slide in under a sheet that then pops out of
+      // existence. `then` runs after the sheet is down and BEFORE onDismissRequest — see
+      // [SheetDismissal.dismiss].
+      val dismissal = LocalSheetDismissal.current
+
+      LaunchedEffect(queueResult) {
+          queueResultMsg?.let {
+              if (queueResult == true) haptics.confirm() else haptics.reject()
+              Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+              dismissal.dismiss()
+          }
+      }
+
       BoxWithConstraints {
         Column(
             modifier = Modifier
@@ -151,6 +166,10 @@ fun TrackActionsHost(
         }
         HorizontalDivider(modifier = Modifier.padding(top = 8.dp))
 
+        // Deliberately NOT routed through `dismissal`: this is a sheet swap, not a dismissal. The
+        // picker still needs `state.target`, which onDismissRequest (controller::dismiss) clears,
+        // so the two sheets keep exchanging places in one frame — the incoming picker's own
+        // entrance covers the swap, and the scrim never drops.
         ActionItem(
             icon = Icons.Default.LibraryAdd,
             text = stringResource(R.string.player_add_to_playlist),
@@ -160,7 +179,9 @@ fun TrackActionsHost(
         ActionItem(
             icon    = Icons.AutoMirrored.Filled.QueueMusic,
             text    = stringResource(R.string.track_action_add_to_queue),
-            enabled = !state.isQueueing,
+            // Also inert once the result has landed: the row now stays on screen for the length of
+            // the hide animation, and a second tap there would queue the track twice.
+            enabled = !state.isQueueing && queueResult == null,
             onClick = controller::addToQueue,
         )
 
@@ -176,7 +197,7 @@ fun TrackActionsHost(
             ActionItem(
                 icon    = Icons.Default.Checklist,
                 text    = stringResource(R.string.track_action_select),
-                onClick = { haptics.press(); controller.dismiss(); onSelect(target) },
+                onClick = { haptics.press(); dismissal.dismiss { onSelect(target) } },
             )
         }
 
@@ -184,7 +205,9 @@ fun TrackActionsHost(
             ActionItem(
                 icon = Icons.Default.PlaylistRemove,
                 text = stringResource(R.string.track_action_remove_from_playlist, target.removable.name),
-                onClick = { haptics.confirm(); onRemoveFromPlaylist() },
+                // The screen's remover reads the controller's target synchronously, so it MUST run
+                // before onDismissRequest clears it — that is exactly `then`'s slot.
+                onClick = { haptics.confirm(); dismissal.dismiss { onRemoveFromPlaylist() } },
             )
         }
 
@@ -192,7 +215,9 @@ fun TrackActionsHost(
             ActionItem(
                 icon = Icons.Default.Album,
                 text = stringResource(R.string.track_action_go_to_album),
-                onClick = { controller.dismiss(); onGoToAlbum(albumId) },
+                // Navigate only once the sheet is down, so the detail screen pushes over a clean
+                // playlist instead of loading in behind an open sheet.
+                onClick = { dismissal.dismiss { onGoToAlbum(albumId) } },
             )
         }
 
@@ -200,7 +225,7 @@ fun TrackActionsHost(
             ActionItem(
                 icon = Icons.Default.Person,
                 text = stringResource(R.string.track_action_go_to_artist),
-                onClick = { controller.dismiss(); onGoToArtist(artistId) },
+                onClick = { dismissal.dismiss { onGoToArtist(artistId) } },
             )
         }
 
@@ -211,13 +236,14 @@ fun TrackActionsHost(
                 icon = Icons.Default.Share,
                 text = stringResource(R.string.track_action_share),
                 onClick = {
-                    controller.dismiss()
-                    context.startActivity(Intent.createChooser(
-                        Intent(Intent.ACTION_SEND).apply {
-                            putExtra(Intent.EXTRA_TEXT, url)
-                            type = "text/plain"
-                        }, null,
-                    ))
+                    dismissal.dismiss {
+                        context.startActivity(Intent.createChooser(
+                            Intent(Intent.ACTION_SEND).apply {
+                                putExtra(Intent.EXTRA_TEXT, url)
+                                type = "text/plain"
+                            }, null,
+                        ))
+                    }
                 },
             )
         }
