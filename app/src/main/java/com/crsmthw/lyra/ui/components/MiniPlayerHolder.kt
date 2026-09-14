@@ -4,6 +4,7 @@ import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionDefaults
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Transition
 import androidx.compose.animation.core.tween
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
@@ -19,8 +20,9 @@ import com.crsmthw.lyra.util.loadAlbumArtColors
 fun MiniPlayerHolder(
     playerViewModel            : PlayerViewModel,
     onExpand                   : () -> Unit,
+    /** The bar's presence on screen, owned by [PlayerPanelHost] — see [MiniPlayer]'s param docs. */
+    barTransition              : Transition<Boolean>,
     modifier                   : Modifier = Modifier,
-    visible                    : Boolean = true,
     sharedTransitionScope      : SharedTransitionScope? = null,
     sharedContentConfig        : SharedTransitionScope.SharedContentConfig = SharedTransitionDefaults.SharedContentConfig,
     navSharedTransitionScope   : SharedTransitionScope? = null,
@@ -64,7 +66,7 @@ fun MiniPlayerHolder(
         progress                   = playerState.progress,
         accentColor                = accentColor,
         surfaceAccentColor         = surfaceAccentColor,
-        visible                    = visible,
+        barTransition              = barTransition,
         onPlayPause                = playerViewModel::playPause,
         onSkipNext                 = playerViewModel::skipNext,
         onExpand                   = onExpand,

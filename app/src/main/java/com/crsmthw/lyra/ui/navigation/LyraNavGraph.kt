@@ -293,6 +293,17 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
     // roles the "album-art" morph needs.
     val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route
     val showsPlayerSurface = routeShowsPlayerSurface(currentRoute)
+    // The SAME predicate for the entry a back would land on, so `PlayerPanelHost` can seek the mini
+    // player in with a back GESTURE rather than dropping it in at commit (the committed flip above
+    // is a frame or two too late to track a finger). `previousBackStackEntry` is a plain property,
+    // but it is read here beside `currentBackStackEntryAsState()`, whose change is what makes it
+    // move — and it is stable during a predictive gesture, which only calls `prepareForTransition`
+    // and pops at commit (navigation-compose `NavHostEventHandler`). Null (a back that LEAVES the
+    // app, e.g. from the Library root) falls back to "unchanged", so nothing is ever seeked for a
+    // gesture that isn't an in-app pop.
+    val backEntryRoute = navController.previousBackStackEntry?.destination?.route
+    val showsPlayerSurfaceAfterBack =
+        if (backEntryRoute == null) showsPlayerSurface else routeShowsPlayerSurface(backEntryRoute)
     // Per-route mini-player shape, animated in place by the host instead of swapped by remounting.
     val miniFullWidth = currentRoute == Screen.Search.route || currentRoute == Screen.Stats.route
     val miniAvoidsIme = currentRoute == Screen.Search.route
@@ -311,6 +322,7 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
             onOpenPlayer             = { safePush(Screen.Player.route) },
             onOpenQueue              = { safePush(Screen.Queue.route) },
             visible                  = showsPlayerSurface,
+            visibleAfterBack         = showsPlayerSurfaceAfterBack,
             miniPlayerFullWidth      = miniFullWidth,
             miniPlayerAvoidsIme      = miniAvoidsIme,
             navSharedTransitionScope = this@SharedTransitionLayout,
@@ -588,6 +600,11 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
  * Routes that get the app's floating player surface — the mini player and (on wide non-short
  * screens) the pop-out panel — and, at ≥1200dp, the docked third pane instead. ONE list for both so
  * they cannot drift apart as screens are added.
+ *
+ * Asked TWICE per composition: of the current entry (does the surface show now?) and of the entry
+ * below it (would a back show it?). The second answer is what `PlayerPanelHost` seeks the mini
+ * player against during a predictive-back gesture, so it must stay a pure function of the route —
+ * no reads of anything that only the current destination knows.
  *
  * Excluded: **Player** and **Queue** (they ARE the player), **Settings** and **Auth**. The link
  * **resolver is INCLUDED** deliberately: it is pushed over the Library and pops itself, usually in

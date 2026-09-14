@@ -6,7 +6,10 @@ import androidx.compose.animation.SharedTransitionDefaults
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.SharedTransitionScope.SharedContentState
+import androidx.compose.animation.core.SeekableTransitionState
+import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.rememberTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.background
@@ -23,10 +26,18 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigationevent.NavigationEventTransitionState
+import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
+import com.crsmthw.lyra.util.NavTransitionMillis
 import com.crsmthw.lyra.util.confirm
 import com.crsmthw.lyra.util.screenTransitionSpec
 import androidx.compose.ui.unit.dp
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 
 // THE app's one floating player surface: a mini player bar and (on wide non-short screens) a
 // pop-out player panel, hosted ONCE by `LyraNavGraph` around the whole `NavHost` — not per screen.
@@ -37,12 +48,15 @@ import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 // put while the screens slide underneath it.
 //
 // `visible` is the caller's route gate — true on the browse routes, false on Player/Queue (which
-// ARE the player), Settings and Auth. Because the host outlives every destination, a per-route
-// difference that used to be a constructor argument is now an ANIMATED property: `miniPlayerFullWidth`
-// (Search/Stats: a single full-width list, no right pane for a 58 % bar to line up with) resizes the
-// bar in place with the app's finite `screenTransitionSpec()` instead of taking it off screen and
-// putting a different one back. `miniPlayerAvoidsIme` (Search: the field auto-focuses) lifts it
-// above the software keyboard.
+// ARE the player), Settings and Auth. `visibleAfterBack` is the same predicate applied to the entry
+// BELOW the current one; it is what lets a predictive-back GESTURE seek the bar in with the finger
+// instead of dropping it in at commit — see "The mini player's presence" below.
+//
+// Because the host outlives every destination, a per-route difference that used to be a constructor
+// argument is now an ANIMATED property: `miniPlayerFullWidth` (Search/Stats: a single full-width
+// list, no right pane for a 58 % bar to line up with) resizes the bar in place with the app's finite
+// `screenTransitionSpec()` instead of taking it off screen and putting a different one back.
+// `miniPlayerAvoidsIme` (Search: the field auto-focuses) lifts it above the software keyboard.
 //
 // The `onRequestPlayer` lambda passed to `content` opens the panel on wide screens and calls
 // `onOpenPlayer` on narrow ones, so track-tap handlers don't need to know which mode they're in.
@@ -111,6 +125,12 @@ fun PlayerPanelHost(
     onOpenQueue             : () -> Unit = {},
     /** Does the CURRENT route get the floating player surface? False on Player/Queue/Settings/Auth. */
     visible                 : Boolean = true,
+    /**
+     * The same question asked of the route a BACK would land on (the entry below the current one).
+     * Defaults to [visible] — "a back here changes nothing about the surface" — which is also the
+     * right answer when there is no entry below, i.e. when back leaves the app.
+     */
+    visibleAfterBack        : Boolean = visible,
     miniPlayerFullWidth     : Boolean = false,
     miniPlayerAvoidsIme     : Boolean = false,
     navSharedTransitionScope: SharedTransitionScope? = null,
@@ -156,6 +176,117 @@ fun PlayerPanelHost(
     // mini player's nav-scope gate. Using this Transition avoids the scrim-tween-vs-panel-slide
     // desync that a separate timer would have.
     val panelTransition = updateTransition(panelVisible, label = "panelPresence")
+
+    // ── The mini player's presence, as a SEEKABLE transition ─────────────────────────────────────
+    //
+    // Before the hoist the bar lived INSIDE the Library destination, which `NavHost` composes at the
+    // START of a back gesture and seeks with the finger — so the bar and the mini↔big "album-art"
+    // morph tracked the drag and unwound on an early release. Hosted out here the bar's visibility
+    // became a plain Boolean flipped by `currentBackStackEntryAsState()`, which only moves when the
+    // pop COMMITS: the bar was absent for the whole drag and slid in afterwards, and the art morph
+    // snapped partway instead of following the thumb. This restores the old feel by driving the bar
+    // from a `SeekableTransitionState` the same way `NavHost.kt` drives its own AnimatedContent.
+    //
+    // Track presence is read here (not only in `MiniPlayerHolder`) because it belongs in the ONE
+    // Boolean the transition animates over. SEEDED SYNCHRONOUSLY from the StateFlow's current value
+    // — `collectAsStateWithLifecycle` bakes its initial value into its own `remember`, and a literal
+    // `false` would make the bar animate in from nothing on every Activity recreation.
+    val hasTrack by remember {
+        playerViewModel.uiState.map { it.currentTrack != null }.distinctUntilChanged()
+    }.collectAsStateWithLifecycle(playerViewModel.uiState.value.currentTrack != null)
+
+    // `barWanted` is everything about the bar that does NOT depend on the route, so the same
+    // expression can be evaluated for the current route and for the one a back would land on.
+    // `!showPlayerPanel` is in it because on a wide screen with the pop-out OPEN the panel — not the
+    // bar — is the "album-art" partner `PlayerScreen`'s art pops back into; a bar that seeked in
+    // during the drag would have to slide straight back out at commit as the panel arrived.
+    val barWanted   = hasTrack && !showPlayerPanel
+    val showBar     = barWanted && visible            // == `visible && !panelVisible && hasTrack`
+    val barAfterBack = barWanted && visibleAfterBack  // what a committed back would make it
+
+    // A read-only mirror of the gesture every back handler already sees. Observing this StateFlow
+    // registers NO handler, so it cannot steal the gesture from `NavHost`'s own
+    // (`rememberNavHostEventHandler`) — deliberately NOT `rememberNavigationEventState`, which owns
+    // one and would intercept. Any dispatcher in the hierarchy answers identically:
+    // `NavigationEventDispatcher.transitionState` delegates to `sharedProcessor`, and a child
+    // dispatcher is constructed with `parent?.sharedProcessor` (NavigationEventDispatcher.kt).
+    val idleGesture  = remember { MutableStateFlow<NavigationEventTransitionState>(NavigationEventTransitionState.Idle) }
+    val gestureFlow  = LocalNavigationEventDispatcherOwner.current?.navigationEventDispatcher?.transitionState
+        ?: idleGesture
+    val gestureState by gestureFlow.collectAsStateWithLifecycle()
+
+    // Only a BACK gesture is followed. `TRANSITIONING_FORWARD` is somebody else's motion, and the
+    // third value (`TRANSITIONING_UNKNOWN`, internal to the library) cannot arrive from Android's
+    // own input — `NavigationEventInput.dispatchOnBackStarted/Progressed` always pass
+    // `TRANSITIONING_BACK` — so an unknown direction is treated as "no seek" and simply falls back
+    // to the committed behaviour, which is what this code did before.
+    val inProgress   = gestureState as? NavigationEventTransitionState.InProgress
+    val backProgress = inProgress
+        ?.takeIf { it.direction == NavigationEventTransitionState.TRANSITIONING_BACK }
+        // `seekTo` has a `requirePrecondition` that THROWS outside 0..1, and BackEvent.progress is
+        // not reliably clamped across OEM builds.
+        ?.latestEvent?.progress?.coerceIn(0f, 1f)
+
+    val barState      = remember { SeekableTransitionState(showBar) }
+    val barTransition = rememberTransition(barState, label = "miniPlayerPresence")
+
+    if (backProgress != null && barAfterBack != showBar) {
+        // The gesture changes whether the surface is shown, so the bar rides it. `NavHost` seeks its
+        // own transition from the same `progress`, so the two stay in step frame for frame — and
+        // because the bar's AnimatedVisibility scope is a child of this transition, so does the
+        // nav-scope "album-art" bounds animation. Written generically: a gesture OUT of a surface
+        // route into one that hides it would seek the bar away just as well (it can't happen today —
+        // PlayerScreen is never below a browse route — but nothing here assumes that).
+        LaunchedEffect(backProgress, barAfterBack) { barState.seekTo(backProgress, barAfterBack) }
+    } else {
+        LaunchedEffect(showBar) {
+            if (barState.currentState != showBar) {
+                // Ordinary change (a push to Player, a button/committed back, Settings↔browse) AND
+                // the commit of a seeked gesture, which is the same thing one frame later: the seek
+                // already set `targetState`, so this finds the target UNCHANGED and resumes from the
+                // gesture's fraction over the REMAINING duration instead of restarting.
+                //
+                // Deliberately NO `animationSpec`. With one, `SeekableTransitionState` runs the
+                // FRACTION through that spec (Transition.kt: `newAnimation.animationSpec = newSpec`)
+                // while every child is still seeked by that fraction through its own curve — the
+                // easing would apply twice and the bar would read visibly slower than the nav slide
+                // beside it. With none, `animationSpecDuration = totalDurationNanos * (1 - fraction)`
+                // and the fraction advances LINEARLY, so the children play at their natural rate.
+                // The finite spec THE HARD RULE (docs/MOTION.md) asks for lives on those children:
+                // MiniPlayer's slide in/out is `screenTransitionSpec()`, so `totalDurationNanos` is
+                // `NavTransitionMillis`. This is exactly what `NavHost.kt` and the Library's
+                // single-pane predictive back do.
+                //
+                // Note this branch, not the dispatcher's `Idle`, is what commits a gesture: the two
+                // arrive through separate flow collections (the pop happens inside
+                // `dispatchOnCompleted` BEFORE it writes `Idle`, but they reach composition
+                // independently), and keying the branch on `showBar` means whichever lands first is
+                // the one that decides. Idle-first costs at most one frame of the unwind below
+                // before the route flip restarts this effect and resumes the entrance.
+                barState.animateTo(showBar)
+            } else if (barState.targetState != showBar) {
+                // Released without committing. The seek has to be wound back by hand, and the
+                // duration is scaled by how far the gesture actually got — `NavHost.kt`'s cancel
+                // formula, mirrored in LibrarySinglePaneLayout — or a cancel at 5 % would take a
+                // full transition to snap back. Floored so a transition that momentarily reports no
+                // duration can't compute `tween(0)` and snap.
+                val totalMillis = (barTransition.totalDurationNanos / 1_000_000)
+                    .coerceAtLeast(NavTransitionMillis.toLong())
+                animate(
+                    initialValue  = barState.fraction,
+                    targetValue   = 0f,
+                    animationSpec = tween((barState.fraction * totalMillis).toInt()),
+                ) { value, _ ->
+                    // seekTo/snapTo suspend, `animate`'s callback does not — hand the work back to
+                    // this effect's own scope, as NavHost does internally.
+                    this@LaunchedEffect.launch {
+                        if (value > 0f)  barState.seekTo(value)
+                        if (value == 0f) barState.snapTo(showBar)
+                    }
+                }
+            }
+        }
+    }
 
     // Dismiss panel when folding — canShowPanel goes false on narrow screens
     LaunchedEffect(canShowPanel) {
@@ -310,22 +441,23 @@ fun PlayerPanelHost(
                 // transitions.
                 val navArtConfig = rememberMatchWhenConfig(LocalPlayerRouteVisible.current)
 
-                // The mini player's own AnimatedVisibility is its shared-element scope in BOTH
-                // layers (MiniPlayer falls back to its inner scope, which is now the only one). That
-                // is what keeps the nav-level mini↔PlayerScreen morph working with the bar living
-                // outside every destination: `visible` flips at the START of a push to Player (the
-                // bar is the EXIT participant and is already composed) and at the START of a
-                // committed pop back off it (the bar is the ENTER participant, composing fresh into
-                // a live transition) — exactly the two roles that work. Matching is per key within
-                // a SharedTransitionScope and independent of each participant's parent transition
-                // (SharedTransitionScope.kt `sharedElementsFor`: `sharedElements.getOrPut(key)`;
-                // the AnimatedVisibilityScope only supplies `parentTransition` to `sharedBoundsImpl`),
-                // so an AnimatedVisibility-scoped bar and an AnimatedContent-scoped PlayerScreen do
-                // match.
+                // The mini player's own AnimatedVisibility — a child of `barTransition` above — is
+                // its shared-element scope in BOTH layers (MiniPlayer falls back to its inner scope,
+                // which is now the only one). That is what keeps the nav-level mini↔PlayerScreen
+                // morph working with the bar living outside every destination: the bar is the EXIT
+                // participant on a push to Player (already composed when `showBar` flips false) and
+                // the ENTER participant on the way back — composing fresh into a live transition at
+                // the first frame of the back GESTURE, not at commit, which is the whole point of
+                // the seek. Matching is per key within a SharedTransitionScope and independent of
+                // each participant's parent transition (SharedTransitionScope.kt `sharedElementsFor`:
+                // `sharedElements.getOrPut(key)`; the AnimatedVisibilityScope only supplies
+                // `parentTransition` to `sharedBoundsImpl`), so an AnimatedVisibility-scoped bar and
+                // an AnimatedContent-scoped PlayerScreen do match — and because both parents are
+                // being seeked by the same gesture progress, the morph tracks the finger.
                 MiniPlayerHolder(
                     playerViewModel          = playerViewModel,
                     onExpand                 = onRequestPlayer,
-                    visible                  = visible && !panelVisible,
+                    barTransition            = barTransition,
                     modifier                 = Modifier
                         .align(Alignment.BottomEnd)
                         .fillMaxWidth(miniWidthFraction)
