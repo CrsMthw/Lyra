@@ -40,17 +40,26 @@ import com.crsmthw.lyra.util.press
 private val SegmentContentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp)
 
 /**
- * Last-resort shrink for a label that still does not fit after the padding above.
+ * Last-resort shrink for a single-line label in an evenly divided row that still does not fit after
+ * its container's horizontal padding has been trimmed.
+ *
+ * **Shared, deliberately.** Two callers: this file's [ConnectedChoiceRow] segments and
+ * `LibraryBrowserPane`'s `LibraryTabRow` tab labels, which face the same geometry (`paneWidth / 4`
+ * minus padding) for the same reason. One constant so the two cannot drift.
  *
  * `StepBased` treats "fits" as "is **not** ellipsized", so paired with `maxLines = 1` +
  * [TextOverflow.Ellipsis] it picks the largest size at which the whole word renders. Capped at the
- * size the button already uses (`ButtonSmallTokens` label = 14sp) so nothing ever grows, floored at
- * labelSmall so it stays legible; on every pane with room, all segments sit at the cap and look
- * identical. (If M3 ever changes that token the cap simply stops matching — it cannot crash, which
- * a `LocalTextStyle`-derived max could if the ambient size were ever `Unspecified`.) Sizes are in
- * `sp`, so the user's font-scale setting still applies across the whole range.
+ * size both callers' own type already uses — `ButtonSmallTokens` label and `TitleSmall` are both
+ * 14sp — so nothing ever grows; floored at labelSmall so it stays legible. On every pane with room
+ * all items sit at the cap and look identical. (If M3 ever changes either token the cap simply
+ * stops matching — it cannot crash, which a `LocalTextStyle`-derived max could if the ambient size
+ * were ever `Unspecified`.) Sizes are in `sp`, so the user's font-scale setting still applies
+ * across the whole range.
+ *
+ * The known cost, at both call sites: on a genuinely cramped pane the longest label renders a step
+ * or two smaller than its neighbours (see docs/MATERIAL3.md → ButtonGroup).
  */
-private val SegmentLabelAutoSize = TextAutoSize.StepBased(
+internal val CrampedLabelAutoSize = TextAutoSize.StepBased(
     minFontSize = 11.sp,
     maxFontSize = 14.sp,
     stepSize    = 0.5.sp,
@@ -127,7 +136,7 @@ fun <T> ConnectedChoiceRow(
                         ) {
                             Text(
                                 text      = label,
-                                autoSize  = SegmentLabelAutoSize,
+                                autoSize  = CrampedLabelAutoSize,
                                 maxLines  = 1,
                                 overflow  = TextOverflow.Ellipsis,
                                 textAlign = TextAlign.Center,

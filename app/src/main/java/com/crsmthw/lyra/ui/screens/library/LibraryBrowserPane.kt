@@ -21,6 +21,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -29,8 +30,10 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.crsmthw.lyra.R
+import com.crsmthw.lyra.ui.components.CrampedLabelAutoSize
 import com.crsmthw.lyra.ui.components.appBarWindowInsets
 import com.crsmthw.lyra.ui.components.toTrackActionTarget
 import com.crsmthw.lyra.util.ListScrollHaptics
@@ -403,9 +406,10 @@ internal fun LibraryBrowserPane(
         }
 
         // Pinned directly under the bar — it does not scroll away, and unlike the connected
-        // ConnectedChoiceRow it divides the width evenly with ellipsised single-line labels, so a
-        // narrow pane (the ≈340dp unfolded left pane) can't produce "Playl…" + a press-squeeze that
-        // briefly un-truncates it.
+        // ConnectedChoiceRow it divides the width evenly and can't press-squeeze a truncated label
+        // back to full width for a frame. Truncation itself is not something the row form fixes:
+        // it is `paneWidth / 4` minus the label's padding versus the label, so the labels are made
+        // to FIT (halved padding + a shared auto-size recipe) — see `LibraryTabRow`.
         LibraryTabRow(
             selected       = state.libraryFilter,
             onSelect       = { filter ->
@@ -529,20 +533,73 @@ internal fun LibraryBrowserPane(
 // ── Library filter tabs (Playlists / Albums / Artists / Shows) ────────────────
 
 /**
- * The content-type filter as full-width M3 primary tabs, pinned under the app bar — the
- * `ConnectedChoiceRow` picker this replaces truncated all four labels on a narrow pane and its
- * press-squeeze briefly un-truncated the pressed one.
+ * Tab height, M3's own `PrimaryNavigationTabTokens.ContainerHeight`. Applied by hand because the
+ * generic [Tab] overload (see [LibraryTabRow]) does not carry it — only the `text =` slot overload's
+ * `TabBaselineLayout` does. On the Tab's `modifier`, never inside the content: the row's height is
+ * `max(tabMeasurable.maxIntrinsicHeight)`.
+ */
+private val LibraryTabHeight = 48.dp
+
+/**
+ * Horizontal padding around a tab label, halved from the 16dp M3 hard-codes.
+ *
+ * `TabBaselineLayout` wraps the `text =` slot in `padding(horizontal = HorizontalTextPadding)` with
+ * `HorizontalTextPadding = 16.dp` (internal, not overridable), i.e. **32dp of a tab is padding**.
+ * Same reasoning as `ConnectedChoiceRow`'s `SegmentContentPadding`: on a narrow pane that is most
+ * of the tab, and because the label is centred the trim is invisible wherever there is room (the
+ * visible gap is `(tabWidth - labelWidth) / 2`, not the padding). Reaching it means building the
+ * tab with the generic `content` overload instead of the `text =` slot.
+ */
+private val LibraryTabLabelPadding = 8.dp
+
+/**
+ * What [LibraryTabLabelPadding] costs the indicator, and what the [LibraryTabRow] indicator adds
+ * back: `2 × (16dp − 8dp)`.
+ *
+ * `TabRowImpl` derives the indicator width as
+ * `min(tabMeasurable.maxIntrinsicWidth, tabWidth) - HorizontalTextPadding * 2` (floored at 24dp) —
+ * it assumes the tab's intrinsic width includes M3's own 32dp of text padding. With 8dp a side the
+ * intrinsic width is 16dp smaller, so the default indicator would come out 16dp narrower than the
+ * label instead of hugging it.
+ */
+private val LibraryTabIndicatorCompensation = 16.dp
+
+/**
+ * The content-type filter as full-width M3 primary tabs, pinned under the app bar.
  *
  * Conventions copied from `SearchScreen`'s `SearchTabRow` (already settled): a **fixed**
  * `PrimaryTabRow` (divides the width evenly, unlike the left-aligned scrollable variant),
- * `maxLines = 1` + ellipsis, `divider = {}`, the default expressive primary indicator, and one
- * `press()` haptic fired from the gesture on a GENUINE change only — re-tapping the active tab is
- * silent, matching the picker.
+ * `maxLines = 1` + ellipsis, `divider = {}`, the expressive primary indicator hugging the label,
+ * and one `press()` haptic fired from the gesture on a GENUINE change only — re-tapping the active
+ * tab is silent, matching the `ConnectedChoiceRow` picker this replaces.
+ *
+ * **What the fixed row actually removed, and what it did not.** The picker's defects were the
+ * press-squeeze (`animateWidth`) briefly un-truncating the pressed label, which reads as a glitch,
+ * and the `softWrap = false` bug that rendered the longest label start-aligned and clipped. Both
+ * are gone by construction here. **Truncation is not**: it is governed by `paneWidth / 4` minus the
+ * label's horizontal padding versus the label, so the labels have to be made to FIT.
+ *
+ * Two things make them fit, mirroring the picker:
+ * - the generic `Tab(selected, onClick, modifier, enabled, selectedContentColor,
+ *   unselectedContentColor, interactionSource) { content }` overload, so the label gets
+ *   [LibraryTabLabelPadding] instead of M3's hard-coded 16dp a side (that overload provides neither
+ *   the tab's height nor its text style, so both are passed by hand — `TitleSmall` is what
+ *   `PrimaryNavigationTabTokens.LabelTextFont` resolves to);
+ * - `CrampedLabelAutoSize`, the SHARED 11–14sp `StepBased` recipe, so a label that still does not
+ *   fit shrinks rather than ellipsises.
+ *
+ * The arithmetic, at the narrowest pane the app supports — a 600dp window's two-pane left pane,
+ * ≈242dp: `tabWidth = 60.5dp`, label room `60.5 - 16 = 44.5dp`. "Playlists" measures ≈53dp at 14sp
+ * and ≈42dp at 11sp, so it fits at ~11.5sp. With M3's 32dp the room was 28.5dp, which "Playlists"
+ * cannot fit at ANY size in the range. On the unfolded Fold's ≈340dp left pane the room is 69dp and
+ * every label sits at the full 14sp. Known cost, as for the ButtonGroup: on a cramped pane
+ * "Playlists" renders a step or two smaller than its three neighbours.
  *
  * `unselectedContentColor` is passed explicitly: `Tab` defaults it to `selectedContentColor`,
  * which `PrimaryTabRow` sets to `primary` for the whole row, so leaving it alone renders all four
  * labels in the accent colour.
  */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun LibraryTabRow(
     selected       : LibraryFilter,
@@ -555,6 +612,38 @@ private fun LibraryTabRow(
         selectedTabIndex = selected.ordinal,
         modifier         = modifier,
         containerColor   = containerColor,
+        // M3's default indicator verbatim (`matchContentSize = true`, `width = Dp.Unspecified` — omit
+        // that and every tab gets `PrimaryIndicator`'s 24dp stub), plus the compensation the halved
+        // label padding needs. See [LibraryTabIndicatorCompensation]: `TabRowImpl` subtracts a
+        // hard-coded 32dp from the tab's intrinsic width, so widening the indicator by the 16dp the
+        // label no longer spends restores exactly today's geometry — the bar is the label's width.
+        //
+        // The widening goes INSIDE `tabIndicatorOffset`, because `TabIndicatorOffsetNode` forces its
+        // child's width by constraint but reports `layout(placeable.width, …)` — the child's actual
+        // width, which this node is free to make larger. Its offset placement is untouched.
+        //
+        // Where the intrinsic width is clipped to `tabWidth` (the cramped pane) this comes out
+        // WIDER than before — `tabWidth - 16` rather than `tabWidth - 32` — which is right: the
+        // label now occupies that room instead of being ellipsized inside 28.5dp.
+        indicator        = {
+            TabRowDefaults.PrimaryIndicator(
+                modifier = Modifier
+                    .tabIndicatorOffset(selected.ordinal, matchContentSize = true)
+                    .layout { measurable, constraints ->
+                        // `tabIndicatorOffset` always hands down a FIXED width, so the bounded case
+                        // is the only real one; the unbounded fall-through measures untouched
+                        // rather than building `Constraints(minWidth = Infinity)`, which throws.
+                        val widened = if (constraints.hasBoundedWidth) {
+                            val target =
+                                constraints.maxWidth + LibraryTabIndicatorCompensation.roundToPx()
+                            constraints.copy(minWidth = target, maxWidth = target)
+                        } else constraints
+                        val placeable = measurable.measure(widened)
+                        layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+                    },
+                width    = Dp.Unspecified,
+            )
+        },
         divider          = {},
     ) {
         LibraryFilter.entries.forEach { filter ->
@@ -566,16 +655,20 @@ private fun LibraryTabRow(
                         onSelect(filter)
                     }
                 },
-                text     = {
-                    Text(
-                        stringResource(filter.labelRes),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                },
+                modifier               = Modifier.height(LibraryTabHeight),
                 selectedContentColor   = MaterialTheme.colorScheme.primary,
                 unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            ) {
+                Text(
+                    stringResource(filter.labelRes),
+                    style     = MaterialTheme.typography.titleSmall,
+                    autoSize  = CrampedLabelAutoSize,
+                    maxLines  = 1,
+                    overflow  = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                    modifier  = Modifier.padding(horizontal = LibraryTabLabelPadding),
+                )
+            }
         }
     }
 }
