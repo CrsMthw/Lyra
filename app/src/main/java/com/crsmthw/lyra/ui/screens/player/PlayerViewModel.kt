@@ -42,15 +42,33 @@ private const val TAG = "PlayerVM"
 private fun Throwable.isNoActiveDevice(): Boolean = message?.contains("404") == true
 
 /**
- * True when the API REFUSED this request — a 4xx other than 404, read off the `"HTTP <code>: …"`
- * text `safeCall` produces. A failure with no status (no connectivity, a parse error) is not a
- * verdict on the request body and must never cost the user their queue, so it returns false.
+ * True when the API REFUSED THIS REQUEST BODY — read off the `"HTTP <code>: …"` text `safeCall`
+ * produces. The degrade it gates (drop a multi-uri `uris` body down to the single uri, losing the
+ * queue) is only ever the right answer when the body itself is what the API objected to: a 413 /
+ * 414 / 422 from a 750-uri list genuinely is that, and must still degrade.
+ *
+ * Four things are explicitly NOT a verdict on the body, and none of them may cost the user the
+ * queue:
+ *  - **no status at all** (no connectivity, a parse error) — nothing was refused;
+ *  - **404** — "no active device"; the App Remote fallback is what fixes it (see [isNoActiveDevice]);
+ *  - **429** — rate limited; the same body a moment later is fine. Back off instead
+ *    ([isRateLimited] → `PlayerStateManager.noteRateLimited()`), never degrade;
+ *  - **401** — the token was refused, not the body. `TokenManager` has already refreshed and
+ *    retried by the time this is seen.
  */
 private fun Throwable.isRequestRefused(): Boolean {
     val status = message?.takeIf { it.startsWith("HTTP ") }
         ?.drop("HTTP ".length)?.takeWhile(Char::isDigit)?.toIntOrNull() ?: return false
-    return status in 400..499 && status != 404
+    return status in 400..499 && status !in setOf(401, 404, 429)
 }
+
+/**
+ * Spotify's rate limit (429). Same `"HTTP <code>: …"` shape, same `message.contains` test the
+ * device/volume paths use (docs/SPOTIFY.md → Rate Limiting): every caller that sees one must call
+ * `PlayerStateManager.noteRateLimited()` so the whole app shares the one 60-second penalty window
+ * instead of hammering independently.
+ */
+private fun Throwable.isRateLimited(): Boolean = message?.contains("429") == true
 
 enum class RepeatMode { OFF, CONTEXT, TRACK }
 
@@ -491,6 +509,10 @@ class PlayerViewModel(
                 val retryError = result.exceptionOrNull()
                 if (retryError != null) {
                     Log.w(TAG, "single-uri retry also failed", retryError)
+                    // Noted HERE as well as in onFailure below: when the retry is rate limited the
+                    // original rejection is what gets surfaced (next line), so the 429 would never
+                    // reach the failure branch and the backoff gate would never be armed.
+                    if (retryError.isRateLimited()) playerStateManager.noteRateLimited()
                     // A 404 on the retry means "no active device", which the App Remote fallback
                     // below can still fix — keep it so that path runs. Anything else: surface the
                     // ORIGINAL rejection, which names the real cause rather than its second symptom.
@@ -527,26 +549,47 @@ class PlayerViewModel(
                                     delay(1_500L)
                                     val elapsedMs = System.currentTimeMillis() - sdkStartedAt
                                     val pending   = playUris
+                                    var rateLimited = false
                                     val ok = when {
                                         pending != null -> {
                                             val restore = repository.play(uris = pending, positionMs = elapsedMs)
                                             val err     = restore.exceptionOrNull()
-                                            // The same degrade as the direct call, applied inside the
-                                            // loop: a multi-uri body the API REFUSES must not be
-                                            // re-sent for the full 10-second window. A 404 here is
-                                            // just "the device isn't awake yet" — that is exactly
-                                            // what this loop retries for, so it never degrades.
-                                            if (err != null && pending.size > 1 && err.isRequestRefused()) {
-                                                Log.w(TAG, "SDK restore refused a ${pending.size}-uri " +
-                                                           "body (${err.message}); dropping the queue", err)
-                                                playUris = null
+                                            when {
+                                                // A 429 says nothing about the body — the SAME body
+                                                // is fine once the window passes. Arm the shared
+                                                // backoff gate and ABANDON the loop with `playUris`
+                                                // INTACT: retrying every 1.5s inside a penalty
+                                                // window is exactly the hammering the gate exists
+                                                // to stop. This does NOT recover the queue (the SDK
+                                                // is playing the single item and we stop trying to
+                                                // restore it); what it fixes is the wrong diagnosis
+                                                // — before, a 429 read as "the API refused this
+                                                // body", nulled playUris and dropped the queue
+                                                // permanently on a transient throttle.
+                                                err != null && err.isRateLimited() -> {
+                                                    Log.w(TAG, "SDK restore rate limited; backing off " +
+                                                               "and leaving the queue unrestored", err)
+                                                    playerStateManager.noteRateLimited()
+                                                    rateLimited = true
+                                                }
+                                                // The same degrade as the direct call, applied inside
+                                                // the loop: a multi-uri body the API REFUSES must not
+                                                // be re-sent for the full 10-second window. A 404 here
+                                                // is just "the device isn't awake yet" — that is
+                                                // exactly what this loop retries for, so it never
+                                                // degrades.
+                                                err != null && pending.size > 1 && err.isRequestRefused() -> {
+                                                    Log.w(TAG, "SDK restore refused a ${pending.size}-uri " +
+                                                               "body (${err.message}); dropping the queue", err)
+                                                    playUris = null
+                                                }
                                             }
                                             restore.isSuccess
                                         }
                                         contextUri != null -> repository.play(contextUri = contextUri, offsetUri = uri, positionMs = elapsedMs).isSuccess
                                         else               -> true
                                     }
-                                    if (ok) break
+                                    if (ok || rateLimited) break
                                 }
                             }
                             delay(500L)
@@ -556,6 +599,10 @@ class PlayerViewModel(
                             _uiState.update { it.copy(error = "Couldn't connect to Spotify.", isPlaying = false) }
                         }
                     } else {
+                        // Share the one 60-second penalty window with every other caller rather
+                        // than letting this path fire again into an active limit (docs/SPOTIFY.md →
+                        // Rate Limiting); the device-transfer and volume paths do the same.
+                        if (e.isRateLimited()) playerStateManager.noteRateLimited()
                         playerStateManager.releasePlayingOptimism()
                         _uiState.update { it.copy(error = e.message, isPlaying = false) }
                     }
