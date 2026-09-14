@@ -294,4 +294,7 @@
     <string name="search_type_artist">Artist</string>
     <string name="search_type_album">Album</string>
     <string name="search_type_show">Podcast</string>
+    <!-- Incoming Spotify links -->
+    <string name="deeplink_resolving">Opening link…</string>
+    <string name="deeplink_unsupported">Lyra can\'t open that Spotify link</string>
 </resources>
