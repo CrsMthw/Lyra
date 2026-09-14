@@ -239,8 +239,9 @@ fun SearchScreen(
         playerViewModel          = playerViewModel,
         onOpenPlayer             = onOpenPlayer,
         onOpenQueue              = onOpenQueue,
-        // A single full-width results list at every width, and the field auto-focuses — so the bar
-        // stays full-width and rides above the keyboard instead of hiding behind it.
+        // A single full-width results list at every width, and the field auto-focuses whenever
+        // there is nothing to read behind the keyboard — so the bar stays full-width and rides
+        // above the keyboard instead of hiding behind it.
         miniPlayerFullWidth      = true,
         miniPlayerAvoidsIme      = true,
         navSharedTransitionScope = sharedTransitionScope,
@@ -369,7 +370,14 @@ fun SearchScreen(
                                     items(albums, key = { "album_${it.id}" }) { album ->
                                         AlbumRow(
                                             album   = album,
+                                            // Drop the keyboard from the gesture, as the back arrow
+                                            // does. Nothing dismissed the IME on the way OUT to a
+                                            // detail screen, so it was still animating down (or
+                                            // still up) behind the pushed screen, and the state on
+                                            // return depended on that race. Same on the artist and
+                                            // show rows and on the Recent list below.
                                             onClick = {
+                                                keyboard?.hide()
                                                 viewModel.addRecentSearch(album.toRecentSearch())
                                                 onAlbumClick(album.id)
                                             },
@@ -396,6 +404,7 @@ fun SearchScreen(
                                         ArtistRow(
                                             artist  = artist,
                                             onClick = {
+                                                keyboard?.hide()
                                                 viewModel.addRecentSearch(artist.toRecentSearch())
                                                 onArtistClick(artist.id)
                                             },
@@ -429,6 +438,7 @@ fun SearchScreen(
                                         ShowRow(
                                             show    = show,
                                             onClick = {
+                                                keyboard?.hide()
                                                 viewModel.addRecentSearch(show.toRecentSearch())
                                                 show.id?.let(onShowClick)
                                             },
@@ -488,6 +498,9 @@ fun SearchScreen(
                         recent   = recent,
                         onClick  = {
                             haptics.confirm()
+                            // The keyboard is up by default over this list (blank field ⇒
+                            // auto-focus), so hiding it from the gesture matters most here.
+                            keyboard?.hide()
                             viewModel.addRecentSearch(recent)   // re-tapping moves it to the front
                             when (recent.type) {
                                 "track"    -> onTrackClick(recent.uri, listOf(recent.uri))
@@ -554,7 +567,15 @@ fun SearchScreen(
         SearchInputBar(
             queryState     = queryState,
             onBack         = { keyboard?.hide(); haptics.confirm(); onBack() },
-            onClear        = { queryState.clearText(); viewModel.clearQuery() },
+            // Focus explicitly: clearing is the start of typing the next query, and since the
+            // auto-focus effect above no longer fires on a re-entry over results, the field may
+            // well not be focused when the ✕ is tapped. Already-focused (the ordinary case, mid
+            // typing) makes the request a no-op.
+            onClear        = {
+                queryState.clearText()
+                viewModel.clearQuery()
+                focusRequester.requestFocus()
+            },
             onSearch       = { keyboard?.hide() },
             focusRequester = focusRequester,
             modifier       = Modifier
@@ -588,9 +609,27 @@ fun SearchScreen(
         onGoToArtist = onArtistClick,
     )
 
-    // Auto-focus the field. If we arrived via the FAB→bar shared-element morph, wait for it to
-    // settle before popping the keyboard so the layout shift doesn't stutter the transition.
+    // Auto-focus the field — on the FIRST entry of this screen instance (the arrival from the
+    // Library FAB, where the whole point is to start typing), or on any entry where the field is
+    // blank and there is nothing to look at behind the keyboard.
+    //
+    // Not on a re-entry over results: `LaunchedEffect(Unit)` runs again every time the screen is
+    // composed, and popping back from Album/Artist/Show detail composes Search afresh, so the
+    // unguarded version threw the keyboard back up over the restored results the user had just
+    // returned to (device pass 2026-09-13 — and it is the state the podcast crash was hit from).
+    // The flag is `rememberSaveable` for the same reason the scroll-reset guard above is: it has to
+    // survive the save/restore a pop performs, or every re-entry would read it fresh and focus.
+    //
+    // If we arrived via the FAB→bar shared-element morph, wait for it to settle before popping the
+    // keyboard so the layout shift doesn't stutter the transition. The wait is unconditional:
+    // `first { it }` returns on the spot when the transition has already settled, and on a blank
+    // re-entry it also keeps the focus request out of the pop slide.
+    var autoFocused by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(Unit) {
+        // The field's own text, not `state.query`: the field is the thing being focused, and this
+        // reads it once from a coroutine, so the screen scope gains no subscription to it.
+        if (autoFocused && queryState.text.isNotBlank()) return@LaunchedEffect
+        autoFocused = true
         animatedContentScope?.transition?.let { t ->
             snapshotFlow { t.currentState == t.targetState }.first { it }
         }
