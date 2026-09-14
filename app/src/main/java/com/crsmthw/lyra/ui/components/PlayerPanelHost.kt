@@ -63,8 +63,14 @@ import kotlinx.coroutines.launch
 // `LyraNavGraph` threads it into each browse screen's own `onOpenPlayer`/`onNavigateToPlayer`.
 //
 // On EXTRA-WIDE screens (≥1200dp, e.g. a tablet in landscape) the player lives in a permanent
-// docked third pane hosted by `LyraNavGraph`, beside this host. Here we just render the content and
-// suppress the mini player + pop-out so nothing competes with that pane for `"album-art"`.
+// docked third pane hosted by `LyraNavGraph`, beside this host. The mini player and the pop-out are
+// then suppressed so nothing competes with that pane for `"album-art"` — but the host still runs in
+// full and still emits `content(...)` from the SAME call site it does at every other width. It must:
+// an early return put the content in a different composition group, so a window CROSSING the gate
+// (a tablet rotating — `android:configChanges` keeps the Activity alive) re-parented the whole
+// NavHost and wiped every destination's `rememberSaveable` state (browser scroll, the Search field
+// / tabs / guards, the panel flag). Only the two siblings AFTER the content — the scrim and the
+// mini/pop-out `SharedTransitionLayout` — are conditional.
 @OptIn(ExperimentalSharedTransitionApi::class)
 /**
  * True while this host's pop-out player panel is showing. A screen inside the host that registers
@@ -142,16 +148,19 @@ fun PlayerPanelHost(
     val screenHeightDp = with(density) { containerSize.height.toDp() }
     val isWideScreen   = currentWindowAdaptiveInfoV2().windowSizeClass.isWidthAtLeastBreakpoint(600)
     val isShortScreen  = screenHeightDp < 500.dp
-    val canShowPanel   = isWideScreen && !isShortScreen
     // Mirror of LyraNavGraph's docked-pane gate: when the docked third pane is up, drop the mini
     // player + pop-out entirely. Measured width (not isWidthAtLeastBreakpoint(1200), whose default
     // V1 width buckets cap at 840dp).
     val isExtraWide    = screenWidthDp >= 1200.dp && screenHeightDp >= 600.dp
+    // `!isExtraWide` is part of this rather than an early return, so that the panel is structurally
+    // impossible at that width while `content(...)` keeps ONE call site (see the header comment).
+    val canShowPanel   = isWideScreen && !isShortScreen && !isExtraWide
 
-    if (isExtraWide) {
-        Box(modifier = modifier.fillMaxSize()) { content {} }   // player is the docked pane
-        return
-    }
+    // The docked pane IS the player at this width, so a track tap must do nothing extra. A plain
+    // `onRequestPlayer` would fall through to `onOpenPlayer()` and push PlayerScreen BESIDE the
+    // docked pane — a behaviour change the old early return (which passed `{}`) did not have.
+    // Remembered so the lambda identity is stable and taps don't recompose every hosted screen.
+    val noPlayerRequest: () -> Unit = remember { {} }
 
     val maxPanelHeight = screenHeightDp * 0.8f
     val focusManager   = LocalFocusManager.current
@@ -167,8 +176,10 @@ fun PlayerPanelHost(
     // player must not leave the panel floating over them. It is HIDDEN, not closed — `showPlayerPanel`
     // is untouched, so coming back restores it, and on the push to PlayerScreen the exiting panel is
     // the "album-art" EXIT participant the big art morphs out of (and the ENTER participant on the
-    // way back).
-    val panelVisible = showPlayerPanel && visible
+    // way back). `canShowPanel` is in it so the panel — and with it `LocalPopOutPanelOpen`, the
+    // scrim and this host's BackHandler — is structurally false wherever the panel is not composed
+    // at all, which now includes the extra-wide docked-pane width.
+    val panelVisible = showPlayerPanel && visible && canShowPanel
 
     // Single source of truth for the pop-out panel's presence on screen. Drives both the panel's
     // own AnimatedVisibility (so the gate below reads the SAME animation that's rendering) and the
@@ -200,8 +211,14 @@ fun PlayerPanelHost(
     // bar — is the "album-art" partner `PlayerScreen`'s art pops back into; a bar that seeked in
     // during the drag would have to slide straight back out at commit as the panel arrived.
     val barWanted   = hasTrack && !showPlayerPanel
-    val showBar     = barWanted && visible            // == `visible && !panelVisible && hasTrack`
+    val showBar     = barWanted && visible
     val barAfterBack = barWanted && visibleAfterBack  // what a committed back would make it
+    // On extra-wide the bar is simply not composed (the whole `SharedTransitionLayout` below is
+    // skipped), so this transition runs with no children: `totalDurationNanos` is 0, which the
+    // cancel branch below already floors at `NavTransitionMillis`. Gating `showBar` on
+    // `!isExtraWide` as well would work too, and would cost an extra state change on a rotation
+    // that crosses the gate; leaving it alone keeps the Boolean route-derived and nothing renders
+    // either way.
 
     // A read-only mirror of the gesture every back handler already sees. Observing this StateFlow
     // registers NO handler, so it cannot steal the gesture from `NavHost`'s own
@@ -287,7 +304,10 @@ fun PlayerPanelHost(
         }
     }
 
-    // Dismiss panel when folding — canShowPanel goes false on narrow screens
+    // Dismiss panel when folding — canShowPanel goes false on narrow screens, and (since the
+    // extra-wide early return was removed) also when a window grows PAST 1200dp into the docked
+    // pane's territory. Both are the same statement: the pop-out cannot be composed here, so the
+    // user's intent to have it open is spent. The docked pane is the player at that width.
     LaunchedEffect(canShowPanel) {
         if (!canShowPanel) showPlayerPanel = false
     }
@@ -316,189 +336,200 @@ fun PlayerPanelHost(
     }
 
     Box(modifier = modifier.fillMaxSize()) {
+        // ONE content call site at every width — see the header comment on why an early return for
+        // the extra-wide case was a state-wiping trap.
         CompositionLocalProvider(LocalPopOutPanelOpen provides panelVisible) {
-            content(onRequestPlayer)
+            content(if (isExtraWide) noPlayerRequest else onRequestPlayer)
         }
 
-        // Scrim behind the panel.
-        //
-        // The tap-to-dismiss modifier is only installed while the panel is actually OPEN, and is
-        // dropped entirely while the scrim fades out. `clickable(enabled = false)` is NOT enough:
-        // it still installs a PointerInputModifierNode (Clickable.kt gates only the gesture
-        // recognition on `enabled`), Compose stops hit testing at the topmost hit sibling, and an
-        // unconsumed event does not fall through to siblings beneath it. So a disabled scrim still
-        // swallowed every tap aimed at the library underneath for the whole 300ms fade — long after
-        // it was visually gone (~4% opacity by 250ms). With no pointer input at all, the fading
-        // Box is just a draw modifier and taps reach the content behind it immediately.
-        if (scrimAlpha > 0f) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = scrimAlpha))
-                    .then(
-                        if (panelVisible)
-                            Modifier.clickable { haptics.confirm(); showPlayerPanel = false }
-                        else Modifier
+        // Everything from here to the matching brace is the floating player surface itself, and it
+        // is the ONLY thing the docked-pane width drops. These are SIBLINGS of `content` inside this
+        // Box, so making them conditional cannot touch the content's composition group identity —
+        // which is exactly what the old `if (isExtraWide) { … ; return }` did: it re-parented the
+        // whole NavHost and wiped every destination's rememberSaveable state on a tablet rotation
+        // across 1200dp.
+        if (!isExtraWide) {
+
+            // Scrim behind the panel.
+            //
+            // The tap-to-dismiss modifier is only installed while the panel is actually OPEN, and is
+            // dropped entirely while the scrim fades out. `clickable(enabled = false)` is NOT enough:
+            // it still installs a PointerInputModifierNode (Clickable.kt gates only the gesture
+            // recognition on `enabled`), Compose stops hit testing at the topmost hit sibling, and an
+            // unconsumed event does not fall through to siblings beneath it. So a disabled scrim still
+            // swallowed every tap aimed at the library underneath for the whole 300ms fade — long after
+            // it was visually gone (~4% opacity by 250ms). With no pointer input at all, the fading
+            // Box is just a draw modifier and taps reach the content behind it immediately.
+            if (scrimAlpha > 0f) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = scrimAlpha))
+                        .then(
+                            if (panelVisible)
+                                Modifier.clickable { haptics.confirm(); showPlayerPanel = false }
+                            else Modifier
+                        )
+                )
+            }
+
+            // The LOCAL shared-transition scope for the mini↔pop-out morph. It wraps ONLY those two —
+            // deliberately not the content — so the NavHost is not dragged into an extra lookahead pass
+            // it never needed (before the hoist this STL lived inside each hosted screen, so only
+            // Player/Queue/Settings/Auth were outside one; keeping the content out preserves that for
+            // every screen). Laying it full-screen over the content costs nothing: a Box with no
+            // pointer-input modifier is not hit-tested, so taps outside the bar/panel fall straight
+            // through, exactly as they do through the fading scrim above.
+            SharedTransitionLayout(modifier = Modifier.fillMaxSize()) {
+                Box(modifier = Modifier.fillMaxSize()) {
+                    // Mini player placement. The bar is pinned to the BottomEnd and its WIDTH is the
+                    // per-route knob: 58 % on a wide screen (matching the two-pane right pane it sits
+                    // under) and full width on narrow, or on the screens that are a single full-width
+                    // list at every width (Stats, Search — no right pane for a 58 % bar to line up
+                    // with, so pinned-right reads as a bug on the unfolded screen). At fraction 1f
+                    // BottomEnd is identical to the BottomCenter the narrow case used before the hoist,
+                    // so this is one placement instead of two.
+                    // It ANIMATES because the host now outlives the route change: Library→Search used
+                    // to take the 58 % bar off screen and slide a full-width one back in. A finite
+                    // `screenTransitionSpec()`, never a spring — it runs during a nav content swap
+                    // (docs/MOTION.md → THE HARD RULE). `animateFloatAsState` does not animate its
+                    // first value, so the bar is born at the right width.
+                    //
+                    // The target is FROZEN while the bar is hidden. Without that, pushing Search →
+                    // Player on a wide screen retargets 1f → 0.58f (the Player route is not
+                    // `miniPlayerFullWidth`) at the exact moment the bar starts sliding out, so it
+                    // shrinks diagonally on the way off and grows on the way back — the same
+                    // retarget-mid-transition bug as the search FAB's bottom padding. Held, the resize
+                    // only ever runs between two routes that both show the bar, which is the case it
+                    // exists for. Assigned DURING composition and deliberately NOT snapshot-backed: the
+                    // scope that writes it also reads `visible`/`miniPlayerFullWidth`, so it can never
+                    // be stale, and a `MutableState` write read in the same pass would schedule an
+                    // extra recomposition (same reasoning as the Library's `PaneStateHolder`).
+                    val widthTarget = if (isWideScreen && !miniPlayerFullWidth) 0.58f else 1f
+                    val heldWidth   = remember { MiniWidthHolder(widthTarget) }
+                    if (visible) heldWidth.value = widthTarget
+                    val miniWidthFraction by animateFloatAsState(
+                        targetValue   = heldWidth.value,
+                        animationSpec = screenTransitionSpec(),
+                        label         = "miniWidth",
                     )
-            )
-        }
 
-        // The LOCAL shared-transition scope for the mini↔pop-out morph. It wraps ONLY those two —
-        // deliberately not the content — so the NavHost is not dragged into an extra lookahead pass
-        // it never needed (before the hoist this STL lived inside each hosted screen, so only
-        // Player/Queue/Settings/Auth were outside one; keeping the content out preserves that for
-        // every screen). Laying it full-screen over the content costs nothing: a Box with no
-        // pointer-input modifier is not hit-tested, so taps outside the bar/panel fall straight
-        // through, exactly as they do through the fading scrim above.
-        SharedTransitionLayout(modifier = Modifier.fillMaxSize()) {
-            Box(modifier = Modifier.fillMaxSize()) {
-                // Mini player placement. The bar is pinned to the BottomEnd and its WIDTH is the
-                // per-route knob: 58 % on a wide screen (matching the two-pane right pane it sits
-                // under) and full width on narrow, or on the screens that are a single full-width
-                // list at every width (Stats, Search — no right pane for a 58 % bar to line up
-                // with, so pinned-right reads as a bug on the unfolded screen). At fraction 1f
-                // BottomEnd is identical to the BottomCenter the narrow case used before the hoist,
-                // so this is one placement instead of two.
-                // It ANIMATES because the host now outlives the route change: Library→Search used
-                // to take the 58 % bar off screen and slide a full-width one back in. A finite
-                // `screenTransitionSpec()`, never a spring — it runs during a nav content swap
-                // (docs/MOTION.md → THE HARD RULE). `animateFloatAsState` does not animate its
-                // first value, so the bar is born at the right width.
-                //
-                // The target is FROZEN while the bar is hidden. Without that, pushing Search →
-                // Player on a wide screen retargets 1f → 0.58f (the Player route is not
-                // `miniPlayerFullWidth`) at the exact moment the bar starts sliding out, so it
-                // shrinks diagonally on the way off and grows on the way back — the same
-                // retarget-mid-transition bug as the search FAB's bottom padding. Held, the resize
-                // only ever runs between two routes that both show the bar, which is the case it
-                // exists for. Assigned DURING composition and deliberately NOT snapshot-backed: the
-                // scope that writes it also reads `visible`/`miniPlayerFullWidth`, so it can never
-                // be stale, and a `MutableState` write read in the same pass would schedule an
-                // extra recomposition (same reasoning as the Library's `PaneStateHolder`).
-                val widthTarget = if (isWideScreen && !miniPlayerFullWidth) 0.58f else 1f
-                val heldWidth   = remember { MiniWidthHolder(widthTarget) }
-                if (visible) heldWidth.value = widthTarget
-                val miniWidthFraction by animateFloatAsState(
-                    targetValue   = heldWidth.value,
-                    animationSpec = screenTransitionSpec(),
-                    label         = "miniWidth",
-                )
+                    // Bottom inset for the mini player — ONE modifier that unions the IME
+                    // UNCONDITIONALLY, on every route.
+                    //
+                    // It used to be two different modifiers switched by a `miniPlayerAvoidsIme` flag
+                    // that `LyraNavGraph` derived from `currentBackStackEntryAsState()` — which flips
+                    // on the FIRST FRAME of a push. So leaving Search with the keyboard still up (tap
+                    // a result row, or the back arrow) swapped the bar to the no-IME inset immediately:
+                    // it snapped down behind the still-retracting keyboard and popped back up ~250ms
+                    // later when the IME inset finally reached zero. A Boolean that changes a frame
+                    // before the inset it describes cannot be made to agree with it; unioning the IME
+                    // always makes the bar ride the keyboard down instead, with no flag to be out of
+                    // step with. (Search, which auto-focuses its field, is why the lift exists at all.)
+                    //
+                    // `union` takes the LARGER of the two rather than stacking: the IME inset already
+                    // spans the nav bar, so imePadding() + navigationBarsPadding() would leave a
+                    // nav-bar-sized gap above the keyboard. The pop-out panel below deliberately keeps
+                    // plain nav bar + cutout — it is capped at 80 % of the screen height, so lifting it
+                    // above the keyboard would squash it and make it jump on every IME toggle.
+                    // Horizontal stays in the side list: the IME has no horizontal inset, so this keeps
+                    // the side nav-bar clearance navigationBarsPadding() gives in landscape. The
+                    // DISPLAY CUTOUT is in the union because in landscape the hole-punch camera sits on
+                    // a side edge and screen content clears it via horizontalSystemBarsPadding() — the
+                    // mini player must indent the same way or it pokes out past the content on that
+                    // side (device pass 2026-09-12, item 36). Horizontal + Bottom only: the top stays
+                    // with the content above.
+                    //
+                    // Honest note: the activity window still receives IME insets while a DIALOG above
+                    // it shows the keyboard (AddToPlaylistSheet's create-playlist dialog runs in its
+                    // own window), so the bar lifts behind that sheet + its scrim. It is invisible and
+                    // harmless — stated here so nobody re-introduces the conditional to "fix" it.
+                    val miniBottomInset = Modifier.windowInsetsPadding(
+                        WindowInsets.ime.union(WindowInsets.navigationBars).union(WindowInsets.displayCutout)
+                            .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)
+                    )
 
-                // Bottom inset for the mini player — ONE modifier that unions the IME
-                // UNCONDITIONALLY, on every route.
-                //
-                // It used to be two different modifiers switched by a `miniPlayerAvoidsIme` flag
-                // that `LyraNavGraph` derived from `currentBackStackEntryAsState()` — which flips
-                // on the FIRST FRAME of a push. So leaving Search with the keyboard still up (tap
-                // a result row, or the back arrow) swapped the bar to the no-IME inset immediately:
-                // it snapped down behind the still-retracting keyboard and popped back up ~250ms
-                // later when the IME inset finally reached zero. A Boolean that changes a frame
-                // before the inset it describes cannot be made to agree with it; unioning the IME
-                // always makes the bar ride the keyboard down instead, with no flag to be out of
-                // step with. (Search, which auto-focuses its field, is why the lift exists at all.)
-                //
-                // `union` takes the LARGER of the two rather than stacking: the IME inset already
-                // spans the nav bar, so imePadding() + navigationBarsPadding() would leave a
-                // nav-bar-sized gap above the keyboard. The pop-out panel below deliberately keeps
-                // plain nav bar + cutout — it is capped at 80 % of the screen height, so lifting it
-                // above the keyboard would squash it and make it jump on every IME toggle.
-                // Horizontal stays in the side list: the IME has no horizontal inset, so this keeps
-                // the side nav-bar clearance navigationBarsPadding() gives in landscape. The
-                // DISPLAY CUTOUT is in the union because in landscape the hole-punch camera sits on
-                // a side edge and screen content clears it via horizontalSystemBarsPadding() — the
-                // mini player must indent the same way or it pokes out past the content on that
-                // side (device pass 2026-09-12, item 36). Horizontal + Bottom only: the top stays
-                // with the content above.
-                //
-                // Honest note: the activity window still receives IME insets while a DIALOG above
-                // it shows the keyboard (AddToPlaylistSheet's create-playlist dialog runs in its
-                // own window), so the bar lifts behind that sheet + its scrim. It is invisible and
-                // harmless — stated here so nobody re-introduces the conditional to "fix" it.
-                val miniBottomInset = Modifier.windowInsetsPadding(
-                    WindowInsets.ime.union(WindowInsets.navigationBars).union(WindowInsets.displayCutout)
-                        .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)
-                )
+                    // The mini player's SECONDARY nav scope (wide screens only) is held CONTINUOUSLY
+                    // while the pop-out panel is fully closed, and dropped only while it is
+                    // open/animating. Continuous-when-closed is required for the morph to work on POP:
+                    // a shared element added after a pop transition has already begun is too late to be
+                    // captured as the EXIT participant (that is why an isRunning gate morphed on push
+                    // but not back). Dropping it while the panel is present is the actual conflict
+                    // window — it stops the mini and the panel from both claiming "album-art" in the
+                    // nav scope and fighting the local mini↔panel morph.
+                    // On NARROW screens the mini's PRIMARY scope (below) is ALREADY the nav scope, so
+                    // this stays false to avoid a double registration that breaks the morph
+                    // asymmetrically.
+                    val panelPresent = panelTransition.currentState || panelTransition.targetState ||
+                                       panelTransition.isRunning
+                    val miniNeedsNavScope = canShowPanel && !panelPresent
 
-                // The mini player's SECONDARY nav scope (wide screens only) is held CONTINUOUSLY
-                // while the pop-out panel is fully closed, and dropped only while it is
-                // open/animating. Continuous-when-closed is required for the morph to work on POP:
-                // a shared element added after a pop transition has already begun is too late to be
-                // captured as the EXIT participant (that is why an isRunning gate morphed on push
-                // but not back). Dropping it while the panel is present is the actual conflict
-                // window — it stops the mini and the panel from both claiming "album-art" in the
-                // nav scope and fighting the local mini↔panel morph.
-                // On NARROW screens the mini's PRIMARY scope (below) is ALREADY the nav scope, so
-                // this stays false to avoid a double registration that breaks the morph
-                // asymmetrically.
-                val panelPresent = panelTransition.currentState || panelTransition.targetState ||
-                                   panelTransition.isRunning
-                val miniNeedsNavScope = canShowPanel && !panelPresent
+                    // ...and WHICH nav transition it may morph across is a second, independent gate. The
+                    // scope above stays put (see why in [rememberMatchWhenConfig]); this config decides
+                    // whether the entry may MATCH, and only PlayerScreen's big art is a wanted partner.
+                    // With ONE hoisted mini player the browse→browse double match this was introduced
+                    // for (two screens each carrying a bar, both claiming "album-art", the art pinned in
+                    // the transition overlay while the bar slid away — device pass 2026-09-12) can no
+                    // longer happen; the gate is kept because it is free and keeps the key quiet on
+                    // every navigation that has no morph. It must stay a `SharedContentConfig` and never
+                    // become an add/remove of the modifier.
+                    // Deliberately NOT applied to the mini's primary scope on WIDE screens: there the
+                    // primary is the LOCAL mini↔pop-out morph, which has nothing to do with nav
+                    // transitions.
+                    val navArtConfig = rememberMatchWhenConfig(LocalPlayerRouteVisible.current)
 
-                // ...and WHICH nav transition it may morph across is a second, independent gate. The
-                // scope above stays put (see why in [rememberMatchWhenConfig]); this config decides
-                // whether the entry may MATCH, and only PlayerScreen's big art is a wanted partner.
-                // With ONE hoisted mini player the browse→browse double match this was introduced
-                // for (two screens each carrying a bar, both claiming "album-art", the art pinned in
-                // the transition overlay while the bar slid away — device pass 2026-09-12) can no
-                // longer happen; the gate is kept because it is free and keeps the key quiet on
-                // every navigation that has no morph. It must stay a `SharedContentConfig` and never
-                // become an add/remove of the modifier.
-                // Deliberately NOT applied to the mini's primary scope on WIDE screens: there the
-                // primary is the LOCAL mini↔pop-out morph, which has nothing to do with nav
-                // transitions.
-                val navArtConfig = rememberMatchWhenConfig(LocalPlayerRouteVisible.current)
-
-                // The mini player's own AnimatedVisibility — a child of `barTransition` above — is
-                // its shared-element scope in BOTH layers (MiniPlayer falls back to its inner scope,
-                // which is now the only one). That is what keeps the nav-level mini↔PlayerScreen
-                // morph working with the bar living outside every destination: the bar is the EXIT
-                // participant on a push to Player (already composed when `showBar` flips false) and
-                // the ENTER participant on the way back — composing fresh into a live transition at
-                // the first frame of the back GESTURE, not at commit, which is the whole point of
-                // the seek. Matching is per key within a SharedTransitionScope and independent of
-                // each participant's parent transition (SharedTransitionScope.kt `sharedElementsFor`:
-                // `sharedElements.getOrPut(key)`; the AnimatedVisibilityScope only supplies
-                // `parentTransition` to `sharedBoundsImpl`), so an AnimatedVisibility-scoped bar and
-                // an AnimatedContent-scoped PlayerScreen do match — and because both parents are
-                // being seeked by the same gesture progress, the morph tracks the finger.
-                MiniPlayerHolder(
-                    playerViewModel          = playerViewModel,
-                    onExpand                 = onRequestPlayer,
-                    barTransition            = barTransition,
-                    modifier                 = Modifier
-                        .align(Alignment.BottomEnd)
-                        .fillMaxWidth(miniWidthFraction)
-                        .then(miniBottomInset),
-                    sharedTransitionScope    = if (canShowPanel) this@SharedTransitionLayout else navSharedTransitionScope,
-                    sharedContentConfig      = if (canShowPanel) SharedTransitionDefaults.SharedContentConfig else navArtConfig,
-                    navSharedTransitionScope = if (miniNeedsNavScope) navSharedTransitionScope else null,
-                    navSharedContentConfig   = navArtConfig,
-                )
-
-                // Pop-out panel (wide non-short screens only)
-                if (canShowPanel) {
-                    PlayerPopOutPanel(
-                        panelTransition            = panelTransition,
-                        playerViewModel            = playerViewModel,
-                        onClose                    = { showPlayerPanel = false },
-                        onFullScreen               = onOpenPlayer,
-                        onOpenQueue                = onOpenQueue,
-                        localSharedTransitionScope = this@SharedTransitionLayout,
-                        navSharedTransitionScope   = navSharedTransitionScope,
-                        modifier                   = Modifier
+                    // The mini player's own AnimatedVisibility — a child of `barTransition` above — is
+                    // its shared-element scope in BOTH layers (MiniPlayer falls back to its inner scope,
+                    // which is now the only one). That is what keeps the nav-level mini↔PlayerScreen
+                    // morph working with the bar living outside every destination: the bar is the EXIT
+                    // participant on a push to Player (already composed when `showBar` flips false) and
+                    // the ENTER participant on the way back — composing fresh into a live transition at
+                    // the first frame of the back GESTURE, not at commit, which is the whole point of
+                    // the seek. Matching is per key within a SharedTransitionScope and independent of
+                    // each participant's parent transition (SharedTransitionScope.kt `sharedElementsFor`:
+                    // `sharedElements.getOrPut(key)`; the AnimatedVisibilityScope only supplies
+                    // `parentTransition` to `sharedBoundsImpl`), so an AnimatedVisibility-scoped bar and
+                    // an AnimatedContent-scoped PlayerScreen do match — and because both parents are
+                    // being seeked by the same gesture progress, the morph tracks the finger.
+                    MiniPlayerHolder(
+                        playerViewModel          = playerViewModel,
+                        onExpand                 = onRequestPlayer,
+                        barTransition            = barTransition,
+                        modifier                 = Modifier
                             .align(Alignment.BottomEnd)
-                            .padding(start = 8.dp, end = 16.dp, bottom = 16.dp)
-                            .fillMaxWidth(0.54f)
-                            .heightIn(max = maxPanelHeight)
-                            // nav bar + camera cutout on the side/bottom edges — never the IME
-                            .windowInsetsPadding(
-                                WindowInsets.navigationBars.union(WindowInsets.displayCutout)
-                                    .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)
-                            ),
+                            .fillMaxWidth(miniWidthFraction)
+                            .then(miniBottomInset),
+                        sharedTransitionScope    = if (canShowPanel) this@SharedTransitionLayout else navSharedTransitionScope,
+                        sharedContentConfig      = if (canShowPanel) SharedTransitionDefaults.SharedContentConfig else navArtConfig,
+                        navSharedTransitionScope = if (miniNeedsNavScope) navSharedTransitionScope else null,
+                        navSharedContentConfig   = navArtConfig,
                     )
+
+                    // Pop-out panel (wide non-short screens only)
+                    if (canShowPanel) {
+                        PlayerPopOutPanel(
+                            panelTransition            = panelTransition,
+                            playerViewModel            = playerViewModel,
+                            onClose                    = { showPlayerPanel = false },
+                            onFullScreen               = onOpenPlayer,
+                            onOpenQueue                = onOpenQueue,
+                            localSharedTransitionScope = this@SharedTransitionLayout,
+                            navSharedTransitionScope   = navSharedTransitionScope,
+                            modifier                   = Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(start = 8.dp, end = 16.dp, bottom = 16.dp)
+                                .fillMaxWidth(0.54f)
+                                .heightIn(max = maxPanelHeight)
+                                // nav bar + camera cutout on the side/bottom edges — never the IME
+                                .windowInsetsPadding(
+                                    WindowInsets.navigationBars.union(WindowInsets.displayCutout)
+                                        .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)
+                                ),
+                        )
+                    }
                 }
             }
-        }
+        }   // if (!isExtraWide) — scrim + mini/pop-out only
 
         // Back closes the pop-out panel. Composed LAST, AFTER `content` — i.e. after the NavHost and
         // everything inside it — so it is the most recently added enabled handler and wins. Both
@@ -512,7 +543,9 @@ fun PlayerPanelHost(
         // That is what [LocalPopOutPanelOpen] is for. Keep this call unconditional (BackHandler's
         // KDoc warns that conditional calls change composition order); `enabled` alone makes it
         // yield when the panel is absent, so the Library's single-pane PredictiveBackHandler is
-        // untouched.
+        // untouched. That includes the extra-wide width, where this now registers (it did not
+        // before the early return was removed) but `panelVisible` is structurally false, so it
+        // always yields — and `DockedPlayerPane`'s own handler is composed after this host anyway.
         BackHandler(enabled = panelVisible) { showPlayerPanel = false }
     }
 }
