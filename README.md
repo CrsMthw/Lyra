@@ -92,6 +92,15 @@ From the dashboard overview, copy your **Client ID**. Enter it in the app on fir
 
 ---
 
+## Opening Spotify links in Lyra by default
+
+Android hands a web link to the app that has *verified* the domain, and only Spotify can verify `spotify.com` — so Lyra can never take Spotify links automatically. Two switches make it the default:
+
+1. **Turn Spotify's link handling off.** Settings → Apps → Spotify → **Set as default** (called *Open by default* on some phones) → switch **Open supported links** off. Individual links can't be turned off there on One UI, so the whole switch goes off.
+2. **Turn Lyra's on.** Settings → Apps → Lyra → **Set as default** → switch **Open supported links** on, then **Add link** and tick every listed host (`open.spotify.com`, `spotify.link`, `spotify.app.link`, `spotify-alternate.app.link`).
+
+After that, any shared Spotify link — including the short `spotify.link` links the Spotify app's share sheet produces, the `open.spotify.com/intl-xx/…` locale form and `spotify:` URIs — opens in Lyra: tracks and episodes start playing and the player opens, albums, artists and shows open their pages, and one of your own playlists opens in the Library. To go back, reverse the two switches.
+
 ## Building
 
 ### Prerequisites
