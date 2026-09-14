@@ -64,8 +64,9 @@ fun MiniPlayer(
     modifier              : Modifier = Modifier,
     isWakingUp            : Boolean = false,
     /**
-     * The bar's presence on screen, owned by [PlayerPanelHost] as a `SeekableTransitionState` so a
-     * predictive-back GESTURE off `PlayerScreen` can seek it with the finger. `true` means "bar on
+     * The bar's presence on screen, owned by [PlayerPanelHost]: a child of the one seekable
+     * transition that owns BOTH floating surfaces, so a predictive-back GESTURE — off
+     * `PlayerScreen`, or out of the pop-out panel — seeks it with the finger. `true` means "bar on
      * screen"; the host folds the route gate, the pop-out panel and "is there a track at all" into
      * that single Boolean, so this composable no longer decides its own visibility.
      */
@@ -78,11 +79,11 @@ fun MiniPlayer(
     // enter/exit that the nav-level "album-art" morph rides on. Only the SharedTransitionScopes
     // differ, and a key is matched per scope, so registering the same key in two of them from one
     // AnimatedVisibilityScope is fine.
-    // Because that scope's transition is a child of a SEEKABLE one, the bounds animation this art
-    // registers is seeked too: `Modifier.sharedElement` calls `sharedBoundsImpl(parentTransition =
-    // animatedVisibilityScope.transition)`, which does `parentTransition.createChildTransition(key)`
+    // Because that scope's transition is a DESCENDANT of a SEEKABLE one, the bounds animation this
+    // art registers is seeked too: `Modifier.sharedElement` calls `sharedBoundsImpl(parentTransition
+    // = animatedVisibilityScope.transition)`, which does `parentTransition.createChildTransition(key)`
     // (SharedTransitionScope.kt), and `SeekableTransitionState.seekTo` drives every descendant by
-    // fraction (`seekToFraction()` -> `transition.seekAnimations(playTimeNanos)`).
+    // fraction (`seekToFraction()` -> `transition.seekAnimations(playTimeNanos)`, which recurses).
     sharedTransitionScope      : SharedTransitionScope? = null,
     // Each scope gets its own SharedContentConfig, so the caller can leave the modifier in place
     // for the composable's whole life and still say WHICH transitions the "album-art" element may
@@ -119,6 +120,19 @@ fun MiniPlayer(
         exit     = slideOutVertically(miniSlideSpec) { it + navBarPx },
     ) {
         val effectiveScope: AnimatedVisibilityScope = this
+
+        // Compose nothing at all unless the bar is genuinely part of the current or the target
+        // state. `AnimatedVisibility` ALSO composes its content while its transition reports
+        // `hasInitialValueAnimations` — and since the bar and the pop-out panel became two children
+        // of ONE transition (see [PlayerSurface]), an INTERRUPTED change on the other half sets
+        // that flag here too: `SeekableTransitionState.moveAnimationToInitialState()` hands the
+        // interrupted animation to `Transition.setInitialAnimations`, which recurses into every
+        // child transition. The bar would then compose in `PreEnter` and register a second,
+        // non-target `"album-art"` participant in the local scope — the exact ambiguity that broke
+        // the mini → panel morph in the first place. Not dead code: that interruption is device
+        // report 48 (close the panel, then open Settings before it lands).
+        if (!barTransition.currentState && !barTransition.targetState) return@AnimatedVisibility
+
         val shownTrack = track ?: return@AnimatedVisibility
 
         val shape   = RoundedCornerShape(20.dp)
