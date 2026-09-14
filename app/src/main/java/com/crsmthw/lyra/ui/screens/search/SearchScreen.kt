@@ -604,14 +604,25 @@ fun SearchScreen(
         SearchInputBar(
             queryState     = queryState,
             onBack         = { keyboard?.hide(); haptics.confirm(); onBack() },
-            // Focus explicitly: clearing is the start of typing the next query, and since the
-            // auto-focus effect above no longer fires on a re-entry over results, the field may
-            // well not be focused when the ✕ is tapped. Already-focused (the ordinary case, mid
-            // typing) makes the request a no-op.
+            // Focus AND show the keyboard, in that order — clearing is the start of typing the
+            // next query, so the ✕ has to leave the field ready to type in from either state it
+            // can be tapped in:
+            //  - unfocused (a re-entry over restored results, where the auto-focus effect below
+            //    deliberately no longer fires): `requestFocus()` does the work, and the IME comes
+            //    up with the focus gain.
+            //  - focused with the IME hidden — the state a system swipe-down dismissal leaves
+            //    behind: `requestFocus()` is a no-op on an already-focused field, so the ✕ used to
+            //    clear the text and leave the user staring at a cursor with no keyboard (device
+            //    pass 2026-09-14, checklist 6). The focus never went away, so the field's text
+            //    input session is still alive and an explicit `show()` reaches it.
+            // The M3 InputField is on the TextFieldState path and does not intercept either call;
+            // its own clear-focus-on-collapse effect is unarmed, the SearchBarState being pinned
+            // Expanded (see SearchInputBar's KDoc).
             onClear        = {
                 queryState.clearText()
                 viewModel.clearQuery()
                 focusRequester.requestFocus()
+                keyboard?.show()
             },
             onSearch       = { keyboard?.hide() },
             focusRequester = focusRequester,
