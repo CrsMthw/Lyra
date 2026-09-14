@@ -385,10 +385,28 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
                 val pendingPlaylistId by pendingPlaylistFlow.collectAsStateWithLifecycle()
                 LaunchedEffect(pendingPlaylistId) {
                     val id = pendingPlaylistId ?: return@LaunchedEffect
-                    backStackEntry.savedStateHandle[PENDING_PLAYLIST_KEY] = null
                     val playlist = withTimeoutOrNull(PENDING_PLAYLIST_TIMEOUT_MS) {
                         vm.uiState.mapNotNull { s -> s.playlists.firstOrNull { it.id == id } }.first()
                     }
+                    // The key is cleared AFTER the wait, deliberately — do not "tidy" it back to
+                    // the top of the effect.
+                    // (a) `SavedStateHandle.set` writes THROUGH the cached StateFlow this effect is
+                    //     keyed on (`SavedStateHandleImpl`, lifecycle-viewmodel-savedstate 2.11.0),
+                    //     so clearing first re-emits null, changes this effect's OWN key and
+                    //     cancels the running coroutine a frame later. Whenever `first()` actually
+                    //     has to wait — a cold start while loadLibrary is still reading the cache,
+                    //     or a playlist that only arrives with the network refresh — neither
+                    //     `selectPlaylist` nor the toast ever ran.
+                    // (b) Leaving the id set until the wait completes is also what makes the
+                    //     hand-off survive a disposal MID-wait: the Library composable is disposed
+                    //     if the user navigates away, and the id lives in saved state, so the next
+                    //     composition re-runs this effect and re-waits. The residual is accepted —
+                    //     a playlist may open up to 10 s later if the user returns inside the
+                    //     window, or once more after a saved-state restore. Re-running with the
+                    //     now-null key is a no-op.
+                    // Nothing below here suspends, so the self-cancelling emission can never land
+                    // between the clear and the hand-off.
+                    backStackEntry.savedStateHandle[PENDING_PLAYLIST_KEY] = null
                     if (playlist != null) vm.selectPlaylist(playlist)
                     else Toast.makeText(
                         context,
