@@ -63,8 +63,46 @@ import com.crsmthw.lyra.ui.components.LocalPopOutPanelOpen
  * other, so the driving effect needs to know WHY the state looks the way it does — a detail key
  * that is still set means "unwind" after a cancelled gesture but "wait" after a committed one.
  * Three booleans could encode this, but they admit combinations that don't exist.
+ *
+ * **[Committing] and [Finishing] are two halves of ONE commit, and the split is the fix for a
+ * wedge** (2026-09-14): a back commits, the browser pane slides in for ~300 ms with tappable cards,
+ * and a card tapped during that slide sets `detailKey` again. The four cases the pair has to tell
+ * apart — all of which reach the effect as "it re-ran with some `detailKey`":
+ *
+ * 1. **Button back, waiting for the emission** — [Committing] with `detailKey` still the OUTGOING
+ *    key: park. `clearSelection()` fires in the same dispatch as the phase but is read back a frame
+ *    or two later, and animating while the key still points at the detail would reverse the close.
+ * 2. **Gesture commit, waiting for the emission** — identical, and identically parked. When the
+ *    emission lands, the seek has already set `targetState = null`, so `animateTo(null)` finds the
+ *    target unchanged and plays only the remainder from the gesture's `fraction`.
+ * 3. **A redirect to a DIFFERENT pane mid-slide** — the emission has landed, so the phase is
+ *    [Finishing] and any further `detailKey` can only be a new selection: drop to [Idle] and let
+ *    its own branch animate there. The `animateTo(null)` the re-key cancelled had already set
+ *    `targetState = null`, so `targetState != detailKey` holds and the swap runs forward into the
+ *    new pane (with `moveAnimationToInitialState` smoothing the interruption).
+ * 4. **A reselect of the SAME pane mid-slide** — same path: `targetState` is `null`, `detailKey` is
+ *    the old key, so it animates back into that pane instead of freezing half-slid.
+ *
+ * Without [Finishing], cases 3 and 4 re-keyed the effect into the parked [Committing] branch:
+ * nothing ran, the cancelled `animateTo` was never resumed, and the `AnimatedContent` sat frozen
+ * with both panes partially offset (FAB gone, `isShowingDetail` true, only a back gesture out).
+ * Merging the two — a bare `else -> Idle` on [Committing] — is the other broken shape: it fires in
+ * cases 1 and 2 as well, where `detailKey` is the outgoing key and [Idle] would animate straight
+ * back INTO the detail the user just left.
+ *
+ * Why [Idle] tests `targetState` and not `currentState`: a committed gesture never reaches [Idle]
+ * (it goes [Committing] → [Finishing]), and every way a running `animateTo` is cancelled here also
+ * changes `detailKey` or the phase — so there is no reachable state with `targetState == detailKey`,
+ * `currentState != detailKey` and a frozen fraction for `currentState` to have to catch.
+ *
+ * Documented residual: [Committing] parks on `detailKey != null` unconditionally, so a card tap
+ * landing inside the very emission that carries `clearSelection()` (`StateFlow` conflates, so the
+ * effect would only ever see the new key) would still park. Deliberate — the alternative test
+ * `detailKey != transitionState.currentState` ALSO matches a back committed while the pane was
+ * still ENTERING (`currentState` is `null` then, since `seekTo` never assigns it), and would bounce
+ * the detail back in against the user's own back.
  */
-private enum class BackPhase { Idle, Seeking, Committing, Cancelled }
+private enum class BackPhase { Idle, Seeking, Committing, Finishing, Cancelled }
 
 /**
  * Holds the last [LibraryUiState] a given detail pane saw, so an outgoing pane keeps rendering its
@@ -176,12 +214,21 @@ internal fun SinglePaneLayout(
     } else {
         LaunchedEffect(detailKey, backPhase) {
             when (backPhase) {
-                // Waiting for clearSelection's emission. When it lands detailKey becomes null and
-                // this effect re-runs; animateTo(null) then finds the target UNCHANGED (the seek
-                // already set it), so it resumes from the gesture's fraction with only the
-                // remaining duration instead of restarting from 0.
-                BackPhase.Committing -> if (detailKey == null) {
-                    transitionState.animateTo(null)
+                // Waiting for clearSelection's emission — park while the key still points at the
+                // detail (cases 1 and 2 in BackPhase's KDoc). When the emission lands, hand over to
+                // Finishing rather than animating here: that is what tells a LATER detailKey apart
+                // from this one, so a card tapped during the ~300 ms slide is a redirect instead of
+                // a wedge.
+                BackPhase.Committing -> if (detailKey == null) backPhase = BackPhase.Finishing
+                // The emission has landed, so the close can run. animateTo(null) finds the target
+                // UNCHANGED after a gesture (the seek already set it) and resumes from the
+                // gesture's fraction over the remaining duration instead of restarting from 0.
+                // A detailKey HERE is a NEW selection arriving mid-slide (cases 3 and 4), so the
+                // phase just drops and Idle's branch animates to it from wherever this one got to.
+                // The phase is cleared AFTER animateTo, never before — clearing it first re-keys
+                // this effect and cancels the very animation it just started.
+                BackPhase.Finishing -> {
+                    if (detailKey == null) transitionState.animateTo(null)
                     backPhase = BackPhase.Idle
                 }
                 // Released without committing: unwind the seek back to the detail pane. The
@@ -208,8 +255,10 @@ internal fun SinglePaneLayout(
                     backPhase = BackPhase.Idle
                 }
                 // Ordinary pane change (tapping a playlist, tapping a different one, or a
-                // non-gesture back). Same-key emissions fall through to Unit — they carry data,
-                // not a pane change, and must not touch the transition.
+                // non-gesture back) — and the pane tapped during a committed close, handed here by
+                // Finishing. Same-key emissions fall through to Unit — they carry data, not a pane
+                // change, and must not touch the transition. `targetState` is the right side of the
+                // comparison; see BackPhase's KDoc for why `currentState` never needs to be.
                 BackPhase.Idle -> if (transitionState.targetState != detailKey) {
                     transitionState.animateTo(detailKey)
                 }
