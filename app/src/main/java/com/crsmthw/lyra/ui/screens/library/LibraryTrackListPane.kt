@@ -69,12 +69,17 @@ internal fun RightPaneContent(
     sharedScope     : SharedTransitionScope? = null,   // container-transform target (single pane)
     animScope       : AnimatedContentScope? = null,
 ) {
+    // Seeded from the StateFlow's current value rather than a literal, for the same reason as
+    // `hasCurrentTrack` in LibrarySinglePaneLayout: a literal initial value is re-applied every
+    // time this pane re-enters composition, so the now-playing row highlight would drop for one
+    // frame on each pane swap / screen re-entry. Cosmetic here — but the same shape as the bug
+    // that made the search bar→FAB morph stutter, so keep both seeded.
     val currentTrackId by remember {
         playerViewModel.uiState.map { it.currentTrack?.id }.distinctUntilChanged()
-    }.collectAsStateWithLifecycle(null)
+    }.collectAsStateWithLifecycle(playerViewModel.uiState.value.currentTrack?.id)
     val isPlayingState by remember {
         playerViewModel.uiState.map { it.isPlaying }.distinctUntilChanged()
-    }.collectAsStateWithLifecycle(false)
+    }.collectAsStateWithLifecycle(playerViewModel.uiState.value.isPlaying)
     val playlist     = state.currentPlaylist
     val isLikedSongs = playlist == null
     // Owned playlists only (never Liked Songs / followed) get the delete action — and the same

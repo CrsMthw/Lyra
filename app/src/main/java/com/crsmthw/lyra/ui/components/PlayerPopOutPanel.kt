@@ -1,6 +1,5 @@
 package com.crsmthw.lyra.ui.components
 
-import androidx.compose.animation.AnimatedContentScope
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
@@ -35,7 +34,6 @@ fun PlayerPopOutPanel(
     modifier                   : Modifier = Modifier,
     onOpenQueue                : () -> Unit = {},
     navSharedTransitionScope   : SharedTransitionScope? = null,
-    navAnimatedContentScope    : AnimatedContentScope? = null,
 ) {
     val density  = LocalDensity.current
     val navBarPx = WindowInsets.navigationBars.getBottom(density)
@@ -49,6 +47,9 @@ fun PlayerPopOutPanel(
         exit     = slideOutVertically(panelSlideSpec) { it + navBarPx + with(density) { 16.dp.roundToPx() } },
         modifier = modifier,
     ) {
+        // This AnimatedVisibility scope is the panel's enter/exit for BOTH shared-element layers:
+        // the local mini↔panel morph and — now that the host lives outside the NavHost and the
+        // panel is hidden (not closed) on the Player route — the nav-level panel↔PlayerScreen morph.
         val panelScope: AnimatedVisibilityScope = this
         Card(
             shape     = RoundedCornerShape(24.dp),
@@ -62,7 +63,6 @@ fun PlayerPopOutPanel(
                 sharedTransitionScope    = localSharedTransitionScope,
                 animatedVisibilityScope  = panelScope,
                 navSharedTransitionScope = navSharedTransitionScope,
-                navAnimatedContentScope  = navAnimatedContentScope,
             )
         }
     }

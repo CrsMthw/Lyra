@@ -1,6 +1,5 @@
 package com.crsmthw.lyra.ui.components
 
-import androidx.compose.animation.AnimatedContentScope
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
@@ -75,9 +74,10 @@ fun PlayerCardContent(
     // Local scope — mini player ↔ panel expansion
     sharedTransitionScope   : SharedTransitionScope? = null,
     animatedVisibilityScope : AnimatedVisibilityScope? = null,
-    // Nav scope — panel → full PlayerScreen
+    // Nav scope — panel → full PlayerScreen. It rides the SAME [animatedVisibilityScope] as the
+    // local morph: the panel lives outside the NavHost now, so its own show/hide (which the route
+    // gates — see PlayerPanelHost's `panelVisible`) is the enter/exit the nav morph uses.
     navSharedTransitionScope  : SharedTransitionScope? = null,
-    navAnimatedContentScope   : AnimatedContentScope? = null,
 ) {
     val state by playerViewModel.uiState.collectAsStateWithLifecycle()
     val pickerState by playerViewModel.pickerState.collectAsStateWithLifecycle()
@@ -285,11 +285,11 @@ fun PlayerCardContent(
                     )
                 }
             } else Modifier
-            val navArtMod = if (navSharedTransitionScope != null && navAnimatedContentScope != null) {
+            val navArtMod = if (navSharedTransitionScope != null && animatedVisibilityScope != null) {
                 with(navSharedTransitionScope) {
                     Modifier.sharedElement(
                         sharedContentState      = rememberSharedContentState(key = "album-art"),
-                        animatedVisibilityScope = navAnimatedContentScope,
+                        animatedVisibilityScope = animatedVisibilityScope,
                         boundsTransform         = rememberArtBoundsTransform(),
                     )
                 }

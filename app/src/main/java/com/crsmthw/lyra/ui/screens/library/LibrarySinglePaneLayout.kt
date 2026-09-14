@@ -103,9 +103,21 @@ internal fun SinglePaneLayout(
     val mosaicDir = remember { File(context.filesDir, "mosaics") }
 
     // Only track presence of a current track — changes infrequently, not every second.
+    //
+    // SEEDED SYNCHRONOUSLY from the StateFlow's current value; do NOT "simplify" this back to a
+    // literal `false`. `collectAsStateWithLifecycle` uses its initial value in its own `remember`,
+    // so a literal one is re-applied every time this layout re-enters composition — i.e. on every
+    // pop back INTO the Library. The flow then emits `true` a frame later, and `fabBottomPadding`
+    // below SPRINGS the search FAB up 74dp while the Search screen's bar→FAB `sharedBounds` is
+    // already animating toward it: the bounds animation retargets to the moving FAB and the morph
+    // stutters twice on the way (device pass 2026-09-13, checklist 15 — "stops in two positions",
+    // "only when miniplayer is on screen"). `animateDpAsState` does not animate its first value, so
+    // with a correct seed a FAB whose target is 90.dp is BORN at 90.dp and the morph is smooth.
+    // Springing `fabBottomPadding` stays correct (docs/MOTION.md puts it in the "spring it" column)
+    // precisely BECAUSE of this seed.
     val hasCurrentTrack by remember {
         playerViewModel.uiState.map { it.currentTrack != null }.distinctUntilChanged()
-    }.collectAsStateWithLifecycle(false)
+    }.collectAsStateWithLifecycle(playerViewModel.uiState.value.currentTrack != null)
 
     // ── Predictive back: detail → browser ────────────────────────────────────────────────────
     // Backing out of a playlist / Liked Songs is GESTURE-DRIVEN, so the container transform (the

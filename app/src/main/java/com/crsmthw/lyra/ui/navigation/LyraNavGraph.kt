@@ -62,6 +62,7 @@ import androidx.navigation.navArgument
 import com.crsmthw.lyra.R
 import com.crsmthw.lyra.di.AppContainer
 import com.crsmthw.lyra.ui.components.LocalPlayerRouteVisible
+import com.crsmthw.lyra.ui.components.PlayerPanelHost
 import com.crsmthw.lyra.ui.screens.album.AlbumDetailScreen
 import com.crsmthw.lyra.ui.screens.deeplink.LinkResolverScreen
 import com.crsmthw.lyra.ui.screens.deeplink.LinkResolverViewModel
@@ -230,21 +231,18 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
 
     // Is PlayerScreen one of the two ends of the nav transition that is running right now?
     //
-    // Every hosted browse screen (Library / Album / Artist / Stats / Search) carries a mini player
-    // whose album art registers the "album-art" shared element in THIS SharedTransitionLayout, so a
-    // browse→browse navigation puts TWO matched entries on screen at once and the art gets hoisted
-    // into the shared-transition overlay — where it stays pinned in place while the mini-player bar
-    // it belongs to slides away with its screen, then snaps back in at the end. That is the glitch
-    // Cris saw backing out of Search with a track playing (and it was silently there on
-    // Library↔Album/Stats too); with no track playing there is no art to match and it was clean.
-    //
-    // The match is only ever WANTED against PlayerScreen's big art, so gate it on that. `visibleEntries`
-    // is what NavHost itself renders from and, per its KDoc, keeps an entry listed for the whole of its
-    // exit transition — including one already popped off the back stack — so this is true from the first
-    // frame of a push to Player AND for the whole pop back off it. It reaches the mini player as
+    // The app's ONE mini player (hosted below, around the whole NavHost) registers the "album-art"
+    // shared element in THIS SharedTransitionLayout, and the only partner that match is ever wanted
+    // against is PlayerScreen's big art — so gate it on that. `visibleEntries` is what NavHost itself
+    // renders from and, per its KDoc, keeps an entry listed for the whole of its exit transition —
+    // including one already popped off the back stack — so this is true from the first frame of a
+    // push to Player AND for the whole pop back off it. It reaches the mini player as
     // [LocalPlayerRouteVisible]; PlayerPanelHost turns it into a SharedContentConfig rather than
-    // adding/removing the modifier, which would be too late to be captured on a pop (see the Nav Scope
-    // Gate comment there).
+    // adding/removing the modifier, which would be too late to be captured on a pop (see the Nav
+    // Scope Gate comment there). It used to be load-bearing, because every hosted screen carried its
+    // own bar and a browse→browse navigation put TWO matched entries on screen; with a single hoisted
+    // bar that cannot happen any more, and this is now belt-and-braces that keeps the key quiet on
+    // navigations with no morph.
     val navVisibleEntries by navController.visibleEntries.collectAsStateWithLifecycle()
     val playerRouteVisible = navVisibleEntries.any { it.destination.route == Screen.Player.route }
 
@@ -280,28 +278,60 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
     // Gate on the MEASURED window width — NOT isWidthAtLeastBreakpoint(1200), whose default V1
     // width buckets cap at 840dp. The pane is hosted HERE, beside the NavHost and OUTSIDE the
     // per-destination slide/fade, so it stays put while the browse screens animate. It shows on
-    // every screen that gets the floating mini player at narrower widths — the browse routes plus
-    // Stats and Search — and NOT on Player/Queue (which ARE the player) or Auth/Settings. Keeping
-    // Search in the set also keeps the NavHost width constant across the Library FAB→search-bar
-    // container transform, so the "search-bar" morph is measured in one pane geometry, not two.
+    // exactly the routes that get the floating mini player at narrower widths — see
+    // [routeShowsPlayerSurface], the single predicate both read. Keeping Search in that set also
+    // keeps the NavHost width constant across the Library FAB→search-bar container transform, so
+    // the "search-bar" morph is measured in one pane geometry, not two.
     val windowContainer = LocalWindowInfo.current.containerSize
     val isExtraWide = with(LocalDensity.current) {
         windowContainer.width.toDp() >= 1200.dp && windowContainer.height.toDp() >= 600.dp
     }
+    // ONE route predicate for the whole floating/docked player surface, so the two can never drift:
+    // it gates the mini player + pop-out at narrow/wide widths AND the docked third pane at ≥1200dp.
+    // Read from `currentBackStackEntryAsState()`, which flips at the START of a push and of a
+    // committed pop, so the bar exits while PlayerScreen enters and enters while it exits — the two
+    // roles the "album-art" morph needs.
     val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route
-    val isBrowse = currentRoute == Screen.Library.route ||
-                   currentRoute == Screen.AlbumDetail.route ||
-                   currentRoute == Screen.ArtistDetail.route ||
-                   currentRoute == Screen.ShowDetail.route ||
-                   currentRoute == Screen.Stats.route ||
-                   currentRoute == Screen.Search.route
+    val showsPlayerSurface = routeShowsPlayerSurface(currentRoute)
+    // The SAME predicate for the entry a back would land on, so `PlayerPanelHost` can seek the mini
+    // player in with a back GESTURE rather than dropping it in at commit (the committed flip above
+    // is a frame or two too late to track a finger). `previousBackStackEntry` is a plain property,
+    // but it is read here beside `currentBackStackEntryAsState()`, whose change is what makes it
+    // move — and it is stable during a predictive gesture, which only calls `prepareForTransition`
+    // and pops at commit (navigation-compose `NavHostEventHandler`). Null (a back that LEAVES the
+    // app, e.g. from the Library root) falls back to "unchanged", so nothing is ever seeked for a
+    // gesture that isn't an in-app pop.
+    val backEntryRoute = navController.previousBackStackEntry?.destination?.route
+    val showsPlayerSurfaceAfterBack =
+        if (backEntryRoute == null) showsPlayerSurface else routeShowsPlayerSurface(backEntryRoute)
+    // Per-route mini-player shape, animated in place by the host instead of swapped by remounting.
+    val miniFullWidth = currentRoute == Screen.Search.route || currentRoute == Screen.Stats.route
+    val miniAvoidsIme = currentRoute == Screen.Search.route
 
     SharedTransitionLayout {
       Row(modifier = Modifier.fillMaxSize()) {
+        // THE app's single mini player / pop-out panel, wrapped around the whole NavHost so it
+        // survives every browse→browse navigation instead of exiting and re-entering with each
+        // screen. It sits INSIDE this Row (beside the docked third pane) and inside this
+        // SharedTransitionLayout, so the ≥1200dp docked-pane geometry and the nav-scope
+        // "album-art" morph are both unchanged. `onRequestPlayer` is threaded into the browse
+        // screens' own onOpenPlayer/onNavigateToPlayer below: pop-out on a wide screen, a push to
+        // PlayerScreen on a narrow one.
+        PlayerPanelHost(
+            playerViewModel          = playerVm,
+            onOpenPlayer             = { safePush(Screen.Player.route) },
+            onOpenQueue              = { safePush(Screen.Queue.route) },
+            visible                  = showsPlayerSurface,
+            visibleAfterBack         = showsPlayerSurfaceAfterBack,
+            miniPlayerFullWidth      = miniFullWidth,
+            miniPlayerAvoidsIme      = miniAvoidsIme,
+            navSharedTransitionScope = this@SharedTransitionLayout,
+            modifier                 = Modifier.weight(1f).fillMaxHeight(),
+        ) { onRequestPlayer ->
         NavHost(
             navController        = navController,
             startDestination     = startDestination,
-            modifier             = Modifier.weight(1f).fillMaxHeight(),
+            modifier             = Modifier.fillMaxSize(),
             // Every fade is pinned to navFadeSpec so it ends on the same frame as the slide. Leaving
             // these as bare fadeIn()/fadeOut() is what desynced them: their default is a spring.
             enterTransition      = { slideInHorizontally(navSlideSpec)  { it / 4 } + fadeIn(navFadeSpec)  },
@@ -370,10 +400,9 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
                 LibraryScreen(
                     viewModel             = vm,
                     playerViewModel       = playerVm,
-                    onOpenPlayer          = { safePush(Screen.Player.route) },
+                    onOpenPlayer          = onRequestPlayer,
                     onOpenSearch          = { safePush(Screen.Search.route) },
                     onOpenSettings        = { safePush(Screen.Settings.route) },
-                    onOpenQueue           = { safePush(Screen.Queue.route) },
                     onOpenAlbum           = { albumId -> safePush(Screen.AlbumDetail.createRoute(albumId)) },
                     onOpenArtist          = { artistId -> safePush(Screen.ArtistDetail.createRoute(artistId)) },
                     onOpenShow            = { showId -> safePush(Screen.ShowDetail.createRoute(showId)) },
@@ -408,15 +437,11 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
             composable(Screen.Stats.route) {
                 val vm = viewModel<StatsViewModel>(factory = StatsViewModelFactory(container))
                 StatsScreen(
-                    viewModel             = vm,
-                    playerViewModel       = playerVm,
-                    onBack                = ::safeNavigateUp,
-                    onOpenPlayer          = { safePush(Screen.Player.route) },
-                    onOpenQueue           = { safePush(Screen.Queue.route) },
-                    onOpenAlbum           = { albumId -> safePush(Screen.AlbumDetail.createRoute(albumId)) },
-                    onOpenArtist          = { artistId -> safePush(Screen.ArtistDetail.createRoute(artistId)) },
-                    sharedTransitionScope = this@SharedTransitionLayout,
-                    animatedContentScope  = this@composable,
+                    viewModel       = vm,
+                    playerViewModel = playerVm,
+                    onBack          = ::safeNavigateUp,
+                    onOpenAlbum     = { albumId -> safePush(Screen.AlbumDetail.createRoute(albumId)) },
+                    onOpenArtist    = { artistId -> safePush(Screen.ArtistDetail.createRoute(artistId)) },
                 )
             }
 
@@ -434,7 +459,6 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
                         playerVm.playTrack(uri, uris = uris)
                         safePush(Screen.Player.route)
                     },
-                    onOpenQueue           = { safePush(Screen.Queue.route) },
                     sharedTransitionScope = this@SharedTransitionLayout,
                     animatedContentScope  = this@composable,
                 )
@@ -449,14 +473,11 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
                     factory = AlbumDetailViewModelFactory(container, albumId)
                 )
                 AlbumDetailScreen(
-                    viewModel             = vm,
-                    playerViewModel       = playerVm,
-                    onBack                = ::safeNavigateUp,
-                    onNavigateToPlayer    = { safePush(Screen.Player.route) },
-                    onOpenQueue           = { safePush(Screen.Queue.route) },
-                    onOpenArtist          = { artistId -> safePush(Screen.ArtistDetail.createRoute(artistId)) },
-                    sharedTransitionScope = this@SharedTransitionLayout,
-                    animatedContentScope  = this@composable,
+                    viewModel          = vm,
+                    playerViewModel    = playerVm,
+                    onBack             = ::safeNavigateUp,
+                    onNavigateToPlayer = onRequestPlayer,
+                    onOpenArtist       = { artistId -> safePush(Screen.ArtistDetail.createRoute(artistId)) },
                 )
             }
 
@@ -469,14 +490,10 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
                     factory = ArtistDetailViewModelFactory(container, artistId)
                 )
                 ArtistDetailScreen(
-                    viewModel             = vm,
-                    playerViewModel       = playerVm,
-                    onBack                = ::safeNavigateUp,
-                    onOpenAlbum           = { albumId -> safePush(Screen.AlbumDetail.createRoute(albumId)) },
-                    onOpenPlayer          = { safePush(Screen.Player.route) },
-                    onOpenQueue           = { safePush(Screen.Queue.route) },
-                    sharedTransitionScope = this@SharedTransitionLayout,
-                    animatedContentScope  = this@composable,
+                    viewModel       = vm,
+                    playerViewModel = playerVm,
+                    onBack          = ::safeNavigateUp,
+                    onOpenAlbum     = { albumId -> safePush(Screen.AlbumDetail.createRoute(albumId)) },
                 )
             }
 
@@ -489,13 +506,10 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
                     factory = ShowDetailViewModelFactory(container, showId)
                 )
                 ShowDetailScreen(
-                    viewModel             = vm,
-                    playerViewModel       = playerVm,
-                    onBack                = ::safeNavigateUp,
-                    onNavigateToPlayer    = { safePush(Screen.Player.route) },
-                    onOpenQueue           = { safePush(Screen.Queue.route) },
-                    sharedTransitionScope = this@SharedTransitionLayout,
-                    animatedContentScope  = this@composable,
+                    viewModel          = vm,
+                    playerViewModel    = playerVm,
+                    onBack             = ::safeNavigateUp,
+                    onNavigateToPlayer = onRequestPlayer,
                 )
             }
 
@@ -565,8 +579,9 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
                 )
             }
         }
+        } // PlayerPanelHost
 
-        if (isExtraWide && isBrowse) {
+        if (isExtraWide && showsPlayerSurface) {
             DockedPlayerPane(
                 playerViewModel = playerVm,
                 container        = container,
@@ -579,6 +594,32 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
       } // Row
     }
     } // CompositionLocalProvider
+}
+
+/**
+ * Routes that get the app's floating player surface — the mini player and (on wide non-short
+ * screens) the pop-out panel — and, at ≥1200dp, the docked third pane instead. ONE list for both so
+ * they cannot drift apart as screens are added.
+ *
+ * Asked TWICE per composition: of the current entry (does the surface show now?) and of the entry
+ * below it (would a back show it?). The second answer is what `PlayerPanelHost` seeks the mini
+ * player against during a predictive-back gesture, so it must stay a pure function of the route —
+ * no reads of anything that only the current destination knows.
+ *
+ * Excluded: **Player** and **Queue** (they ARE the player), **Settings** and **Auth**. The link
+ * **resolver is INCLUDED** deliberately: it is pushed over the Library and pops itself, usually in
+ * well under a second, so hiding the bar there would slide it out and straight back in for a screen
+ * nobody sees — exactly the churn this hoist exists to remove.
+ */
+private fun routeShowsPlayerSurface(route: String?): Boolean = when (route) {
+    Screen.Library.route,
+    Screen.AlbumDetail.route,
+    Screen.ArtistDetail.route,
+    Screen.ShowDetail.route,
+    Screen.Stats.route,
+    Screen.Search.route,
+    Screen.LinkResolver.route -> true
+    else                      -> false
 }
 
 /**

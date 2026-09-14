@@ -7,6 +7,7 @@ import androidx.compose.animation.SharedTransitionDefaults
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.Transition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
@@ -48,6 +49,9 @@ import coil3.size.Size
 import com.crsmthw.lyra.data.remote.model.SpotifyTrack
 import com.crsmthw.lyra.util.rememberArtBoundsTransform
 
+/** Non-snapshot cell for the last non-null track the bar showed — see its use site. */
+private class LastTrackHolder(var value: SpotifyTrack?)
+
 @OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalSharedTransitionApi::class)
 @Composable
 fun MiniPlayer(
@@ -59,18 +63,33 @@ fun MiniPlayer(
     onExpand              : () -> Unit,
     modifier              : Modifier = Modifier,
     isWakingUp            : Boolean = false,
-    visible               : Boolean = true,
+    /**
+     * The bar's presence on screen, owned by [PlayerPanelHost] as a `SeekableTransitionState` so a
+     * predictive-back GESTURE off `PlayerScreen` can seek it with the finger. `true` means "bar on
+     * screen"; the host folds the route gate, the pop-out panel and "is there a track at all" into
+     * that single Boolean, so this composable no longer decides its own visibility.
+     */
+    barTransition         : Transition<Boolean>,
     accentColor             : Color = Color.Unspecified,
     surfaceAccentColor      : Color = Color.Unspecified,
+    // The AnimatedVisibility below — a CHILD of [barTransition] — is the AnimatedVisibilityScope for
+    // BOTH registrations. The mini player is hosted outside every nav destination (see
+    // PlayerPanelHost), so there is no AnimatedContentScope to borrow, and its own show/hide IS the
+    // enter/exit that the nav-level "album-art" morph rides on. Only the SharedTransitionScopes
+    // differ, and a key is matched per scope, so registering the same key in two of them from one
+    // AnimatedVisibilityScope is fine.
+    // Because that scope's transition is a child of a SEEKABLE one, the bounds animation this art
+    // registers is seeked too: `Modifier.sharedElement` calls `sharedBoundsImpl(parentTransition =
+    // animatedVisibilityScope.transition)`, which does `parentTransition.createChildTransition(key)`
+    // (SharedTransitionScope.kt), and `SeekableTransitionState.seekTo` drives every descendant by
+    // fraction (`seekToFraction()` -> `transition.seekAnimations(playTimeNanos)`).
     sharedTransitionScope      : SharedTransitionScope? = null,
-    animatedVisibilityScope    : AnimatedVisibilityScope? = null,
-    // Each scope pair gets its own SharedContentConfig, so the caller can leave the modifier in
-    // place for the composable's whole life and still say WHICH transitions the "album-art" element
-    // may match across — see PlayerPanelHost's rememberMatchWhenConfig.
+    // Each scope gets its own SharedContentConfig, so the caller can leave the modifier in place
+    // for the composable's whole life and still say WHICH transitions the "album-art" element may
+    // match across — see PlayerPanelHost's rememberMatchWhenConfig.
     sharedContentConfig        : SharedTransitionScope.SharedContentConfig = SharedTransitionDefaults.SharedContentConfig,
     // Secondary scope — used when both local (mini↔panel) and nav (mini↔PlayerScreen) are needed.
     navSharedTransitionScope   : SharedTransitionScope? = null,
-    navAnimatedVisibilityScope : AnimatedVisibilityScope? = null,
     navSharedContentConfig     : SharedTransitionScope.SharedContentConfig = SharedTransitionDefaults.SharedContentConfig,
 ) {
     val haptics               = LocalHapticFeedback.current
@@ -79,15 +98,28 @@ fun MiniPlayer(
     val density    = LocalDensity.current
     val navBarPx   = WindowInsets.navigationBars.getBottom(density)
     val miniSlideSpec = screenTransitionSpec<IntOffset>()
-    AnimatedVisibility(
-        visible  = visible && currentTrack != null,
+
+    // The bar keeps rendering the LAST track it had while it slides away. Two reasons:
+    //   1. `currentTrack` and the host's `hasTrack` gate are two separate collections of the same
+    //      StateFlow and can be one frame out of step; a null here while the transition already
+    //      targets "visible" would put a ZERO-SIZE "album-art" participant into a live nav morph.
+    //   2. When playback ends the bar now slides out with its content instead of collapsing to
+    //      nothing mid-exit.
+    // Non-snapshot cell, assigned during composition — the same idiom as the Library's
+    // `PaneStateHolder`: the scope that writes it also reads `currentTrack`, so it can never be
+    // stale, and a MutableState write read in the same pass would schedule an extra recomposition.
+    val lastTrack = remember { LastTrackHolder(currentTrack) }
+    if (currentTrack != null) lastTrack.value = currentTrack
+    val track = currentTrack ?: lastTrack.value
+
+    barTransition.AnimatedVisibility(
+        visible  = { it },
+        modifier = modifier,
         enter    = slideInVertically(miniSlideSpec)  { it + navBarPx },
         exit     = slideOutVertically(miniSlideSpec) { it + navBarPx },
-        modifier = modifier,
     ) {
-        // Use inner scope when no external scope is provided (two-pane case).
-        val effectiveScope: AnimatedVisibilityScope = animatedVisibilityScope ?: this
-        currentTrack ?: return@AnimatedVisibility
+        val effectiveScope: AnimatedVisibilityScope = this
+        val shownTrack = track ?: return@AnimatedVisibility
 
         val shape   = RoundedCornerShape(20.dp)
         val bgColor = MaterialTheme.colorScheme.surfaceContainerHigh
@@ -119,11 +151,11 @@ fun MiniPlayer(
                         )
                     }
                 } else Modifier
-                val navArtModifier = if (navSharedTransitionScope != null && navAnimatedVisibilityScope != null) {
+                val navArtModifier = if (navSharedTransitionScope != null) {
                     with(navSharedTransitionScope) {
                         Modifier.sharedElement(
                             sharedContentState      = rememberSharedContentState("album-art", navSharedContentConfig),
-                            animatedVisibilityScope = navAnimatedVisibilityScope,
+                            animatedVisibilityScope = effectiveScope,
                             boundsTransform         = rememberArtBoundsTransform(),
                         )
                     }
@@ -141,15 +173,15 @@ fun MiniPlayer(
                 // Hence: full-size URL AND an explicit natural-size decode. The extra memory is one
                 // bitmap for the currently-playing track, which the full player loads anyway.
                 val context = LocalContext.current
-                val artRequest = remember(currentTrack.artUrl, currentTrack.thumbnailUrl) {
+                val artRequest = remember(shownTrack.artUrl, shownTrack.thumbnailUrl) {
                     ImageRequest.Builder(context)
-                        .data(currentTrack.artUrl.takeIf { it.isNotBlank() } ?: currentTrack.thumbnailUrl)
+                        .data(shownTrack.artUrl.takeIf { it.isNotBlank() } ?: shownTrack.thumbnailUrl)
                         .size(Size.ORIGINAL)
                         .build()
                 }
                 AsyncImage(
                     model              = artRequest,
-                    contentDescription = currentTrack.album?.name,
+                    contentDescription = shownTrack.album?.name,
                     contentScale       = ContentScale.Crop,
                     modifier           = artModifier.then(navArtModifier)
                         .size(44.dp)
@@ -160,13 +192,13 @@ fun MiniPlayer(
 
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text     = currentTrack.name,
+                        text     = shownTrack.name,
                         style    = MaterialTheme.typography.bodyMedium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        text     = currentTrack.allArtists,
+                        text     = shownTrack.allArtists,
                         style    = MaterialTheme.typography.bodySmall,
                         color    = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,

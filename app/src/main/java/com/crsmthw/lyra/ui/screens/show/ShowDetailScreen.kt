@@ -1,9 +1,6 @@
 package com.crsmthw.lyra.ui.screens.show
 
 import android.content.Intent
-import androidx.compose.animation.AnimatedContentScope
-import androidx.compose.animation.ExperimentalSharedTransitionApi
-import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -45,7 +42,6 @@ import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.remote.model.SpotifyEpisode
 import com.crsmthw.lyra.data.remote.model.SpotifyShow
 import com.crsmthw.lyra.ui.components.DetailArtHero
-import com.crsmthw.lyra.ui.components.PlayerPanelHost
 import com.crsmthw.lyra.ui.components.TitlePill
 import com.crsmthw.lyra.ui.components.TopActionPill
 import com.crsmthw.lyra.ui.components.TopPillHeight
@@ -89,17 +85,13 @@ private const val EPISODE_QUEUE_LIMIT = 750
  *  - **The subtitle is the episode count, never the publisher** — Feb-2026 deprecated
  *    `show.publisher` and the device spike confirmed it is absent from live responses.
  */
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class,
-       ExperimentalSharedTransitionApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun ShowDetailScreen(
     viewModel             : ShowDetailViewModel,
     playerViewModel       : PlayerViewModel,
     onBack                : () -> Unit,
     onNavigateToPlayer    : () -> Unit,
-    onOpenQueue           : () -> Unit = {},
-    sharedTransitionScope : SharedTransitionScope? = null,
-    animatedContentScope  : AnimatedContentScope? = null,
 ) {
     val state         by viewModel.uiState.collectAsStateWithLifecycle()
     val context        = LocalContext.current
@@ -112,13 +104,6 @@ fun ShowDetailScreen(
     val isWideScreen   = currentWindowAdaptiveInfoV2().windowSizeClass.isWidthAtLeastBreakpoint(600)
     val fallbackTitle  = stringResource(R.string.show_fallback_title)
 
-    PlayerPanelHost(
-        playerViewModel          = playerViewModel,
-        onOpenPlayer             = onNavigateToPlayer,
-        onOpenQueue              = onOpenQueue,
-        navSharedTransitionScope = sharedTransitionScope,
-        navAnimatedContentScope  = animatedContentScope,
-    ) { onRequestPlayer ->
     Scaffold(
         contentWindowInsets = WindowInsets(0),
         // No top app bar in either configuration — both layouts float their own back / share
@@ -174,13 +159,13 @@ fun ShowDetailScreen(
                     {
                         haptics.press()
                         playerViewModel.playTrack(uri = uri, uris = queueFrom(newest))
-                        onRequestPlayer()
+                        onNavigateToPlayer()
                     }
                 }
                 val onPlayEpisode = { episode: SpotifyEpisode ->
                     episode.uri?.takeIf { it.isNotBlank() }?.let { uri ->
                         playerViewModel.playTrack(uri = uri, uris = queueFrom(episode))
-                        onRequestPlayer()
+                        onNavigateToPlayer()
                     }
                     Unit
                 }
@@ -431,7 +416,6 @@ fun ShowDetailScreen(
             }
         }
     }
-    } // PlayerPanelHost
 }
 
 /**

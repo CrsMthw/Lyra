@@ -14,7 +14,6 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.crsmthw.lyra.R
-import com.crsmthw.lyra.ui.components.PlayerPanelHost
 import com.crsmthw.lyra.ui.components.TrackActionsHost
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import com.crsmthw.lyra.util.confirm
@@ -36,10 +35,12 @@ internal fun libArtKey(id: String?): String = "lib-art-${id ?: "liked"}"
 fun LibraryScreen(
     viewModel             : LibraryViewModel,
     playerViewModel       : PlayerViewModel,
+    /** Opens the player for a tapped track: the pop-out panel on a wide screen, a push to
+     *  `PlayerScreen` on a narrow one. Supplied by `LyraNavGraph` from the app-wide
+     *  `PlayerPanelHost`, which now hosts the mini player around the whole NavHost. */
     onOpenPlayer          : () -> Unit,
     onOpenSearch          : () -> Unit,
     onOpenSettings        : () -> Unit,
-    onOpenQueue           : () -> Unit = {},
     onOpenAlbum           : (String) -> Unit = {},
     onOpenArtist          : (String) -> Unit = {},
     onOpenShow            : (String) -> Unit = {},
@@ -64,46 +65,38 @@ fun LibraryScreen(
     // time), so the position also carries across a fold/unfold.
     val browserListState = rememberLazyListState()
 
-    PlayerPanelHost(
-        playerViewModel          = playerViewModel,
-        onOpenPlayer             = onOpenPlayer,
-        onOpenQueue              = onOpenQueue,
-        navSharedTransitionScope = sharedTransitionScope,
-        navAnimatedContentScope  = animatedContentScope,
-    ) { onRequestPlayer ->
-        if (isWideScreen) {
-            TwoPaneLayout(
-                state                 = state,
-                browserListState      = browserListState,
-                viewModel             = viewModel,
-                playerViewModel       = playerViewModel,
-                onOpenSearch          = onOpenSearchHaptic,
-                onOpenSettings        = onOpenSettings,
-                onRequestPlayer       = onRequestPlayer,
-                onOpenAlbum           = onOpenAlbum,
-                onOpenArtist          = onOpenArtist,
-                onOpenShow            = onOpenShow,
-                onOpenStats           = onOpenStats,
-                sharedTransitionScope = sharedTransitionScope,
-                animatedContentScope  = animatedContentScope,
-            )
-        } else {
-            SinglePaneLayout(
-                state                 = state,
-                browserListState      = browserListState,
-                viewModel             = viewModel,
-                playerViewModel       = playerViewModel,
-                onOpenSearch          = onOpenSearchHaptic,
-                onOpenSettings        = onOpenSettings,
-                onRequestPlayer       = onRequestPlayer,
-                onOpenAlbum           = onOpenAlbum,
-                onOpenArtist          = onOpenArtist,
-                onOpenShow            = onOpenShow,
-                onOpenStats           = onOpenStats,
-                sharedTransitionScope = sharedTransitionScope,
-                animatedContentScope  = animatedContentScope,
-            )
-        }
+    if (isWideScreen) {
+        TwoPaneLayout(
+            state                 = state,
+            browserListState      = browserListState,
+            viewModel             = viewModel,
+            playerViewModel       = playerViewModel,
+            onOpenSearch          = onOpenSearchHaptic,
+            onOpenSettings        = onOpenSettings,
+            onRequestPlayer       = onOpenPlayer,
+            onOpenAlbum           = onOpenAlbum,
+            onOpenArtist          = onOpenArtist,
+            onOpenShow            = onOpenShow,
+            onOpenStats           = onOpenStats,
+            sharedTransitionScope = sharedTransitionScope,
+            animatedContentScope  = animatedContentScope,
+        )
+    } else {
+        SinglePaneLayout(
+            state                 = state,
+            browserListState      = browserListState,
+            viewModel             = viewModel,
+            playerViewModel       = playerViewModel,
+            onOpenSearch          = onOpenSearchHaptic,
+            onOpenSettings        = onOpenSettings,
+            onRequestPlayer       = onOpenPlayer,
+            onOpenAlbum           = onOpenAlbum,
+            onOpenArtist          = onOpenArtist,
+            onOpenShow            = onOpenShow,
+            onOpenStats           = onOpenStats,
+            sharedTransitionScope = sharedTransitionScope,
+            animatedContentScope  = animatedContentScope,
+        )
     }
 
     TrackActionsHost(

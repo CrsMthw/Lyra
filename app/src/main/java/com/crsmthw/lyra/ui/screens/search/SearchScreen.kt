@@ -54,7 +54,6 @@ import com.crsmthw.lyra.data.local.RecentSearch
 import com.crsmthw.lyra.data.remote.model.SpotifyAlbum
 import com.crsmthw.lyra.data.remote.model.SpotifyArtist
 import com.crsmthw.lyra.data.remote.model.SpotifyShow
-import com.crsmthw.lyra.ui.components.PlayerPanelHost
 import com.crsmthw.lyra.ui.components.TrackActionTarget
 import com.crsmthw.lyra.ui.components.TrackActionsHost
 import com.crsmthw.lyra.ui.components.TrackRow
@@ -82,7 +81,6 @@ fun SearchScreen(
     onArtistClick         : (artistId: String) -> Unit,
     onShowClick           : (showId: String) -> Unit,
     onTrackClick          : (uri: String, allUris: List<String>) -> Unit,
-    onOpenQueue           : () -> Unit = {},
     sharedTransitionScope : SharedTransitionScope? = null,
     animatedContentScope  : AnimatedContentScope? = null,
 ) {
@@ -231,22 +229,6 @@ fun SearchScreen(
         pendingTrackAction = null
     }
 
-    // The mini player / pop-out panel wrap the whole screen, as on Library/Album/Artist. The
-    // "search-bar" container transform is unaffected: it is built against the NAV shared-transition
-    // scope, which is passed straight through the host's own SharedTransitionLayout — exactly how
-    // the Library FAB end of the same morph already coexists with this host.
-    PlayerPanelHost(
-        playerViewModel          = playerViewModel,
-        onOpenPlayer             = onOpenPlayer,
-        onOpenQueue              = onOpenQueue,
-        // A single full-width results list at every width, and the field auto-focuses whenever
-        // there is nothing to read behind the keyboard — so the bar stays full-width and rides
-        // above the keyboard instead of hiding behind it.
-        miniPlayerFullWidth      = true,
-        miniPlayerAvoidsIme      = true,
-        navSharedTransitionScope = sharedTransitionScope,
-        navAnimatedContentScope  = animatedContentScope,
-    ) { _ ->
     // THE screen's single horizontal inset. In landscape with 3-button navigation the nav bar sits
     // on the left or right edge, and the search field, the Recent rows' X buttons and the result
     // rows all ran underneath it — only the inner results Box carried a narrower nav-bars-only
@@ -255,8 +237,8 @@ fun SearchScreen(
     // calls further down resolve to the remaining BOTTOM inset only, so there is no double padding
     // (CLAUDE.md → Inset Rules). `displayCutout` joins the union for a landscape notch on the same
     // edge. The scrims are inset along with everything else, which is invisible: nothing is drawn
-    // in that strip any more either. The mini player is NOT affected — `PlayerPanelHost` renders it
-    // outside this Box and handles its own insets.
+    // in that strip any more either. The mini player is NOT affected — the app-wide
+    // `PlayerPanelHost` in `LyraNavGraph` renders it outside this screen and insets it itself.
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -601,7 +583,6 @@ fun SearchScreen(
             )
         }
     }
-    } // PlayerPanelHost
 
     TrackActionsHost(
         controller   = viewModel.trackActions,
