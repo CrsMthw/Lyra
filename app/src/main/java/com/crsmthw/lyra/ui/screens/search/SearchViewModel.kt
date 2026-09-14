@@ -371,14 +371,20 @@ private fun SearchResponse.appendPage(tab: SearchTab, page: SearchResponse) = wh
     SearchTab.SHOWS   -> copy(shows   = shows?.appendItems(page.shows) { it.id.orEmpty() } ?: page.shows)
 }
 
-private fun <T> Paged<T>.appendItems(page: Paged<T>?, id: (T) -> String): Paged<T> {
+/**
+ * `items` on both sides is [Paged]'s NULL-FREE view — a search page can carry `null` slots for
+ * results that are unavailable in the user's market — so the merged list written back to `rawItems`
+ * is null-free too. That is what lets the screen render `results.<bucket>?.items` directly: the
+ * buckets it reads never contain a null, first page or merged.
+ */
+private fun <T : Any> Paged<T>.appendItems(page: Paged<T>?, id: (T) -> String): Paged<T> {
     // No bucket for the type we asked for means the API has nothing further for it: drop its `next`.
     if (page == null) return copy(next = null)
     val seen = items.mapTo(HashSet(items.size)) { id(it) }
     return copy(
-        items  = items + page.items.filterNot { id(it) in seen },
-        offset = page.offset,
-        next   = page.next,
+        rawItems = items + page.items.filterNot { id(it) in seen },
+        offset   = page.offset,
+        next     = page.next,
     )
 }
 

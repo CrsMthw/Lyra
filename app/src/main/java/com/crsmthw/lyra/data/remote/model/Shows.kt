@@ -10,11 +10,13 @@ import com.google.gson.annotations.SerializedName
 // greppable; ProGuard already keeps `com.crsmthw.lyra.data.remote.model.**`, so no new keep rule is
 // needed — including for the [SpotifyShow] list the library cache persists.
 //
-// EVERY field is nullable with a default. That is not defensive padding: Gson allocates via
-// `Unsafe` and bypasses the Kotlin constructor, so a key the payload omits lands as `null`
-// whatever the declared type (the same hazard documented on [SpotifyPlaylist] and
+// EVERY field is nullable with a default — and so is every list ELEMENT. That is not defensive
+// padding: Gson allocates via `Unsafe` and bypasses the Kotlin constructor, so a key the payload
+// omits lands as `null` whatever the declared type, and a `null` inside a JSON array lands as a
+// `null` element inside a `List<NonNull>` (the same hazard documented on [SpotifyPlaylist] and
 // [com.crsmthw.lyra.data.local.LibraryCacheData]). The podcast payloads omit plenty — `publisher`
-// is already gone, episode `images` can be absent, and `me/shows` can answer 200 with no `items`.
+// is already gone, episode `images` can be absent, `me/shows` can answer 200 with no `items`, and
+// an episode unavailable in the user's market arrives as a bare `null` in the items array.
 
 /**
  * A podcast show — the simplified object from `me/shows` / `search?type=show`, and the full object
@@ -83,25 +85,38 @@ data class EpisodeResumePoint(
 )
 
 /**
- * A null-tolerant paged wrapper for the podcast endpoints.
+ * A paged wrapper for the podcast endpoints, separate from the shared [Paged] only because its
+ * `total` is nullable: "200 with no items" is a real, documented outcome for episode lists (the
+ * market caveat — see docs/SPOTIFY.md → Podcast shows) and must stay distinguishable from a parse
+ * failure, and a `total` of 0 is part of that signal.
  *
- * Deliberately NOT the shared [Paged], which declares `items`/`total`/`limit`/`offset` non-null.
- * That is safe for endpoints we already trust; it is not safe here, because "200 with no items" is
- * a real, documented outcome for episode lists (the market caveat — see docs/SPOTIFY.md → Podcast
- * shows) and must stay distinguishable from a parse failure.
+ * The null-tolerance of the items themselves is the same rule as [Paged], and podcasts are where it
+ * was found: Spotify returns a `null` SLOT for an episode that is unavailable or removed in the
+ * user's market (`"items": [null, {…}]`), in the embedded `shows/{id}` page and in
+ * `shows/{id}/episodes` alike. That crashed the show screen at the first `it.uri` / `it.id`
+ * (2026-09-13). Read [items] — null-free — and page by [rawCount], which counts every slot.
  */
-data class ShowPage<T>(
-    val items : List<T>? = null,
-    val total : Int?     = null,
-    val next  : String?  = null,
-)
+data class ShowPage<T : Any>(
+    @SerializedName("items") val rawItems: List<T?>? = null,
+    val total : Int?    = null,
+    val next  : String? = null,
+) {
+    /** The page's episodes with the unavailable slots dropped. Null only when the key was absent. */
+    val items: List<T>? get() = rawItems?.filterNotNull()
+
+    /** Slots the endpoint returned, nulls included — what `offset` advances by. */
+    val rawCount: Int get() = rawItems?.size ?: 0
+}
 
 /** `GET me/shows` — items are `{ added_at, show }` wrappers; the page itself can arrive itemless. */
 data class SavedShowsResponse(
-    val items : List<SavedShowItem>? = null,
-    val total : Int?                 = null,
-    val next  : String?              = null,
-)
+    @SerializedName("items") val rawItems: List<SavedShowItem?>? = null,
+    val total : Int?    = null,
+    val next  : String? = null,
+) {
+    val items   : List<SavedShowItem>? get() = rawItems?.filterNotNull()
+    val rawCount: Int                  get() = rawItems?.size ?: 0
+}
 
 data class SavedShowItem(
     @SerializedName("added_at") val addedAt : String?      = null,

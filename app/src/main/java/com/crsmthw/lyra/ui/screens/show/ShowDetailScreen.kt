@@ -65,6 +65,17 @@ import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 
 /**
+ * How many episode uris a single Play may hand `me/player/play`.
+ *
+ * 750, the same cap `PlayerViewModel.playFromLikedSongs` uses. A smaller number would not reduce
+ * the real risk: multiple EPISODE uris in `uris` are undocumented (the Web API reference describes
+ * `uris` as track uris, and a show is not a valid `context_uri`), so if Spotify refuses the shape it
+ * refuses it at two entries as readily as at seven hundred — which is what `PlayerViewModel`'s
+ * one-shot degrade to a single uri is there to catch.
+ */
+private const val EPISODE_QUEUE_LIMIT = 750
+
+/**
  * Podcast show detail — structurally the album screen (`AlbumDetailScreen`): single-pane is a
  * [DetailArtHero] over the episode list, two-pane puts the hero in the left panel and the
  * episodes on the right, both edge-to-edge under a transparent status bar with floating pills.
@@ -132,19 +143,43 @@ fun ShowDetailScreen(
                 val episodes  = state.episodes
                 val showTitle = show.name?.takeIf { it.isNotBlank() } ?: fallbackTitle
 
-                // Play = the newest episode. The endpoint returns newest first, so that is simply
-                // the head of the list; no button at all when the feed is empty.
+                // Queue continuity: starting an episode with its uri ALONE leaves Spotify's queue
+                // empty behind it, so playback stops after that one episode. Send the tapped
+                // episode followed by every episode AFTER it in the loaded list instead — the feed
+                // is newest-first, so "after" is the older episodes, which is the order the Spotify
+                // show page plays in. Only the pages loaded so far can be queued; paging further
+                // down the list before tapping queues more.
+                //
+                // Returns null when there is nothing to continue with, so a one-episode show keeps
+                // the proven single-uri call shape (and with it the App Remote restore path's
+                // `needsRestore == false`) rather than a one-element list that behaves the same but
+                // arms extra machinery. Capped at EPISODE_QUEUE_LIMIT, matching
+                // PlayerViewModel.playFromLikedSongs.
+                fun queueFrom(episode: SpotifyEpisode?): List<String>? {
+                    if (episode == null) return null
+                    // Locate by id in the SAME list that is sliced — the rendered rows are a
+                    // filtered copy, so an index taken from them would not line up here.
+                    val start = episodes.indexOfFirst { it.id != null && it.id == episode.id }
+                    val tail  = if (start >= 0) episodes.drop(start) else listOf(episode)
+                    return tail.mapNotNull { it.uri?.takeIf(String::isNotBlank) }
+                        .take(EPISODE_QUEUE_LIMIT)
+                        .takeIf { it.size > 1 }
+                }
+
+                // Play = the newest episode, and the whole loaded feed behind it. The endpoint
+                // returns newest first, so that is simply the head of the list; no button at all
+                // when the feed is empty.
                 val newest = episodes.firstOrNull { !it.uri.isNullOrBlank() }
                 val onPlayNewest: (() -> Unit)? = newest?.uri?.let { uri ->
                     {
                         haptics.press()
-                        playerViewModel.playTrack(uri = uri)
+                        playerViewModel.playTrack(uri = uri, uris = queueFrom(newest))
                         onRequestPlayer()
                     }
                 }
                 val onPlayEpisode = { episode: SpotifyEpisode ->
-                    episode.uri?.let { uri ->
-                        playerViewModel.playTrack(uri = uri)
+                    episode.uri?.takeIf { it.isNotBlank() }?.let { uri ->
+                        playerViewModel.playTrack(uri = uri, uris = queueFrom(episode))
                         onRequestPlayer()
                     }
                     Unit

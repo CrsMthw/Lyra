@@ -51,10 +51,11 @@ class ShowDetailViewModel(
     private val showUri = "spotify:show:$showId"
 
     /**
-     * The API offset the next episodes page starts at — the count of RAW items received, not
-     * `episodes.size`. They happen to be equal today (nothing is filtered out of an episode page,
-     * unlike track lists, which drop unplayable rows), but keeping them separate means a future
-     * filter can't silently re-fetch and duplicate a row at each page boundary.
+     * The API offset the next episodes page starts at — `ShowPage.rawCount`, the count of RAW slots
+     * received, never `episodes.size`. They are genuinely different numbers: an episode that is
+     * unavailable or removed in the user's market arrives as a `null` slot in the items array and
+     * is dropped on the way in (see [ShowPage]), so paging by the rendered size would re-request
+     * those slots and duplicate every row after them at each page boundary.
      */
     private var nextOffset = 0
 
@@ -91,26 +92,31 @@ class ShowDetailViewModel(
                     // `GET shows/{id}` embeds the first page of episodes, so the common case
                     // paints from ONE round trip. Only fall through to the dedicated episodes
                     // endpoint when that embedded page is absent or empty — which is also where
-                    // the market retry lives.
-                    val embedded = show.episodes?.items.orEmpty()
-                    if (embedded.isNotEmpty()) {
-                        nextOffset = embedded.size
+                    // the market retry lives. An embedded page whose slots are ALL null counts as
+                    // empty here, so such a show falls through to the retry instead of painting a
+                    // permanently empty list.
+                    val embeddedPage = show.episodes
+                    val embedded     = embeddedPage?.items.orEmpty()
+                    if (embeddedPage != null && embedded.isNotEmpty()) {
+                        nextOffset = embeddedPage.rawCount
                         _state.update { it.copy(
                             show        = show,
                             episodes    = embedded,
                             isLoading   = false,
-                            canLoadMore = nextOffset < totalEpisodes(show, show.episodes),
+                            canLoadMore = nextOffset < totalEpisodes(show, embeddedPage),
                         ) }
                     } else {
                         _state.update { it.copy(show = show) }
                         fetchEpisodePage(0).fold(
                             onSuccess = { page ->
                                 val items = page.items.orEmpty()
-                                nextOffset = items.size
+                                nextOffset = page.rawCount
                                 _state.update { it.copy(
                                     episodes    = items,
                                     isLoading   = false,
-                                    canLoadMore = items.isNotEmpty() && nextOffset < totalEpisodes(show, page),
+                                    // Gate on SLOTS, not rendered rows: a first page that was all
+                                    // unavailable still has more pages behind it.
+                                    canLoadMore = page.rawCount > 0 && nextOffset < totalEpisodes(show, page),
                                 ) }
                             },
                             onFailure = { e ->
@@ -136,7 +142,7 @@ class ShowDetailViewModel(
             fetchEpisodePage(offset).fold(
                 onSuccess = { page ->
                     val items = page.items.orEmpty()
-                    nextOffset = offset + items.size
+                    nextOffset = offset + page.rawCount
                     _state.update { cur ->
                         // De-dupe by id: a page fetched at an offset the server has since shifted
                         // can repeat a row, and a duplicate LazyColumn key is a hard crash.
@@ -145,8 +151,12 @@ class ShowDetailViewModel(
                         cur.copy(
                             episodes      = cur.episodes + fresh,
                             isLoadingMore = false,
-                            // A page that added nothing new ends paging, however the totals read.
-                            canLoadMore   = fresh.isNotEmpty() &&
+                            // Paging ends on a page with no SLOTS at all — not on one that added no
+                            // rows. A mid-feed page can be entirely nulls (all unavailable in this
+                            // market) or entirely duplicates, and stopping there would strand the
+                            // rest of the feed. `nextOffset` advanced past those slots, so the next
+                            // request is a genuinely new page and the `total` bound still ends it.
+                            canLoadMore   = page.rawCount > 0 &&
                                             nextOffset < totalEpisodes(cur.show, page),
                         )
                     }
@@ -170,6 +180,11 @@ class ShowDetailViewModel(
      * non-zero total would skip the one case the retry exists for. Later pages are gated on
      * `offset < total`, because an EXHAUSTED page (offset == total) answers empty perfectly
      * legitimately and retrying it would double every last page's traffic.
+     *
+     * "Empty" here is [ShowPage.items] — the NULL-FREE view. A page of nothing but `null` slots is
+     * the same unavailable-in-this-market symptom wearing a different shape, so it counts as empty
+     * and gets the retry; only [ShowPage.rawCount] (used by the callers for paging) still sees the
+     * slots.
      *
      * The retry's own failure is swallowed and the original 2xx page returned, so a market the
      * modern API rejects with a 400 can never turn a good empty page into an error.

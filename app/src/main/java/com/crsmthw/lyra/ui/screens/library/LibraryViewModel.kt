@@ -700,7 +700,7 @@ class LibraryViewModel(
     // ── Albums / Artists / Shows: once-per-session network refresh, PER LEG ──────────────────────
     //
     // Each leg is marked loaded only when its paginated sweep ran to COMPLETION — the loop exiting
-    // on `page.next == null || items.isEmpty()`. A sweep that stopped because a page came back null
+    // on `page.next == null || page.rawCount == 0`. A sweep that stopped because a page came back null
     // (a 429 on the third back-to-back sweep is the likely one) leaves its flag false, so the next
     // segment tap — or a pull-to-refresh while a non-Playlists filter is showing — re-fetches just
     // that leg while the complete ones stay put. One shared flag used to mean a single failed leg
@@ -749,8 +749,10 @@ class LibraryViewModel(
                         if (page == null) break                  // partial or failed — retry later
                         val items = page.items.orEmpty()
                         albums += items.mapNotNull { it.album }
-                        offset += items.size
-                        if (page.next == null || items.isEmpty()) { albumsComplete = true; break }
+                        // RAW slots, not rendered rows — a null item slot still occupies an offset
+                        // (see `Paged`), and it also must not read as "the sweep finished".
+                        offset += page.rawCount
+                        if (page.next == null || page.rawCount == 0) { albumsComplete = true; break }
                     }
                     // A partial sweep's rows go only INTO AN EMPTY grid — better than nothing, but
                     // never in place of the complete cached list already on screen (that list is
@@ -772,7 +774,9 @@ class LibraryViewModel(
                         val items = page.items.orEmpty()
                         artists += items
                         after = page.cursors?.after
-                        if (after == null || items.isEmpty()) { artistsComplete = true; break }
+                        // Cursor-paged, so there is no offset to keep raw — but the terminator is
+                        // still "no SLOTS came back", never "no rows survived the null filter".
+                        if (after == null || page.rawCount == 0) { artistsComplete = true; break }
                     }
                     _uiState.update { s ->
                         if (artistsComplete || (artists.isNotEmpty() && s.followedArtists.isEmpty())) s.copy(followedArtists = artists) else s
@@ -795,8 +799,8 @@ class LibraryViewModel(
                         // every library paint, so a shape change that started embedding 50 episodes
                         // per show must not silently bloat it. Mirrors ShowDetailViewModel's write.
                         shows += items.mapNotNull { it.show?.copy(episodes = null) }
-                        showOffset += items.size
-                        if (page.next == null || items.isEmpty()) { showsComplete = true; break }
+                        showOffset += page.rawCount
+                        if (page.next == null || page.rawCount == 0) { showsComplete = true; break }
                     }
                     _uiState.update { s ->
                         if (showsComplete || (shows.isNotEmpty() && s.followedShows.isEmpty())) s.copy(followedShows = shows) else s
@@ -959,12 +963,12 @@ class LibraryViewModel(
                         // Offset advances by the RAW page size (incl. filtered-out items) so the next
                         // page picks up where the API left off — avoids re-fetch/duplicates when a
                         // playlist contains unplayable tracks.
-                        playlistTracksOffset = resp.items?.size ?: 0,
+                        playlistTracksOffset = resp.rawCount,
                         playlistTracksTotal  = resp.total,
                     ) }
                     untrustedOffsetFor -= playlist.id   // this page anchored the offset on the API's own position
                     if (snapshotId != null) {
-                        val rawOffset = resp.items?.size ?: 0
+                        val rawOffset = resp.rawCount
                         withContext(Dispatchers.IO) {
                             cache.saveTrackList(playlist.id, snapshotId, tracks, rawOffset)
                         }
@@ -1120,7 +1124,7 @@ class LibraryViewModel(
                     isLoadingTracks  = false,
                     // RAW page size, not filtered: see loadMoreLikedSongs. A null track on page 0
                     // would otherwise short the offset and overlap the next page.
-                    likedSongsOffset = resp.items?.size ?: tracks.size,
+                    likedSongsOffset = resp.rawCount,
                     likedSongsTotal  = resp.total,
                     likedSongCount   = resp.total,
                 )}
@@ -1143,16 +1147,18 @@ class LibraryViewModel(
             repository.getLikedSongs(limit = 50, offset = s.likedSongsOffset).fold(
                 onSuccess = { resp ->
                     val newTracks = (resp.items ?: emptyList()).mapNotNull { it.track }.filter { it.isPlayable != false }
-                    // Advance the offset by the RAW page size, not the post-filter size: Spotify's
-                    // offset indexes every saved item, including removed-from-Spotify tracks (null
-                    // track) that mapNotNull drops. Advancing by the filtered size under-counts and
-                    // makes the next page overlap → duplicate rows. distinctBy heals any overlap left
-                    // from a cache-resume start offset. (Playlists already do this — see loadMorePlaylistTracks.)
+                    // Advance the offset by the RAW page size (`rawCount`), not the post-filter size:
+                    // Spotify's offset indexes every saved item, including removed-from-Spotify
+                    // tracks (null `track`) that mapNotNull drops and whole null ITEM slots that the
+                    // model now drops on the way in (see `Paged`). Advancing by the filtered size
+                    // under-counts and makes the next page overlap → duplicate rows. distinctBy heals
+                    // any overlap left from a cache-resume start offset. (Playlists already do this —
+                    // see loadMorePlaylistTracks.)
                     val allTracks = (s.currentTracks + newTracks).distinctBy { it.id }
                     _uiState.update { it.copy(
                         currentTracks       = allTracks,
                         isLoadingMoreTracks = false,
-                        likedSongsOffset    = s.likedSongsOffset + (resp.items?.size ?: 0),
+                        likedSongsOffset    = s.likedSongsOffset + resp.rawCount,
                         likedSongsTotal     = resp.total,
                     )}
                     withContext(Dispatchers.IO) {
@@ -1186,7 +1192,7 @@ class LibraryViewModel(
                         return@fold
                     }
                     val newTracks   = (resp.items ?: emptyList()).mapNotNull { it.resolvedTrack }.filter { it.isPlayable != false }
-                    val rawPageSize = resp.items?.size ?: 0
+                    val rawPageSize = resp.rawCount
                     // De-dupe the page against what's already loaded, by uri — but ONLY for a playlist
                     // this session mutated in-app (`dedupePagesFor`). The artefact: a page fetched
                     // moments after a removal can still be served from Spotify's PRE-removal list,
@@ -1257,7 +1263,7 @@ class LibraryViewModel(
                         _uiState.update { it.copy(
                             currentTracks    = freshFirst50,
                             // RAW page size, not filtered: see loadMoreLikedSongs.
-                            likedSongsOffset = resp.items?.size ?: freshFirst50.size,
+                            likedSongsOffset = resp.rawCount,
                             likedSongsTotal  = resp.total,
                             likedSongCount   = resp.total,
                         )}
@@ -1284,7 +1290,7 @@ class LibraryViewModel(
                         // (Liked Songs, the branch above, can never be in selection mode.)
                         _uiState.update { it.copy(
                             currentTracks        = tracks,
-                            playlistTracksOffset = resp.items?.size ?: 0,   // reset paging to page 0
+                            playlistTracksOffset = resp.rawCount,   // reset paging to page 0
                             playlistTracksTotal  = resp.total,
                         ).selectionCleared() }
                         // Page 0 is fresh from the server, so the post-mutation stale-page window is
@@ -1300,7 +1306,7 @@ class LibraryViewModel(
                             // Page 0 again, so the raw boundary is this page's raw size — written in
                             // the same breath as the de-dupe clear above, which is only safe BECAUSE
                             // a trustworthy boundary lands with it.
-                            val rawOffset = resp.items?.size ?: 0
+                            val rawOffset = resp.rawCount
                             withContext(Dispatchers.IO) {
                                 cache.saveTrackList(playlist.id, playlist.snapshotId, tracks, rawOffset)
                             }

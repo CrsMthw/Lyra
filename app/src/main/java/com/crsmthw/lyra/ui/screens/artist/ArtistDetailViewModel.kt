@@ -39,6 +39,14 @@ class ArtistDetailViewModel(
 
     private val artistUri = "spotify:artist:$artistId"
 
+    /**
+     * The API offset the next discography page starts at — the count of RAW slots received, never
+     * `albums.size`. A release that is unavailable or removed in the user's market arrives as a
+     * `null` slot and is dropped on the way in (see `Paged`), so paging by the rendered size would
+     * re-request those slots and duplicate every row after them.
+     */
+    private var albumsOffset = 0
+
     init {
         load()
         viewModelScope.launch {
@@ -112,6 +120,7 @@ class ArtistDetailViewModel(
 
             artistResult.fold(
                 onSuccess = { artist ->
+                    albumsOffset = albumsPage?.rawCount ?: 0
                     _state.update { it.copy(
                         artist     = artist,
                         albums     = albumsPage?.items ?: emptyList(),
@@ -130,8 +139,9 @@ class ArtistDetailViewModel(
         _state.value.albumsNext ?: return
         viewModelScope.launch {
             _state.update { it.copy(isLoadingMore = true) }
-            repository.getArtistAlbums(artistId, offset = _state.value.albums.size).fold(
+            repository.getArtistAlbums(artistId, offset = albumsOffset).fold(
                 onSuccess = { page ->
+                    albumsOffset += page.rawCount
                     _state.update { s -> s.copy(
                         albums        = s.albums + page.items,
                         albumsNext    = page.next,

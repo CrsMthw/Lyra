@@ -1,5 +1,6 @@
 package com.crsmthw.lyra.ui.screens.player
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -29,6 +30,27 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+private const val TAG = "PlayerVM"
+
+/**
+ * "No active device" — `me/player/play` answers 404 when Spotify is not running anywhere. It is the
+ * trigger for the App Remote fallback, NOT a rejection of the request body, so nothing may degrade
+ * on it. Matches the long-standing `message.contains("404")` test: `SpotifyRepository.safeCall`
+ * flattens HTTP failures to `"HTTP <code>: <body>"` (docs/SPOTIFY.md → Rate Limiting).
+ */
+private fun Throwable.isNoActiveDevice(): Boolean = message?.contains("404") == true
+
+/**
+ * True when the API REFUSED this request — a 4xx other than 404, read off the `"HTTP <code>: …"`
+ * text `safeCall` produces. A failure with no status (no connectivity, a parse error) is not a
+ * verdict on the request body and must never cost the user their queue, so it returns false.
+ */
+private fun Throwable.isRequestRefused(): Boolean {
+    val status = message?.takeIf { it.startsWith("HTTP ") }
+        ?.drop("HTTP ".length)?.takeWhile(Char::isDigit)?.toIntOrNull() ?: return false
+    return status in 400..499 && status != 404
+}
 
 enum class RepeatMode { OFF, CONTEXT, TRACK }
 
@@ -441,19 +463,48 @@ class PlayerViewModel(
             viewModelScope.launch { checkIsLiked(trackId) }
         }
         viewModelScope.launch {
-            repository.play(
+            // The uri list actually being sent. Queue continuity is BEST-EFFORT: `uris` holding
+            // more than one entry is undocumented for episodes (the Web API reference describes
+            // `uris` as track uris, and a show is not a valid `context_uri`), while a SINGLE uri is
+            // the shape podcasts shipped on and tracks have always used. So the first time the API
+            // refuses the multi-uri body we degrade to `[uri]` once and carry on — the user loses
+            // the queue, not the playback. `playUris` is a var so the SDK-restore loop below cannot
+            // spend its whole 10-second window re-sending a body the API has already rejected.
+            var playUris = uris
+            var result = repository.play(
                 uri        = uri,
                 contextUri = contextUri,
                 offsetUri  = if (contextUri != null) uri else null,
-                uris       = uris,
-            ).fold(
+                uris       = playUris,
+            )
+            val firstError = result.exceptionOrNull()
+            if (firstError != null && (playUris?.size ?: 0) > 1 && firstError.isRequestRefused()) {
+                Log.w(TAG, "play() refused a ${playUris?.size}-uri body (${firstError.message}); " +
+                           "retrying with the single uri", firstError)
+                playUris = null
+                result = repository.play(
+                    uri        = uri,
+                    contextUri = contextUri,
+                    offsetUri  = if (contextUri != null) uri else null,
+                    uris       = null,
+                )
+                val retryError = result.exceptionOrNull()
+                if (retryError != null) {
+                    Log.w(TAG, "single-uri retry also failed", retryError)
+                    // A 404 on the retry means "no active device", which the App Remote fallback
+                    // below can still fix — keep it so that path runs. Anything else: surface the
+                    // ORIGINAL rejection, which names the real cause rather than its second symptom.
+                    if (!retryError.isNoActiveDevice()) result = Result.failure(firstError)
+                }
+            }
+            result.fold(
                 onSuccess = {
                     delay(1_000L)
                     playerStateManager.fetchOnce()
                     clearIsWakingUp()
                 },
                 onFailure = { e ->
-                    if (e.message?.contains("404") == true) {
+                    if (e.isNoActiveDevice()) {
                         val sdkSuccess = when {
                             contextUri != null && index != null -> {
                                 val ok = remoteManager.connectAndPlay(contextUri)
@@ -465,15 +516,33 @@ class PlayerViewModel(
                         // Cancel the 3.5s fallback timer — we own the clear from here.
                         clearWakingUpJob?.cancel()
                         if (sdkSuccess) {
-                            val needsRestore = uris != null || (contextUri != null && index == null)
+                            // `playUris`, not `uris`: a list already degraded above is gone, and
+                            // there is then nothing to restore (the SDK is playing the single item),
+                            // so the loop is correctly skipped.
+                            val needsRestore = playUris != null || (contextUri != null && index == null)
                             if (needsRestore) {
                                 val sdkStartedAt = System.currentTimeMillis()
                                 val deadline = sdkStartedAt + 10_000L
                                 while (System.currentTimeMillis() < deadline) {
                                     delay(1_500L)
                                     val elapsedMs = System.currentTimeMillis() - sdkStartedAt
+                                    val pending   = playUris
                                     val ok = when {
-                                        uris != null       -> repository.play(uris = uris, positionMs = elapsedMs).isSuccess
+                                        pending != null -> {
+                                            val restore = repository.play(uris = pending, positionMs = elapsedMs)
+                                            val err     = restore.exceptionOrNull()
+                                            // The same degrade as the direct call, applied inside the
+                                            // loop: a multi-uri body the API REFUSES must not be
+                                            // re-sent for the full 10-second window. A 404 here is
+                                            // just "the device isn't awake yet" — that is exactly
+                                            // what this loop retries for, so it never degrades.
+                                            if (err != null && pending.size > 1 && err.isRequestRefused()) {
+                                                Log.w(TAG, "SDK restore refused a ${pending.size}-uri " +
+                                                           "body (${err.message}); dropping the queue", err)
+                                                playUris = null
+                                            }
+                                            restore.isSuccess
+                                        }
                                         contextUri != null -> repository.play(contextUri = contextUri, offsetUri = uri, positionMs = elapsedMs).isSuccess
                                         else               -> true
                                     }
