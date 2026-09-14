@@ -72,6 +72,30 @@ class AppContainer(context: Context) {
 
     val lrcLibApiService: LrcLibApiService = lrcLibRetrofit.create(LrcLibApiService::class.java)
 
+    // ── Spotify short-link resolver (spotify.link / *.app.link — Branch) ──────
+    // A DEDICATED plain client. It must never be `okHttpClient`, whose TokenManager interceptor
+    // attaches the user's Spotify bearer token to every request — that token has no business
+    // reaching a third-party link-shortening host.
+    //
+    // Redirects are followed BY HAND (`followRedirects = false`) so the hop count is capped and
+    // every `Location` is inspected; with OkHttp following them itself, `Response.header("Location")`
+    // reads null at every hop. Timeouts are short because a spinner is on screen for all of it.
+    // See ui/screens/deeplink/LinkResolverViewModel.
+    val linkResolverClient: OkHttpClient = OkHttpClient.Builder()
+        .followRedirects(false)
+        .followSslRedirects(false)
+        .addInterceptor { chain ->
+            chain.proceed(
+                chain.request().newBuilder()
+                    .header("User-Agent", "Lyra/${BuildConfig.VERSION_NAME} (github.com/CrsMthw/Lyra)")
+                    .build()
+            )
+        }
+        .connectTimeout(5.seconds)
+        .readTimeout   (5.seconds)
+        .callTimeout   (10.seconds)
+        .build()
+
     // ── Image loader (permanent disk cache in filesDir) ──────────────────────
     val imageLoader: ImageLoader = ImageLoader.Builder(context)
         .memoryCache {

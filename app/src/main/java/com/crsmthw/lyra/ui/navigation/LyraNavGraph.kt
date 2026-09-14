@@ -1,6 +1,7 @@
 package com.crsmthw.lyra.ui.navigation
 
 import android.content.Intent
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.ExperimentalSharedTransitionApi
@@ -47,6 +48,9 @@ import com.crsmthw.lyra.util.visualizer.VisualizerStyle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlin.math.pow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.mapNotNull
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import androidx.navigation.NavHostController
@@ -55,11 +59,13 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import androidx.navigation.navDeepLink
+import com.crsmthw.lyra.R
 import com.crsmthw.lyra.di.AppContainer
 import com.crsmthw.lyra.ui.components.LocalPlayerRouteVisible
 import com.crsmthw.lyra.ui.screens.album.AlbumDetailScreen
-import com.crsmthw.lyra.ui.screens.deeplink.TrackDeepLinkScreen
+import com.crsmthw.lyra.ui.screens.deeplink.LinkResolverScreen
+import com.crsmthw.lyra.ui.screens.deeplink.LinkResolverViewModel
+import com.crsmthw.lyra.ui.screens.deeplink.LinkResolverViewModelFactory
 import com.crsmthw.lyra.ui.screens.album.AlbumDetailViewModel
 import com.crsmthw.lyra.ui.screens.album.AlbumDetailViewModelFactory
 import com.crsmthw.lyra.ui.screens.artist.ArtistDetailScreen
@@ -94,12 +100,6 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
     val navController: NavHostController = rememberNavController()
     val playerVm = viewModel<PlayerViewModel>(factory = PlayerViewModelFactory(container))
 
-    // Handle deep links on warm start (activity already running, onNewIntent fired).
-    // Cold-start deep links are handled automatically by NavHost reading Activity.intent.
-    LaunchedEffect(pendingDeepLinkIntent) {
-        pendingDeepLinkIntent?.let { navController.handleDeepLink(it) }
-    }
-
     // ── Global back-tap debounce guard ───────────────────────────────────────
     var lastNavTime by remember { mutableLongStateOf(0L) }
 
@@ -126,6 +126,41 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
         Screen.Library.route
     else
         Screen.Auth.route
+
+    // ── Incoming Spotify links ───────────────────────────────────────────────
+    // Every VIEW intent the manifest's filters accept is funnelled through ONE resolver
+    // destination instead of per-route navDeepLink patterns. Those patterns were exact and
+    // matched only the four plain `open.spotify.com/<type>/<id>` shapes — not the `spotify.link`
+    // short links Spotify's own share sheet produces today, not the `/intl-xx/` locale form, and
+    // not `spotify:` URIs — and they cannot be extended to cover a link whose type is only
+    // knowable after a network round trip. Keeping them ALONGSIDE the resolver would also
+    // double-navigate at cold start, since NavHost handles the launch intent by itself.
+    //
+    // The back stack is built explicitly here, which fixes a second bug: `handleDeepLink` (the
+    // path the navDeepLinks used) navigates with `popUpTo(graph.id, inclusive = true)` when the
+    // link arrives on another app's task, i.e. it clears the ENTIRE stack including the start
+    // destination — so back out of a deep-linked screen used to leave the app. Pushing the
+    // resolver over the Library and letting it pop itself leaves exactly [Library, destination].
+    //
+    // Deliberately NOT routed through safePush: that drops any nav within 350 ms of the last
+    // one, and an incoming link is not a user tap racing a transition — swallowing it would
+    // silently do nothing. The Auth→Library and sessionExpired handlers navigate raw for the
+    // same reason.
+    //
+    // Skipped while signed out: the resolver's destinations all need the API, and popUpTo
+    // (Library) has nothing to pop to. The user lands on Auth.
+    val deepLinksEnabled = startDestination == Screen.Library.route
+    LaunchedEffect(pendingDeepLinkIntent) {
+        if (!deepLinksEnabled) return@LaunchedEffect
+        val intent = pendingDeepLinkIntent ?: return@LaunchedEffect
+        if (intent.action != Intent.ACTION_VIEW) return@LaunchedEffect
+        val rawUrl = intent.data?.toString().orEmpty()
+        if (rawUrl.isBlank()) return@LaunchedEffect
+        navController.navigate(Screen.LinkResolver.createRoute(rawUrl)) {
+            popUpTo(Screen.Library.route) { inclusive = false }
+            launchSingleTop = true
+        }
+    }
 
     // When the refresh token dies (Spotify invalid_grant — 6-month expiry / revoked), the auth
     // manager has already discarded the tokens and emits here. Route the user back to sign-in
@@ -300,8 +335,38 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
                 )
             }
 
-            composable(Screen.Library.route) {
+            composable(Screen.Library.route) { backStackEntry ->
                 val vm = viewModel<LibraryViewModel>(factory = LibraryViewModelFactory(container))
+
+                // A deep-linked playlist, handed back by the link resolver (see above). Only a
+                // playlist in the user's OWN library can be opened: LibraryViewModel.selectPlaylist
+                // takes a loaded SpotifyPlaylist, not an id, so a curated or not-followed playlist
+                // has nothing to select and gets the same "can't open" toast the resolver uses.
+                //
+                // The wait watches for the PLAYLIST, not for `isLoading` to clear: loadLibrary
+                // flips isLoading false on its CACHED emission and only then refreshes from the
+                // network, so a playlist added on another device is not in that first snapshot and
+                // gating on the flag would toast a link that is about to become openable. The
+                // timeout is therefore what reports a genuinely absent playlist; the usual case
+                // answers from cache in well under a second.
+                val pendingPlaylistFlow = remember(backStackEntry) {
+                    backStackEntry.savedStateHandle.getStateFlow<String?>(PENDING_PLAYLIST_KEY, null)
+                }
+                val pendingPlaylistId by pendingPlaylistFlow.collectAsStateWithLifecycle()
+                LaunchedEffect(pendingPlaylistId) {
+                    val id = pendingPlaylistId ?: return@LaunchedEffect
+                    backStackEntry.savedStateHandle[PENDING_PLAYLIST_KEY] = null
+                    val playlist = withTimeoutOrNull(PENDING_PLAYLIST_TIMEOUT_MS) {
+                        vm.uiState.mapNotNull { s -> s.playlists.firstOrNull { it.id == id } }.first()
+                    }
+                    if (playlist != null) vm.selectPlaylist(playlist)
+                    else Toast.makeText(
+                        context,
+                        context.getString(R.string.deeplink_unsupported),
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
+
                 LibraryScreen(
                     viewModel             = vm,
                     playerViewModel       = playerVm,
@@ -378,7 +443,6 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
             composable(
                 route      = Screen.AlbumDetail.route,
                 arguments  = listOf(navArgument("id") { type = NavType.StringType }),
-                deepLinks  = listOf(navDeepLink { uriPattern = "https://open.spotify.com/album/{id}" }),
             ) { backStackEntry ->
                 val albumId = backStackEntry.arguments?.getString("id") ?: return@composable
                 val vm = viewModel<AlbumDetailViewModel>(
@@ -399,7 +463,6 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
             composable(
                 route      = Screen.ArtistDetail.route,
                 arguments  = listOf(navArgument("id") { type = NavType.StringType }),
-                deepLinks  = listOf(navDeepLink { uriPattern = "https://open.spotify.com/artist/{id}" }),
             ) { backStackEntry ->
                 val artistId = backStackEntry.arguments?.getString("id") ?: return@composable
                 val vm = viewModel<ArtistDetailViewModel>(
@@ -420,7 +483,6 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
             composable(
                 route      = Screen.ShowDetail.route,
                 arguments  = listOf(navArgument("id") { type = NavType.StringType }),
-                deepLinks  = listOf(navDeepLink { uriPattern = "https://open.spotify.com/show/{id}" }),
             ) { backStackEntry ->
                 val showId = backStackEntry.arguments?.getString("id") ?: return@composable
                 val vm = viewModel<ShowDetailViewModel>(
@@ -437,20 +499,53 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
                 )
             }
 
+            // The one landing pad for every incoming Spotify link. It resolves the raw url — a
+            // spotify.link short link needs a network round trip, everything else is instant —
+            // then hands off and pops itself, so back from the destination lands on the Library.
+            //
+            // Every navigation out of here bypasses safePush on purpose: see the funnel comment
+            // above. A hand-off popping the resolver inclusive is also what keeps the Library
+            // underneath from being duplicated.
             composable(
-                route     = Screen.TrackDeepLink.route,
-                arguments = listOf(navArgument("id") { type = NavType.StringType }),
-                deepLinks = listOf(navDeepLink { uriPattern = "https://open.spotify.com/track/{id}" }),
+                route     = Screen.LinkResolver.route,
+                arguments = listOf(navArgument("url") { type = NavType.StringType }),
             ) { backStackEntry ->
-                val trackId = backStackEntry.arguments?.getString("id") ?: return@composable
-                TrackDeepLinkScreen(
-                    trackId            = trackId,
-                    playerViewModel    = playerVm,
-                    onNavigateToPlayer = {
-                        navController.navigate(Screen.Player.route) {
-                            popUpTo(Screen.TrackDeepLink.route) { inclusive = true }
-                            launchSingleTop = true
+                val encoded = backStackEntry.arguments?.getString("url") ?: return@composable
+                val rawUrl  = remember(encoded) { Screen.LinkResolver.decodeUrl(encoded) }
+                val vm = viewModel<LinkResolverViewModel>(
+                    factory = LinkResolverViewModelFactory(container)
+                )
+                fun handOff(route: String) {
+                    navController.navigate(route) {
+                        popUpTo(Screen.LinkResolver.route) { inclusive = true }
+                        launchSingleTop = true
+                    }
+                }
+                LinkResolverScreen(
+                    rawUrl          = rawUrl,
+                    viewModel       = vm,
+                    playerViewModel = playerVm,
+                    onOpenAlbum     = { albumId  -> handOff(Screen.AlbumDetail.createRoute(albumId)) },
+                    onOpenArtist    = { artistId -> handOff(Screen.ArtistDetail.createRoute(artistId)) },
+                    onOpenShow      = { showId   -> handOff(Screen.ShowDetail.createRoute(showId)) },
+                    // A playlist has no hosted destination — its track list lives INSIDE the
+                    // Library. Stash the id on the Library's own back-stack entry and pop back
+                    // to it; the Library block below picks it up and opens the playlist in place.
+                    // getBackStackEntry throws when the route isn't on the stack. The resolver is
+                    // only ever pushed on top of the Library, but a session-expired wipe could in
+                    // principle clear it mid-resolve, and an incoming link must never crash.
+                    onOpenPlaylist  = { playlistId ->
+                        runCatching {
+                            navController.getBackStackEntry(Screen.Library.route)
+                                .savedStateHandle[PENDING_PLAYLIST_KEY] = playlistId
                         }
+                        navController.popBackStack(Screen.LinkResolver.route, inclusive = true)
+                    },
+                    onOpenPlayer    = { handOff(Screen.Player.route) },
+                    // Nothing to open: the screen has already shown its toast, so just get out
+                    // of the way rather than leaving a spinner on screen.
+                    onUnsupported   = {
+                        navController.popBackStack(Screen.LinkResolver.route, inclusive = true)
                     },
                 )
             }
@@ -485,6 +580,18 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
     }
     } // CompositionLocalProvider
 }
+
+/**
+ * Key under which the link resolver stashes a deep-linked playlist id on the Library's own
+ * back-stack entry, for the Library destination to pick up once it is on top again. There is no
+ * hosted playlist-detail destination to navigate to — the track list lives inside LibraryScreen.
+ */
+private const val PENDING_PLAYLIST_KEY = "deeplink_playlist_id"
+
+/** How long a deep-linked playlist waits to show up in the user's library before Lyra reports it
+ *  as one it can't open. Reached only when the playlist genuinely isn't in the library (curated,
+ *  or followed by nobody) — a cached hit answers in well under a second. */
+private const val PENDING_PLAYLIST_TIMEOUT_MS = 10_000L
 
 /** Fixed width of the docked full-player pane (M3 recommends ~360–412dp for a fixed pane /
  *  side sheet; 380 keeps the portrait player comfortable on a ~1280dp tablet). */

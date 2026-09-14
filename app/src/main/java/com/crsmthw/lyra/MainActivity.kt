@@ -30,17 +30,26 @@ class MainActivity : ComponentActivity() {
     private val requestNotificationPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
-    // Warm-start deep link: set in onNewIntent, read by LyraNavGraph via handleDeepLink.
+    // The VIEW intent that brought us here, cold start or warm. LyraNavGraph funnels it into the
+    // link-resolver destination itself — no destination declares a navDeepLink any more, so
+    // NavHost's own automatic handleDeepLink on the launch intent has nothing to match.
     private var pendingDeepLinkIntent by mutableStateOf<Intent?>(null)
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        // launchMode is singleTop, so a link tapped while Lyra is alive arrives here rather than
+        // in a second instance. Keep getIntent() in step with what we are about to act on.
+        setIntent(intent)
         pendingDeepLinkIntent = intent
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
+        // Cold-start deep link — seeded only on a FRESH launch. On an Activity recreation the
+        // same VIEW intent is re-delivered, and re-firing it would push a second copy of the
+        // destination on top of the back stack Navigation has just restored.
+        if (savedInstanceState == null) pendingDeepLinkIntent = intent
         if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
