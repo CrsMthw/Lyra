@@ -632,8 +632,15 @@ fun PlayerPanelHost(
                     // scope that writes it also reads `visible`/`miniPlayerFullWidth`, so it can never
                     // be stale, and a `MutableState` write read in the same pass would schedule an
                     // extra recomposition (same reasoning as the Library's `PaneStateHolder`).
+                    //
+                    // The freeze exists for a ROUTE change mid-slide, NOT for a FOLD. Keyed on
+                    // `isWideScreen` so unfolding re-seeds it even while the bar is hidden:
+                    // without that, opening the full player folded and then unfolding left the
+                    // held value at the folded 1f, so backing out brought the bar in at full
+                    // width — art morphing to the far left — and only then shrank it to the
+                    // right pane's 0.58f (device report 45).
                     val widthTarget = if (isWideScreen && !miniPlayerFullWidth) 0.58f else 1f
-                    val heldWidth   = remember { MiniWidthHolder(widthTarget) }
+                    val heldWidth   = remember(isWideScreen) { MiniWidthHolder(widthTarget) }
                     if (visible) heldWidth.value = widthTarget
                     val miniWidthFraction by animateFloatAsState(
                         targetValue   = heldWidth.value,
