@@ -25,6 +25,17 @@ data class PlayerState(
     val durationMs            : Long           = 0L,
     val shuffleEnabled        : Boolean        = false,
     val repeatState           : String         = "off",
+    /**
+     * Does the current playback have a CONTEXT (playlist / album / artist / show), as opposed to a
+     * bare `uris` list? `QueueViewModel` needs it because `me/player/queue` echoes the playing item
+     * back as the queue head only in the context-less case.
+     *
+     * Unlike [repeatState] it has no optimistic lock of its own — nothing in the app mutates it
+     * locally — but it DOES follow the mid-transfer track lock: `item` and `context` go null
+     * together while Spotify switches devices, and taking it raw there would read "no context" for
+     * a poll window while [currentTrack] is still held at the previous track.
+     */
+    val hasContext            : Boolean        = false,
     val sleepTimerMinutes     : Int            = 0,
     val sleepTimerTotalMinutes: Int            = 0,
     val currentDevice         : SpotifyDevice? = null,
@@ -93,6 +104,9 @@ class PlayerStateManager(
                             durationMs     = if (lockingTransfer) it.durationMs else (response.item?.durationMs ?: it.durationMs),
                             shuffleEnabled = if (now < shuffleLockUntil) it.shuffleEnabled else response.shuffleState,
                             repeatState    = if (now < repeatLockUntil) it.repeatState else response.repeatState,
+                            // Locked with the TRACK, not on a lock of its own: `context` goes null
+                            // alongside `item` mid-transfer, and the queue's echo drop reads this.
+                            hasContext     = if (lockingTransfer) it.hasContext else response.context != null,
                             currentDevice  = response.device,
                         )
                     }

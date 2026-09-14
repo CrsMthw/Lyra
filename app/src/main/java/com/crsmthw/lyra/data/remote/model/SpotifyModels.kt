@@ -218,6 +218,16 @@ data class PlayerStateResponse(
     @SerializedName("shuffle_state")      val shuffleState : Boolean,
     @SerializedName("repeat_state")       val repeatState  : String,  // "off"|"context"|"track"
     val device         : SpotifyDevice?,
+    /**
+     * The playback CONTEXT — playlist / album / artist / show — or null when playback was started
+     * from a bare `uris` list (a single track tapped in Search, a one-episode show). Reuses
+     * [PlayHistoryContext]: same shape, already Gson-serialized, so no new keep rule.
+     *
+     * Read by `QueueViewModel` via `PlayerState.hasContext`: `me/player/queue` echoes the current
+     * item as the queue HEAD only for a context-less single-`uris` play, so the echo drop is gated
+     * on the context being absent (docs/SPOTIFY.md → Podcast shows → `additional_types`).
+     */
+    val context        : PlayHistoryContext? = null,
 )
 
 data class SpotifyDevice(
