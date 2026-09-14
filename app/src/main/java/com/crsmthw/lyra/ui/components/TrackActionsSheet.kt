@@ -57,7 +57,15 @@ import com.crsmthw.lyra.util.toggle
  * **Every action that closes the sheet goes through [LocalSheetDismissal]**, whose `then` runs once
  * the sheet is down: the sheet slides away, *then* the screen navigates / removes / shares. Calling
  * `controller.dismiss()` from a row instead would null the target in the same frame, dropping the
- * sheet's window out of composition with no hide animation at all.
+ * sheet's window out of composition with no hide animation at all. The three rows that do NOT
+ * close the sheet (Add to playlist — a sheet swap — plus Add to queue and the like toggle, which
+ * act in place) are instead gated on `!dismissal.isHiding`, because a row acting mid-hide bypasses
+ * that handle's latch as well as its animation.
+ *
+ * Residual worth knowing: a user drag that cancels a programmatic hide and springs the sheet back
+ * to Expanded re-enables every row, but `LaunchedEffect(queueResult)` does not re-fire, so after a
+ * successful "Add to queue" the sheet simply stays open with that row still inert. Benign, and far
+ * better than the alternative — before the cancellation fix the whole sheet went inert.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -166,13 +174,23 @@ fun TrackActionsHost(
         }
         HorizontalDivider(modifier = Modifier.padding(top = 8.dp))
 
-        // Deliberately NOT routed through `dismissal`: this is a sheet swap, not a dismissal. The
-        // picker still needs `state.target`, which onDismissRequest (controller::dismiss) clears,
-        // so the two sheets keep exchanging places in one frame — the incoming picker's own
-        // entrance covers the swap, and the scrim never drops.
+        // The three rows below act WITHOUT going through `dismissal`, so they bypass its one-hide
+        // latch as well as its animation — hence `!dismissal.isHiding` on each. The rows stay on
+        // screen and tappable for the whole hide, so a tap there acts on a sheet already on its way
+        // out. Rows that DO go through `dismissal.dismiss` need no gate: the latch makes a second
+        // tap a no-op.
+        //
+        // Add to playlist is deliberately NOT routed through `dismissal`: it is a sheet SWAP, not a
+        // dismissal. The picker still needs `state.target`, which onDismissRequest
+        // (controller::dismiss) clears, so the two sheets keep exchanging places in one frame — the
+        // incoming picker's own entrance covers the swap, and the scrim never drops. That swap is
+        // also the row that actually broke: tapping it mid-hide disposed THIS sheet and cancelled
+        // the hide job, whose completion handler then cleared the picker state before the picker
+        // had rendered (fixed on both ends — see [SheetDismissal]).
         ActionItem(
-            icon = Icons.Default.LibraryAdd,
-            text = stringResource(R.string.player_add_to_playlist),
+            icon    = Icons.Default.LibraryAdd,
+            text    = stringResource(R.string.player_add_to_playlist),
+            enabled = !dismissal.isHiding,
             onClick = controller::openPlaylistPicker,
         )
 
@@ -181,7 +199,7 @@ fun TrackActionsHost(
             text    = stringResource(R.string.track_action_add_to_queue),
             // Also inert once the result has landed: the row now stays on screen for the length of
             // the hide animation, and a second tap there would queue the track twice.
-            enabled = !state.isQueueing && queueResult == null,
+            enabled = !state.isQueueing && queueResult == null && !dismissal.isHiding,
             onClick = controller::addToQueue,
         )
 
@@ -189,7 +207,8 @@ fun TrackActionsHost(
         ActionItem(
             icon    = if (liked == true) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
             text    = stringResource(if (liked == true) R.string.track_action_unlike else R.string.track_action_like),
-            enabled = liked != null,          // wait for isTrackSaved to resolve before allowing a toggle
+            // `liked != null` waits for isTrackSaved to resolve before allowing a toggle.
+            enabled = liked != null && !dismissal.isHiding,
             onClick = { haptics.toggle(liked != true); controller.toggleLike() }, // optimistic; label flips in place
         )
 

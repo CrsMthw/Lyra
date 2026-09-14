@@ -164,6 +164,11 @@ private enum class PlayerSurface { None, Bar, Panel }
  * handler's own lambda: `PredictiveBackHandler` CANCELS that lambda's job on a cancelled gesture
  * (`ComposePredictiveBackHandler.onBackCancelled` → `activeJob?.cancel()`), so an unwind animation
  * written there would never run.
+ *
+ * `Committing` has TWO exits, and the second one is not optional: the phase parks the effect while
+ * the panel is still what the app wants (waiting for `closePanel()` to be read back), but a
+ * re-OPEN during the committed close must drop the phase so the reversal can play — see the branch
+ * itself for why an unhandled re-open froze both surfaces mid-slide behind a live scrim.
  */
 private enum class PanelBackPhase { Idle, Seeking, Committing, Cancelled }
 
@@ -453,6 +458,28 @@ fun PlayerPanelHost(
                 // `targetState`, so `animateTo` finds it unchanged and plays only the remainder.
                 PanelBackPhase.Committing -> if (surfaceTarget != PlayerSurface.Panel) {
                     surfaceState.animateTo(surfaceTarget)
+                    panelBack = PanelBackPhase.Idle
+                } else {
+                    // `Panel` HERE means the user RE-OPENED it during the ~300 ms close (a tap on
+                    // the rising mini player, or a track tap on a hosted screen — both are
+                    // `onRequestPlayer`). It cannot mean "the close hasn't landed yet":
+                    // `Committing` and `closePanel()` are written in the SAME dispatch, so a
+                    // composition that sees this phase has already seen the close.
+                    //
+                    // Dropping the phase is the whole fix — it hands the reversal to `Idle` below,
+                    // which is the path the panel's close BUTTON already takes. Mid-`animateTo` the
+                    // re-open re-keys this effect and CANCELS it, and `animateTo` assigns
+                    // `currentState` only AFTER `runAnimations()` (Transition.kt), so
+                    // `currentState` never left `Panel` while the seek's `targetState` is `Bar`:
+                    // `Idle`'s `targetState != surfaceTarget` arm unwinds the exit back into the
+                    // panel. In the trailing-`waitForComposition()` variant (the motion finished,
+                    // `currentState == targetState == Bar`) `Idle`'s `currentState != surfaceTarget`
+                    // arm animates the panel in again. Without this arm the phase stayed
+                    // `Committing` for good and nothing ever drove the transition again: bar and
+                    // panel frozen mid-slide, `scrimAlpha` frozen part-way, and — because
+                    // `panelVisible` is true again — the scrim composed WITH its `clickable`, i.e.
+                    // a permanent half-opacity tap sink over the browse screen with
+                    // `LocalPopOutPanelOpen` true, so every hosted back handler yielded to it.
                     panelBack = PanelBackPhase.Idle
                 }
                 // Released without committing: unwind, leaving the panel open.
