@@ -123,6 +123,9 @@ private fun rememberMatchWhenConfig(enabled: Boolean): SharedTransitionScope.Sha
 /** Non-snapshot cell for the mini player's last on-screen width fraction — see its use site. */
 private class MiniWidthHolder(var value: Float)
 
+/** Non-snapshot cell for the last browse surface the panel was seen over — see its use site. */
+private class SurfaceKeyHolder(var value: String?)
+
 @Composable
 fun PlayerPanelHost(
     playerViewModel         : PlayerViewModel,
@@ -137,6 +140,18 @@ fun PlayerPanelHost(
      * right answer when there is no entry below, i.e. when back leaves the app.
      */
     visibleAfterBack        : Boolean = visible,
+    /**
+     * Identity of the browse surface currently on screen — `NavBackStackEntry.id`, which is stable
+     * for the life of an entry and is itself saved/restored across process death
+     * (`NavBackStackEntryStateImpl` persists it and hands it back to `NavBackStackEntry.create`).
+     *
+     * The pop-out panel is scoped to the entry it was OPENED over: `visible` alone only says
+     * whether the current ROUTE shows the surface, so a panel opened on the Library used to re-open
+     * itself, scrim and all, over any browse screen the user later reached — including one they
+     * navigated FORWARD into (panel → full-screen → tap an artist name → the panel slides in over
+     * the artist screen). Null (the default) keeps the pre-2026-09-14 behaviour.
+     */
+    surfaceKey              : String? = null,
     miniPlayerFullWidth     : Boolean = false,
     navSharedTransitionScope: SharedTransitionScope? = null,
     content                 : @Composable (onRequestPlayer: () -> Unit) -> Unit,
@@ -172,14 +187,58 @@ fun PlayerPanelHost(
     // process death / Activity recreation like any other user-visible UI state.
     var showPlayerPanel by rememberSaveable { mutableStateOf(false) }
 
-    // …and its presence ON SCREEN, which the route also gates: navigating into Settings or the full
-    // player must not leave the panel floating over them. It is HIDDEN, not closed — `showPlayerPanel`
-    // is untouched, so coming back restores it, and on the push to PlayerScreen the exiting panel is
-    // the "album-art" EXIT participant the big art morphs out of (and the ENTER participant on the
-    // way back). `canShowPanel` is in it so the panel — and with it `LocalPopOutPanelOpen`, the
-    // scrim and this host's BackHandler — is structurally false wherever the panel is not composed
-    // at all, which now includes the extra-wide docked-pane width.
-    val panelVisible = showPlayerPanel && visible && canShowPanel
+    // …and WHICH browse surface that intent belongs to. `showPlayerPanel` is one app-wide flag, and
+    // the route only ever HID the panel, so it re-opened with its 0.45 scrim over any browse screen
+    // the user later reached — including one navigated FORWARD into: panel open on the Library → its
+    // full-screen button pushes Player → tap an artist name → ArtistDetail is a surface route, so
+    // the panel and scrim slid in over the screen the user had just opened. Scoping the intent to
+    // the back-stack ENTRY it was opened over fixes that without clearing the flag on `!visible` —
+    // which must not happen, because the push to Player is exactly the push where the exiting panel
+    // has to survive as the "album-art" EXIT participant.
+    var panelOwnerKey by rememberSaveable { mutableStateOf<String?>(null) }
+
+    // The owner is compared against a FROZEN copy of `surfaceKey`: while `visible` is false the
+    // current entry is Player/Queue/Settings, and taking those as "a different surface" would read
+    // the push to the full player as a change of owner and kill the panel mid-morph. Frozen means
+    // the last surface entry the panel was actually seen over. Assigned DURING composition and
+    // deliberately not snapshot-backed (the `MiniWidthHolder` / `PaneStateHolder` idiom): the scope
+    // that writes it also reads `visible`, so it can never be stale, and a `MutableState` written
+    // and read in the same pass would schedule an extra recomposition.
+    val surfaceOwner = remember { SurfaceKeyHolder(surfaceKey) }
+    if (visible) surfaceOwner.value = surfaceKey
+
+    // ONE ownership value, feeding BOTH consumers below. A null owner behaves exactly as the code
+    // did before this existed, so a saveable lost to a restore can never strand a panel nobody can
+    // reach.
+    val panelOwned = showPlayerPanel && (panelOwnerKey == null || surfaceOwner.value == panelOwnerKey)
+
+    /** The one way the panel closes for good: intent and its owner are cleared together. */
+    fun closePanel() {
+        showPlayerPanel = false
+        panelOwnerKey   = null
+    }
+
+    // Ownership is not something the user can navigate back INTO: once the panel has been left
+    // behind on another surface, returning to the original entry must not resurrect it. Keyed on
+    // the frozen value, which is safe DESPITE it not being snapshot-backed: the only write to it is
+    // the line above, inside this composable's own body, so any pass that changes it is by
+    // definition a recomposition of this host — and this key is re-read on that same pass. A push
+    // to Player/Queue does not write it at all, so it never triggers there.
+    LaunchedEffect(surfaceOwner.value) {
+        if (panelOwnerKey != null && surfaceOwner.value != panelOwnerKey) closePanel()
+    }
+
+    // …and the panel's presence ON SCREEN, which the route also gates: navigating into Settings or
+    // the full player must not leave the panel floating over them. It is HIDDEN, not closed —
+    // `showPlayerPanel` is untouched, so coming back restores it, and on the push to PlayerScreen
+    // the exiting panel is the "album-art" EXIT participant the big art morphs out of (and the
+    // ENTER participant on the way back). `currentBackStackEntryAsState` flips at the start of a
+    // push and of a COMMITTED pop and is stable during a predictive gesture, so on the pop back off
+    // Player the id matches again on the same frame `visible` does — the morph timing is unchanged.
+    // `canShowPanel` is in it so the panel — and with it `LocalPopOutPanelOpen`, the scrim and this
+    // host's BackHandler — is structurally false wherever the panel is not composed at all, which
+    // now includes the extra-wide docked-pane width.
+    val panelVisible = panelOwned && visible && canShowPanel
 
     // Single source of truth for the pop-out panel's presence on screen. Drives both the panel's
     // own AnimatedVisibility (so the gate below reads the SAME animation that's rendering) and the
@@ -207,10 +266,14 @@ fun PlayerPanelHost(
 
     // `barWanted` is everything about the bar that does NOT depend on the route, so the same
     // expression can be evaluated for the current route and for the one a back would land on.
-    // `!showPlayerPanel` is in it because on a wide screen with the pop-out OPEN the panel — not the
+    // `!panelOwned` is in it because on a wide screen with the pop-out OPEN the panel — not the
     // bar — is the "album-art" partner `PlayerScreen`'s art pops back into; a bar that seeked in
     // during the drag would have to slide straight back out at commit as the panel arrived.
-    val barWanted   = hasTrack && !showPlayerPanel
+    // It MUST be the same `panelOwned` that feeds `panelVisible`, never the raw `showPlayerPanel`:
+    // on a surface the panel does not own, the panel is gone and the bar is what the user gets —
+    // the two values diverging would leave `barWanted` false there and the mini player would simply
+    // vanish for the rest of the session.
+    val barWanted   = hasTrack && !panelOwned
     val showBar     = barWanted && visible
     val barAfterBack = barWanted && visibleAfterBack  // what a committed back would make it
     // On extra-wide the bar is simply not composed (the whole `SharedTransitionLayout` below is
@@ -309,7 +372,7 @@ fun PlayerPanelHost(
     // pane's territory. Both are the same statement: the pop-out cannot be composed here, so the
     // user's intent to have it open is spent. The docked pane is the player at that width.
     LaunchedEffect(canShowPanel) {
-        if (!canShowPanel) showPlayerPanel = false
+        if (!canShowPanel) closePanel()
     }
 
     val scrimAlpha by animateFloatAsState(
@@ -332,6 +395,10 @@ fun PlayerPanelHost(
             focusManager.clearFocus(force = true)
             keyboard?.hide()
             showPlayerPanel = true
+            // The surface this intent belongs to. The PARAMETER, not the frozen holder — they are
+            // equal while `visible` (and a tap can only arrive from a visible surface), but the
+            // parameter is the one that is obviously right at click time.
+            panelOwnerKey   = surfaceKey
         } else onOpenPlayer()
     }
 
@@ -360,14 +427,20 @@ fun PlayerPanelHost(
             // swallowed every tap aimed at the library underneath for the whole 300ms fade — long after
             // it was visually gone (~4% opacity by 250ms). With no pointer input at all, the fading
             // Box is just a draw modifier and taps reach the content behind it immediately.
-            if (scrimAlpha > 0f) {
+            //
+            // `visible &&` is a cosmetic rider on the same idea: the fade-out tween outlives the
+            // route flip, so on a push to PlayerScreen the dimming wash would otherwise be drawn
+            // over the INCOMING player for ~300ms. Gating the draw on the route trades that for the
+            // outgoing browse screen losing its dim abruptly rather than fading — the better of the
+            // two, since the outgoing screen is sliding out under it anyway.
+            if (visible && scrimAlpha > 0f) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(Color.Black.copy(alpha = scrimAlpha))
                         .then(
                             if (panelVisible)
-                                Modifier.clickable { haptics.confirm(); showPlayerPanel = false }
+                                Modifier.clickable { haptics.confirm(); closePanel() }
                             else Modifier
                         )
                 )
@@ -510,7 +583,7 @@ fun PlayerPanelHost(
                         PlayerPopOutPanel(
                             panelTransition            = panelTransition,
                             playerViewModel            = playerViewModel,
-                            onClose                    = { showPlayerPanel = false },
+                            onClose                    = { closePanel() },
                             onFullScreen               = onOpenPlayer,
                             onOpenQueue                = onOpenQueue,
                             localSharedTransitionScope = this@SharedTransitionLayout,
@@ -546,6 +619,6 @@ fun PlayerPanelHost(
         // untouched. That includes the extra-wide width, where this now registers (it did not
         // before the early return was removed) but `panelVisible` is structurally false, so it
         // always yields — and `DockedPlayerPane`'s own handler is composed after this host anyway.
-        BackHandler(enabled = panelVisible) { showPlayerPanel = false }
+        BackHandler(enabled = panelVisible) { closePanel() }
     }
 }

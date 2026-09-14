@@ -291,7 +291,12 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
     // Read from `currentBackStackEntryAsState()`, which flips at the START of a push and of a
     // committed pop, so the bar exits while PlayerScreen enters and enters while it exits — the two
     // roles the "album-art" morph needs.
-    val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route
+    // The ENTRY, not just its route: its `id` is the identity `PlayerPanelHost` scopes the pop-out
+    // panel to, so a panel opened over the Library does not re-open itself over whatever browse
+    // screen the user reaches next (including one navigated FORWARD into). Same state read, so the
+    // route and the key can never be a frame apart.
+    val currentEntry = navController.currentBackStackEntryAsState().value
+    val currentRoute = currentEntry?.destination?.route
     val showsPlayerSurface = routeShowsPlayerSurface(currentRoute)
     // The SAME predicate for the entry a back would land on, so `PlayerPanelHost` can seek the mini
     // player in with a back GESTURE rather than dropping it in at commit (the committed flip above
@@ -325,6 +330,7 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
             onOpenQueue              = { safePush(Screen.Queue.route) },
             visible                  = showsPlayerSurface,
             visibleAfterBack         = showsPlayerSurfaceAfterBack,
+            surfaceKey               = currentEntry?.id,
             miniPlayerFullWidth      = miniFullWidth,
             navSharedTransitionScope = this@SharedTransitionLayout,
             modifier                 = Modifier.weight(1f).fillMaxHeight(),
