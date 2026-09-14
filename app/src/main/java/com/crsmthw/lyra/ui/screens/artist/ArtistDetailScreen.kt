@@ -1,8 +1,5 @@
 package com.crsmthw.lyra.ui.screens.artist
 
-import androidx.compose.animation.AnimatedContentScope
-import androidx.compose.animation.ExperimentalSharedTransitionApi
-import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -42,7 +39,6 @@ import coil3.compose.AsyncImage
 import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.remote.model.SpotifyAlbum
 import com.crsmthw.lyra.ui.components.DetailArtHero
-import com.crsmthw.lyra.ui.components.PlayerPanelHost
 import com.crsmthw.lyra.ui.components.TitlePill
 import com.crsmthw.lyra.ui.components.TopActionPill
 import com.crsmthw.lyra.ui.components.TopPillHeight
@@ -57,17 +53,13 @@ import com.crsmthw.lyra.util.toggle
 import com.crsmthw.lyra.util.visualizer.FftWaveCanvas
 import com.crsmthw.lyra.util.visualizer.LocalVisualizerAccentColor
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class, ExperimentalSharedTransitionApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun ArtistDetailScreen(
     viewModel             : ArtistDetailViewModel,
     playerViewModel       : PlayerViewModel,
     onBack                : () -> Unit,
     onOpenAlbum           : (albumId: String) -> Unit,
-    onOpenPlayer          : () -> Unit = {},
-    onOpenQueue           : () -> Unit = {},
-    sharedTransitionScope : SharedTransitionScope? = null,
-    animatedContentScope  : AnimatedContentScope? = null,
 ) {
     val state         by viewModel.uiState.collectAsStateWithLifecycle()
     val context        = LocalContext.current
@@ -79,13 +71,6 @@ fun ArtistDetailScreen(
     val background     = MaterialTheme.colorScheme.background
     val isWideScreen   = currentWindowAdaptiveInfoV2().windowSizeClass.isWidthAtLeastBreakpoint(600)
 
-    PlayerPanelHost(
-        playerViewModel          = playerViewModel,
-        onOpenPlayer             = onOpenPlayer,
-        onOpenQueue              = onOpenQueue,
-        navSharedTransitionScope = sharedTransitionScope,
-        navAnimatedContentScope  = animatedContentScope,
-    ) { _ ->
     Scaffold(
         contentWindowInsets = WindowInsets(0),
         // No top app bar in either configuration — both single- and two-pane float their own back /
@@ -387,7 +372,6 @@ fun ArtistDetailScreen(
             }
         }
     }
-    } // PlayerPanelHost
 }
 
 private fun LazyListScope.artistContent(

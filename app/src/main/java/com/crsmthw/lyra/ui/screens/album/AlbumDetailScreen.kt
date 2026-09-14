@@ -1,8 +1,5 @@
 package com.crsmthw.lyra.ui.screens.album
 
-import androidx.compose.animation.AnimatedContentScope
-import androidx.compose.animation.ExperimentalSharedTransitionApi
-import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -44,7 +41,6 @@ import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.remote.model.AlbumTrack
 import com.crsmthw.lyra.data.remote.model.SpotifyAlbumFull
 import com.crsmthw.lyra.ui.components.DetailArtHero
-import com.crsmthw.lyra.ui.components.PlayerPanelHost
 import com.crsmthw.lyra.ui.components.TitlePill
 import com.crsmthw.lyra.ui.components.TopActionPill
 import com.crsmthw.lyra.ui.components.TopPillHeight
@@ -64,17 +60,14 @@ import com.crsmthw.lyra.util.toTimeString
 import com.crsmthw.lyra.util.visualizer.FftWaveCanvas
 import com.crsmthw.lyra.util.visualizer.LocalVisualizerAccentColor
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class, ExperimentalSharedTransitionApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun AlbumDetailScreen(
     viewModel             : AlbumDetailViewModel,
     playerViewModel       : PlayerViewModel,
     onBack                : () -> Unit,
     onNavigateToPlayer    : () -> Unit,
-    onOpenQueue           : () -> Unit = {},
     onOpenArtist          : ((artistId: String) -> Unit)? = null,
-    sharedTransitionScope : SharedTransitionScope? = null,
-    animatedContentScope  : AnimatedContentScope? = null,
 ) {
     val state         by viewModel.uiState.collectAsStateWithLifecycle()
     val context        = LocalContext.current
@@ -86,13 +79,6 @@ fun AlbumDetailScreen(
     val background     = MaterialTheme.colorScheme.background
     val isWideScreen   = currentWindowAdaptiveInfoV2().windowSizeClass.isWidthAtLeastBreakpoint(600)
 
-    PlayerPanelHost(
-        playerViewModel          = playerViewModel,
-        onOpenPlayer             = onNavigateToPlayer,
-        onOpenQueue              = onOpenQueue,
-        navSharedTransitionScope = sharedTransitionScope,
-        navAnimatedContentScope  = animatedContentScope,
-    ) { onRequestPlayer ->
     Scaffold(
         contentWindowInsets = WindowInsets(0),
         // No top app bar in either configuration — both single- and two-pane float their own back /
@@ -121,12 +107,12 @@ fun AlbumDetailScreen(
                     if (tracks.isNotEmpty()) {
                         haptics.press()
                         playerViewModel.playTrack(uri = tracks[0].uri, contextUri = albumUri, index = 0)
-                        onRequestPlayer()
+                        onNavigateToPlayer()
                     }
                 }
                 val onPlayTrack = { track: AlbumTrack, idx: Int ->
                     playerViewModel.playTrack(uri = track.uri, contextUri = albumUri, index = idx)
-                    onRequestPlayer()
+                    onNavigateToPlayer()
                 }
                 val onTrackLongPress = { track: AlbumTrack ->
                     viewModel.trackActions.open(track.toTrackActionTarget(album))
@@ -203,7 +189,7 @@ fun AlbumDetailScreen(
                                             onShuffle  = {
                                                 haptics.press()
                                                 playerViewModel.shuffleContext(albumUri)
-                                                onRequestPlayer()
+                                                onNavigateToPlayer()
                                             },
                                             artContent = albumArt,
                                         )
@@ -322,7 +308,7 @@ fun AlbumDetailScreen(
                                     onShuffle  = {
                                         haptics.press()
                                         playerViewModel.shuffleContext(albumUri)
-                                        onRequestPlayer()
+                                        onNavigateToPlayer()
                                     },
                                     artContent = albumArt,
                                 )
@@ -423,7 +409,6 @@ fun AlbumDetailScreen(
             }
         }
     }
-    } // PlayerPanelHost
 
     TrackActionsHost(
         controller   = viewModel.trackActions,

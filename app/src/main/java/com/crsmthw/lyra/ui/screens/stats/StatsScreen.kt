@@ -1,8 +1,5 @@
 package com.crsmthw.lyra.ui.screens.stats
 
-import androidx.compose.animation.AnimatedContentScope
-import androidx.compose.animation.ExperimentalSharedTransitionApi
-import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -41,7 +38,6 @@ import com.crsmthw.lyra.data.remote.model.SpotifyArtist
 import com.crsmthw.lyra.data.remote.model.SpotifyTrack
 import com.crsmthw.lyra.ui.components.ConnectedChoiceRow
 import com.crsmthw.lyra.ui.components.HeroBandHeight
-import com.crsmthw.lyra.ui.components.PlayerPanelHost
 import com.crsmthw.lyra.ui.components.TitlePill
 import com.crsmthw.lyra.ui.components.TopActionPill
 import com.crsmthw.lyra.ui.components.TopScrim
@@ -60,35 +56,23 @@ import com.crsmthw.lyra.util.press
  * `/me/top/{type}`, with a connected time-range picker (4 weeks / 6 months / all time).
  * Same OneUI floating-controls chrome as Queue: hero title + TopScrim + back/title pills.
  *
- * Wrapped in [PlayerPanelHost] like Library/Album/Artist, so playing a top track puts the floating
- * mini player (or the pop-out panel on a wide screen) right here instead of forcing a trip back.
+ * The floating mini player is NOT this screen's to render — it is hosted app-wide by
+ * `LyraNavGraph` around the whole `NavHost` (since 2026-09-13), so playing a top track simply
+ * lights up the bar that is already on screen. This screen only owes it the 100dp of bottom list
+ * clearance below.
  */
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class,
-       ExperimentalSharedTransitionApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun StatsScreen(
     viewModel             : StatsViewModel,
     playerViewModel       : PlayerViewModel,
     onBack                : () -> Unit,
-    onOpenPlayer          : () -> Unit = {},
-    onOpenQueue           : () -> Unit = {},
     onOpenAlbum           : (String) -> Unit = {},
     onOpenArtist          : (String) -> Unit = {},
-    sharedTransitionScope : SharedTransitionScope? = null,
-    animatedContentScope  : AnimatedContentScope? = null,
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val haptics = LocalHapticFeedback.current
 
-    PlayerPanelHost(
-        playerViewModel          = playerViewModel,
-        onOpenPlayer             = onOpenPlayer,
-        onOpenQueue              = onOpenQueue,
-        // A single full-width list at every width — there is no right pane for a 58% bar to align to.
-        miniPlayerFullWidth      = true,
-        navSharedTransitionScope = sharedTransitionScope,
-        navAnimatedContentScope  = animatedContentScope,
-    ) { _ ->
     Scaffold(
         contentWindowInsets = WindowInsets(0),
     ) { paddingValues ->
@@ -287,7 +271,6 @@ fun StatsScreen(
             }
         }
     }
-    } // PlayerPanelHost
 
     TrackActionsHost(
         controller   = viewModel.trackActions,

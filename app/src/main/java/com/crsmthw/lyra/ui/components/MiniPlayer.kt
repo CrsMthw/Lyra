@@ -62,15 +62,18 @@ fun MiniPlayer(
     visible               : Boolean = true,
     accentColor             : Color = Color.Unspecified,
     surfaceAccentColor      : Color = Color.Unspecified,
+    // The bar's OWN AnimatedVisibility below is the AnimatedVisibilityScope for BOTH registrations.
+    // The mini player is hosted outside every nav destination (see PlayerPanelHost), so there is no
+    // AnimatedContentScope to borrow — and its own show/hide IS the enter/exit that the nav-level
+    // "album-art" morph rides on. Only the SharedTransitionScopes differ, and a key is matched per
+    // scope, so registering the same key in two of them from one AnimatedVisibilityScope is fine.
     sharedTransitionScope      : SharedTransitionScope? = null,
-    animatedVisibilityScope    : AnimatedVisibilityScope? = null,
-    // Each scope pair gets its own SharedContentConfig, so the caller can leave the modifier in
-    // place for the composable's whole life and still say WHICH transitions the "album-art" element
-    // may match across — see PlayerPanelHost's rememberMatchWhenConfig.
+    // Each scope gets its own SharedContentConfig, so the caller can leave the modifier in place
+    // for the composable's whole life and still say WHICH transitions the "album-art" element may
+    // match across — see PlayerPanelHost's rememberMatchWhenConfig.
     sharedContentConfig        : SharedTransitionScope.SharedContentConfig = SharedTransitionDefaults.SharedContentConfig,
     // Secondary scope — used when both local (mini↔panel) and nav (mini↔PlayerScreen) are needed.
     navSharedTransitionScope   : SharedTransitionScope? = null,
-    navAnimatedVisibilityScope : AnimatedVisibilityScope? = null,
     navSharedContentConfig     : SharedTransitionScope.SharedContentConfig = SharedTransitionDefaults.SharedContentConfig,
 ) {
     val haptics               = LocalHapticFeedback.current
@@ -85,8 +88,7 @@ fun MiniPlayer(
         exit     = slideOutVertically(miniSlideSpec) { it + navBarPx },
         modifier = modifier,
     ) {
-        // Use inner scope when no external scope is provided (two-pane case).
-        val effectiveScope: AnimatedVisibilityScope = animatedVisibilityScope ?: this
+        val effectiveScope: AnimatedVisibilityScope = this
         currentTrack ?: return@AnimatedVisibility
 
         val shape   = RoundedCornerShape(20.dp)
@@ -119,11 +121,11 @@ fun MiniPlayer(
                         )
                     }
                 } else Modifier
-                val navArtModifier = if (navSharedTransitionScope != null && navAnimatedVisibilityScope != null) {
+                val navArtModifier = if (navSharedTransitionScope != null) {
                     with(navSharedTransitionScope) {
                         Modifier.sharedElement(
                             sharedContentState      = rememberSharedContentState("album-art", navSharedContentConfig),
-                            animatedVisibilityScope = navAnimatedVisibilityScope,
+                            animatedVisibilityScope = effectiveScope,
                             boundsTransform         = rememberArtBoundsTransform(),
                         )
                     }
