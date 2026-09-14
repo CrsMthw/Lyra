@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Podcasts
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -120,16 +121,29 @@ fun SearchScreen(
     // live field text. (The other half of that inheritance — an immediate page-2 fetch — is closed
     // by the stale-layout guard inside `SearchResultsList`, not here.)
     //
+    // A CHANGE of that query, not merely an entry. `LaunchedEffect(state.resultsQuery)` runs again
+    // every time the screen is composed, and popping back from Album/Artist/Show detail composes
+    // Search afresh against the SAME ViewModel — same `resultsQuery`, four `LazyListState`s just
+    // restored to where the user left them — so an unguarded reset threw all four away and dumped
+    // them at the top of the list they had just come back from (device pass 2026-09-13). The guard
+    // is `rememberSaveable`, never a plain `remember`: it has to survive the same save/restore that
+    // brings the scroll offsets back, or a re-entry would read it fresh and reset anyway. `null` is
+    // the sentinel rather than "" so "no reset has run in this instance" stays distinguishable from
+    // "the reset ran for a cleared field". A query typed after returning is a genuine change and
+    // still resets all four.
+    //
     // `requestScrollToItem`, NOT the suspending `scrollToItem`, for the same reason the pager effect
     // below uses `requestScrollToPage`: `LazyListState.scroll` waits for that list's FIRST layout
     // before doing anything, and only the settled page is composed (`beyondViewportPageCount = 0`),
     // so a tab that has never been laid out in this composition blocks forever — and blocks every
-    // call after it in this one coroutine. Reachable on an ordinary pop back into Search: the
-    // saveable-backed states restore a non-zero offset into brand-new, never-measured objects, so a
-    // restored Albums tab kept the previous query's offset because the Tracks reset above it never
-    // returned. The request form writes the position synchronously and schedules the remeasure, for
-    // composed and uncomposed tabs alike.
+    // call after it in this one coroutine. A genuine new query is exactly that case: the three tabs
+    // the user is not on have not been measured for these results, so the suspending form would
+    // park on the first of them and leave the rest holding the previous query's offset. The request
+    // form writes the position synchronously and schedules the remeasure, composed or not.
+    var lastResetQuery by rememberSaveable { mutableStateOf<String?>(null) }
     LaunchedEffect(state.resultsQuery) {
+        if (state.resultsQuery == lastResetQuery) return@LaunchedEffect
+        lastResetQuery = state.resultsQuery
         tracksListState.requestScrollToItem(0)
         albumsListState.requestScrollToItem(0)
         artistsListState.requestScrollToItem(0)
