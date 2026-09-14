@@ -341,6 +341,32 @@ internal fun LibraryBrowserPane(
         // (e.g. rotating portrait → folded landscape) would draw the small bar shifted up and
         // clipped. Separate `if` branches are separate composition groups, so each keeps its own.
         val scrollBehavior = if (useLargeBar) {
+            // ENTRY RESET — a collapsed bar over a list that is AT THE TOP is a state the behaviour
+            // cannot produce itself, and cannot get out of either: `ExitUntilCollapsedScrollBehavior`
+            // re-expands only from the leftover of a downward scroll, which a list already at offset
+            // 0 never produces. It can be ARRIVED at, though, because `rememberTopAppBarState` is
+            // `rememberSaveable` and the compact branch below keeps its own state: collapse the bar
+            // in portrait, rotate to the short pane (a pinned bar, which never writes `heightOffset`),
+            // rotate back, and the large branch re-enters with the stale collapsed offset — over a
+            // list the compact pane may well have scrolled back to the top.
+            //
+            // So clear it whenever this branch (re)enters composition with the list at the top.
+            // `remember`, not a `LaunchedEffect`: this runs BEFORE the bar composes, so there is no
+            // frame of a shifted bar, and it is the same "assign during composition" idiom as the
+            // Library's `PaneStateHolder` (docs/MOTION.md). It is keyed on [barState] so a new
+            // hoisted instance re-arms it.
+            //
+            // It therefore also runs on every ordinary re-entry of this pane (the single-pane
+            // browser is disposed whenever a detail opens). That is SAFE ONLY because of the guard,
+            // which is exactly the impossible-state test — with the list restored part-way down, the
+            // guard is false and the restored collapse the hoisting exists to preserve is untouched.
+            // Do not narrow the guard to a rotation.
+            remember(barState) {
+                if (listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0) {
+                    barState.heightOffset  = 0f
+                    barState.contentOffset = 0f
+                }
+            }
             TopAppBarDefaults.exitUntilCollapsedScrollBehavior(state = barState)
         } else {
             TopAppBarDefaults.pinnedScrollBehavior(state = rememberTopAppBarState())
@@ -374,7 +400,32 @@ internal fun LibraryBrowserPane(
         // briefly un-truncates it.
         LibraryTabRow(
             selected       = state.libraryFilter,
-            onSelect       = viewModel::setLibraryFilter,
+            onSelect       = { filter ->
+                // Reset the BAR AND THE LIST TOGETHER, at the call site, before the filter changes.
+                //
+                // The bar state and the list state are shared by all four tabs, and
+                // `ExitUntilCollapsedScrollBehavior` has no "content is at the top, re-expand" path
+                // (it re-expands only from the leftover of a downward scroll). So scrolling
+                // Playlists until the bar collapsed and then tapping a tab whose content cannot
+                // scroll — Shows with nothing followed, a two-item Albums — left the big title and
+                // the subtitle collapsed over an empty pane with no gesture available to bring them
+                // back. Resetting only the bar would be just as unreachable a state in reverse: a
+                // fully expanded bar over a list parked mid-scroll.
+                //
+                // NOT a `LaunchedEffect(state.libraryFilter)`: this pane is recomposed on every
+                // detail open/close and nav-back, so an effect keyed on the filter would wipe the
+                // restored scroll position the hoisting exists to preserve, and would fire in the
+                // middle of a predictive-back seek. `LibraryTabRow` already calls `onSelect` only on
+                // a genuine change, so no extra guard is needed here.
+                //
+                // UX CHANGE: the scroll position no longer carries across filter tabs. It did before
+                // (incidentally — the tabs share one `LazyListState`), but that was never designed:
+                // the position of the Playlists list means nothing in Albums.
+                barState.heightOffset  = 0f
+                barState.contentOffset = 0f
+                listState.requestScrollToItem(0)
+                viewModel.setLibraryFilter(filter)
+            },
             containerColor = paneColor,
         )
 

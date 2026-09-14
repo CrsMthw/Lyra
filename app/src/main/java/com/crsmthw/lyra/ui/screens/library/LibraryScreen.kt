@@ -63,6 +63,10 @@ fun LibraryScreen(
     // A `LazyListState` restores its index/offset at construction, so the position is on the FIRST
     // frame, with no scroll animation. Both layouts get the same instance (only one is composed at a
     // time), so the position also carries across a fold/unfold.
+    //
+    // What it deliberately does NOT survive is a FILTER-TAB change: `LibraryBrowserPane`'s tab
+    // `onSelect` resets this state (and the bar's) to the top, because the four tabs share one list
+    // and a Playlists offset means nothing in Albums — see the comment at that call site.
     val browserListState = rememberLazyListState()
 
     // The browser app bar's collapse state, hoisted for the same reason as `browserListState`: the
@@ -75,7 +79,9 @@ fun LibraryScreen(
     // Safe with respect to the predictive-back seek: this is an ordinary composition-local
     // `mutableFloatStateOf` holder — it never enters `LibraryUiState`, so it cannot perturb
     // `detailKey`, which is the `SeekableTransitionState`'s target (docs/MOTION.md → Predictive
-    // back). The COMPACT bar deliberately does not use it — see `LibraryBrowserPane`.
+    // back). The COMPACT bar deliberately does not use it — see `LibraryBrowserPane`, which also
+    // clears this state on a filter-tab change and whenever the large-bar branch (re)enters with
+    // the list already at the top (a collapsed bar over a list at offset 0 has no way back).
     val browserBarState = rememberTopAppBarState()
 
     if (isWideScreen) {
