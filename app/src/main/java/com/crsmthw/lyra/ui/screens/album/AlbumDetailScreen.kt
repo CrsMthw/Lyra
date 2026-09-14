@@ -26,6 +26,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfoV2
 import androidx.compose.ui.platform.LocalContext
@@ -41,11 +42,9 @@ import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.remote.model.AlbumTrack
 import com.crsmthw.lyra.data.remote.model.SpotifyAlbumFull
 import com.crsmthw.lyra.ui.components.DetailArtHero
-import com.crsmthw.lyra.ui.components.TitlePill
-import com.crsmthw.lyra.ui.components.TopActionPill
-import com.crsmthw.lyra.ui.components.TopPillHeight
 import com.crsmthw.lyra.ui.components.TopScrim
 import com.crsmthw.lyra.ui.components.TrackActionsHost
+import com.crsmthw.lyra.ui.components.appBarWindowInsets
 import com.crsmthw.lyra.ui.components.rememberHeroScrollProgress
 import com.crsmthw.lyra.ui.components.toTrackActionTarget
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
@@ -79,10 +78,23 @@ fun AlbumDetailScreen(
     val background     = MaterialTheme.colorScheme.background
     val isWideScreen   = currentWindowAdaptiveInfoV2().windowSizeClass.isWidthAtLeastBreakpoint(600)
 
+    // App bars trial (docs/APP_BARS_OPTIONS.md → D1): the floating back / title / share pills and
+    // the single-pane TopScrim are replaced by a small `TopAppBar` PINNED over the hero with a
+    // TRANSPARENT container, which becomes solid once content scrolls under it. One back icon for
+    // every bar on the screen (single-pane, the two-pane LEFT pane, and the loading/error state) so
+    // the gesture, the debounce path (`onBack` → `safeNavigateUp`) and the haptic can't drift.
+    val backNavIcon: @Composable () -> Unit = {
+        IconButton(onClick = { haptics.confirm(); onBack() }) {
+            Icon(Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = stringResource(R.string.nav_back))
+        }
+    }
+
     Scaffold(
         contentWindowInsets = WindowInsets(0),
-        // No top app bar in either configuration — both single- and two-pane float their own back /
-        // share pills over the hero (a leftover bar here would cover those pills in two-pane).
+        // Still NO Scaffold topBar: each configuration lays its own bar over its own scrolling
+        // content (the bar must overlap the hero, and in two-pane it belongs to the left pane only),
+        // so a Scaffold bar would both reserve height and span both cards.
     ) { paddingValues ->
         Box(Modifier.fillMaxSize()) {
         when {
@@ -151,10 +163,41 @@ fun AlbumDetailScreen(
                     }
                 }
 
+                // The old TopActionPill's contents verbatim (save/follow heart + share), now the
+                // bar's `actions` slot — one definition for both panes, which is also the last of
+                // the two copies the pills needed. `@Composable RowScope.() -> Unit` is exactly the
+                // shape `TopAppBar` wants.
+                val albumActions: @Composable RowScope.() -> Unit = {
+                    IconButton(
+                        onClick = { haptics.toggle(state.isSaved != true); viewModel.toggleSaved() },
+                        enabled = state.isSaved != null,
+                    ) {
+                        Icon(
+                            imageVector        = if (state.isSaved == true) Icons.Default.Favorite
+                                                 else Icons.Default.FavoriteBorder,
+                            contentDescription = stringResource(
+                                if (state.isSaved == true) R.string.cd_unfollow else R.string.cd_follow),
+                        )
+                    }
+                    IconButton(onClick = {
+                        haptics.press()
+                        context.startActivity(Intent.createChooser(
+                            Intent(Intent.ACTION_SEND).apply {
+                                putExtra(Intent.EXTRA_TEXT, "https://open.spotify.com/album/${album.id}")
+                                type = "text/plain"
+                            }, null
+                        ))
+                    }) {
+                        Icon(Icons.Default.Share, contentDescription = stringResource(R.string.player_share))
+                    }
+                }
+
                 if (isWideScreen) {
-                    // Edge-to-edge under a transparent status bar (like single-pane). The hero's
-                    // own `statusBarsPadding()` + the pane TopScrims handle the top inset; no parent
-                    // statusBarsPadding (which would leave an opaque band where the bar sits).
+                    // Edge-to-edge under a transparent status bar (like single-pane), so NO parent
+                    // statusBarsPadding (it would leave an opaque band where the status bar sits).
+                    // Each pane self-pads: the LEFT pane's app bar takes the status-bar inset as its
+                    // own `windowInsets` over a hero that already bakes `statusBarsPadding()`; the
+                    // RIGHT pane keeps its top contentPadding inset + TopScrim.
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -167,17 +210,24 @@ fun AlbumDetailScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             // Left pane — the detail hero panel (art + name/meta + play/shuffle),
-                            // with floating back + share pills and a top scrim (no solid bar).
+                            // with the transparent pinned app bar over it (was: a top scrim plus a
+                            // back pill and a share pill).
                             Card(
                                 modifier  = Modifier.weight(0.42f).fillMaxHeight(),
                                 shape     = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
                                 colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                                 elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                             ) {
+                                // `scrolledContainerColor` is the CARD's colour here, not the
+                                // screen background — the bar has to become whatever is behind it.
+                                val leftBarBehavior = TopAppBarDefaults.pinnedScrollBehavior()
                                 Box(modifier = Modifier.fillMaxSize()) {
                                     Column(
                                         modifier = Modifier
                                             .fillMaxSize()
+                                            // BEFORE verticalScroll: the connection must be the
+                                            // scrollable's PARENT node, or it is silently inert.
+                                            .nestedScroll(leftBarBehavior.nestedScrollConnection)
                                             .verticalScroll(rememberScrollState())
                                             .padding(bottom = navBarBottomDp),
                                     ) {
@@ -194,50 +244,21 @@ fun AlbumDetailScreen(
                                             artContent = albumArt,
                                         )
                                     }
-                                    // Top scrim (drawn under the pills) — fades the hero toward the card.
-                                    TopScrim(color = MaterialTheme.colorScheme.surface, modifier = Modifier.align(Alignment.TopCenter))
-                                    // Back pill (top-left).
-                                    TopActionPill(
-                                        modifier = Modifier
-                                            .align(Alignment.TopStart)
-                                            .statusBarsPadding()
-                                            .padding(start = 12.dp, top = 8.dp),
-                                    ) {
-                                        IconButton(onClick = { haptics.confirm(); onBack() }) {
-                                            Icon(Icons.AutoMirrored.Filled.ArrowBack,
-                                                contentDescription = stringResource(R.string.nav_back))
-                                        }
-                                    }
-                                    // Share pill (top-right).
-                                    TopActionPill(
-                                        modifier = Modifier
-                                            .align(Alignment.TopEnd)
-                                            .statusBarsPadding()
-                                            .padding(end = 12.dp, top = 8.dp),
-                                    ) {
-                                        IconButton(
-                                            onClick = { haptics.toggle(state.isSaved != true); viewModel.toggleSaved() },
-                                            enabled = state.isSaved != null,
-                                        ) {
-                                            Icon(
-                                                imageVector        = if (state.isSaved == true) Icons.Default.Favorite
-                                                                                 else Icons.Default.FavoriteBorder,
-                                                contentDescription = stringResource(
-                                                    if (state.isSaved == true) R.string.cd_unfollow else R.string.cd_follow),
-                                            )
-                                        }
-                                        IconButton(onClick = {
-                                            haptics.press()
-                                            context.startActivity(Intent.createChooser(
-                                                Intent(Intent.ACTION_SEND).apply {
-                                                    putExtra(Intent.EXTRA_TEXT, "https://open.spotify.com/album/${album.id}")
-                                                    type = "text/plain"
-                                                }, null
-                                            ))
-                                        }) {
-                                            Icon(Icons.Default.Share, contentDescription = stringResource(R.string.player_share))
-                                        }
-                                    }
+                                    // No title in this bar: the hero's own name sits right under it
+                                    // and barely scrolls in a pane this short, exactly as the
+                                    // two-pane left pane carried no title pill.
+                                    TopAppBar(
+                                        title          = {},
+                                        navigationIcon = backNavIcon,
+                                        actions        = albumActions,
+                                        windowInsets   = appBarWindowInsets,
+                                        colors         = TopAppBarDefaults.topAppBarColors(
+                                            containerColor         = Color.Transparent,
+                                            scrolledContainerColor = MaterialTheme.colorScheme.surface,
+                                        ),
+                                        scrollBehavior = leftBarBehavior,
+                                        modifier       = Modifier.align(Alignment.TopCenter),
+                                    )
                                 }
                             }
 
@@ -293,10 +314,25 @@ fun AlbumDetailScreen(
                     ) {
                         val tracksListState = rememberLazyListState()
                         ListScrollHaptics(tracksListState)
-                        val titlePillAlpha = rememberHeroScrollProgress(tracksListState)
+                        // The bar's title crossfade is driven by the SAME helper that drove the
+                        // title pill — `rememberHeroScrollProgress` ramps 0→1 exactly as the hero
+                        // (item 0) leaves the viewport, so the hand-off has no jump. Deliberately
+                        // NOT the bar's own scrolled fraction: `SingleRowTopAppBar` thresholds
+                        // `overlappedFraction` to a binary `if (> 0.01f) 1f else 0f`, so it is not
+                        // a continuous fraction and cannot drive a crossfade at all.
+                        val barTitleAlpha  = rememberHeroScrollProgress(tracksListState)
+                        val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
                         LazyColumn(
                             state          = tracksListState,
-                            modifier       = Modifier.fillMaxSize(),
+                            modifier       = Modifier
+                                .fillMaxSize()
+                                .nestedScroll(scrollBehavior.nestedScrollConnection),
+                            // NO extra top inset. `DetailArtHero` already bakes
+                            // `statusBarsPadding() + TopPillHeight + 20.dp` (= status bar + 72dp)
+                            // onto its art tile, which clears the bar's 64dp collapsed row with
+                            // 8dp to spare — adding "status bar + collapsed height" here would
+                            // double it, and forking the component to remove its padding would
+                            // break the two-pane pane and the Library hero that share it.
                             contentPadding = PaddingValues(bottom = 100.dp + navBarBottomDp),
                         ) {
                             item(key = "header") {
@@ -336,76 +372,67 @@ fun AlbumDetailScreen(
                             alpha    = 0.20f,
                         )
 
-                        // Top scrim — fades the album art under the status bar.
-                        TopScrim(color = background, modifier = Modifier.align(Alignment.TopCenter))
-
-                        // Album-name title pill — fades in as the art scrolls away, sitting just
-                        // right of the screen-level back pill.
-                        TitlePill(
-                            text     = album.name,
-                            modifier = Modifier
-                                .align(Alignment.TopStart)
-                                .statusBarsPadding()
-                                .padding(start = 16.dp + TopPillHeight + 8.dp, top = 8.dp)
-                                .widthIn(max = 220.dp)
-                                .graphicsLayer { alpha = titlePillAlpha.value },
-                        )
-
-                        // Share pill (top-right).
-                        TopActionPill(
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .statusBarsPadding()
-                                .padding(end = 16.dp, top = 8.dp),
-                        ) {
-                            IconButton(
-                                onClick = { haptics.toggle(state.isSaved != true); viewModel.toggleSaved() },
-                                enabled = state.isSaved != null,
-                            ) {
-                                Icon(
-                                    imageVector        = if (state.isSaved == true) Icons.Default.Favorite
-                                                         else Icons.Default.FavoriteBorder,
-                                    contentDescription = stringResource(
-                                        if (state.isSaved == true) R.string.cd_unfollow else R.string.cd_follow),
+                        // The bar, composed LAST so it draws (and hit-tests) over the list. Pinned,
+                        // so its height never changes and overlaying is correct. Transparent over
+                        // the hero — at rest there is only 8dp of page background between its
+                        // bottom edge and the art — turning solid `background` (what the TopScrim
+                        // it replaces faded to) once anything scrolls under it. Default `onSurface`
+                        // icon/title colours are right here: unlike PlayerScreen there is no accent
+                        // gradient behind the bar, just the page background.
+                        TopAppBar(
+                            title          = {
+                                Text(
+                                    text     = album.name,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    // Draw-phase only, so the crossfade costs no recomposition.
+                                    modifier = Modifier.graphicsLayer { alpha = barTitleAlpha.value },
                                 )
-                            }
-                            IconButton(onClick = {
-                                haptics.press()
-                                context.startActivity(Intent.createChooser(
-                                    Intent(Intent.ACTION_SEND).apply {
-                                        putExtra(Intent.EXTRA_TEXT, "https://open.spotify.com/album/${album.id}")
-                                        type = "text/plain"
-                                    }, null
-                                ))
-                            }) {
-                                Icon(Icons.Default.Share, contentDescription = stringResource(R.string.player_share))
-                            }
-                        }
+                            },
+                            navigationIcon = backNavIcon,
+                            actions        = albumActions,
+                            windowInsets   = appBarWindowInsets,
+                            colors         = TopAppBarDefaults.topAppBarColors(
+                                containerColor         = Color.Transparent,
+                                scrolledContainerColor = background,
+                            ),
+                            scrollBehavior = scrollBehavior,
+                            modifier       = Modifier.align(Alignment.TopCenter),
+                        )
                     }
                 }
             }
         }
 
-            // Screen-level back pill. Single-pane: always (loading/error/content). Two-pane: only
-            // while loading/erroring — once the album loads, the left-pane hero carries its own back.
-            // In two-pane it must land exactly where that left-pane pill will (inside the Row's 8dp
-            // inset + the pill's own 12/8dp) so it doesn't jump when the content loads in.
-            if (!isWideScreen || state.album == null) {
-                TopActionPill(
+            // Screen-level back bar, for the loading and error states ONLY — once the album loads,
+            // the bar that carries the title and actions lives inside the layout that owns the
+            // scrolling content (single-pane over the list, two-pane over the LEFT card), because
+            // that is what gives it a scroll behaviour to colour itself from.
+            //
+            // The condition is the exact NEGATION of the `when`'s content arm, not just
+            // `album == null`: today `loadAlbum()` only runs from `init` so `isLoading` implies a
+            // null album, but a future reload path that set `isLoading` over a loaded album would
+            // swap the content (bar included) for the spinner and leave back unreachable.
+            //
+            // It carries its own `horizontalSystemBarsPadding()` because it is a SIBLING of those
+            // layouts, not a descendant — so this is still one horizontal application per subtree,
+            // not a second one on the same element. In the wide case it also takes the Row's own
+            // 8dp inset so the back arrow doesn't jump when the content lands and the left-pane
+            // bar takes over.
+            if (state.isLoading || state.error != null || state.album == null) {
+                TopAppBar(
+                    title          = {},
+                    navigationIcon = backNavIcon,
+                    windowInsets   = appBarWindowInsets,
+                    colors         = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.Transparent,
+                    ),
                     modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .statusBarsPadding()
+                        .align(Alignment.TopCenter)
                         .horizontalSystemBarsPadding()
-                        .padding(
-                            start = if (isWideScreen) 8.dp + 12.dp else 16.dp,
-                            top   = if (isWideScreen) 8.dp + 8.dp  else 8.dp,
-                        ),
-                ) {
-                    IconButton(onClick = { haptics.confirm(); onBack() }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(R.string.nav_back))
-                    }
-                }
+                        .padding(horizontal = if (isWideScreen) 8.dp else 0.dp,
+                                 vertical   = if (isWideScreen) 8.dp else 0.dp),
+                )
             }
         }
     }
