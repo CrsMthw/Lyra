@@ -1,17 +1,19 @@
 package com.crsmthw.lyra.ui.components
 
-import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionDefaults
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.SharedTransitionScope.SharedContentState
+import androidx.compose.animation.core.ExperimentalTransitionApi
 import androidx.compose.animation.core.SeekableTransitionState
 import androidx.compose.animation.core.animate
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.createChildTransition
 import androidx.compose.animation.core.rememberTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -38,6 +40,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlin.coroutines.cancellation.CancellationException
 
 // THE app's one floating player surface: a mini player bar and (on wide non-short screens) a
 // pop-out player panel, hosted ONCE by `LyraNavGraph` around the whole `NavHost` — not per screen.
@@ -49,8 +52,10 @@ import kotlinx.coroutines.launch
 //
 // `visible` is the caller's route gate — true on the browse routes, false on Player/Queue (which
 // ARE the player), Settings and Auth. `visibleAfterBack` is the same predicate applied to the entry
-// BELOW the current one; it is what lets a predictive-back GESTURE seek the bar in with the finger
-// instead of dropping it in at commit — see "The mini player's presence" below.
+// BELOW the current one; it is what lets a predictive-back GESTURE seek the surface in with the
+// finger — the bar, or the pop-out panel it was hidden behind — instead of dropping it in at
+// commit. See "The floating player surface, as ONE seekable transition" below; the panel's OWN
+// close gesture is the `PredictiveBackHandler` at the bottom.
 //
 // Because the host outlives every destination, a per-route difference that used to be a constructor
 // argument is now an ANIMATED property: `miniPlayerFullWidth` (Search/Stats: a single full-width
@@ -120,12 +125,57 @@ private fun rememberMatchWhenConfig(enabled: Boolean): SharedTransitionScope.Sha
     }
 }
 
+/**
+ * Which of the app's two floating player surfaces is on screen. They are mutually exclusive, so ONE
+ * state describes both — and, crucially, ONE seekable transition animates over it.
+ *
+ * That is not a tidiness choice, it is the fix for a broken container transform (device pass
+ * 2026-09-14): the bar used to have its own `SeekableTransitionState` whose target was flipped from
+ * a `LaunchedEffect`, i.e. one frame AFTER the composition in which the panel's own
+ * `updateTransition(panelVisible)` had already started entering. For that one frame BOTH
+ * `"album-art"` entries reported `boundsAnimation.target == true`, and a shared element with two
+ * simultaneous targets has no defined target bounds — `SharedElement`'s KDoc says it outright ("we
+ * expect there to be only 1 state that is becoming visible, which we will use to derive target
+ * bounds"), and `invalidateTargetBoundsProvider` just takes `enabledEntries.fastFirstOrNull { it
+ * .target }`, which was the *mini player* (added first). So the art was configured against its own
+ * geometry and simply appeared in the panel instead of flying into it.
+ *
+ * A child transition's target is computed in the SAME composition pass as its parent's
+ * (`createChildTransition` reads `parentTransition.targetState` directly), so with both halves as
+ * children of one transition the bar's hide and the panel's show can no longer be a frame apart.
+ * It also means a single `seekTo` drives both ends of the morph — which is what lets a
+ * predictive-back gesture seek the panel in from the full player, and seek it back out to the bar.
+ */
+private enum class PlayerSurface { None, Bar, Panel }
+
+/**
+ * Phase of the pop-out panel's OWN predictive-back close gesture.
+ *
+ * Same reasoning as the Library's `BackPhase` (docs/MOTION.md → Predictive back): the gesture and
+ * the state change that commits it are asynchronous, so the effect that drives the transition has
+ * to know WHY the state looks the way it does — a panel that is still open means "unwind" after a
+ * cancelled gesture but "wait for `closePanel()`" after a committed one. It also tells the
+ * ROUTE-driven seek to stand down: `NavigationEventProcessor` writes `InProgress` for every
+ * predictive gesture regardless of which handler won it, so without this the two would both drive
+ * the same transition.
+ *
+ * `Seeking` is set before the progress flow is collected, so the first progress frame cannot race
+ * an `animateTo` against the seek. All the suspending work lives in the effects below, never in the
+ * handler's own lambda: `PredictiveBackHandler` CANCELS that lambda's job on a cancelled gesture
+ * (`ComposePredictiveBackHandler.onBackCancelled` → `activeJob?.cancel()`), so an unwind animation
+ * written there would never run.
+ */
+private enum class PanelBackPhase { Idle, Seeking, Committing, Cancelled }
+
 /** Non-snapshot cell for the mini player's last on-screen width fraction — see its use site. */
 private class MiniWidthHolder(var value: Float)
 
 /** Non-snapshot cell for the last browse surface the panel was seen over — see its use site. */
 private class SurfaceKeyHolder(var value: String?)
 
+// `createChildTransition` — the one experimental API here; the shared-transition API itself is
+// stable as of compose-animation 1.12.
+@OptIn(ExperimentalTransitionApi::class)
 @Composable
 fun PlayerPanelHost(
     playerViewModel         : PlayerViewModel,
@@ -240,48 +290,70 @@ fun PlayerPanelHost(
     // now includes the extra-wide docked-pane width.
     val panelVisible = panelOwned && visible && canShowPanel
 
-    // Single source of truth for the pop-out panel's presence on screen. Drives both the panel's
-    // own AnimatedVisibility (so the gate below reads the SAME animation that's rendering) and the
-    // mini player's nav-scope gate. Using this Transition avoids the scrim-tween-vs-panel-slide
-    // desync that a separate timer would have.
-    val panelTransition = updateTransition(panelVisible, label = "panelPresence")
-
-    // ── The mini player's presence, as a SEEKABLE transition ─────────────────────────────────────
+    // ── The floating player surface, as ONE seekable transition ──────────────────────────────────
     //
     // Before the hoist the bar lived INSIDE the Library destination, which `NavHost` composes at the
     // START of a back gesture and seeks with the finger — so the bar and the mini↔big "album-art"
-    // morph tracked the drag and unwound on an early release. Hosted out here the bar's visibility
-    // became a plain Boolean flipped by `currentBackStackEntryAsState()`, which only moves when the
-    // pop COMMITS: the bar was absent for the whole drag and slid in afterwards, and the art morph
-    // snapped partway instead of following the thumb. This restores the old feel by driving the bar
-    // from a `SeekableTransitionState` the same way `NavHost.kt` drives its own AnimatedContent.
+    // morph tracked the drag and unwound on an early release. Hosted out here its visibility became
+    // a plain Boolean flipped by `currentBackStackEntryAsState()`, which only moves when the pop
+    // COMMITS: the bar was absent for the whole drag and slid in afterwards, and the art morph
+    // snapped partway instead of following the thumb. That is why this is a `SeekableTransitionState`
+    // driven the way `NavHost.kt` drives its own AnimatedContent.
     //
-    // Track presence is read here (not only in `MiniPlayerHolder`) because it belongs in the ONE
-    // Boolean the transition animates over. SEEDED SYNCHRONOUSLY from the StateFlow's current value
-    // — `collectAsStateWithLifecycle` bakes its initial value into its own `remember`, and a literal
+    // It animates over [PlayerSurface] — BOTH surfaces, not just the bar — for the reason spelled
+    // out on that enum: a bar whose target flipped one frame after the panel's left the shared
+    // element with two simultaneous targets and no defined target bounds, so the art appeared in
+    // the panel instead of flying into it. One state also means one `seekTo` moves both ends of the
+    // morph, which is what the two predictive-back gestures below need.
+    //
+    // Track presence is read here (not only in `MiniPlayerHolder`) because it belongs in the state
+    // the transition animates over. SEEDED SYNCHRONOUSLY from the StateFlow's current value —
+    // `collectAsStateWithLifecycle` bakes its initial value into its own `remember`, and a literal
     // `false` would make the bar animate in from nothing on every Activity recreation.
     val hasTrack by remember {
         playerViewModel.uiState.map { it.currentTrack != null }.distinctUntilChanged()
     }.collectAsStateWithLifecycle(playerViewModel.uiState.value.currentTrack != null)
 
-    // `barWanted` is everything about the bar that does NOT depend on the route, so the same
-    // expression can be evaluated for the current route and for the one a back would land on.
-    // `!panelOwned` is in it because on a wide screen with the pop-out OPEN the panel — not the
-    // bar — is the "album-art" partner `PlayerScreen`'s art pops back into; a bar that seeked in
-    // during the drag would have to slide straight back out at commit as the panel arrived.
-    // It MUST be the same `panelOwned` that feeds `panelVisible`, never the raw `showPlayerPanel`:
-    // on a surface the panel does not own, the panel is gone and the bar is what the user gets —
-    // the two values diverging would leave `barWanted` false there and the mini player would simply
-    // vanish for the rest of the session.
-    val barWanted   = hasTrack && !panelOwned
-    val showBar     = barWanted && visible
-    val barAfterBack = barWanted && visibleAfterBack  // what a committed back would make it
-    // On extra-wide the bar is simply not composed (the whole `SharedTransitionLayout` below is
-    // skipped), so this transition runs with no children: `totalDurationNanos` is 0, which the
-    // cancel branch below already floors at `NavTransitionMillis`. Gating `showBar` on
-    // `!isExtraWide` as well would work too, and would cost an extra state change on a rotation
-    // that crosses the gate; leaving it alone keeps the Boolean route-derived and nothing renders
-    // either way.
+    // ONE expression for which surface is wanted, parameterised by the two things that change
+    // between the questions asked of it: the ROUTE gate, and whether the panel still owns this
+    // surface. `surfaceFor(visible) == Panel` is exactly `panelVisible`, and `== Bar` is exactly
+    // the old `hasTrack && !panelOwned && visible` — they can no longer drift apart.
+    // `panelOwned` (never the raw `showPlayerPanel`) is the value here for the same reason it feeds
+    // `panelVisible`: on a surface the panel does not own, the panel is gone and the bar is what
+    // the user gets, so the two diverging would make the mini player vanish for the session.
+    fun surfaceFor(routeShows: Boolean, owned: Boolean = panelOwned): PlayerSurface = when {
+        owned && canShowPanel && routeShows -> PlayerSurface.Panel
+        hasTrack && !owned && routeShows    -> PlayerSurface.Bar
+        else                                -> PlayerSurface.None
+    }
+    /** What the app wants on screen right now. */
+    val surfaceTarget          = surfaceFor(visible)
+    /** …what a committed back would make it (the entry BELOW the current one). */
+    val surfaceAfterBack       = surfaceFor(visibleAfterBack)
+    /** …and what closing the panel on this route would make it: the bar takes over. */
+    val surfaceAfterPanelClose = surfaceFor(visible, owned = false)
+    // On extra-wide the bar and the panel are simply not composed (the whole
+    // `SharedTransitionLayout` below is skipped), so the only child left on this transition is the
+    // scrim's `animateFloat` — still a finite 300 ms, and the cancel branch floors the duration
+    // anyway. Gating `surfaceTarget` on `!isExtraWide` as well would work too, and would cost an
+    // extra state change on a rotation that crosses the gate; leaving it alone keeps the state
+    // route-derived and nothing renders either way.
+    val surfaceState      = remember { SeekableTransitionState(surfaceTarget) }
+    val surfaceTransition = rememberTransition(surfaceState, label = "playerSurface")
+
+    // The two halves as CHILD transitions, so `MiniPlayer` and `PlayerPopOutPanel` still take a
+    // plain `Transition<Boolean>` and render inside its `AnimatedVisibility`. A child's target is
+    // derived from its parent's IN THE SAME COMPOSITION (`createChildTransition` reads
+    // `parentTransition.targetState`), which is the whole point — and `seekTo` reaches them
+    // (`seekToFraction()` → `Transition.seekAnimations`, which recurses into `_transitions`), so
+    // both the bar's slide, the panel's slide and the `"album-art"` bounds animation hanging off
+    // either `AnimatedVisibility` follow one gesture fraction.
+    val barTransition   = surfaceTransition.createChildTransition(label = "miniPlayerPresence") {
+        it == PlayerSurface.Bar
+    }
+    val panelTransition = surfaceTransition.createChildTransition(label = "panelPresence") {
+        it == PlayerSurface.Panel
+    }
 
     // A read-only mirror of the gesture every back handler already sees. Observing this StateFlow
     // registers NO handler, so it cannot steal the gesture from `NavHost`'s own
@@ -306,63 +378,131 @@ fun PlayerPanelHost(
         // not reliably clamped across OEM builds.
         ?.latestEvent?.progress?.coerceIn(0f, 1f)
 
-    val barState      = remember { SeekableTransitionState(showBar) }
-    val barTransition = rememberTransition(barState, label = "miniPlayerPresence")
+    // The pop-out panel's own close gesture. Written by the `PredictiveBackHandler` at the very
+    // bottom of this composable (registration order is its precedence, so it must stay there);
+    // read here, because every suspending call has to live outside that handler's cancellable job.
+    var panelBack         by remember { mutableStateOf(PanelBackPhase.Idle) }
+    var panelBackProgress by remember { mutableFloatStateOf(0f) }
 
-    if (backProgress != null && barAfterBack != showBar) {
-        // The gesture changes whether the surface is shown, so the bar rides it. `NavHost` seeks its
-        // own transition from the same `progress`, so the two stay in step frame for frame — and
-        // because the bar's AnimatedVisibility scope is a child of this transition, so does the
-        // nav-scope "album-art" bounds animation. Written generically: a gesture OUT of a surface
-        // route into one that hides it would seek the bar away just as well (it can't happen today —
-        // PlayerScreen is never below a browse route — but nothing here assumes that).
-        LaunchedEffect(backProgress, barAfterBack) { barState.seekTo(backProgress, barAfterBack) }
-    } else {
-        LaunchedEffect(showBar) {
-            if (barState.currentState != showBar) {
-                // Ordinary change (a push to Player, a button/committed back, Settings↔browse) AND
-                // the commit of a seeked gesture, which is the same thing one frame later: the seek
-                // already set `targetState`, so this finds the target UNCHANGED and resumes from the
-                // gesture's fraction over the REMAINING duration instead of restarting.
-                //
-                // Deliberately NO `animationSpec`. With one, `SeekableTransitionState` runs the
-                // FRACTION through that spec (Transition.kt: `newAnimation.animationSpec = newSpec`)
-                // while every child is still seeked by that fraction through its own curve — the
-                // easing would apply twice and the bar would read visibly slower than the nav slide
-                // beside it. With none, `animationSpecDuration = totalDurationNanos * (1 - fraction)`
-                // and the fraction advances LINEARLY, so the children play at their natural rate.
-                // The finite spec THE HARD RULE (docs/MOTION.md) asks for lives on those children:
-                // MiniPlayer's slide in/out is `screenTransitionSpec()`, so `totalDurationNanos` is
-                // `NavTransitionMillis`. This is exactly what `NavHost.kt` and the Library's
-                // single-pane predictive back do.
-                //
-                // Note this branch, not the dispatcher's `Idle`, is what commits a gesture: the two
-                // arrive through separate flow collections (the pop happens inside
-                // `dispatchOnCompleted` BEFORE it writes `Idle`, but they reach composition
-                // independently), and keying the branch on `showBar` means whichever lands first is
-                // the one that decides. Idle-first costs at most one frame of the unwind below
-                // before the route flip restarts this effect and resumes the entrance.
-                barState.animateTo(showBar)
-            } else if (barState.targetState != showBar) {
-                // Released without committing. The seek has to be wound back by hand, and the
-                // duration is scaled by how far the gesture actually got — `NavHost.kt`'s cancel
-                // formula, mirrored in LibrarySinglePaneLayout — or a cancel at 5 % would take a
-                // full transition to snap back. Floored so a transition that momentarily reports no
-                // duration can't compute `tween(0)` and snap.
-                val totalMillis = (barTransition.totalDurationNanos / 1_000_000)
+    // ── What drives the transition: the panel's close gesture, a route gesture, or a plain change ─
+    when {
+        // (1) The panel's own close gesture: the panel retreats and the bar rises with the finger,
+        //     the art flying between them because both are children of this one transition.
+        panelBack == PanelBackPhase.Seeking ->
+            LaunchedEffect(panelBackProgress, surfaceAfterPanelClose) {
+                surfaceState.seekTo(panelBackProgress.coerceIn(0f, 1f), surfaceAfterPanelClose)
+            }
+
+        // (2) A route back GESTURE that changes which surface the app shows, so the surface rides
+        //     it. `NavHost` seeks its own transition from the same `progress`, so the two stay in
+        //     step frame for frame — including the `"album-art"` morph, whose two ends are children
+        //     of the two seeked transitions. This covers the bar sliding in as a browse route comes
+        //     back AND the pop-out panel coming in under the full player it was hidden behind.
+        //     It stands down while the panel is open: the handler at the bottom consumes that
+        //     gesture and branch (1) drives it, but `NavigationEventProcessor` writes `InProgress`
+        //     for EVERY predictive gesture regardless of which handler won, so without these two
+        //     guards both branches would fight over one transition. (`panelBack` covers the frames
+        //     after the finger lifts, where `panelVisible` has already flipped.)
+        panelBack == PanelBackPhase.Idle && !panelVisible &&
+            backProgress != null && surfaceAfterBack != surfaceTarget ->
+            LaunchedEffect(backProgress, surfaceAfterBack) {
+                surfaceState.seekTo(backProgress, surfaceAfterBack)
+            }
+
+        // (3) Everything else: the commit or cancel of either gesture, and every ordinary change.
+        else -> LaunchedEffect(surfaceTarget, panelBack) {
+            val effectScope = this
+
+            // Wind a released-but-uncommitted seek back to `currentState`. The duration is scaled
+            // by how far the gesture actually got — `NavHost.kt`'s cancel formula, mirrored in
+            // LibrarySinglePaneLayout — or a cancel at 5 % would take a full transition to snap
+            // back. Floored so a transition that momentarily reports no duration can't compute
+            // `tween(0)` and snap.
+            suspend fun unwindSeek() {
+                val totalMillis = (surfaceTransition.totalDurationNanos / 1_000_000)
                     .coerceAtLeast(NavTransitionMillis.toLong())
                 animate(
-                    initialValue  = barState.fraction,
+                    initialValue  = surfaceState.fraction,
                     targetValue   = 0f,
-                    animationSpec = tween((barState.fraction * totalMillis).toInt()),
+                    animationSpec = tween((surfaceState.fraction * totalMillis).toInt()),
                 ) { value, _ ->
                     // seekTo/snapTo suspend, `animate`'s callback does not — hand the work back to
                     // this effect's own scope, as NavHost does internally.
-                    this@LaunchedEffect.launch {
-                        if (value > 0f)  barState.seekTo(value)
-                        if (value == 0f) barState.snapTo(showBar)
+                    effectScope.launch {
+                        if (value > 0f)  surfaceState.seekTo(value)
+                        if (value == 0f) surfaceState.snapTo(surfaceTarget)
                     }
                 }
+            }
+
+            // Deliberately NO `animationSpec` on any `animateTo` below. With one,
+            // `SeekableTransitionState` runs the FRACTION through that spec (Transition.kt:
+            // `newAnimation.animationSpec = newSpec`) while every child is still seeked by that
+            // fraction through its own curve — the easing would apply twice and the surface would
+            // read visibly slower than the nav slide beside it. With none,
+            // `animationSpecDuration = totalDurationNanos * (1 - fraction)` and the fraction
+            // advances LINEARLY, so the children play at their natural rate and a resume costs
+            // exactly the remaining duration. The finite spec THE HARD RULE (docs/MOTION.md) asks
+            // for lives on those children: both slides are `screenTransitionSpec()`. This is
+            // exactly what `NavHost.kt` and the Library's single-pane predictive back do.
+            when (panelBack) {
+                // The close gesture committed. `closePanel()` fires in the same dispatch as this
+                // phase, but the two reach composition as separate state reads, so wait until the
+                // panel is no longer what the app wants before finishing — animating while
+                // `surfaceTarget` is still `Panel` would REVERSE the gesture. The seek already set
+                // `targetState`, so `animateTo` finds it unchanged and plays only the remainder.
+                PanelBackPhase.Committing -> if (surfaceTarget != PlayerSurface.Panel) {
+                    surfaceState.animateTo(surfaceTarget)
+                    panelBack = PanelBackPhase.Idle
+                }
+                // Released without committing: unwind, leaving the panel open.
+                PanelBackPhase.Cancelled -> {
+                    unwindSeek()
+                    panelBack = PanelBackPhase.Idle
+                }
+                PanelBackPhase.Idle -> when {
+                    // Ordinary change (a tap on the mini player, the panel's close button, a push
+                    // to Player, a button/committed back, Settings↔browse) AND the commit of a
+                    // seeked route gesture, which is the same thing one frame later.
+                    //
+                    // Note this branch, not the dispatcher's `Idle`, is what commits a route
+                    // gesture: the two arrive through separate flow collections (the pop happens
+                    // inside `dispatchOnCompleted` BEFORE it writes `Idle`, but they reach
+                    // composition independently), and keying the branch on `surfaceTarget` means
+                    // whichever lands first is the one that decides. Idle-first costs at most one
+                    // frame of the unwind below before the route flip restarts this effect and
+                    // resumes the entrance.
+                    surfaceState.currentState != surfaceTarget -> {
+                        // A change that arrives while a change to a THIRD state is still in flight
+                        // must not redirect it: both surfaces would then have `target == false`,
+                        // the shared element would lose its target entirely
+                        // (`VisibleContentAbsentDuringTransition` → `calculateAlternativeTargetBounds`)
+                        // and the art would drift back toward the geometry it came from and vanish.
+                        // That is device report 48 — close the panel and open Settings immediately,
+                        // and the art flew back toward the panel and disappeared. Completing the
+                        // in-flight change first resolves the match, then the new one plays from a
+                        // settled state.
+                        //
+                        // Deliberately NOT applied to a plain REVERSAL (push to Player, then pop
+                        // straight back): there the two participants' targets flip together, so
+                        // there is always exactly one target and nothing is stranded — and snapping
+                        // would yank the bar fully off screen before sliding it back in. A reversal
+                        // lands in the `targetState != surfaceTarget` branch below and unwinds.
+                        if (surfaceState.currentState != surfaceState.targetState &&
+                            surfaceTarget != surfaceState.targetState &&
+                            surfaceTarget != surfaceState.currentState
+                        ) {
+                            surfaceState.snapTo(surfaceState.targetState)
+                        }
+                        surfaceState.animateTo(surfaceTarget)
+                    }
+                    // A route gesture released without committing, or a reversal of a running
+                    // change back to where it started.
+                    surfaceState.targetState != surfaceTarget -> unwindSeek()
+                    else -> Unit
+                }
+                // Driven by branch (1); this effect is not even composed then.
+                PanelBackPhase.Seeking -> Unit
             }
         }
     }
@@ -375,11 +515,17 @@ fun PlayerPanelHost(
         if (!canShowPanel) closePanel()
     }
 
-    val scrimAlpha by animateFloatAsState(
-        targetValue   = if (panelVisible) 0.45f else 0f,
-        animationSpec = tween(300),
-        label         = "panelHostScrim",
-    )
+    // The scrim's alpha is an animation ON THE PANEL'S OWN TRANSITION, not a separate
+    // `animateFloatAsState`: it therefore cannot desync from the panel's slide, and — the reason it
+    // changed — it SEEKS with a predictive-back gesture like everything else on that transition, so
+    // it fades in with the finger as the panel comes in from under the full player and fades out
+    // with the finger as the panel is dragged away. `screenTransitionSpec()` is the same
+    // `tween(300, FastOutSlowInEasing)` this used to pass literally; never a spring, an alpha would
+    // overshoot a valid range (docs/MOTION.md).
+    val scrimAlpha by panelTransition.animateFloat(
+        transitionSpec = { screenTransitionSpec() },
+        label          = "panelHostScrim",
+    ) { shown -> if (shown) 0.45f else 0f }
 
     // Opening the pop-out drops any text focus first. Under `enableEdgeToEdge()` the window is NOT
     // resized for the IME, and the panel below deliberately keeps plain `navigationBarsPadding()`
@@ -428,12 +574,20 @@ fun PlayerPanelHost(
             // it was visually gone (~4% opacity by 250ms). With no pointer input at all, the fading
             // Box is just a draw modifier and taps reach the content behind it immediately.
             //
-            // `visible &&` is a cosmetic rider on the same idea: the fade-out tween outlives the
-            // route flip, so on a push to PlayerScreen the dimming wash would otherwise be drawn
-            // over the INCOMING player for ~300ms. Gating the draw on the route trades that for the
-            // outgoing browse screen losing its dim abruptly rather than fading — the better of the
-            // two, since the outgoing screen is sliding out under it anyway.
-            if (visible && scrimAlpha > 0f) {
+            // `visible ||` is a cosmetic rider on the same idea: the fade-out outlives the route
+            // flip, so on a push to PlayerScreen the dimming wash would otherwise be drawn over the
+            // INCOMING player for ~300ms. Gating the draw on the route trades that for the outgoing
+            // browse screen losing its dim abruptly rather than fading — the better of the two,
+            // since the outgoing screen is sliding out under it anyway.
+            //
+            // The second term is what lets the scrim seek IN under the full player: during a back
+            // gesture off `PlayerScreen` the route still reads as Player (`currentBackStackEntry`
+            // only moves at commit) while the panel's target is already `true` from the seek, and
+            // without it the scrim would pop in at 0.45 the instant the gesture committed. It
+            // cannot re-open the hole this gate exists to close: `panelTransition.targetState` is
+            // true only when `surfaceTarget == Panel` — which requires `visible` — or during
+            // exactly that gesture.
+            if ((visible || panelTransition.targetState) && scrimAlpha > 0f) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -533,6 +687,10 @@ fun PlayerPanelHost(
                     // On NARROW screens the mini's PRIMARY scope (below) is ALREADY the nav scope, so
                     // this stays false to avoid a double registration that breaks the morph
                     // asymmetrically.
+                    // Read off the panel's own child transition, which is still the exact animation
+                    // rendering the panel — so this stays true until the panel is genuinely gone,
+                    // and it is now true from the first frame of a gesture that seeks the panel in
+                    // (the raw Boolean and a separate tween could each be a frame or a spring out).
                     val panelPresent = panelTransition.currentState || panelTransition.targetState ||
                                        panelTransition.isRunning
                     val miniNeedsNavScope = canShowPanel && !panelPresent
@@ -555,8 +713,8 @@ fun PlayerPanelHost(
                     // its shared-element scope in BOTH layers (MiniPlayer falls back to its inner scope,
                     // which is now the only one). That is what keeps the nav-level mini↔PlayerScreen
                     // morph working with the bar living outside every destination: the bar is the EXIT
-                    // participant on a push to Player (already composed when `showBar` flips false) and
-                    // the ENTER participant on the way back — composing fresh into a live transition at
+                    // participant on a push to Player (already composed when the surface leaves `Bar`)
+                    // and the ENTER participant on the way back — composing fresh into a live transition at
                     // the first frame of the back GESTURE, not at commit, which is the whole point of
                     // the seek. Matching is per key within a SharedTransitionScope and independent of
                     // each participant's parent transition (SharedTransitionScope.kt `sharedElementsFor`:
@@ -604,21 +762,46 @@ fun PlayerPanelHost(
             }
         }   // if (!isExtraWide) — scrim + mini/pop-out only
 
-        // Back closes the pop-out panel. Composed LAST, AFTER `content` — i.e. after the NavHost and
-        // everything inside it — so it is the most recently added enabled handler and wins. Both
-        // this and NavHost's own predictive-back handler register on the SAME
-        // `NavigationEventDispatcher` via `addHandler` from an effect (navigation-compose 2.10.0's
-        // `rememberNavHostEventHandler`; activity-compose 1.13.0's `BackHandler`), and
-        // `NavigationEventProcessor.findHandler` resolves most-to-least recently added — on both
+        // Back closes the pop-out panel, and the panel FOLLOWS THE FINGER doing it: the panel and
+        // its scrim retreat, the mini player rises and the art flies between them, all seeked by
+        // the gesture, unwinding on an early release. A plain `BackHandler` could only close it
+        // after the gesture committed. The handler itself does nothing but record the phase and
+        // the progress — `PredictiveBackHandler` CANCELS this lambda's job when the gesture is
+        // cancelled (`ComposePredictiveBackHandler.onBackCancelled` → `activeJob?.cancel()`), so an
+        // unwind animation written here would never run; the suspending work lives in the effects
+        // above, exactly as in `LibrarySinglePaneLayout`. A NON-predictive back (button, 3-button
+        // nav) still arrives here: `onBackCompleted` opens a session whose flow completes with zero
+        // events, so it lands straight in `Committing` and the close plays as an animation.
+        //
+        // Composed LAST, AFTER `content` — i.e. after the NavHost and everything inside it — so it
+        // is the most recently added enabled handler and wins. This, `BackHandler` and NavHost's
+        // own predictive-back handler all register on the SAME `NavigationEventDispatcher` via
+        // `addHandler` at `PRIORITY_DEFAULT` from an effect (navigation-compose 2.10.0's
+        // `rememberNavHostEventHandler`; activity-compose 1.13.0's `BackHandler` /
+        // `PredictiveBackHandler`), and `NavigationEventProcessor.findHandler` resolves
+        // most-to-least recently added within a priority — on both
         // `ActivityFlags.isOnBackPressedLifecycleOrderMaintained` branches.
         // Order alone is still NOT the guard for handlers inside `content`: a layout composed after
         // this host already exists (unfolding into TwoPaneLayout) registers later and outranks it.
-        // That is what [LocalPopOutPanelOpen] is for. Keep this call unconditional (BackHandler's
-        // KDoc warns that conditional calls change composition order); `enabled` alone makes it
-        // yield when the panel is absent, so the Library's single-pane PredictiveBackHandler is
-        // untouched. That includes the extra-wide width, where this now registers (it did not
-        // before the early return was removed) but `panelVisible` is structurally false, so it
-        // always yields — and `DockedPlayerPane`'s own handler is composed after this host anyway.
-        BackHandler(enabled = panelVisible) { closePanel() }
+        // That is what [LocalPopOutPanelOpen] is for — and it stays true for the whole gesture,
+        // since `closePanel()` only runs at commit. Keep this call unconditional (the KDoc warns
+        // that conditional calls change composition order); `enabled` alone makes it yield when the
+        // panel is absent, so the Library's single-pane PredictiveBackHandler is untouched. That
+        // includes the extra-wide width, where this now registers (it did not before the early
+        // return was removed) but `panelVisible` is structurally false, so it always yields — and
+        // `DockedPlayerPane`'s own handler is composed after this host anyway.
+        PredictiveBackHandler(enabled = panelVisible) { events ->
+            panelBackProgress = 0f
+            panelBack         = PanelBackPhase.Seeking   // BEFORE collecting, so the first progress
+            try {                                        // frame can't race an animateTo
+                events.collect { event -> panelBackProgress = event.progress }
+                // Committed. The phase flips first so the effect parks instead of unwinding during
+                // the frame or two before `closePanel()`'s state change is read back.
+                panelBack = PanelBackPhase.Committing
+                closePanel()
+            } catch (_: CancellationException) {
+                panelBack = PanelBackPhase.Cancelled
+            }
+        }
     }
 }

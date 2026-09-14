@@ -40,13 +40,28 @@ fun PlayerPopOutPanel(
     val panelSlideSpec = screenTransitionSpec<IntOffset>()
 
     // Driven by PlayerPanelHost's `panelTransition` so the host's nav-scope gate reads the exact
-    // same animation that's on screen (no separate timer to desync from it).
+    // same animation that's on screen (no separate timer to desync from it). Since 2026-09-14 that
+    // is a CHILD of the host's seekable `PlayerSurface` transition, so this enter/exit — and with
+    // it the `"album-art"` bounds animation that hangs off the scope below — follows a
+    // predictive-back gesture: the panel comes in with the finger from under the full player, and
+    // goes back out to the mini player with it.
     panelTransition.AnimatedVisibility(
         visible  = { it },
         enter    = slideInVertically(panelSlideSpec)  { it + navBarPx + with(density) { 16.dp.roundToPx() } },
         exit     = slideOutVertically(panelSlideSpec) { it + navBarPx + with(density) { 16.dp.roundToPx() } },
         modifier = modifier,
     ) {
+        // Compose nothing at all unless the panel is genuinely part of the current or the target
+        // state. `AnimatedVisibility` ALSO composes its content while its transition reports
+        // `hasInitialValueAnimations`, and since the panel and the mini player became two children
+        // of ONE transition (see `PlayerSurface` in PlayerPanelHost) an INTERRUPTED change on the
+        // other half sets that flag here too — `moveAnimationToInitialState()` hands the
+        // interrupted animation to `Transition.setInitialAnimations`, which recurses into every
+        // child transition. The panel would then compose in `PreEnter` and register a second,
+        // non-target `"album-art"` participant in both scopes, which is the exact ambiguity that
+        // broke the mini → panel morph in the first place.
+        if (!panelTransition.currentState && !panelTransition.targetState) return@AnimatedVisibility
+
         // This AnimatedVisibility scope is the panel's enter/exit for BOTH shared-element layers:
         // the local mini↔panel morph and — now that the host lives outside the NavHost and the
         // panel is hidden (not closed) on the Player route — the nav-level panel↔PlayerScreen morph.
