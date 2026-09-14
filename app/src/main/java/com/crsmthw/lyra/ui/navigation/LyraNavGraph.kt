@@ -305,8 +305,10 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
     val showsPlayerSurfaceAfterBack =
         if (backEntryRoute == null) showsPlayerSurface else routeShowsPlayerSurface(backEntryRoute)
     // Per-route mini-player shape, animated in place by the host instead of swapped by remounting.
+    // WIDTH only: the bar's IME lift used to be a second route-derived flag here and is now
+    // unconditional inside the host — a Boolean that flips on the first frame of a push can never
+    // agree with an inset that is still retracting (see `miniBottomInset` in PlayerPanelHost).
     val miniFullWidth = currentRoute == Screen.Search.route || currentRoute == Screen.Stats.route
-    val miniAvoidsIme = currentRoute == Screen.Search.route
 
     SharedTransitionLayout {
       Row(modifier = Modifier.fillMaxSize()) {
@@ -324,7 +326,6 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
             visible                  = showsPlayerSurface,
             visibleAfterBack         = showsPlayerSurfaceAfterBack,
             miniPlayerFullWidth      = miniFullWidth,
-            miniPlayerAvoidsIme      = miniAvoidsIme,
             navSharedTransitionScope = this@SharedTransitionLayout,
             modifier                 = Modifier.weight(1f).fillMaxHeight(),
         ) { onRequestPlayer ->

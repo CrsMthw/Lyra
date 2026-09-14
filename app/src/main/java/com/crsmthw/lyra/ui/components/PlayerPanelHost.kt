@@ -56,7 +56,7 @@ import kotlinx.coroutines.launch
 // argument is now an ANIMATED property: `miniPlayerFullWidth` (Search/Stats: a single full-width
 // list, no right pane for a 58 % bar to line up with) resizes the bar in place with the app's finite
 // `screenTransitionSpec()` instead of taking it off screen and putting a different one back.
-// `miniPlayerAvoidsIme` (Search: the field auto-focuses) lifts it above the software keyboard.
+// The bar's bottom inset simply unions `WindowInsets.ime` on every route — see `miniBottomInset`.
 //
 // The `onRequestPlayer` lambda passed to `content` opens the panel on wide screens and calls
 // `onOpenPlayer` on narrow ones, so track-tap handlers don't need to know which mode they're in.
@@ -132,7 +132,6 @@ fun PlayerPanelHost(
      */
     visibleAfterBack        : Boolean = visible,
     miniPlayerFullWidth     : Boolean = false,
-    miniPlayerAvoidsIme     : Boolean = false,
     navSharedTransitionScope: SharedTransitionScope? = null,
     content                 : @Composable (onRequestPlayer: () -> Unit) -> Unit,
 ) {
@@ -306,8 +305,8 @@ fun PlayerPanelHost(
     // normal case there, not an edge case. `clearFocus(force = true)` is the load-bearing half:
     // `hide()` alone leaves the field focused, and dismissing a sheet the action row opened can
     // then hand focus back and re-show the IME under the panel. Unconditional inside `canShowPanel`
-    // — a no-op on Library/Album/Artist, where nothing is focused — rather than keyed on
-    // `miniPlayerAvoidsIme`, which describes the mini player's inset, not whether an IME is up.
+    // — a no-op on Library/Album/Artist, where nothing is focused. (The mini player needs no such
+    // per-route knob: its inset unions the IME on every route, see `miniBottomInset`.)
     val onRequestPlayer: () -> Unit = {
         if (canShowPanel) {
             focusManager.clearFocus(force = true)
@@ -385,32 +384,40 @@ fun PlayerPanelHost(
                     label         = "miniWidth",
                 )
 
-                // Bottom inset for the mini player. `miniPlayerAvoidsIme` lifts it above the
-                // keyboard — Search auto-focuses its field, so the keyboard is up on entry and a
-                // mini player left at the window bottom would spend most of the screen's life
-                // hidden behind it. The inset is the UNION of the IME and nav bar, which takes the
-                // larger of the two instead of stacking: the IME inset already spans the nav bar,
-                // so imePadding() + navigationBarsPadding() would leave a nav-bar-sized gap above
-                // the keyboard. The pop-out panel below deliberately keeps plain
-                // navigationBarsPadding() — it is capped at 80 % of the screen height, so lifting
-                // it above the keyboard would squash it and make it jump every time the IME
-                // toggles. Horizontal stays in the side list: the IME has no horizontal inset, so
-                // this keeps the side nav-bar clearance navigationBarsPadding() gives in landscape.
-                // Both branches also union the DISPLAY CUTOUT: in landscape the hole-punch camera
-                // sits on a side edge and screen content clears it via horizontalSystemBarsPadding()
-                // — the mini player must indent the same way or it pokes out past the content on
-                // that side (device pass 2026-09-12, item 36). Horizontal + Bottom only: the top
-                // stays with the content above.
-                val miniBottomInset = if (miniPlayerAvoidsIme)
-                    Modifier.windowInsetsPadding(
-                        WindowInsets.ime.union(WindowInsets.navigationBars).union(WindowInsets.displayCutout)
-                            .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)
-                    )
-                else
-                    Modifier.windowInsetsPadding(
-                        WindowInsets.navigationBars.union(WindowInsets.displayCutout)
-                            .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)
-                    )
+                // Bottom inset for the mini player — ONE modifier that unions the IME
+                // UNCONDITIONALLY, on every route.
+                //
+                // It used to be two different modifiers switched by a `miniPlayerAvoidsIme` flag
+                // that `LyraNavGraph` derived from `currentBackStackEntryAsState()` — which flips
+                // on the FIRST FRAME of a push. So leaving Search with the keyboard still up (tap
+                // a result row, or the back arrow) swapped the bar to the no-IME inset immediately:
+                // it snapped down behind the still-retracting keyboard and popped back up ~250ms
+                // later when the IME inset finally reached zero. A Boolean that changes a frame
+                // before the inset it describes cannot be made to agree with it; unioning the IME
+                // always makes the bar ride the keyboard down instead, with no flag to be out of
+                // step with. (Search, which auto-focuses its field, is why the lift exists at all.)
+                //
+                // `union` takes the LARGER of the two rather than stacking: the IME inset already
+                // spans the nav bar, so imePadding() + navigationBarsPadding() would leave a
+                // nav-bar-sized gap above the keyboard. The pop-out panel below deliberately keeps
+                // plain nav bar + cutout — it is capped at 80 % of the screen height, so lifting it
+                // above the keyboard would squash it and make it jump on every IME toggle.
+                // Horizontal stays in the side list: the IME has no horizontal inset, so this keeps
+                // the side nav-bar clearance navigationBarsPadding() gives in landscape. The
+                // DISPLAY CUTOUT is in the union because in landscape the hole-punch camera sits on
+                // a side edge and screen content clears it via horizontalSystemBarsPadding() — the
+                // mini player must indent the same way or it pokes out past the content on that
+                // side (device pass 2026-09-12, item 36). Horizontal + Bottom only: the top stays
+                // with the content above.
+                //
+                // Honest note: the activity window still receives IME insets while a DIALOG above
+                // it shows the keyboard (AddToPlaylistSheet's create-playlist dialog runs in its
+                // own window), so the bar lifts behind that sheet + its scrim. It is invisible and
+                // harmless — stated here so nobody re-introduces the conditional to "fix" it.
+                val miniBottomInset = Modifier.windowInsetsPadding(
+                    WindowInsets.ime.union(WindowInsets.navigationBars).union(WindowInsets.displayCutout)
+                        .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)
+                )
 
                 // The mini player's SECONDARY nav scope (wide screens only) is held CONTINUOUSLY
                 // while the pop-out panel is fully closed, and dropped only while it is
