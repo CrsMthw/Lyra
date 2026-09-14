@@ -1,5 +1,3 @@
-@file:Suppress("ConfigurationScreenWidthHeight")
-
 package com.crsmthw.lyra.ui.screens.library
 
 import androidx.activity.compose.BackHandler
@@ -24,7 +22,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.IntOffset
@@ -50,6 +47,9 @@ internal fun TwoPaneLayout(
     /** Browser scroll position, owned by `LibraryScreen` — the same instance the single-pane layout
      *  gets, so the position also survives a fold/unfold. */
     browserListState      : LazyListState,
+    /** Browser app-bar collapse state, owned by `LibraryScreen` — the same instance the single-pane
+     *  layout gets, so the bar's collapse also survives a fold/unfold. */
+    browserBarState       : TopAppBarState,
     viewModel             : LibraryViewModel,
     playerViewModel       : PlayerViewModel,
     onOpenSearch          : () -> Unit,
@@ -62,8 +62,6 @@ internal fun TwoPaneLayout(
     sharedTransitionScope : SharedTransitionScope? = null,
     animatedContentScope  : AnimatedContentScope? = null,
 ) {
-    val config    = LocalConfiguration.current
-    val isLandscape = config.screenWidthDp > config.screenHeightDp
     val context   = LocalContext.current
     val mosaicDir = remember { File(context.filesDir, "mosaics") }
 
@@ -86,8 +84,10 @@ internal fun TwoPaneLayout(
     }
 
     // No statusBarsPadding here — the panes go edge-to-edge under a transparent status bar (like the
-    // single-pane screens). Each pane self-pads its top inset (hero `statusBarsPadding()` + TopScrim,
-    // floating pills) so content fades under the bar instead of leaving an opaque background band.
+    // single-pane screens). Each pane self-pads its top inset: the LEFT pane's app bar takes the
+    // status-bar inset as its own `windowInsets` (App bars trial, 2026-09-14); the right pane's hero
+    // bakes `statusBarsPadding()` and fades under a TopScrim. A parent inset here would instead
+    // leave an opaque background band where the status bar sits.
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -114,9 +114,9 @@ internal fun TwoPaneLayout(
                     LibraryBrowserPane(
                         state                 = state,
                         listState             = browserListState,
+                        barState              = browserBarState,
                         viewModel             = viewModel,
                         onOpenSettings        = onOpenSettings,
-                        isLandscape           = isLandscape,
                         onOpenAlbum           = onOpenAlbum,
                         onOpenArtist          = onOpenArtist,
                         onOpenShow            = onOpenShow,

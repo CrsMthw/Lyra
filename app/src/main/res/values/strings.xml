@@ -99,6 +99,15 @@
         <item quantity="one">%1$d track</item>
         <item quantity="other">%1$d tracks</item>
     </plurals>
+    <!-- Library top app bar subtitle -->
+    <plurals name="library_bar_playlists">
+        <item quantity="one">%1$d playlist</item>
+        <item quantity="other">%1$d playlists</item>
+    </plurals>
+    <plurals name="library_bar_liked">
+        <item quantity="one">%1$d liked song</item>
+        <item quantity="other">%1$d liked songs</item>
+    </plurals>
 
     <!-- Podcast shows -->
     <plurals name="show_episode_count">

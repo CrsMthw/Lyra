@@ -84,6 +84,9 @@ internal fun SinglePaneLayout(
     /** Browser scroll position, owned by `LibraryScreen` so it survives this pane being disposed
      *  while a detail is open (the `AnimatedContent` below does not save its children's state). */
     browserListState      : LazyListState,
+    /** Browser app-bar collapse state, owned by `LibraryScreen` for the same reason as
+     *  [browserListState] — this layout disposes the browser pane while a detail is open. */
+    browserBarState       : TopAppBarState,
     viewModel             : LibraryViewModel,
     playerViewModel       : PlayerViewModel,
     onOpenSearch          : () -> Unit,
@@ -275,9 +278,9 @@ internal fun SinglePaneLayout(
                     LibraryBrowserPane(
                         state          = state,
                         listState      = browserListState,
+                        barState       = browserBarState,
                         viewModel      = viewModel,
                         onOpenSettings = onOpenSettings,
-                        isLandscape    = isLandscape,
                         onOpenAlbum    = onOpenAlbum,
                         onOpenArtist   = onOpenArtist,
                         onOpenShow     = onOpenShow,

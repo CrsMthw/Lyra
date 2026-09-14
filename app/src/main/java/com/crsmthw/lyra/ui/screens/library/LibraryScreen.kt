@@ -65,10 +65,24 @@ fun LibraryScreen(
     // time), so the position also carries across a fold/unfold.
     val browserListState = rememberLazyListState()
 
+    // The browser app bar's collapse state, hoisted for the same reason as `browserListState`: the
+    // single-pane browser pane is disposed by `SinglePaneLayout`'s `AnimatedContent` whenever a
+    // playlist detail opens, so a pane-local state would snap the bar back to fully expanded over a
+    // list that restored itself half-way down. `rememberTopAppBarState` is `rememberSaveable`, so
+    // held here it also survives navigating away and a fold/unfold (both layouts get the same
+    // instance and only one is composed at a time).
+    //
+    // Safe with respect to the predictive-back seek: this is an ordinary composition-local
+    // `mutableFloatStateOf` holder — it never enters `LibraryUiState`, so it cannot perturb
+    // `detailKey`, which is the `SeekableTransitionState`'s target (docs/MOTION.md → Predictive
+    // back). The COMPACT bar deliberately does not use it — see `LibraryBrowserPane`.
+    val browserBarState = rememberTopAppBarState()
+
     if (isWideScreen) {
         TwoPaneLayout(
             state                 = state,
             browserListState      = browserListState,
+            browserBarState       = browserBarState,
             viewModel             = viewModel,
             playerViewModel       = playerViewModel,
             onOpenSearch          = onOpenSearchHaptic,
@@ -85,6 +99,7 @@ fun LibraryScreen(
         SinglePaneLayout(
             state                 = state,
             browserListState      = browserListState,
+            browserBarState       = browserBarState,
             viewModel             = viewModel,
             playerViewModel       = playerViewModel,
             onOpenSearch          = onOpenSearchHaptic,
