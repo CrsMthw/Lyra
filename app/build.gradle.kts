@@ -112,6 +112,10 @@ dependencies {
 
     // Navigation
     implementation(libs.androidx.navigation.compose)
+    // navigation-compose only depends on this at RUNTIME, so it needs declaring to reach the
+    // compile classpath: PlayerPanelHost observes NavigationEventDispatcher.transitionState to seek
+    // the mini player with a predictive-back gesture. `navigationevent` arrives as its api dep.
+    implementation(libs.androidx.navigationevent.compose)
 
     // Persistence
     implementation(libs.androidx.datastore.preferences)
