@@ -35,6 +35,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -229,6 +234,43 @@ fun SearchScreen(
         pendingTrackAction = null
     }
 
+    // Dragging the results drops the keyboard. Scrolling a list is the user saying they are done
+    // typing and want to look at what came back, and the field kept both the cursor and the IME
+    // through the whole scroll (device pass 2026-09-14, checklist 6) — with `imePadding()` on the
+    // results that also meant reading the tab through a half-height viewport.
+    //
+    // A NESTED SCROLL connection, not `snapshotFlow { listState.isScrollInProgress }`, because the
+    // source is the thing that has to be discriminated, not the fact of a scroll:
+    // `NestedScrollSource.UserInput` is a real drag (or a mouse wheel) and excludes the fling
+    // (`SideEffect`) that follows it as well as the IME's own bring-into-view (`Relocate`) — while
+    // `isScrollInProgress` cannot tell a drag from ANY programmatic scroll on these four hoisted
+    // list states, so it would quietly depend on `requestScrollToItem` (the per-query reset above)
+    // not counting as one. The pager's horizontal swipe dispatches an x-only delta and a
+    // `LazyColumn` a y-only one, so `available.y != 0f` is what keeps a tab swipe — and a tab tap,
+    // which dispatches nothing at all — on the keyboard, exactly as today.
+    //
+    // Gated on the field actually holding focus so the pair fires ONCE per gesture rather than on
+    // every delta of it, and so it cannot fight anything that already dropped the IME: the row taps
+    // and the back arrow call `keyboard?.hide()` themselves, and a long-press hands `pendingTrackAction`
+    // to the effect above, which waits for the inset to reach zero before opening the sheet. The flag
+    // is written from the field's focus callback and read ONLY from this lambda (pointer input, not
+    // composition), so nothing subscribes to it and a focus change recomposes nothing.
+    val fieldFocused = remember { mutableStateOf(false) }
+    val dismissImeOnScroll = remember(focusManager, keyboard) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (fieldFocused.value &&
+                    source == NestedScrollSource.UserInput &&
+                    available.y != 0f
+                ) {
+                    focusManager.clearFocus(force = true)
+                    keyboard?.hide()
+                }
+                return Offset.Zero   // observing, never consuming
+            }
+        }
+    }
+
     // THE screen's single horizontal inset. In landscape with 3-button navigation the nav bar sits
     // on the left or right edge, and the search field, the Recent rows' X buttons and the result
     // rows all ran underneath it — only the inner results Box carried a narrower nav-bars-only
@@ -284,7 +326,13 @@ fun SearchScreen(
                     // `screenTransitionSpec()` rule (docs/MOTION.md → THE HARD RULE) is not in play.
                     HorizontalPager(
                         state                   = pagerState,
-                        modifier                = Modifier.fillMaxSize(),
+                        // The results container is where the keyboard-dismissing nested scroll
+                        // connection attaches: it is the parent of both the pager's own horizontal
+                        // scrollable and every page's LazyColumn, so one connection sees all four
+                        // lists and can tell their vertical drags from a tab swipe by axis alone.
+                        modifier                = Modifier
+                            .fillMaxSize()
+                            .nestedScroll(dismissImeOnScroll),
                         // Neighbours compose only while a drag is actually in flight; the `isActive`
                         // gate below is what stops one of them paging itself as it slides into view.
                         beyondViewportPageCount = 0,
@@ -556,17 +604,29 @@ fun SearchScreen(
         SearchInputBar(
             queryState     = queryState,
             onBack         = { keyboard?.hide(); haptics.confirm(); onBack() },
-            // Focus explicitly: clearing is the start of typing the next query, and since the
-            // auto-focus effect above no longer fires on a re-entry over results, the field may
-            // well not be focused when the ✕ is tapped. Already-focused (the ordinary case, mid
-            // typing) makes the request a no-op.
+            // Focus AND show the keyboard, in that order — clearing is the start of typing the
+            // next query, so the ✕ has to leave the field ready to type in from either state it
+            // can be tapped in:
+            //  - unfocused (a re-entry over restored results, where the auto-focus effect below
+            //    deliberately no longer fires): `requestFocus()` does the work, and the IME comes
+            //    up with the focus gain.
+            //  - focused with the IME hidden — the state a system swipe-down dismissal leaves
+            //    behind: `requestFocus()` is a no-op on an already-focused field, so the ✕ used to
+            //    clear the text and leave the user staring at a cursor with no keyboard (device
+            //    pass 2026-09-14, checklist 6). The focus never went away, so the field's text
+            //    input session is still alive and an explicit `show()` reaches it.
+            // The M3 InputField is on the TextFieldState path and does not intercept either call;
+            // its own clear-focus-on-collapse effect is unarmed, the SearchBarState being pinned
+            // Expanded (see SearchInputBar's KDoc).
             onClear        = {
                 queryState.clearText()
                 viewModel.clearQuery()
                 focusRequester.requestFocus()
+                keyboard?.show()
             },
             onSearch       = { keyboard?.hide() },
             focusRequester = focusRequester,
+            onFocusChanged = { fieldFocused.value = it },
             modifier       = Modifier
                 .align(Alignment.TopCenter)
                 .statusBarsPadding()
@@ -1067,6 +1127,7 @@ private fun SearchInputBar(
     onClear       : () -> Unit,
     onSearch      : () -> Unit,
     focusRequester: FocusRequester,
+    onFocusChanged: (Boolean) -> Unit,
     modifier      : Modifier = Modifier,
 ) {
     val searchBarState = rememberSearchBarState(initialValue = SearchBarValue.Expanded)
@@ -1081,7 +1142,16 @@ private fun SearchInputBar(
             textFieldState = queryState,
             searchBarState = searchBarState,
             onSearch       = { onSearch() },
-            modifier       = Modifier.fillMaxWidth().focusRequester(focusRequester),
+            // `isFocused || hasFocus`, not `isFocused` alone: if the InputField interposes a
+            // focusTarget of its own between this modifier and the inner text field, the observer
+            // node here is reported as ActiveParent (isFocused false, hasFocus true) and a
+            // focus-only read would silently never go true — i.e. a green build with a dead
+            // scroll-dismissal. The union is true in both shapes and false only when the whole
+            // subtree is unfocused, which is all the caller asks.
+            modifier       = Modifier
+                .fillMaxWidth()
+                .focusRequester(focusRequester)
+                .onFocusChanged { onFocusChanged(it.isFocused || it.hasFocus) },
             placeholder    = { Text(stringResource(R.string.search_placeholder)) },
             leadingIcon    = {
                 IconButton(onClick = onBack) {
