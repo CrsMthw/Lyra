@@ -9,11 +9,12 @@ import androidx.core.net.toUri
  * which is why one enum covers both forms.
  */
 enum class SpotifyLinkType(val segment: String) {
-    TRACK   ("track"),
-    ALBUM   ("album"),
-    ARTIST  ("artist"),
-    SHOW    ("show"),
-    EPISODE ("episode");
+    TRACK    ("track"),
+    ALBUM    ("album"),
+    ARTIST   ("artist"),
+    SHOW     ("show"),
+    EPISODE  ("episode"),
+    PLAYLIST ("playlist");
 
     companion object {
         fun fromSegment(segment: String): SpotifyLinkType? =
@@ -60,12 +61,12 @@ private val LOCALE_SEGMENT_PATTERN = Regex("intl-[A-Za-z0-9_-]+")
  */
 internal val SPOTIFY_WEB_URL_PATTERN = Regex(
     """https://open\.spotify\.com/(?:intl-[A-Za-z0-9_-]+/)?""" +
-        """(?:track|album|artist|show|episode)/[A-Za-z0-9]+"""
+        """(?:track|album|artist|show|episode|playlist)/[A-Za-z0-9]+"""
 )
 
 /**
- * Normalise any shape of Spotify link into a [SpotifyLink], or null when it is not one Lyra can
- * open (a `/playlist/`, a search URL, a user profile, a malformed id, …).
+ * Normalise any shape of Spotify link into a [SpotifyLink], or null when it is not one Lyra
+ * recognises at all (a search URL, a user profile, a malformed id, …).
  *
  * Handles:
  *  - `https://open.spotify.com/show/<id>?si=…`  (query and fragment are dropped)

@@ -40,6 +40,9 @@ import kotlinx.coroutines.delay
  * episode uri exactly like a track uri) and then the player is opened. The short settle delay is
  * the same one the old track-only deep link used — it gives the play call time to land so the
  * player doesn't open on the PREVIOUS track and visibly swap.
+ *
+ * A playlist has no hosted destination either: `onOpenPlaylist` hands the id back to the Library,
+ * which opens it in place when it is one of the user's own.
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -50,6 +53,7 @@ fun LinkResolverScreen(
     onOpenAlbum     : (String) -> Unit,
     onOpenArtist    : (String) -> Unit,
     onOpenShow      : (String) -> Unit,
+    onOpenPlaylist  : (String) -> Unit,
     onOpenPlayer    : () -> Unit,
     onUnsupported   : () -> Unit,
 ) {
@@ -71,9 +75,10 @@ fun LinkResolverScreen(
                 onUnsupported()
             }
             is LinkResolution.Resolved -> when (outcome.link.type) {
-                SpotifyLinkType.ALBUM  -> onOpenAlbum(outcome.link.id)
-                SpotifyLinkType.ARTIST -> onOpenArtist(outcome.link.id)
-                SpotifyLinkType.SHOW   -> onOpenShow(outcome.link.id)
+                SpotifyLinkType.ALBUM    -> onOpenAlbum(outcome.link.id)
+                SpotifyLinkType.ARTIST   -> onOpenArtist(outcome.link.id)
+                SpotifyLinkType.SHOW     -> onOpenShow(outcome.link.id)
+                SpotifyLinkType.PLAYLIST -> onOpenPlaylist(outcome.link.id)
                 SpotifyLinkType.TRACK, SpotifyLinkType.EPISODE -> {
                     isStartingPlayback = true
                     playerViewModel.playTrack(uri = outcome.link.uri)

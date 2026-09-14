@@ -69,11 +69,13 @@
                 <data android:pathPrefix="/artist/" />
                 <data android:pathPrefix="/show/" />
                 <data android:pathPrefix="/episode/" />
+                <data android:pathPrefix="/playlist/" />
                 <data android:pathAdvancedPattern="/intl-[^/]+/track/[^/]+" />
                 <data android:pathAdvancedPattern="/intl-[^/]+/album/[^/]+" />
                 <data android:pathAdvancedPattern="/intl-[^/]+/artist/[^/]+" />
                 <data android:pathAdvancedPattern="/intl-[^/]+/show/[^/]+" />
                 <data android:pathAdvancedPattern="/intl-[^/]+/episode/[^/]+" />
+                <data android:pathAdvancedPattern="/intl-[^/]+/playlist/[^/]+" />
             </intent-filter>
 
             <!-- 2. Branch short links — what the Spotify app's own share sheet produces today

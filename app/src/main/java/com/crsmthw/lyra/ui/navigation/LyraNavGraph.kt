@@ -1,6 +1,7 @@
 package com.crsmthw.lyra.ui.navigation
 
 import android.content.Intent
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.ExperimentalSharedTransitionApi
@@ -47,6 +48,9 @@ import com.crsmthw.lyra.util.visualizer.VisualizerStyle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlin.math.pow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.mapNotNull
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import androidx.navigation.NavHostController
@@ -55,6 +59,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.crsmthw.lyra.R
 import com.crsmthw.lyra.di.AppContainer
 import com.crsmthw.lyra.ui.components.LocalPlayerRouteVisible
 import com.crsmthw.lyra.ui.screens.album.AlbumDetailScreen
@@ -330,8 +335,38 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
                 )
             }
 
-            composable(Screen.Library.route) {
+            composable(Screen.Library.route) { backStackEntry ->
                 val vm = viewModel<LibraryViewModel>(factory = LibraryViewModelFactory(container))
+
+                // A deep-linked playlist, handed back by the link resolver (see above). Only a
+                // playlist in the user's OWN library can be opened: LibraryViewModel.selectPlaylist
+                // takes a loaded SpotifyPlaylist, not an id, so a curated or not-followed playlist
+                // has nothing to select and gets the same "can't open" toast the resolver uses.
+                //
+                // The wait watches for the PLAYLIST, not for `isLoading` to clear: loadLibrary
+                // flips isLoading false on its CACHED emission and only then refreshes from the
+                // network, so a playlist added on another device is not in that first snapshot and
+                // gating on the flag would toast a link that is about to become openable. The
+                // timeout is therefore what reports a genuinely absent playlist; the usual case
+                // answers from cache in well under a second.
+                val pendingPlaylistFlow = remember(backStackEntry) {
+                    backStackEntry.savedStateHandle.getStateFlow<String?>(PENDING_PLAYLIST_KEY, null)
+                }
+                val pendingPlaylistId by pendingPlaylistFlow.collectAsStateWithLifecycle()
+                LaunchedEffect(pendingPlaylistId) {
+                    val id = pendingPlaylistId ?: return@LaunchedEffect
+                    backStackEntry.savedStateHandle[PENDING_PLAYLIST_KEY] = null
+                    val playlist = withTimeoutOrNull(PENDING_PLAYLIST_TIMEOUT_MS) {
+                        vm.uiState.mapNotNull { s -> s.playlists.firstOrNull { it.id == id } }.first()
+                    }
+                    if (playlist != null) vm.selectPlaylist(playlist)
+                    else Toast.makeText(
+                        context,
+                        context.getString(R.string.deeplink_unsupported),
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
+
                 LibraryScreen(
                     viewModel             = vm,
                     playerViewModel       = playerVm,
@@ -493,6 +528,19 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
                     onOpenAlbum     = { albumId  -> handOff(Screen.AlbumDetail.createRoute(albumId)) },
                     onOpenArtist    = { artistId -> handOff(Screen.ArtistDetail.createRoute(artistId)) },
                     onOpenShow      = { showId   -> handOff(Screen.ShowDetail.createRoute(showId)) },
+                    // A playlist has no hosted destination — its track list lives INSIDE the
+                    // Library. Stash the id on the Library's own back-stack entry and pop back
+                    // to it; the Library block below picks it up and opens the playlist in place.
+                    // getBackStackEntry throws when the route isn't on the stack. The resolver is
+                    // only ever pushed on top of the Library, but a session-expired wipe could in
+                    // principle clear it mid-resolve, and an incoming link must never crash.
+                    onOpenPlaylist  = { playlistId ->
+                        runCatching {
+                            navController.getBackStackEntry(Screen.Library.route)
+                                .savedStateHandle[PENDING_PLAYLIST_KEY] = playlistId
+                        }
+                        navController.popBackStack(Screen.LinkResolver.route, inclusive = true)
+                    },
                     onOpenPlayer    = { handOff(Screen.Player.route) },
                     // Nothing to open: the screen has already shown its toast, so just get out
                     // of the way rather than leaving a spinner on screen.
@@ -532,6 +580,18 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
     }
     } // CompositionLocalProvider
 }
+
+/**
+ * Key under which the link resolver stashes a deep-linked playlist id on the Library's own
+ * back-stack entry, for the Library destination to pick up once it is on top again. There is no
+ * hosted playlist-detail destination to navigate to — the track list lives inside LibraryScreen.
+ */
+private const val PENDING_PLAYLIST_KEY = "deeplink_playlist_id"
+
+/** How long a deep-linked playlist waits to show up in the user's library before Lyra reports it
+ *  as one it can't open. Reached only when the playlist genuinely isn't in the library (curated,
+ *  or followed by nobody) — a cached hit answers in well under a second. */
+private const val PENDING_PLAYLIST_TIMEOUT_MS = 10_000L
 
 /** Fixed width of the docked full-player pane (M3 recommends ~360–412dp for a fixed pane /
  *  side sheet; 380 keeps the portrait player comfortable on a ~1280dp tablet). */
