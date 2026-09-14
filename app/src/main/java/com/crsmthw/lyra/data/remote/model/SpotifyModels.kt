@@ -3,13 +3,41 @@ package com.crsmthw.lyra.data.remote.model
 import com.google.gson.annotations.SerializedName
 
 // ── Paging wrapper ───────────────────────────────────────────────────────────
-data class Paged<T>(
-    val items  : List<T>,
-    val total  : Int,
-    val limit  : Int,
-    val offset : Int,
-    val next   : String?,
-)
+/**
+ * One page of a Spotify collection.
+ *
+ * [rawItems] is the array **exactly as it arrived**, and both of its nullabilities are real: the
+ * key can be absent, and individual SLOTS can be `null` for items that are unavailable or removed
+ * in the user's market (`"items": [null, {…}]` — observed on podcast episode pages, 2026-09-13).
+ * Gson allocates via `Unsafe` and bypasses the Kotlin constructor, so a declared non-null element
+ * type buys nothing at runtime: the list really does hold nulls and the first `it.foo` on one is an
+ * NPE. Declaring the element type honestly is the only fix that holds. (Nullability is Kotlin
+ * metadata — `List<T?>` and `List<T>` are the same JVM type, so Gson, Retrofit and the
+ * `-keep class …data.remote.model.**` rule are all unaffected.)
+ *
+ * Consumers read [items], which is null-free by construction, and page by [rawCount], which counts
+ * every slot the endpoint returned. The two differ exactly when a page carried nulls, and
+ * conflating them is the raw-offset bug (docs/CACHING.md → `CachedTrackList.rawOffset`): an offset
+ * taken from the filtered list re-requests the dropped slots and duplicates the rows after them.
+ *
+ * [rawCount] only means anything on a freshly parsed page — after a client-side merge (see
+ * `SearchViewModel.appendItems`) `rawItems` is already null-free and the two counts coincide.
+ *
+ * `T : Any` is what lets the element type be filtered; every instantiation is a concrete model.
+ */
+data class Paged<T : Any>(
+    @SerializedName("items") val rawItems: List<T?>? = null,
+    val total  : Int     = 0,
+    val limit  : Int     = 0,
+    val offset : Int     = 0,
+    val next   : String? = null,
+) {
+    /** The page's items with the unavailable slots dropped — what every consumer renders. */
+    val items: List<T> get() = rawItems?.filterNotNull() ?: emptyList()
+
+    /** Slots the endpoint returned, nulls included — what an `offset` advances by. */
+    val rawCount: Int get() = rawItems?.size ?: 0
+}
 
 // ── Image ────────────────────────────────────────────────────────────────────
 data class SpotifyImage(
@@ -203,7 +231,12 @@ data class SpotifyDevice(
     @SerializedName("supports_volume")   val supportsVolume       : Boolean  = true,
 )
 
-data class DevicesResponse(val devices: List<SpotifyDevice>)
+/** Same null-tolerant shape as the paged wrappers above — the array here is `devices`, not `items`. */
+data class DevicesResponse(
+    @SerializedName("devices") val rawDevices: List<SpotifyDevice?>? = null,
+) {
+    val devices: List<SpotifyDevice> get() = rawDevices?.filterNotNull() ?: emptyList()
+}
 
 data class TransferPlaybackRequest(
     @SerializedName("device_ids") val deviceIds: List<String>,
@@ -249,23 +282,39 @@ data class SearchResponse(
 )
 
 // ── API list wrappers ────────────────────────────────────────────────────────
+//
+// Every one of these follows [Paged]'s shape for the same reason: `rawItems` is what Gson parsed,
+// nulls and all; `items` is the null-free view consumers render; `rawCount` is the number of slots
+// the endpoint returned, which is what an `offset` advances by. `items` keeps each wrapper's
+// ORIGINAL nullability — a wrapper whose `items` could be absent still answers null for an absent
+// key, so "the key wasn't there" stays distinguishable from "the page was empty".
+
 data class UserPlaylistsResponse(
-    val items  : List<SpotifyPlaylist>,
-    val total  : Int,
-    val next   : String?,
-)
+    @SerializedName("items") val rawItems: List<SpotifyPlaylist?>? = null,
+    val total  : Int     = 0,
+    val next   : String? = null,
+) {
+    val items   : List<SpotifyPlaylist> get() = rawItems?.filterNotNull() ?: emptyList()
+    val rawCount: Int                   get() = rawItems?.size ?: 0
+}
 
 data class PlaylistTracksResponse(
-    val items  : List<PlaylistTrack>?,
-    val total  : Int,
-    val next   : String?,
-)
+    @SerializedName("items") val rawItems: List<PlaylistTrack?>? = null,
+    val total  : Int     = 0,
+    val next   : String? = null,
+) {
+    val items   : List<PlaylistTrack>? get() = rawItems?.filterNotNull()
+    val rawCount: Int                  get() = rawItems?.size ?: 0
+}
 
 data class SavedTracksResponse(
-    val items  : List<SavedTrack>?,
-    val total  : Int,
-    val next   : String?,
-)
+    @SerializedName("items") val rawItems: List<SavedTrack?>? = null,
+    val total  : Int     = 0,
+    val next   : String? = null,
+) {
+    val items   : List<SavedTrack>? get() = rawItems?.filterNotNull()
+    val rawCount: Int               get() = rawItems?.size ?: 0
+}
 
 // ── Recently played (Get Recently Played Tracks) ─────────────────────────────
 data class PlayHistoryContext(
@@ -283,8 +332,11 @@ data class PlayHistoryItem(
 )
 
 data class RecentlyPlayedResponse(
-    val items : List<PlayHistoryItem>? = null,
-)
+    @SerializedName("items") val rawItems: List<PlayHistoryItem?>? = null,
+) {
+    val items   : List<PlayHistoryItem>? get() = rawItems?.filterNotNull()
+    val rawCount: Int                    get() = rawItems?.size ?: 0
+}
 
 // ── Saved albums (Get User's Saved Albums) ───────────────────────────────────
 data class SavedAlbum(
@@ -293,10 +345,13 @@ data class SavedAlbum(
 )
 
 data class SavedAlbumsResponse(
-    val items : List<SavedAlbum>? = null,
+    @SerializedName("items") val rawItems: List<SavedAlbum?>? = null,
     val total : Int     = 0,
     val next  : String? = null,
-)
+) {
+    val items   : List<SavedAlbum>? get() = rawItems?.filterNotNull()
+    val rawCount: Int               get() = rawItems?.size ?: 0
+}
 
 // ── Followed artists (Get Followed Artists — cursor-paged, nested) ───────────
 data class FollowedArtistsResponse(
@@ -304,10 +359,13 @@ data class FollowedArtistsResponse(
 )
 
 data class FollowedArtistsPage(
-    val items   : List<SpotifyArtist>? = null,
+    @SerializedName("items") val rawItems: List<SpotifyArtist?>? = null,
     val total   : Int = 0,
     val cursors : FollowCursors? = null,
-)
+) {
+    val items   : List<SpotifyArtist>? get() = rawItems?.filterNotNull()
+    val rawCount: Int                  get() = rawItems?.size ?: 0
+}
 
 data class FollowCursors(val after: String? = null)
 
@@ -352,9 +410,12 @@ data class SpotifyAlbumFull(
 
 // ── Queue ─────────────────────────────────────────────────────────────────────
 data class QueueResponse(
-    @SerializedName("currently_playing") val currentlyPlaying: SpotifyTrack?,
-    @SerializedName("queue")             val queue            : List<SpotifyTrack> = emptyList(),
-)
+    @SerializedName("currently_playing") val currentlyPlaying: SpotifyTrack?           = null,
+    @SerializedName("queue")             val rawQueue        : List<SpotifyTrack?>?    = null,
+) {
+    /** Null-free view — see [Paged]. An unavailable item in the queue arrives as a `null` slot. */
+    val queue: List<SpotifyTrack> get() = rawQueue?.filterNotNull() ?: emptyList()
+}
 
 // ── Create playlist request ───────────────────────────────────────────────────
 data class CreatePlaylistRequest(

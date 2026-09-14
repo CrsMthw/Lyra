@@ -105,10 +105,12 @@ class LyraForegroundService : Service() {
         scope.launch {
             val container = (application as LyraApplication).container
             // RAW (pre-filter) offset into Spotify's saved-tracks list, tracked across loop iterations.
-            // Liked-songs items can have a null track (removed from Spotify) which we drop, so the
+            // Liked-songs items can have a null track (removed from Spotify), and a whole item slot
+            // can itself be null (unavailable in this market — see `Paged`); both are dropped, so the
             // stored track count lags the raw offset — paginating by the stored size re-fetches the
-            // gap and duplicates rows. We advance the raw offset by the raw page size instead, and
-            // stop once a short/empty page signals the end (re-arming if the cache is reset under us).
+            // gap and duplicates rows. We advance the raw offset by `resp.rawCount`, the number of
+            // slots the endpoint returned, and stop once a short/empty page signals the end
+            // (re-arming if the cache is reset under us).
             var rawOffset = -1     // -1 = seed from the cache on first run
             var prevSize  = -1     // last seen cache size, to detect an external reset (shrink)
             while (isActive) {
@@ -126,7 +128,7 @@ class LyraForegroundService : Service() {
                     if (rawOffset >= total) return@withContext  // fully backfilled (re-arms if total grows)
                     container.spotifyRepository.getLikedSongs(limit = 50, offset = rawOffset).fold(
                         onSuccess = { resp ->
-                            val rawCount = resp.items?.size ?: 0
+                            val rawCount = resp.rawCount
                             if (rawCount == 0) { rawOffset = total; return@fold }  // past the end
                             rawOffset += rawCount
                             val newTracks = (resp.items ?: emptyList())
