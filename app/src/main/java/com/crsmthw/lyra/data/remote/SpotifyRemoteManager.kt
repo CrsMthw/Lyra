@@ -96,6 +96,24 @@ class SpotifyRemoteManager(
         return true
     }
 
+    /**
+     * Seek whatever the App Remote is currently playing to [positionMs] (`PlayerApi.seekTo(long)`).
+     *
+     * Exists for the 404 fallback: `playerApi.play(uri)` always starts an episode at 0:00, where
+     * `me/player/play` resumes it from Spotify's own server-side position. Same
+     * `connectSuspend()`-first shape as [skipNext] so it wakes Spotify if the bind has gone away.
+     *
+     * Fire-and-forget like [play] — the SDK's `CallResult` is discarded, so returning true means
+     * the IPC call was dispatched, not that the seek landed. A seek issued before a freshly started
+     * item has loaded is dropped, so the caller must let it settle first (see
+     * `PlayerViewModel.playTrack`).
+     */
+    suspend fun seekTo(positionMs: Long): Boolean {
+        if (!connectSuspend()) return false
+        _appRemote?.playerApi?.seekTo(positionMs)
+        return true
+    }
+
     fun pause() {
         _appRemote?.playerApi?.pause()
     }

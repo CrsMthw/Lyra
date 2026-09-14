@@ -72,6 +72,39 @@ import java.time.format.FormatStyle
 private const val EPISODE_QUEUE_LIMIT = 750
 
 /**
+ * How close to the end of an episode a resume point may be and still be honoured — 10 seconds.
+ *
+ * Spotify sets `fully_played` only at the very end, so a resume point can sit inside the last
+ * moments of an episode without it. Resuming there would play a few seconds and stop, and the
+ * useful answer for an episode that is effectively finished is the beginning. The same bound
+ * discards a cached page's resume point that has drifted past the episode's duration.
+ */
+private const val RESUME_TAIL_GUARD_MS = 10_000L
+
+/**
+ * Where this episode should start when Lyra has to place the playhead itself, or null to start
+ * wherever the API decides (the beginning, for the App Remote).
+ *
+ * **Null in production today.** `resume_point` is only populated for a token carrying the
+ * `user-read-playback-position` scope, and `SpotifyAuthManager.SCOPES` does not request it (see the
+ * note on [SpotifyEpisode.resumePoint]) — so this is the plumbing the App Remote path needs the
+ * moment that scope is added, not something that fires now. The Web API path does not need it at
+ * all: `me/player/play` resumes an episode from Spotify's own authoritative position.
+ *
+ * Rejected: a fully-played episode, an absent or zero position, and a position inside the last
+ * [RESUME_TAIL_GUARD_MS] of a known duration.
+ */
+private val SpotifyEpisode.startPositionMs: Long?
+    get() {
+        val point = resumePoint ?: return null
+        if (point.fullyPlayed == true) return null
+        val position = point.resumePositionMs?.takeIf { it > 0L } ?: return null
+        val duration = durationMs
+        if (duration != null && position > duration - RESUME_TAIL_GUARD_MS) return null
+        return position
+    }
+
+/**
  * Podcast show detail — structurally the album screen (`AlbumDetailScreen`): single-pane is a
  * [DetailArtHero] over the episode list, two-pane puts the hero in the left panel and the
  * episodes on the right, both edge-to-edge under a transparent status bar with floating pills.
@@ -158,13 +191,23 @@ fun ShowDetailScreen(
                 val onPlayNewest: (() -> Unit)? = newest?.uri?.let { uri ->
                     {
                         haptics.press()
-                        playerViewModel.playTrack(uri = uri, uris = queueFrom(newest))
+                        playerViewModel.playTrack(
+                            uri             = uri,
+                            uris            = queueFrom(newest),
+                            startPositionMs = newest.startPositionMs,
+                        )
                         onNavigateToPlayer()
                     }
                 }
                 val onPlayEpisode = { episode: SpotifyEpisode ->
                     episode.uri?.takeIf { it.isNotBlank() }?.let { uri ->
-                        playerViewModel.playTrack(uri = uri, uris = queueFrom(episode))
+                        playerViewModel.playTrack(
+                            uri             = uri,
+                            uris            = queueFrom(episode),
+                            // Only the App Remote fallback uses this; the Web API resumes an
+                            // episode from Spotify's own position without being told.
+                            startPositionMs = episode.startPositionMs,
+                        )
                         onNavigateToPlayer()
                     }
                     Unit
