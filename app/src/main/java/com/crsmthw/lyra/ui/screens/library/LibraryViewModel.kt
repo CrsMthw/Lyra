@@ -32,6 +32,28 @@ enum class LibraryFilter { PLAYLISTS, ALBUMS, ARTISTS, SHOWS }
 
 data class LibraryUiState(
     val playlists             : List<SpotifyPlaylist>  = emptyList(),
+    /**
+     * How many playlists the SERVER says the user has — `me/playlists`' own `total`, the only
+     * authority for a user-visible count of a remote collection (CLAUDE.md → "Counts come from the
+     * server, deltas are interim"). Deliberately NOT [playlists]`.size`: that list is ONE unpaged
+     * page (limit 50) with null slots filtered out, so it reads 50 forever for a user with 120
+     * playlists, and 29 for a page holding one null.
+     *
+     * `null` until a network read lands, so a cache-warm / network-cold start can render the half
+     * of the app-bar subtitle it actually knows rather than a wrong number. Written at exactly two
+     * sites — [loadLibrary] and [refreshLibrary], each from the SAME response the items come from —
+     * plus one interim −1 in [deletePlaylist], the app's only optimistic playlist-list edit.
+     *
+     * A PRE-EXISTING GAP this exposes: `me/playlists` is not paged, so a user with more than 50
+     * playlists now sees 50 rows under a truthful count. Paging that endpoint is a beta follow-up,
+     * not part of the app-bars trial.
+     *
+     * ANOTHER, accepted: a playlist CREATED elsewhere in the app arrives via
+     * [observeCacheRevision], which re-reads the whole list from disk — `playlists` grows while
+     * this stays one low until the next network read. A ±delta there would DOUBLE-count, because
+     * [deletePlaylist] bumps the cache revision as well as decrementing here.
+     */
+    val playlistCount         : Int?                   = null,
     val forYouEnabled         : Boolean                = false,   // Settings toggle, default off
     val jumpBackIn            : List<JumpBackInItem>   = emptyList(),
     val topTracks             : List<SpotifyTrack>     = emptyList(),
@@ -274,6 +296,10 @@ class LibraryViewModel(
                         val wasOpen = s.currentPlaylist?.id == playlist.id
                         s.copy(
                             playlists       = s.playlists.filterNot { it.id == playlist.id },
+                            // The INTERIM count, alongside the row that just left — the server's
+                            // own total lands again on the next load/refresh. Only ever a delta
+                            // here; see [LibraryUiState.playlistCount].
+                            playlistCount   = s.playlistCount?.let { (it - 1).coerceAtLeast(0) },
                             currentPlaylist = if (wasOpen) null else s.currentPlaylist,
                             currentTracks   = if (wasOpen) emptyList() else s.currentTracks,
                             refreshError    = null,
@@ -571,7 +597,13 @@ class LibraryViewModel(
                 }
                 return@launch
             }
-            _uiState.update { it.copy(playlists = playlistsResult.getOrThrow().items) }
+            // ONE local, so the rendered rows and the count come from the SAME response — `items`
+            // is the filtered page, `total` is every playlist the endpoint knows about.
+            val playlistsPage = playlistsResult.getOrThrow()
+            _uiState.update { it.copy(
+                playlists     = playlistsPage.items,
+                playlistCount = playlistsPage.total,
+            ) }
 
             repository.getLikedSongs(limit = 1).fold(
                 onSuccess = { resp -> _uiState.update { it.copy(likedSongCount = resp.total) } },
@@ -845,7 +877,12 @@ class LibraryViewModel(
                 _uiState.update { it.copy(isLibraryRefreshing = false) }
                 return@launch
             }
-            _uiState.update { it.copy(playlists = playlistsResult.getOrThrow().items) }
+            // Same one-local rule as loadLibrary — rows and count from one response.
+            val playlistsPage = playlistsResult.getOrThrow()
+            _uiState.update { it.copy(
+                playlists     = playlistsPage.items,
+                playlistCount = playlistsPage.total,
+            ) }
 
             repository.getLikedSongs(limit = 1).fold(
                 onSuccess = { resp -> _uiState.update { it.copy(likedSongCount = resp.total) } },

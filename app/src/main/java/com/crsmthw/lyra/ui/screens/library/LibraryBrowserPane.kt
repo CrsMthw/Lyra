@@ -300,12 +300,20 @@ internal fun LibraryBrowserPane(
     // resize the bar under the user. Pinning the 152dp form and rendering an empty line until the
     // library is read costs only a small shift of the title's baseline, behind the cold-start
     // loading indicator.
-    val playlistsLabel = pluralStringResource(
-        R.plurals.library_bar_playlists, state.playlists.size, state.playlists.size)
-    val likedLabel     = pluralStringResource(
-        R.plurals.library_bar_liked, state.likedSongCount, state.likedSongCount)
-    val barSubtitle    = if (state.playlists.isNotEmpty() || state.likedSongCount > 0)
-        "$playlistsLabel · $likedLabel" else ""
+    //
+    // Both halves come from the SERVER's own `total`, never from a rendered list's length
+    // (CLAUDE.md → "Counts come from the server, deltas are interim"). `state.playlists` is one
+    // unpaged page of `me/playlists` (limit 50, null slots filtered out), so its `.size` reads 50
+    // forever for a user with 120 playlists — `state.playlistCount` is the endpoint's `total`.
+    // While that is still null (cache-warm, network-cold) the playlist half is SUPPRESSED rather
+    // than guessed, and the liked half paints alone.
+    val playlistsLabel = state.playlistCount?.let {
+        pluralStringResource(R.plurals.library_bar_playlists, it, it)
+    }
+    val likedLabel     = state.likedSongCount.takeIf { it > 0 }?.let {
+        pluralStringResource(R.plurals.library_bar_liked, it, it)
+    }
+    val barSubtitle    = listOfNotNull(playlistsLabel, likedLabel).joinToString(" · ")
 
     val barTitle  = stringResource(R.string.app_name)
     // containerColor == scrolledContainerColor on purpose. M3's default `scrolledContainerColor`
