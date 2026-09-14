@@ -291,7 +291,12 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
     // Read from `currentBackStackEntryAsState()`, which flips at the START of a push and of a
     // committed pop, so the bar exits while PlayerScreen enters and enters while it exits — the two
     // roles the "album-art" morph needs.
-    val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route
+    // The ENTRY, not just its route: its `id` is the identity `PlayerPanelHost` scopes the pop-out
+    // panel to, so a panel opened over the Library does not re-open itself over whatever browse
+    // screen the user reaches next (including one navigated FORWARD into). Same state read, so the
+    // route and the key can never be a frame apart.
+    val currentEntry = navController.currentBackStackEntryAsState().value
+    val currentRoute = currentEntry?.destination?.route
     val showsPlayerSurface = routeShowsPlayerSurface(currentRoute)
     // The SAME predicate for the entry a back would land on, so `PlayerPanelHost` can seek the mini
     // player in with a back GESTURE rather than dropping it in at commit (the committed flip above
@@ -305,8 +310,10 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
     val showsPlayerSurfaceAfterBack =
         if (backEntryRoute == null) showsPlayerSurface else routeShowsPlayerSurface(backEntryRoute)
     // Per-route mini-player shape, animated in place by the host instead of swapped by remounting.
+    // WIDTH only: the bar's IME lift used to be a second route-derived flag here and is now
+    // unconditional inside the host — a Boolean that flips on the first frame of a push can never
+    // agree with an inset that is still retracting (see `miniBottomInset` in PlayerPanelHost).
     val miniFullWidth = currentRoute == Screen.Search.route || currentRoute == Screen.Stats.route
-    val miniAvoidsIme = currentRoute == Screen.Search.route
 
     SharedTransitionLayout {
       Row(modifier = Modifier.fillMaxSize()) {
@@ -323,8 +330,8 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
             onOpenQueue              = { safePush(Screen.Queue.route) },
             visible                  = showsPlayerSurface,
             visibleAfterBack         = showsPlayerSurfaceAfterBack,
+            surfaceKey               = currentEntry?.id,
             miniPlayerFullWidth      = miniFullWidth,
-            miniPlayerAvoidsIme      = miniAvoidsIme,
             navSharedTransitionScope = this@SharedTransitionLayout,
             modifier                 = Modifier.weight(1f).fillMaxHeight(),
         ) { onRequestPlayer ->
@@ -385,10 +392,28 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
                 val pendingPlaylistId by pendingPlaylistFlow.collectAsStateWithLifecycle()
                 LaunchedEffect(pendingPlaylistId) {
                     val id = pendingPlaylistId ?: return@LaunchedEffect
-                    backStackEntry.savedStateHandle[PENDING_PLAYLIST_KEY] = null
                     val playlist = withTimeoutOrNull(PENDING_PLAYLIST_TIMEOUT_MS) {
                         vm.uiState.mapNotNull { s -> s.playlists.firstOrNull { it.id == id } }.first()
                     }
+                    // The key is cleared AFTER the wait, deliberately — do not "tidy" it back to
+                    // the top of the effect.
+                    // (a) `SavedStateHandle.set` writes THROUGH the cached StateFlow this effect is
+                    //     keyed on (`SavedStateHandleImpl`, lifecycle-viewmodel-savedstate 2.11.0),
+                    //     so clearing first re-emits null, changes this effect's OWN key and
+                    //     cancels the running coroutine a frame later. Whenever `first()` actually
+                    //     has to wait — a cold start while loadLibrary is still reading the cache,
+                    //     or a playlist that only arrives with the network refresh — neither
+                    //     `selectPlaylist` nor the toast ever ran.
+                    // (b) Leaving the id set until the wait completes is also what makes the
+                    //     hand-off survive a disposal MID-wait: the Library composable is disposed
+                    //     if the user navigates away, and the id lives in saved state, so the next
+                    //     composition re-runs this effect and re-waits. The residual is accepted —
+                    //     a playlist may open up to 10 s later if the user returns inside the
+                    //     window, or once more after a saved-state restore. Re-running with the
+                    //     now-null key is a no-op.
+                    // Nothing below here suspends, so the self-cancelling emission can never land
+                    // between the clear and the hand-off.
+                    backStackEntry.savedStateHandle[PENDING_PLAYLIST_KEY] = null
                     if (playlist != null) vm.selectPlaylist(playlist)
                     else Toast.makeText(
                         context,

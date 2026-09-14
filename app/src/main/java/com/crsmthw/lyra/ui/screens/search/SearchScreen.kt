@@ -316,7 +316,14 @@ fun SearchScreen(
                                     items(tracks, key = { "track_${it.id}" }) { track ->
                                         TrackRow(
                                             track   = track,
+                                            // Drop the keyboard from the gesture, exactly as the
+                                            // album/artist/show rows do. A track tap pushes the
+                                            // full player, and the mini player's bottom inset
+                                            // unions the IME — dismissing it here is what lets the
+                                            // bar ride the keyboard down on the way out instead of
+                                            // the IME retracting behind the pushed screen.
                                             onClick = {
+                                                keyboard?.hide()
                                                 viewModel.addRecentSearch(track.toRecentSearch())
                                                 val idx = tracks.indexOfFirst { it.uri == track.uri }.coerceAtLeast(0)
                                                 onTrackClick(track.uri, tracks.drop(idx).map { it.uri })
@@ -356,8 +363,8 @@ fun SearchScreen(
                                             // does. Nothing dismissed the IME on the way OUT to a
                                             // detail screen, so it was still animating down (or
                                             // still up) behind the pushed screen, and the state on
-                                            // return depended on that race. Same on the artist and
-                                            // show rows and on the Recent list below.
+                                            // return depended on that race. Same on the track,
+                                            // artist and show rows and on the Recent list below.
                                             onClick = {
                                                 keyboard?.hide()
                                                 viewModel.addRecentSearch(album.toRecentSearch())
