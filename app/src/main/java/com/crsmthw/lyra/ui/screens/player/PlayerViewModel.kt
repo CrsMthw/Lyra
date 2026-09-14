@@ -469,6 +469,7 @@ class PlayerViewModel(
     // ── Play track (keeps SDK fallback logic, always user-initiated) ──────────
 
     fun playTrack(uri: String, contextUri: String? = null, uris: List<String>? = null, index: Int? = null) {
+        val isEpisode = uri.startsWith("spotify:episode:")
         playerStateManager.setOptimisticallyPlaying()
         playerStateManager.resetProgressForNewTrack()
         _uiState.update { it.copy(isPlaying = true, isLiked = false, error = null, isWakingUp = true) }
@@ -476,11 +477,21 @@ class PlayerViewModel(
         // and checkIsLiked would otherwise ask me/tracks/contains about `spotify:track:<episode
         // id>`, i.e. about a different item entirely. me/player/play takes episode uris in `uris`
         // (the `uri` branch of repository.play), so nothing else here needs to change.
-        if (!uri.startsWith("spotify:episode:")) {
+        if (!isEpisode) {
             val trackId = uri.substringAfterLast(":")
             viewModelScope.launch { checkIsLiked(trackId) }
         }
         viewModelScope.launch {
+            // The body an EPISODE degrades to, and the body it restores with — null for a track.
+            // `repository.play` is wire-identical for `uris = [uri]` and `uri = uri` (both send
+            // `PlayRequest(uris = listOf(uri))`), so this changes nothing about the request; what it
+            // changes is that `playUris` stays non-null for an episode, which is what makes
+            // `needsRestore` true below. Without it a ONE-EPISODE show (whose `uris` is null by
+            // design) never ran the restore loop at all, so the App Remote's 0:00 start was never
+            // corrected — the Web API's play is the only one of the two that honours Spotify's
+            // server-side resume point. Gated on `contextUri == null` so the restore loop's
+            // `pending` branch can never pre-empt its `contextUri` branch.
+            val episodeSingleUri = listOf(uri).takeIf { isEpisode && contextUri == null }
             // The uri list actually being sent. Queue continuity is BEST-EFFORT: `uris` holding
             // more than one entry is undocumented for episodes (the Web API reference describes
             // `uris` as track uris, and a show is not a valid `context_uri`), while a SINGLE uri is
@@ -488,7 +499,7 @@ class PlayerViewModel(
             // refuses the multi-uri body we degrade to `[uri]` once and carry on — the user loses
             // the queue, not the playback. `playUris` is a var so the SDK-restore loop below cannot
             // spend its whole 10-second window re-sending a body the API has already rejected.
-            var playUris = uris
+            var playUris = uris ?: episodeSingleUri
             var result = repository.play(
                 uri        = uri,
                 contextUri = contextUri,
@@ -499,7 +510,11 @@ class PlayerViewModel(
             if (firstError != null && (playUris?.size ?: 0) > 1 && firstError.isRequestRefused()) {
                 Log.w(TAG, "play() refused a ${playUris?.size}-uri body (${firstError.message}); " +
                            "retrying with the single uri", firstError)
-                playUris = null
+                // `episodeSingleUri`, not a bare null: the multi-uri body is what was refused, and
+                // the single uri is the proven shape — so an episode keeps a body to restore with
+                // (and its resume point) instead of being stranded at the SDK's 0:00. A track has
+                // nothing to restore once the queue is gone, and gets null as before.
+                playUris = episodeSingleUri
                 result = repository.play(
                     uri        = uri,
                     contextUri = contextUri,
@@ -540,7 +555,9 @@ class PlayerViewModel(
                         if (sdkSuccess) {
                             // `playUris`, not `uris`: a list already degraded above is gone, and
                             // there is then nothing to restore (the SDK is playing the single item),
-                            // so the loop is correctly skipped.
+                            // so the loop is correctly skipped. For an EPISODE `playUris` is never
+                            // null (see `episodeSingleUri`) — the restore is what puts it at its
+                            // resume point, so it must run even with no queue to rebuild.
                             val needsRestore = playUris != null || (contextUri != null && index == null)
                             if (needsRestore) {
                                 val sdkStartedAt = System.currentTimeMillis()
@@ -552,7 +569,25 @@ class PlayerViewModel(
                                     var rateLimited = false
                                     val ok = when {
                                         pending != null -> {
-                                            val restore = repository.play(uris = pending, positionMs = elapsedMs)
+                                            // An EPISODE resumes from Spotify's own server-side
+                                            // position when the play call carries NO `position_ms` —
+                                            // which is why a half-listened episode resumes correctly
+                                            // whenever the Web API is the path that starts it.
+                                            // Sending `elapsedMs` overrode that and pinned the
+                                            // restored episode a second or two from the START: the
+                                            // symptom Cris hit was "force-stop Spotify, tap a
+                                            // half-listened episode, it plays from 0:00". A track
+                                            // has no resume point, so for tracks `elapsedMs` is
+                                            // still exactly what makes the restore seamless.
+                                            //
+                                            // Read off the body's OWN first entry rather than the
+                                            // tapped `uri`: `position_ms` applies to whatever `uris`
+                                            // starts with, so this stays right even if a caller ever
+                                            // leads with something other than the tapped item.
+                                            val restorePositionMs =
+                                                if (pending.firstOrNull()?.startsWith("spotify:episode:") == true) null
+                                                else elapsedMs
+                                            val restore = repository.play(uris = pending, positionMs = restorePositionMs)
                                             val err     = restore.exceptionOrNull()
                                             when {
                                                 // A 429 says nothing about the body — the SAME body
@@ -581,7 +616,11 @@ class PlayerViewModel(
                                                 err != null && pending.size > 1 && err.isRequestRefused() -> {
                                                     Log.w(TAG, "SDK restore refused a ${pending.size}-uri " +
                                                                "body (${err.message}); dropping the queue", err)
-                                                    playUris = null
+                                                    // Same reasoning as the direct call's degrade:
+                                                    // an episode falls back to the single uri (one
+                                                    // more iteration can still place it at its
+                                                    // resume point), a track to null.
+                                                    playUris = episodeSingleUri
                                                 }
                                             }
                                             restore.isSuccess
