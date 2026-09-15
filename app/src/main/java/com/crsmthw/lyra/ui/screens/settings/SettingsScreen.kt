@@ -135,7 +135,6 @@ fun SettingsScreen(
                 },
                 containerColor = background,
                 barState       = barState,
-                isContentAtTop = { scrollState.value == 0 },
             )
 
             Box(modifier = Modifier.fillMaxWidth().weight(1f)) {

@@ -766,6 +766,23 @@ class LibraryViewModel(
         if (filter != LibraryFilter.PLAYLISTS) loadCollections()
     }
 
+    /**
+     * Start the collections sweep because a non-Playlists **page** has composed, rather than
+     * because a tab was settled on.
+     *
+     * The browser's filter tabs are the pages of a `HorizontalPager`, which composes a neighbour at
+     * DRAG START while [setLibraryFilter] only arrives when the swipe SETTLES — so on a cold cache
+     * the first swipe onto Albums / Artists / Shows rendered that page's empty text ("No saved
+     * albums") for the whole length of the gesture and swapped to the spinner only on release.
+     *
+     * Idempotent, and it cannot double-fetch with the settle path: [loadCollections] returns early
+     * while a sweep is in flight and again once all three legs have completed, so whichever of the
+     * two arrives first does the work and the other is a no-op. Like the settle path it DOES re-arm
+     * a leg that failed earlier this session — deliberate, and now a little earlier: bringing the
+     * page on screen is the gesture that asks for its content.
+     */
+    fun ensureCollectionsLoaded() = loadCollections()
+
     private fun loadCollections() {
         if (collectionsInFlight) return
         if (albumsLoaded && artistsLoaded && showsLoaded) return
