@@ -62,7 +62,7 @@ import kotlin.coroutines.cancellation.CancellationException
 // argument is now an ANIMATED property: `miniPlayerFullWidth` (Search/Stats: a single full-width
 // list, no right pane for a 58 % bar to line up with) resizes the bar in place with the app's finite
 // `screenTransitionSpec()` instead of taking it off screen and putting a different one back.
-// The bar's bottom inset simply unions `WindowInsets.ime` on every route — see `miniBottomInset`.
+// The bar's bottom inset carries `WindowInsets.ime` on every route — see `miniBottomInset`.
 //
 // The `onRequestPlayer` lambda passed to `content` opens the panel on wide screens and calls
 // `onOpenPlayer` on narrow ones, so track-tap handlers don't need to know which mode they're in.
@@ -651,7 +651,7 @@ fun PlayerPanelHost(
     // `hide()` alone leaves the field focused, and dismissing a sheet the action row opened can
     // then hand focus back and re-show the IME under the panel. Unconditional inside `canShowPanel`
     // — a no-op on Library/Album/Artist, where nothing is focused. (The mini player needs no such
-    // per-route knob: its inset unions the IME on every route, see `miniBottomInset`.)
+    // per-route knob: its inset carries the IME on every route, see `miniBottomInset`.)
     val onRequestPlayer: () -> Unit = {
         if (canShowPanel) {
             focusManager.clearFocus(force = true)
@@ -770,7 +770,7 @@ fun PlayerPanelHost(
                         label         = "miniWidth",
                     )
 
-                    // Bottom inset for the mini player — ONE modifier that unions the IME
+                    // Bottom inset for the mini player — ONE modifier that includes the IME
                     // UNCONDITIONALLY, on every route.
                     //
                     // It used to be two different modifiers switched by a `miniPlayerAvoidsIme` flag
@@ -779,29 +779,36 @@ fun PlayerPanelHost(
                     // a result row, or the back arrow) swapped the bar to the no-IME inset immediately:
                     // it snapped down behind the still-retracting keyboard and popped back up ~250ms
                     // later when the IME inset finally reached zero. A Boolean that changes a frame
-                    // before the inset it describes cannot be made to agree with it; unioning the IME
-                    // always makes the bar ride the keyboard down instead, with no flag to be out of
-                    // step with. (Search, which auto-focuses its field, is why the lift exists at all.)
+                    // before the inset it describes cannot be made to agree with it; carrying the IME
+                    // term always makes the bar ride the keyboard down instead, with no flag to be out
+                    // of step with. (Search, which auto-focuses its field, is why the lift exists.)
                     //
-                    // `union` takes the LARGER of the two rather than stacking: the IME inset already
-                    // spans the nav bar, so imePadding() + navigationBarsPadding() would leave a
-                    // nav-bar-sized gap above the keyboard. The pop-out panel below deliberately keeps
-                    // plain nav bar + cutout — it is capped at 80 % of the screen height, so lifting it
-                    // above the keyboard would squash it and make it jump on every IME toggle.
+                    // The IME is ADDED to the nav bar rather than unioned with it (2026-09-15), so
+                    // with a keyboard up the bar floats a nav-bar height ABOVE it instead of sitting
+                    // flush on it. That gap is WANTED: Search draws its bottom visualizer wave inside
+                    // its own imePadding() box, bottom-anchored in exactly the nav-bar strip, so the
+                    // wave rides up with the keyboard — and a flush bar covered it completely, while
+                    // at rest it shows in the strip under the bar. Stacking keeps the at-rest look
+                    // with the keyboard up (device report 54). Geometry with the keyboard HIDDEN is
+                    // untouched: `WindowInsets.ime` is zero then, so `add` and the old `union` agree.
+                    // The pop-out panel below deliberately keeps plain nav bar + cutout — it is capped
+                    // at 80 % of the screen height, so lifting it above the keyboard would squash it
+                    // and make it jump on every IME toggle.
                     // Horizontal stays in the side list: the IME has no horizontal inset, so this keeps
                     // the side nav-bar clearance navigationBarsPadding() gives in landscape. The
-                    // DISPLAY CUTOUT is in the union because in landscape the hole-punch camera sits on
-                    // a side edge and screen content clears it via horizontalSystemBarsPadding() — the
-                    // mini player must indent the same way or it pokes out past the content on that
-                    // side (device pass 2026-09-12, item 36). Horizontal + Bottom only: the top stays
-                    // with the content above.
+                    // DISPLAY CUTOUT is UNIONED (a max, not a sum) because in landscape the hole-punch
+                    // camera sits on a side edge and screen content clears it via
+                    // horizontalSystemBarsPadding() — the mini player must indent the same way or it
+                    // pokes out past the content on that side (device pass 2026-09-12, item 36).
+                    // Horizontal + Bottom only: the top stays with the content above.
                     //
                     // Honest note: the activity window still receives IME insets while a DIALOG above
                     // it shows the keyboard (AddToPlaylistSheet's create-playlist dialog runs in its
-                    // own window), so the bar lifts behind that sheet + its scrim. It is invisible and
-                    // harmless — stated here so nobody re-introduces the conditional to "fix" it.
+                    // own window), so the bar lifts behind that sheet + its scrim — now by one extra
+                    // nav-bar height. It is invisible and harmless — stated here so nobody
+                    // re-introduces the conditional to "fix" it.
                     val miniBottomInset = Modifier.windowInsetsPadding(
-                        WindowInsets.ime.union(WindowInsets.navigationBars).union(WindowInsets.displayCutout)
+                        WindowInsets.ime.add(WindowInsets.navigationBars).union(WindowInsets.displayCutout)
                             .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)
                     )
 
