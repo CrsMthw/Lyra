@@ -174,6 +174,17 @@ fun MiniPlayer(
                         )
                     }
                 } else Modifier
+                // A pass-through layout modifier that re-measures this art after every settle of
+                // the floating player surface — the same reader `PlayerCardContent` and
+                // `PlayerScreen` carry, and for the same reason: the shared-element state machine
+                // only re-reads its target bounds provider when a node holding the key is measured
+                // again. Here it is INSURANCE — the bar is not provably the survivor of any
+                // cancelled seek that had a partner, but the argument for that rests entirely on
+                // `LocalPlayerRouteVisible` disabling its nav entry, so see
+                // [LocalPlayerArtSettleCount]'s KDoc. Appended AFTER the shared modifiers so their
+                // place at the head of the chain is unchanged; the invalidation lands on the same
+                // LayoutNode either way.
+                val artSettleMod = rememberArtSettleInvalidation()
 
                 // This art is a shared-element participant: the same "album-art" element morphs into
                 // the full player / pop-out panel, where it is drawn at ~600px. Two things conspired
@@ -197,7 +208,7 @@ fun MiniPlayer(
                     model              = artRequest,
                     contentDescription = shownTrack.album?.name,
                     contentScale       = ContentScale.Crop,
-                    modifier           = artModifier.then(navArtModifier)
+                    modifier           = artModifier.then(navArtModifier).then(artSettleMod)
                         .size(44.dp)
                         .clip(RoundedCornerShape(10.dp)),
                 )

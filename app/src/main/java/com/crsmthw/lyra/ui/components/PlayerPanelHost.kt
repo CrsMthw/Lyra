@@ -106,10 +106,26 @@ private val NoArtSettles: IntState = mutableIntStateOf(0)
 
 /**
  * How many times this host's floating player surface has SETTLED (reached
- * `currentState == targetState`). Bumped by [PlayerPanelHost]; read by the `"album-art"`
- * participants that OUTLIVE a transition — the pop-out panel's art (`PlayerCardContent`) and the
- * full player's (`PlayerScreen`) — through [rememberArtSettleInvalidation], which turns each bump
- * into one no-op re-measure of that art.
+ * `currentState == targetState`). Bumped by [PlayerPanelHost]; read by all three `"album-art"`
+ * participants — the pop-out panel's art (`PlayerCardContent`), the full player's (`PlayerScreen`)
+ * and the mini player's (`MiniPlayer`) — through [rememberArtSettleInvalidation], which turns each
+ * bump into one no-op re-measure of that art.
+ *
+ * The first two are the participants that provably OUTLIVE a cancelled seek. The mini player's is
+ * INSURANCE rather than a traced failure — it used to deliberately have no reader. The one path on
+ * which the bar would be the survivor of a cancelled seek that had a PARTNER is a back off an
+ * album/artist opened FROM the full player (stack `[…, Player, AlbumDetail]`, where the surface
+ * seeks `Bar → None` with the finger), and there the bar's nav-scope entry is DISABLED for the
+ * whole gesture, so no match ever forms and there is no provider to strand:
+ * `LocalPlayerRouteVisible` is false, because navigation-compose 2.10.0's `prepareForTransition`
+ * emits no `_visibleEntries` — the prepared entry BELOW the top one does not become visible during
+ * a predictive-back gesture (`NavHost.kt` says exactly that where it falls back to the
+ * `AnimatedContent` target instead of a `visibleEntries` lookup). That gate, NOT the old claim that
+ * "`Bar → None` leaves a single participant so nothing matches", is the real argument. Since the
+ * whole argument rests on it, and a `visibleEntries` leak that left `Player` listed while the user
+ * sits on a detail route would quietly re-enable the entry, the bar carries the reader too: one
+ * no-op re-measure of a 44dp art per surface settle, against a class of bug that is invisible until
+ * the SECOND gesture.
  *
  * **Why the re-measure is needed.** A CANCELLED seek disposes the participant the abandoned
  * direction was heading for: the mini player for a cancelled panel close, the bar or the pop-out
@@ -137,8 +153,8 @@ val LocalPlayerArtSettleCount: ProvidableCompositionLocal<IntState> =
 
 /**
  * A pass-through layout modifier that re-measures its `LayoutNode` whenever
- * [LocalPlayerArtSettleCount] is bumped. Chain it onto an `"album-art"` participant that outlives
- * transitions; see that counter's KDoc for what the re-measure repairs.
+ * [LocalPlayerArtSettleCount] is bumped. Chain it onto every `"album-art"` participant that can
+ * outlive a transition; see that counter's KDoc for what the re-measure repairs.
  *
  * The counter is read INSIDE the measure block on purpose: measure-scope reads are observed
  * (`OwnerSnapshotObserver.observeMeasureSnapshotReadsAffectingLookahead`), so a bump runs
@@ -424,17 +440,18 @@ fun PlayerPanelHost(
         it == PlayerSurface.Panel
     }
 
-    // ONE no-op re-measure of the `"album-art"` participants that outlive a transition, after
-    // every SETTLE of the surface — the repair for the broken morph on the gesture that follows a
-    // CANCELLED one (device reports 44 + 48). The whole mechanism is in
-    // [LocalPlayerArtSettleCount]'s KDoc; [rememberArtSettleInvalidation] is the reader.
+    // ONE no-op re-measure of all three `"album-art"` participants (pop-out card, full player, and
+    // the bar as insurance), after every SETTLE of the surface — the repair for the broken morph on
+    // the gesture that follows a CANCELLED one (device reports 44 + 48). The whole mechanism, and
+    // why the bar has a reader at all, is in [LocalPlayerArtSettleCount]'s KDoc;
+    // [rememberArtSettleInvalidation] is the reader.
     //
     // Keyed on the pair rather than fired from the cancel path itself: it then runs only from a
     // composition in which `currentState == targetState`, i.e. one where the surface the gesture
     // abandoned already reports `target == false` and the state machine can only re-read a
     // provider that is still on screen. That also covers every other way the surface settles (a
     // commit, a button back, a fold, the third-state snap) at the cost of one pass-through
-    // re-measure of two art chains, and it needs no knowledge of WHICH path settled it.
+    // re-measure of three art chains, and it needs no knowledge of WHICH path settled it.
     val artSettles = remember { mutableIntStateOf(0) }
     LaunchedEffect(surfaceState.currentState, surfaceState.targetState) {
         if (surfaceState.currentState == surfaceState.targetState) artSettles.intValue++
@@ -668,8 +685,8 @@ fun PlayerPanelHost(
         // ONE content call site at every width — see the header comment on why an early return for
         // the extra-wide case was a state-wiping trap.
         // The settle counter is provided here for `PlayerScreen`, which lives inside the NavHost;
-        // the pop-out panel is a SIBLING of the content, so it is provided again around the panel
-        // below rather than by re-parenting this whole Box.
+        // the mini player and the pop-out panel are SIBLINGS of the content, so it is provided
+        // again around each of them below rather than by re-parenting this whole Box.
         CompositionLocalProvider(
             LocalPopOutPanelOpen       provides panelVisible,
             LocalPlayerArtSettleCount  provides artSettles,
@@ -858,19 +875,30 @@ fun PlayerPanelHost(
                     // `parentTransition` to `sharedBoundsImpl`), so an AnimatedVisibility-scoped bar and
                     // an AnimatedContent-scoped PlayerScreen do match — and because both parents are
                     // being seeked by the same gesture progress, the morph tracks the finger.
-                    MiniPlayerHolder(
-                        playerViewModel          = playerViewModel,
-                        onExpand                 = onRequestPlayer,
-                        barTransition            = barTransition,
-                        modifier                 = Modifier
-                            .align(Alignment.BottomEnd)
-                            .fillMaxWidth(miniWidthFraction)
-                            .then(miniBottomInset),
-                        sharedTransitionScope    = if (canShowPanel) this@SharedTransitionLayout else navSharedTransitionScope,
-                        sharedContentConfig      = if (canShowPanel) SharedTransitionDefaults.SharedContentConfig else navArtConfig,
-                        navSharedTransitionScope = if (miniNeedsNavScope) navSharedTransitionScope else null,
-                        navSharedContentConfig   = navArtConfig,
-                    )
+                    //
+                    // The settle counter is provided here because the bar, like the panel below, is
+                    // a SIBLING of `content` above — so without this wrapper the bar's art would
+                    // read the inert `NoArtSettles` and its `rememberArtSettleInvalidation()` would
+                    // do nothing at all. UNCONDITIONAL on purpose: a conditional provider would
+                    // flip the holder's composition group every time the condition changed and
+                    // reset everything it remembers (the art slide `Animatable` included), which is
+                    // the same trap as the old `if (isExtraWide) { …; return }` in the header
+                    // comment.
+                    CompositionLocalProvider(LocalPlayerArtSettleCount provides artSettles) {
+                        MiniPlayerHolder(
+                            playerViewModel          = playerViewModel,
+                            onExpand                 = onRequestPlayer,
+                            barTransition            = barTransition,
+                            modifier                 = Modifier
+                                .align(Alignment.BottomEnd)
+                                .fillMaxWidth(miniWidthFraction)
+                                .then(miniBottomInset),
+                            sharedTransitionScope    = if (canShowPanel) this@SharedTransitionLayout else navSharedTransitionScope,
+                            sharedContentConfig      = if (canShowPanel) SharedTransitionDefaults.SharedContentConfig else navArtConfig,
+                            navSharedTransitionScope = if (miniNeedsNavScope) navSharedTransitionScope else null,
+                            navSharedContentConfig   = navArtConfig,
+                        )
+                    }
 
                     // Pop-out panel (wide non-short screens only). The settle counter is provided
                     // again here because the panel is a SIBLING of `content` above, and its art is
