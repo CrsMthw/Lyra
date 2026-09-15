@@ -3,6 +3,7 @@ package com.crsmthw.lyra.ui.screens.library
 import androidx.compose.animation.AnimatedContentScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -29,6 +30,42 @@ internal const val SEARCH_BAR_SHARED_KEY = "search-bar"
  *  `"liked"`. The matching source card and the hero use the same key so only that pair morphs. */
 internal fun libArtKey(id: String?): String = "lib-art-${id ?: "liked"}"
 
+/**
+ * The browser's four scroll positions — one per filter tab, because the tabs are the pages of a
+ * `HorizontalPager` and each page scrolls its own list.
+ *
+ * Held together so the pane takes one parameter instead of four; [get] is the only way the pane
+ * picks one, so a page can never be handed the wrong list.
+ */
+internal class LibraryBrowserListStates(
+    val playlists : LazyListState,
+    val albums    : LazyListState,
+    val artists   : LazyListState,
+    val shows     : LazyListState,
+) {
+    operator fun get(filter: LibraryFilter): LazyListState = when (filter) {
+        LibraryFilter.PLAYLISTS -> playlists
+        LibraryFilter.ALBUMS    -> albums
+        LibraryFilter.ARTISTS   -> artists
+        LibraryFilter.SHOWS     -> shows
+    }
+}
+
+/**
+ * Creates the four browser list states. Called at SCREEN scope so they outlive the pane that
+ * scrolls them — see the call site's comment for why that hoist is load-bearing.
+ */
+@Composable
+internal fun rememberLibraryBrowserListStates(): LibraryBrowserListStates {
+    val playlists = rememberLazyListState()
+    val albums    = rememberLazyListState()
+    val artists   = rememberLazyListState()
+    val shows     = rememberLazyListState()
+    return remember(playlists, albums, artists, shows) {
+        LibraryBrowserListStates(playlists, albums, artists, shows)
+    }
+}
+
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalSharedTransitionApi::class)
 @Composable
@@ -53,23 +90,24 @@ fun LibraryScreen(
     val haptics       = LocalHapticFeedback.current
     val onOpenSearchHaptic = { haptics.confirm(); onOpenSearch() }
 
-    // The browser list's scroll position, hoisted to the SCREEN so it outlives the pane it scrolls.
-    // `rememberLazyListState` is `rememberSaveable(saver = LazyListState.Saver)`, but inside
-    // `LibraryBrowserPane` that bought nothing: the single-pane browser lives in `SinglePaneLayout`'s
-    // `AnimatedContent`, which simply disposes the pane when a playlist opens (it is not a
-    // `SaveableStateHolder`), so backing out always landed at the top. Held here it survives both the
-    // detail↔browser pane swap AND navigating away — the Library's own `NavBackStackEntry` saves this
-    // screen's `rememberSaveable` values, so Album/Artist/Search/Stats/Settings and back restore it too.
-    // A `LazyListState` restores its index/offset at construction, so the position is on the FIRST
-    // frame, with no scroll animation. Both layouts get the same instance (only one is composed at a
-    // time), so the position also carries across a fold/unfold.
+    // The browser's scroll positions — ONE PER FILTER TAB, hoisted to the SCREEN so they outlive the
+    // pane that scrolls them. `rememberLazyListState` is `rememberSaveable(saver = LazyListState.Saver)`,
+    // but inside `LibraryBrowserPane` that bought nothing: the single-pane browser lives in
+    // `SinglePaneLayout`'s `AnimatedContent`, which simply disposes the pane when a playlist opens (it
+    // is not a `SaveableStateHolder`), so backing out always landed at the top. Held here they survive
+    // both the detail↔browser pane swap AND navigating away — the Library's own `NavBackStackEntry`
+    // saves this screen's `rememberSaveable` values, so Album/Artist/Search/Stats/Settings and back
+    // restore them too. A `LazyListState` restores its index/offset at construction, so a position is
+    // on the FIRST frame, with no scroll animation. Both layouts get the same holder (only one is
+    // composed at a time), so the positions also carry across a fold/unfold.
     //
-    // What it deliberately does NOT survive is a FILTER-TAB change: `LibraryBrowserPane`'s tab
-    // `onSelect` resets this state (and the bar's) to the top, because the four tabs share one list
-    // and a Playlists offset means nothing in Albums — see the comment at that call site.
-    val browserListState = rememberLazyListState()
+    // Four states, not one, since the filter tabs became the pages of a `HorizontalPager`: each page
+    // scrolls its own list, and switching tabs now returns to where that tab was left instead of
+    // resetting it (Cris's verdict, 2026-09-14 — the shared-state reset moved the tab row under the
+    // finger of someone mid-tap).
+    val browserListStates = rememberLibraryBrowserListStates()
 
-    // The browser app bar's collapse state, hoisted for the same reason as `browserListState`: the
+    // The browser app bar's collapse state, hoisted for the same reason as `browserListStates`: the
     // single-pane browser pane is disposed by `SinglePaneLayout`'s `AnimatedContent` whenever a
     // playlist detail opens, so a pane-local state would snap the bar back to fully expanded over a
     // list that restored itself half-way down. `rememberTopAppBarState` is `rememberSaveable`, so
@@ -79,15 +117,15 @@ fun LibraryScreen(
     // Safe with respect to the predictive-back seek: this is an ordinary composition-local
     // `mutableFloatStateOf` holder — it never enters `LibraryUiState`, so it cannot perturb
     // `detailKey`, which is the `SeekableTransitionState`'s target (docs/MOTION.md → Predictive
-    // back). The COMPACT bar deliberately does not use it — see `LibraryBrowserPane`, which also
-    // clears this state on a filter-tab change and whenever the large-bar branch (re)enters with
-    // the list already at the top (a collapsed bar over a list at offset 0 has no way back).
+    // back). The COMPACT bar deliberately does not use it, and clears it on entry so this state
+    // only ever describes the large bar — see `LibraryBrowserPane`. Nothing else resets it: the bar
+    // stays where the user's last drag left it, across tab changes, detail opens and navigation.
     val browserBarState = rememberTopAppBarState()
 
     if (isWideScreen) {
         TwoPaneLayout(
             state                 = state,
-            browserListState      = browserListState,
+            browserListStates     = browserListStates,
             browserBarState       = browserBarState,
             viewModel             = viewModel,
             playerViewModel       = playerViewModel,
@@ -104,7 +142,7 @@ fun LibraryScreen(
     } else {
         SinglePaneLayout(
             state                 = state,
-            browserListState      = browserListState,
+            browserListStates     = browserListStates,
             browserBarState       = browserBarState,
             viewModel             = viewModel,
             playerViewModel       = playerViewModel,

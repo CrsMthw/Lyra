@@ -10,7 +10,6 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.toShape
@@ -44,9 +43,9 @@ import com.crsmthw.lyra.ui.components.LocalPopOutPanelOpen
 @Composable
 internal fun TwoPaneLayout(
     state                 : LibraryUiState,
-    /** Browser scroll position, owned by `LibraryScreen` — the same instance the single-pane layout
-     *  gets, so the position also survives a fold/unfold. */
-    browserListState      : LazyListState,
+    /** Browser scroll positions (one per filter tab), owned by `LibraryScreen` — the same holder the
+     *  single-pane layout gets, so the positions also survive a fold/unfold. */
+    browserListStates     : LibraryBrowserListStates,
     /** Browser app-bar collapse state, owned by `LibraryScreen` — the same instance the single-pane
      *  layout gets, so the bar's collapse also survives a fold/unfold. */
     browserBarState       : TopAppBarState,
@@ -113,7 +112,7 @@ internal fun TwoPaneLayout(
                 Box(modifier = Modifier.fillMaxSize()) {
                     LibraryBrowserPane(
                         state                 = state,
-                        listState             = browserListState,
+                        listStates            = browserListStates,
                         barState              = browserBarState,
                         viewModel             = viewModel,
                         onOpenSettings        = onOpenSettings,
