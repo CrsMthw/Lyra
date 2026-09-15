@@ -344,7 +344,7 @@ fun ShowDetailScreen(
                                         modifier       = Modifier.fillMaxSize(),
                                         contentPadding = PaddingValues(top = statusBarTopDp, bottom = 100.dp + navBarBottomDp),
                                     ) {
-                                        episodeItems(episodes, show, state.isLoadingMore, onPlayEpisode)
+                                        episodeItems(episodes, show, state.isLoadingMore, state.resumeScopeMissing, onPlayEpisode)
                                     }
                                     Box(
                                         modifier = Modifier
@@ -396,7 +396,7 @@ fun ShowDetailScreen(
                                     ShowDescription(show)
                                 }
                             }
-                            episodeItems(episodes, show, state.isLoadingMore, onPlayEpisode)
+                            episodeItems(episodes, show, state.isLoadingMore, state.resumeScopeMissing, onPlayEpisode)
                         }
                         Box(
                             modifier = Modifier
@@ -473,17 +473,24 @@ fun ShowDetailScreen(
  * the rows: an episode with no id cannot be keyed, and gating on the raw list while rendering the
  * filtered one would paint a blank list with no empty state for a page that happened to be all
  * id-less. Same rule as the Search screen's Shows tab.
+ *
+ * [resumeScopeMissing] adds the one-line reconnect hint above the first row — only with rows to
+ * explain, which is why it is tested after the empty-state return.
  */
 private fun LazyListScope.episodeItems(
-    episodes      : List<SpotifyEpisode>,
-    show          : SpotifyShow,
-    isLoadingMore : Boolean,
-    onPlay        : (SpotifyEpisode) -> Unit,
+    episodes           : List<SpotifyEpisode>,
+    show               : SpotifyShow,
+    isLoadingMore      : Boolean,
+    resumeScopeMissing : Boolean,
+    onPlay             : (SpotifyEpisode) -> Unit,
 ) {
     val keyed = episodes.filter { !it.id.isNullOrBlank() }
     if (keyed.isEmpty()) {
         item(key = "episodes_empty") { EpisodesEmptyState() }
         return
+    }
+    if (resumeScopeMissing) {
+        item(key = "episodes_resume_hint") { ResumeScopeHint() }
     }
     items(keyed, key = { "episode-${it.id}" }) { episode ->
         EpisodeRow(episode = episode, show = show, onClick = { onPlay(episode) })
@@ -643,6 +650,23 @@ private fun ShowDescription(show: SpotifyShow) {
             .fillMaxWidth()
             .clickable { expanded = !expanded }
             .padding(horizontal = 16.dp, vertical = 8.dp),
+    )
+}
+
+/**
+ * Why the rows show no progress: this session's token was issued before Lyra asked for
+ * `user-read-playback-position`, and a grant only widens on a fresh authorization. Deliberately a
+ * plain line and not a card with a button — reconnecting is a Settings action the user takes when
+ * they feel like it, and nothing else on this screen is degraded. It disappears by itself once a
+ * token carrying the scope is stored.
+ */
+@Composable
+private fun ResumeScopeHint() {
+    Text(
+        text     = stringResource(R.string.show_resume_scope_hint),
+        style    = MaterialTheme.typography.bodySmall,
+        color    = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
     )
 }
 
