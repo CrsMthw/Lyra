@@ -131,30 +131,25 @@ fun StatsScreen(
                             StatsTimeRange.MEDIUM to stringResource(R.string.stats_range_medium),
                             StatsTimeRange.LONG   to stringResource(R.string.stats_range_long),
                         )
+                        // NOTHING RESETS THE BAR OR THE LIST HERE. Changing the range only changes
+                        // the range — the same rule as the Library's filter tabs (Cris's verdict,
+                        // 2026-09-14: "the bar should stay collapsed or stay expanded until the user
+                        // scrolls the list"). This picker IS list item 0, so it is only ever tappable
+                        // with the list already at its top; re-expanding the bar would push the picker
+                        // ~56dp down, out from under the finger that is reaching for the next segment.
+                        //
+                        // A collapsed bar over a short, empty or loading range is not a trap, which is
+                        // what an earlier version of this call site assumed: a `LazyColumn` that can
+                        // consume nothing still DISPATCHES its whole drag through nested scroll
+                        // (`ScrollingLogic.performScroll` always calls `dispatchPreScroll` /
+                        // `dispatchPostScroll`, and `CanDragCalculation` only excludes a mouse), and
+                        // `ExitUntilCollapsedScrollBehavior.onPostScroll` re-expands from
+                        // `available.y > 0` — so one downward drag anywhere on the pane brings the big
+                        // title back, even on an empty range.
                         ConnectedChoiceRow(
                             options  = options,
                             selected = state.range,
-                            onSelect = { range ->
-                                // Reset the BAR AND THE LIST TOGETHER, here at the call site, before the
-                                // range changes — the same rule as the Library's filter tabs.
-                                // `ExitUntilCollapsedScrollBehavior` re-expands ONLY from the leftover of
-                                // a downward scroll, which a list at offset 0 never produces, so scrolling
-                                // until the bar collapsed and then picking a range whose content is
-                                // shorter (or empty, or a single loading item) would strand the big title
-                                // with no gesture left to bring it back. Resetting only the bar swaps that
-                                // for an expanded bar over a list parked mid-scroll, so the list goes too,
-                                // and the VM last so the new content measures at index 0.
-                                //
-                                // NOT a `LaunchedEffect(state.range)`: an effect keyed on the range would
-                                // also fire on every re-entry of this screen and wipe the scroll position
-                                // the hoisted state exists to preserve. `ConnectedChoiceRow` calls
-                                // `onSelect` only on a genuine change (and owns the `press` haptic), so
-                                // re-tapping the live segment does nothing.
-                                barState.heightOffset  = 0f
-                                barState.contentOffset = 0f
-                                listState.requestScrollToItem(0)
-                                viewModel.setRange(range)
-                            },
+                            onSelect = viewModel::setRange,
                             modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 8.dp),
                         )
                     }
