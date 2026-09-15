@@ -645,7 +645,6 @@ fun SearchScreen(
         // owns the blank state.
         if (!queryBlank) {
             SearchTabRow(
-                selected   = state.tab,
                 pagerState = pagerState,
                 onSelect   = viewModel::selectTab,
                 modifier   = Modifier
@@ -746,17 +745,29 @@ private val SearchTab.labelRes: Int
  * `InactiveLabelTextColor` token (`onSurfaceVariant`) that default is presumably meant to resolve to.
  *
  * The indicator is not the default one — it FOLLOWS the pager; see the comment on it below.
+ *
+ * **Which tab reads as selected is the PAGER's `currentPage`, not the ViewModel's tab** — "the page
+ * that sits closest to the snapped position", so it flips at the midpoint of a swipe, which is
+ * exactly when the label should take the accent colour. The VM still learns the tab at settle (the
+ * `settledPage` collector in `SearchScreen`, which also gates per-tab paging); this row simply stops
+ * waiting for it, as the indicator does. Reading it in composition recomposes this row once per page
+ * change — four `Tab`s and a `Spacer`, the indicator's geometry being layout-only.
+ *
+ * `selectedTabIndex` is passed for readability and is otherwise INERT: `PrimaryTabRow` uses it only
+ * inside its own default `indicator` lambda, which this row replaces, and `TabRowImpl` never sees
+ * it. Selection for accessibility comes from each `Tab`'s own `selected` flag — do not "restore"
+ * the parameter on the assumption that the indicator depends on it.
  */
 @Composable
 private fun SearchTabRow(
-    selected: SearchTab,
     pagerState: PagerState,
     onSelect: (SearchTab) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val haptics = LocalHapticFeedback.current
+    val haptics       = LocalHapticFeedback.current
+    val selectedIndex = pagerState.currentPage
     PrimaryTabRow(
-        selectedTabIndex = selected.ordinal,
+        selectedTabIndex = selectedIndex,
         modifier         = modifier,
         containerColor   = Color.Transparent,
         // THE INDICATOR FOLLOWS THE PAGER, it does not animate after it. `tabIndicatorLayout` is
@@ -794,8 +805,9 @@ private fun SearchTabRow(
         indicator        = {
             TabRowDefaults.PrimaryIndicator(
                 modifier = Modifier.tabIndicatorLayout { measurable, constraints, tabPositions ->
-                    // This row is composed while the pager is not (the loading and error branches),
-                    // so an empty list is normal.
+                    // Stock `TabIndicatorOffsetNode`'s own guard, kept: `TabRowImpl` publishes the
+                    // tab positions from inside its own measure pass, so a measure that runs before
+                    // that has nothing to place.
                     if (tabPositions.isEmpty()) return@tabIndicatorLayout layout(0, 0) {}
                     val lastTab  = tabPositions.lastIndex
                     val page     = pagerState.currentPage.coerceIn(0, lastTab)
@@ -828,13 +840,14 @@ private fun SearchTabRow(
         },
         divider          = {},
     ) {
-        SearchTab.entries.forEach { tab ->
+        SearchTab.entries.forEachIndexed { index, tab ->
             Tab(
-                selected = tab == selected,
-                // Fired from the gesture, and only on a genuine change — re-tapping the active tab
-                // is intentionally silent, matching the picker this replaced.
+                selected = index == selectedIndex,
+                // Fired from the gesture, and only on a genuine change — re-tapping the tab that is
+                // VISUALLY selected (the pager's page, not the VM's tab, which can still be catching
+                // up) is intentionally silent, matching the picker this replaced.
                 onClick  = {
-                    if (tab != selected) {
+                    if (index != selectedIndex) {
                         haptics.press()
                         onSelect(tab)
                     }

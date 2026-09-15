@@ -520,7 +520,6 @@ internal fun LibraryBrowserPane(
         // own scroll position (`listStates`), so the row the finger is aiming at does not move. The
         // pager's own settle collector above turns a SWIPE into the same call.
         LibraryTabRow(
-            selected       = state.libraryFilter,
             pagerState     = pagerState,
             onSelect       = viewModel::setLibraryFilter,
             containerColor = paneColor,
@@ -759,19 +758,31 @@ private val LibraryTabIndicatorCompensation = 16.dp
  * `unselectedContentColor` is passed explicitly: `Tab` defaults it to `selectedContentColor`,
  * which `PrimaryTabRow` sets to `primary` for the whole row, so leaving it alone renders all four
  * labels in the accent colour.
+ *
+ * **Which tab reads as selected is the PAGER's `currentPage`, not the ViewModel's filter** — "the
+ * page that sits closest to the snapped position", so it flips at the midpoint of a swipe, which is
+ * exactly when the label should take the accent colour. The VM still learns the filter at settle
+ * (the collector in `LibraryBrowserPane`); this row simply stops waiting for it, as the indicator
+ * does. Reading it in composition recomposes this row once per page change — four `Tab`s and a
+ * `Spacer`, and the indicator's own geometry is layout-only, so nothing else is repeated.
+ *
+ * `selectedTabIndex` is passed for readability and is otherwise INERT: `PrimaryTabRow` uses it only
+ * inside its own default `indicator` lambda, which this row replaces, and `TabRowImpl` never sees
+ * it. Selection for accessibility comes from each `Tab`'s own `selected` flag — do not "restore"
+ * the parameter on the assumption that the indicator depends on it.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun LibraryTabRow(
-    selected       : LibraryFilter,
     pagerState     : PagerState,
     onSelect       : (LibraryFilter) -> Unit,
     containerColor : Color,
     modifier       : Modifier = Modifier,
 ) {
-    val haptics = LocalHapticFeedback.current
+    val haptics       = LocalHapticFeedback.current
+    val selectedIndex = pagerState.currentPage
     PrimaryTabRow(
-        selectedTabIndex = selected.ordinal,
+        selectedTabIndex = selectedIndex,
         modifier         = modifier,
         containerColor   = containerColor,
         // THE INDICATOR FOLLOWS THE PAGER, it does not animate after it. `tabIndicatorLayout` is
@@ -809,8 +820,9 @@ private fun LibraryTabRow(
         indicator        = {
             TabRowDefaults.PrimaryIndicator(
                 modifier = Modifier.tabIndicatorLayout { measurable, constraints, tabPositions ->
-                    // The row is laid out before the pager ever is (the full-area loading and error
-                    // branches compose it with no pages at all), so an empty list is normal.
+                    // Stock `TabIndicatorOffsetNode`'s own guard, kept: `TabRowImpl` publishes the
+                    // tab positions from inside its own measure pass, so a measure that runs before
+                    // that has nothing to place.
                     if (tabPositions.isEmpty()) return@tabIndicatorLayout layout(0, 0) {}
                     val lastTab  = tabPositions.lastIndex
                     val page     = pagerState.currentPage.coerceIn(0, lastTab)
@@ -843,11 +855,14 @@ private fun LibraryTabRow(
         },
         divider          = {},
     ) {
-        LibraryFilter.entries.forEach { filter ->
+        LibraryFilter.entries.forEachIndexed { index, filter ->
             Tab(
-                selected = filter == selected,
+                selected = index == selectedIndex,
+                // Fired from the gesture, and only on a genuine change — re-tapping the tab that
+                // is VISUALLY selected (the pager's page, not the VM's filter, which can still be
+                // catching up) is intentionally silent, matching the picker this replaced.
                 onClick  = {
-                    if (filter != selected) {
+                    if (index != selectedIndex) {
                         haptics.press()
                         onSelect(filter)
                     }
