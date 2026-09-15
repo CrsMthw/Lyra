@@ -55,8 +55,12 @@ data class SpotifyShow(
  * does NOT send (the caller already knows the show) but `me/player` and `me/player/queue` DO —
  * it is what gives an episode a subtitle and a fallback image when it is the now-playing item.
  *
- * [resumePoint] needs the `user-read-playback-position` scope, which Lyra does not request, so it
- * arrives null; it is modelled only so the field parses if that scope is ever added.
+ * [resumePoint] is REQUESTED: `user-read-playback-position` is in
+ * `SpotifyAuthManager.SCOPES` (since 2026-09-15), and it is what drives the show screen's Played
+ * state and "N left" progress. It is still null in two ordinary cases, and the UI must treat both
+ * as "no progress known": the stored token PREDATES the scope (a refresh never widens a grant, so
+ * a session authorized earlier only gains it on a reconnect — the show screen says so in one line
+ * when `SpotifyAuthManager.hasScope` is false), or the user has never started this episode.
  */
 data class SpotifyEpisode(
     val id                  : String?             = null,

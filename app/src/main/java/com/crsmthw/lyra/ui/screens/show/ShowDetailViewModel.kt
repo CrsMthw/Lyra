@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.crsmthw.lyra.data.auth.SpotifyAuthManager
 import com.crsmthw.lyra.data.local.LibraryCache
 import com.crsmthw.lyra.data.remote.model.ShowPage
 import com.crsmthw.lyra.data.remote.model.SpotifyEpisode
@@ -37,15 +38,31 @@ data class ShowDetailUiState(
     val error         : String?              = null,
     /** null = still resolving; the heart is disabled only for that first moment. */
     val isFollowed    : Boolean?             = null,
+    /**
+     * The stored grant does NOT carry `user-read-playback-position`, so no episode can arrive with
+     * a resume point and every row must read as untouched. True for any session authorized before
+     * that scope was requested (a refresh never widens a grant); the screen turns it into one
+     * quiet line above the episodes rather than silently showing nothing.
+     */
+    val resumeScopeMissing: Boolean          = false,
 )
 
 class ShowDetailViewModel(
     private val repository  : SpotifyRepository,
     private val libraryCache: LibraryCache,
+    authManager             : SpotifyAuthManager,
     private val showId      : String,
 ) : ViewModel() {
 
-    private val _state = MutableStateFlow(ShowDetailUiState())
+    // The grant is read ONCE, here: it can only change through a re-authorization, which leaves
+    // this screen entirely (Auth → Library), so the next show opened gets a new ViewModel and with
+    // it the new answer. Nothing to observe.
+    private val _state = MutableStateFlow(
+        ShowDetailUiState(
+            resumeScopeMissing =
+                !authManager.hasScope(SpotifyAuthManager.SCOPE_READ_PLAYBACK_POSITION),
+        )
+    )
     val uiState: StateFlow<ShowDetailUiState> = _state
 
     private val showUri = "spotify:show:$showId"
@@ -251,5 +268,10 @@ class ShowDetailViewModelFactory(
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T =
-        ShowDetailViewModel(container.spotifyRepository, container.libraryCache, showId) as T
+        ShowDetailViewModel(
+            container.spotifyRepository,
+            container.libraryCache,
+            container.authManager,
+            showId,
+        ) as T
 }

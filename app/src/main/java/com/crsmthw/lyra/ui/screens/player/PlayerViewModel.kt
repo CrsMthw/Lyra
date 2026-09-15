@@ -483,9 +483,11 @@ class PlayerViewModel(
      *   forwarded to `me/player/play`: the server resumes an episode from its own authoritative
      *   position, which a cached page's resume point can be stale against. It is used ONLY on the
      *   App Remote fallback, whose `play(uri)` always starts at 0:00 and has no server point to
-     *   consult. **Inert in production today** — `resume_point` needs the
-     *   `user-read-playback-position` scope, which `SpotifyAuthManager.SCOPES` does not request, so
-     *   every caller passes null and the episode relies on the restore loop below instead.
+     *   consult. **Live** since `user-read-playback-position` joined `SpotifyAuthManager.SCOPES`
+     *   (2026-09-15), which is what populates `resume_point`; it still arrives null on a session
+     *   authorized before that scope existed (a refresh never widens a grant), and on an episode
+     *   the user has never started — in both cases the REST path's server-side resume, unchanged
+     *   here, is what places the playhead.
      */
     fun playTrack(
         uri            : String,

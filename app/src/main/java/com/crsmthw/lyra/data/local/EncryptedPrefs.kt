@@ -93,17 +93,36 @@ class EncryptedPrefs(context: Context) {
         get() = accessToken.isNotBlank() &&
                 System.currentTimeMillis() < (tokenExpiry - TOKEN_BUFFER_MS)
 
-    fun saveTokens(access: String, refresh: String, expiresInSeconds: Long) {
+    /**
+     * The scope string the token endpoint actually GRANTED (space-delimited, as sent), or `""` when
+     * nothing is known — which is every session that predates this field, and must read as "not
+     * granted" rather than "probably fine". Only [com.crsmthw.lyra.data.auth.SpotifyAuthManager]
+     * writes it; ask it, via `hasScope`, rather than parsing this here.
+     */
+    var grantedScopes: String
+        get()      = getString(KEY_GRANTED_SCOPES)
+        set(value) { putString(KEY_GRANTED_SCOPES, value) }
+
+    /**
+     * @param scope the granted scope string from the token response, or null to KEEP whatever is
+     *   stored. Null is the refresh case: a refresh response may omit `scope`, and "omitted" means
+     *   "unchanged" — never "everything we asked for", which would hand an old grant the scopes of
+     *   a newer [com.crsmthw.lyra.data.auth.SpotifyAuthManager.SCOPES] list it never consented to.
+     */
+    fun saveTokens(access: String, refresh: String, expiresInSeconds: Long, scope: String? = null) {
         putString(KEY_ACCESS_TOKEN, access)
         putString(KEY_REFRESH_TOKEN, refresh)
+        if (!scope.isNullOrBlank()) putString(KEY_GRANTED_SCOPES, scope)
         prefs.edit { putLong(KEY_TOKEN_EXPIRY, System.currentTimeMillis() + expiresInSeconds * 1000L) }
     }
 
+    /** The granted scopes go with the tokens: they describe THAT grant, not the next one. */
     fun clearTokens() {
         prefs.edit {
             remove(KEY_ACCESS_TOKEN)
             remove(KEY_REFRESH_TOKEN)
             remove(KEY_TOKEN_EXPIRY)
+            remove(KEY_GRANTED_SCOPES)
         }
     }
 
@@ -116,6 +135,7 @@ class EncryptedPrefs(context: Context) {
         private const val KEY_ACCESS_TOKEN   = "access_token"
         private const val KEY_REFRESH_TOKEN  = "refresh_token"
         private const val KEY_TOKEN_EXPIRY   = "token_expiry"
+        private const val KEY_GRANTED_SCOPES = "granted_scopes"
         private const val TOKEN_BUFFER_MS    = 60_000L
     }
 }
