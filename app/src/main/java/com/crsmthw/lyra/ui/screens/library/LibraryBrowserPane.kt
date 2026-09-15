@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import com.crsmthw.lyra.R
 import com.crsmthw.lyra.ui.components.CrampedLabelAutoSize
+import com.crsmthw.lyra.ui.components.LargeBarMinPaneHeight
 import com.crsmthw.lyra.ui.components.appBarWindowInsets
 import com.crsmthw.lyra.ui.components.toTrackActionTarget
 import com.crsmthw.lyra.util.ListScrollHaptics
@@ -50,15 +51,6 @@ import com.crsmthw.lyra.util.rememberArtBoundsTransform
 import java.io.File
 
 // ── Library browser pane ──────────────────────────────────────────────────────
-
-/**
- * Pane height at or above which the browser gets the **large flexible** app bar. Below it (the
- * folded outer screen in landscape, a ≈380dp-tall pane) a 152dp expanded bar plus a 48dp tab row
- * would eat over half the pane before a single card, so that case gets the small pinned bar.
- * 600dp is the M3 medium-height boundary and clears portrait on both screens as well as an
- * unfolded / tablet landscape pane (≈800dp+).
- */
-private val LargeBarMinPaneHeight = 600.dp
 
 /** Breathing room between the tab row and a page's first row — Search's `SearchTabRowGap`. */
 private val LibraryTabRowGap = 12.dp
@@ -348,10 +340,12 @@ internal fun LibraryBrowserPane(
         scrolledContainerColor = paneColor,
     )
 
-    // Height gate, same measured-window idiom as the docked third pane (`LocalWindowInfo`): the
-    // window-size-class height buckets top out at 900dp and have no 600dp boundary, so
-    // `isHeightAtLeastBreakpoint(600)` cannot express this. The left pane is the window height
-    // less 16dp of card padding, so the window read is accurate enough for a 600dp threshold.
+    // Height gate — the SHARED `LargeBarMinPaneHeight` (`ui/components/RootTopBar.kt`), so this
+    // pane's hand-rolled bar pair and the root bar every other screen uses cannot drift apart.
+    // Same measured-window idiom as the docked third pane (`LocalWindowInfo`): the window-size-class
+    // height buckets top out at 900dp and have no 600dp boundary, so `isHeightAtLeastBreakpoint(600)`
+    // cannot express this. The left pane is the window height less 16dp of card padding, so the
+    // window read is accurate enough for a 600dp threshold.
     val paneHeightDp = with(density) { LocalWindowInfo.current.containerSize.height.toDp() }
     val useLargeBar  = paneHeightDp >= LargeBarMinPaneHeight
 

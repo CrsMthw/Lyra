@@ -23,23 +23,32 @@ import androidx.compose.ui.unit.dp
 /**
  * Pane height at or above which a root screen gets the **large flexible** app bar. Below it — the
  * folded outer screen in landscape, a ≈380dp-tall pane — a 152/120dp expanded bar would eat a third
- * of the pane before a single row, so that case gets the small pinned bar. 600dp is the M3
- * medium-height boundary and clears portrait on both screens as well as an unfolded / tablet
- * landscape pane (≈800dp+).
+ * of the pane before a single row (and over HALF of it on the Library, which adds a 48dp tab row
+ * under the bar), so that case gets the small pinned bar. 600dp is the M3 medium-height boundary
+ * and clears portrait on every screen as well as an unfolded / tablet landscape pane (≈800dp+).
  *
  * MEASURED height, not a window-size-class breakpoint: the height buckets are `[0, 480, 900]` and
  * have no 600dp boundary, so `isHeightAtLeastBreakpoint(600)` cannot express this (the same reason
  * the docked third pane keeps its `LocalWindowInfo` read).
+ *
+ * `internal` because `LibraryBrowserPane` reads it too: that pane still hand-rolls its own
+ * large/small bar pair, since [RootTopBar] has no slot for the pinned `PrimaryTabRow` the Library
+ * puts between the bar and the content. The gate itself must not fork, so there is one constant.
  */
-private val LargeBarMinPaneHeight = 600.dp
+internal val LargeBarMinPaneHeight = 600.dp
 
 /**
  * The shared **root-screen** app bar: a [LargeFlexibleTopAppBar] that compresses to the small bar
  * as the content scrolls and stays small until the content is back at the top (M3's own rule for
  * the flexible bars), or a plain small pinned [TopAppBar] on a pane too short for it.
  *
- * `internal` only because both callers (Stats, Settings) are in this module — widen it to public,
- * like its neighbours in this package, whenever something outside needs it.
+ * `internal` only because all three callers (Stats, Settings, Queue) are in this module — widen it
+ * to public, like its neighbours in this package, whenever something outside needs it.
+ *
+ * **Not** used by the Library browser pane, which keeps its own copy of the large/small pair: it
+ * pins a `PrimaryTabRow` between the bar and the content and this component has no slot for one.
+ * The two share the [LargeBarMinPaneHeight] gate so at least that cannot drift; adopting this
+ * composable there is a pure de-duplication waiting on such a slot.
  *
  * Call it as the FIRST child of the screen's own `Column`, and hang the returned behaviour's
  * connection on the scroller inside the `Box(weight(1f))` below it:
