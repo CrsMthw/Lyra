@@ -46,7 +46,7 @@ private val LargeBarMinPaneHeight = 600.dp
  *
  * ```kotlin
  * Column(Modifier.fillMaxSize().horizontalSystemBarsPadding()) {
- *     val scrollBehavior = RootTopBar(title = …, barState = barState, isContentAtTop = { … })
+ *     val scrollBehavior = RootTopBar(title = …, barState = barState)
  *     Box(Modifier.fillMaxWidth().weight(1f)) {
  *         LazyColumn(modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection)) { … }
  *     }
@@ -60,6 +60,23 @@ private val LargeBarMinPaneHeight = 600.dp
  * [appBarWindowInsets] (and never the M3 default, which would apply the horizontal sides a second
  * time on top of the screen's one `horizontalSystemBarsPadding()`).
  *
+ * ### Nothing resets the large bar's collapse
+ *
+ * The bar is where the user's last drag left it — across a range/filter change, a navigation round
+ * trip and a re-entry of the screen (Cris's verdict, 2026-09-14: "the bar should stay collapsed or
+ * stay expanded, until user scrolls the list"). A collapsed bar is never a trap, because a
+ * scroller that can consume NOTHING still dispatches its whole drag through nested scroll
+ * (`ScrollingLogic.performScroll` always calls `dispatchPreScroll`/`dispatchPostScroll`, and
+ * `CanDragCalculation` only excludes a mouse) and `ExitUntilCollapsedScrollBehavior.onPostScroll`
+ * re-expands from `available.y > 0` — so one downward drag brings the big title back even over an
+ * empty page. Callers must therefore NOT reset the bar from a control that swaps their content.
+ *
+ * The one state no large bar can produce is an offset inherited from the SMALL branch's pane, so
+ * that is cleared where it is created: the small branch zeroes [barState] as it enters, since a
+ * pinned bar cannot own a collapse in the first place. **Accepted cost:** a collapse earned in
+ * portrait does not survive a round trip through the folded outer screen in landscape — the bar
+ * comes back expanded, and one upward drag re-collapses it.
+ *
  * @param title the bar's title. One line, ellipsized.
  * @param subtitle optional second line. **If the text can only arrive later (a count landing from
  *   the network), pass a non-null — possibly empty — string from the first frame**: the expanded
@@ -72,16 +89,8 @@ private val LargeBarMinPaneHeight = 600.dp
  *   the AMOLED overlay flattens only `background` / `surface` / `surfaceVariant`, so the default
  *   lights the bar up as a grey band on a pure-black theme the moment the content moves.
  * @param barState the bar's hoisted [TopAppBarState] — hoist it at screen level with
- *   `rememberTopAppBarState()` so the collapse survives navigating away and back. Used by the large
- *   branch only; see [isContentAtTop].
- * @param isContentAtTop "the scroller is at offset 0", read when the large branch (re)enters
- *   composition to clear a stale collapse. `ExitUntilCollapsedScrollBehavior` re-expands ONLY from
- *   the positive leftover of a downward scroll, which content already at 0 never produces — so a
- *   collapsed bar over content at the top is a state it can neither produce nor escape, and the big
- *   title would be stranded with no gesture left to bring it back. It can be ARRIVED at because
- *   `rememberTopAppBarState` is `rememberSaveable` while the small branch keeps its own state:
- *   collapse in portrait, rotate to the short pane, rotate back. Defaults to `{ false }` (never
- *   reset).
+ *   `rememberTopAppBarState()` so the collapse survives navigating away and back. The LARGE branch
+ *   renders from it; the small branch only CLEARS it (see below).
  * @return the behaviour whose `nestedScrollConnection` the caller must put on its scroller.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
@@ -94,7 +103,6 @@ internal fun RootTopBar(
     actions        : @Composable RowScope.() -> Unit = {},
     containerColor : Color = MaterialTheme.colorScheme.background,
     barState       : TopAppBarState = rememberTopAppBarState(),
-    isContentAtTop : () -> Boolean = { false },
 ): TopAppBarScrollBehavior {
     val paneHeightDp = with(LocalDensity.current) {
         LocalWindowInfo.current.containerSize.height.toDp()
@@ -119,19 +127,9 @@ internal fun RootTopBar(
     // landscape rotation would draw the small bar shifted up and clipped (`adjustHeightOffsetLimit`
     // fixes only the LIMIT, not the offset).
     return if (useLargeBar) {
-        // ENTRY RESET — see [isContentAtTop]. `remember`, not a `LaunchedEffect`: it runs once per
-        // branch entry and BEFORE the bar composes, so there is no frame of a shifted bar (the same
-        // "assign during composition" idiom as the Library's `PaneStateHolder`), and it is keyed on
-        // [barState] so a newly hoisted instance re-arms it. It therefore also runs on every
-        // ordinary re-entry of the screen, which is SAFE ONLY because the predicate is exactly the
-        // impossible-state test — with the content restored part-way down it is false and the
-        // restored collapse is untouched.
-        remember(barState) {
-            if (isContentAtTop()) {
-                barState.heightOffset  = 0f
-                barState.contentOffset = 0f
-            }
-        }
+        // No entry reset. The collapse the user last dragged is simply rendered — see "Nothing
+        // resets the large bar's collapse" above; an entry reset here would fire on every ordinary
+        // re-entry of the screen (every nav round trip) and undo it.
         val behavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(state = barState)
         LargeFlexibleTopAppBar(
             title          = titleSlot,
@@ -151,6 +149,22 @@ internal fun RootTopBar(
         )
         behavior
     } else {
+        // Clear the hoisted state on entry so it only ever describes the LARGE bar: this branch
+        // renders a pinned bar off its OWN state, and `PinnedScrollBehavior` never writes
+        // `heightOffset`, so without this a collapse earned in portrait would still be sitting in
+        // the hoisted state when a rotation back re-entered the large branch — over content this
+        // screen may well have scrolled to the top meanwhile. A pinned bar cannot own a collapse,
+        // which is why this is the one place a reset belongs.
+        //
+        // `remember`, not a `LaunchedEffect`: it runs once per branch entry and BEFORE the bar
+        // composes, so there is no frame of a shifted bar (the same "assign during composition"
+        // idiom as the Library's `PaneStateHolder`, docs/MOTION.md). Keyed on [barState] so a newly
+        // hoisted instance re-arms it. Nothing in this branch READS the hoisted state, so the write
+        // cannot invalidate the composition that performs it.
+        remember(barState) {
+            barState.heightOffset  = 0f
+            barState.contentOffset = 0f
+        }
         val behavior = TopAppBarDefaults.pinnedScrollBehavior(state = rememberTopAppBarState())
         // The small bar has no nullable-subtitle overload — the subtitle one takes a non-null slot,
         // so the two cases are two calls. [subtitle] is a screen-level decision, so this `if` never

@@ -112,9 +112,6 @@ fun StatsScreen(
                 },
                 containerColor = MaterialTheme.colorScheme.background,
                 barState       = barState,
-                isContentAtTop = {
-                    listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
-                },
             )
 
             Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
