@@ -289,7 +289,10 @@ fun SearchScreen(
                     .only(WindowInsetsSides.Horizontal)
             ),
     ) {
-        // Scrolling content rides above the keyboard; the floating bar + tab row do not.
+        // Scrolling content rides above the keyboard; the floating bar + tab row do not. The bottom
+        // scrim + wave ride it too, but from a wrapper of their own below the Recent list — they
+        // used to be the last two children of THIS Box, which is what let the recents draw over
+        // them (see the overlay Box further down).
         Box(modifier = Modifier.fillMaxSize().imePadding()) {
             when {
                 state.isLoading -> {
@@ -488,26 +491,13 @@ fun SearchScreen(
                 }
                 // Blank query → nothing; just the floating bar over an empty background.
             }
-
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(scrimHeight)
-                    .align(Alignment.BottomCenter)
-                    .background(Brush.verticalGradient(listOf(Color.Transparent, background)))
-            )
-            FftWaveCanvas(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(scrimHeight)
-                    .align(Alignment.BottomCenter),
-                color    = LocalVisualizerAccentColor.current,
-                alpha    = 0.20f,
-            )
         }
 
         // Recent searches — only while the query is blank. Lives in the outer (non-ime-padded) Box,
         // top-anchored, so the keyboard never lifts it; it vanishes the moment anything is typed.
+        // It is NOT the last content sibling: the bottom scrim + wave are composed after it on
+        // purpose (see the overlay Box below), because they used to sit inside the results Box above
+        // and this list drew straight over them.
         // Gated on the *field's* text, not the ViewModel's: the VM is a debounce-coupled frame or
         // two behind now, which would flash this list over the results on the first keystroke.
         if (queryBlank && recents.isNotEmpty()) {
@@ -562,10 +552,50 @@ fun SearchScreen(
                 ) {
                     Text(stringResource(R.string.search_recent_clear_all))
                 }
-                // Mini-player clearance, INSIDE the scroll: "Clear all" is the last thing in the
-                // list, and the floating bar would otherwise cover it once something is playing.
+                // Mini-player AND bottom-scrim clearance, INSIDE the scroll: "Clear all" is the last
+                // thing in the list, and both the floating bar (once something is playing) and the
+                // scrim + wave that now draw over this list would otherwise cover it. 100dp clears
+                // the scrim's whole `navBarBottom + 48dp` with the keyboard down and all but a few
+                // dp of it with the keyboard up, where the top of that strip is fully transparent
+                // anyway. The rows' tappability does NOT depend on this spacer — the overlay below
+                // has no pointer input — so it stays at the mini player's figure.
                 Spacer(Modifier.height(100.dp))
             }
+        }
+
+        // Bottom scrim + visualizer wave, ABOVE both scrollable lists. These were the last two
+        // children of the results Box above until 2026-09-16, i.e. composed BEFORE the Recent
+        // column, so a full cap-10 recents list — whose `ListItem` rows are an opaque
+        // `colorScheme.surface` — drew straight over them and clipped the top half of the wave with
+        // the keyboard down and hid it entirely with enough rows (device report). Every other list
+        // in the app scrolls UNDER its bottom scrim; composed here the recents do too.
+        //
+        // The wrapper is the same `fillMaxSize().imePadding()` chain as the results Box, so the two
+        // children keep the exact ancestor shape they had: same parent size, same `BottomCenter`
+        // anchor, same `scrimHeight`, same IME response — identical by construction rather than by
+        // an argument about where `imePadding()` lands relative to `height()` and `align()`, which
+        // is why this is a wrapper and not a per-child inset.
+        //
+        // It carries NO pointer input (a `background` Box and `FftWaveCanvas`'s `drawBehind`
+        // Spacer), so it is not a hit-test target and taps fall through to the lists underneath —
+        // the same reason the bottom rows of the results pager have always stayed tappable under
+        // it. It must stay BELOW the top scrim and the floating bar, hence composed before them.
+        Box(modifier = Modifier.fillMaxSize().imePadding()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(scrimHeight)
+                    .align(Alignment.BottomCenter)
+                    .background(Brush.verticalGradient(listOf(Color.Transparent, background)))
+            )
+            FftWaveCanvas(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(scrimHeight)
+                    .align(Alignment.BottomCenter),
+                color    = LocalVisualizerAccentColor.current,
+                alpha    = 0.20f,
+            )
         }
 
         // Top scrim — fades content out under the floating controls (covers the status bar; no
