@@ -23,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfoV2
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -61,7 +62,7 @@ import kotlin.coroutines.cancellation.CancellationException
 // argument is now an ANIMATED property: `miniPlayerFullWidth` (Search/Stats: a single full-width
 // list, no right pane for a 58 % bar to line up with) resizes the bar in place with the app's finite
 // `screenTransitionSpec()` instead of taking it off screen and putting a different one back.
-// The bar's bottom inset simply unions `WindowInsets.ime` on every route — see `miniBottomInset`.
+// The bar's bottom inset carries `WindowInsets.ime` on every route — see `miniBottomInset`.
 //
 // The `onRequestPlayer` lambda passed to `content` opens the panel on wide screens and calls
 // `onOpenPlayer` on narrow ones, so track-tap handlers don't need to know which mode they're in.
@@ -99,6 +100,69 @@ val LocalPopOutPanelOpen: ProvidableCompositionLocal<Boolean> = compositionLocal
  * mini player behaves exactly as it did before the gate existed.
  */
 val LocalPlayerRouteVisible: ProvidableCompositionLocal<Boolean> = compositionLocalOf { true }
+
+/** The [LocalPlayerArtSettleCount] default: nothing ever bumps it. */
+private val NoArtSettles: IntState = mutableIntStateOf(0)
+
+/**
+ * How many times this host's floating player surface has SETTLED (reached
+ * `currentState == targetState`). Bumped by [PlayerPanelHost]; read by the `"album-art"`
+ * participants that OUTLIVE a transition — the pop-out panel's art (`PlayerCardContent`) and the
+ * full player's (`PlayerScreen`) — through [rememberArtSettleInvalidation], which turns each bump
+ * into one no-op re-measure of that art.
+ *
+ * **Why the re-measure is needed.** A CANCELLED seek disposes the participant the abandoned
+ * direction was heading for: the mini player for a cancelled panel close, the bar or the pop-out
+ * panel for a cancelled back off `PlayerScreen`. `SharedTransitionStateMachine` keeps that
+ * participant's `BoundsProvider` as its `targetBoundsProvider`, which is the rect the NEXT morph
+ * starts FROM (`ActiveMatchFoundConfigPending.configureActiveMatch` →
+ * `obtainBoundsFromLastTarget`). That field is re-read in exactly one place,
+ * `updateTargetBoundsProvider()`, reached only from `SharedContentNode`'s lookahead placement
+ * (`onLookaheadPlaced`) or approach measure (`tryInitializingCurrentBounds`) — an entry being
+ * forgotten merely POSTS the request. So with nothing left to re-measure, the pointer can survive
+ * the participant: `obtainBoundsFromLastTarget` then returns null (that provider is no longer in
+ * `allEntries`), `configureActiveMatch` falls back to `Rect(topLeft, lookaheadSize)` — the
+ * INCOMING art's own bounds — and the next gesture morphs from the target to itself, i.e. no
+ * flight at all, with the outgoing copy hidden (`SharedElementEntry.shouldRenderAtAll` is false
+ * for a non-target while a match is configured). On device: "cancel the predictive back once,
+ * then back again — the art in the pop-out panel just completely disappears" (report 44, unfolded;
+ * report 48 is the same thing folded, with the full player's art) — while a COMMITTED gesture in
+ * between cures it, because its last target is the participant that stays (2026-09-14).
+ *
+ * Defaults to a counter that never changes, so where the provider is out of scope — a preview, or
+ * the docked third pane, which is composed BESIDE this host — the modifier is inert.
+ */
+val LocalPlayerArtSettleCount: ProvidableCompositionLocal<IntState> =
+    staticCompositionLocalOf { NoArtSettles }
+
+/**
+ * A pass-through layout modifier that re-measures its `LayoutNode` whenever
+ * [LocalPlayerArtSettleCount] is bumped. Chain it onto an `"album-art"` participant that outlives
+ * transitions; see that counter's KDoc for what the re-measure repairs.
+ *
+ * The counter is read INSIDE the measure block on purpose: measure-scope reads are observed
+ * (`OwnerSnapshotObserver.observeMeasureSnapshotReadsAffectingLookahead`), so a bump runs
+ * `LayoutNode.invalidateMeasurements()` → `requestLookaheadRemeasure()` (the node lives in a
+ * lookahead scope) → the whole modifier chain's lookahead measure + placement re-runs, including
+ * the `sharedElement` node's own — which is what calls `processPendingRequest()` →
+ * `updateTargetBoundsProvider()`. Reading it in composition instead would not do: the shared node
+ * is only re-measured when this node is, and the two must be the same `LayoutNode`, which is why
+ * this is a modifier on the art rather than anything around it.
+ */
+@Composable
+fun rememberArtSettleInvalidation(): Modifier {
+    val settles = LocalPlayerArtSettleCount.current
+    return remember(settles) {
+        Modifier.layout { measurable, constraints ->
+            // The counter only ever grows from 0, so this is always 0. It is used (rather than
+            // read and discarded) so the read cannot be optimised away — and it can never move
+            // the art.
+            val settleNudge = settles.intValue.coerceAtMost(0)
+            val placeable   = measurable.measure(constraints)
+            layout(placeable.width, placeable.height) { placeable.place(settleNudge, 0) }
+        }
+    }
+}
 
 /**
  * A [SharedTransitionScope.SharedContentConfig] that enables the shared element only while
@@ -360,6 +424,22 @@ fun PlayerPanelHost(
         it == PlayerSurface.Panel
     }
 
+    // ONE no-op re-measure of the `"album-art"` participants that outlive a transition, after
+    // every SETTLE of the surface — the repair for the broken morph on the gesture that follows a
+    // CANCELLED one (device reports 44 + 48). The whole mechanism is in
+    // [LocalPlayerArtSettleCount]'s KDoc; [rememberArtSettleInvalidation] is the reader.
+    //
+    // Keyed on the pair rather than fired from the cancel path itself: it then runs only from a
+    // composition in which `currentState == targetState`, i.e. one where the surface the gesture
+    // abandoned already reports `target == false` and the state machine can only re-read a
+    // provider that is still on screen. That also covers every other way the surface settles (a
+    // commit, a button back, a fold, the third-state snap) at the cost of one pass-through
+    // re-measure of two art chains, and it needs no knowledge of WHICH path settled it.
+    val artSettles = remember { mutableIntStateOf(0) }
+    LaunchedEffect(surfaceState.currentState, surfaceState.targetState) {
+        if (surfaceState.currentState == surfaceState.targetState) artSettles.intValue++
+    }
+
     // A read-only mirror of the gesture every back handler already sees. Observing this StateFlow
     // registers NO handler, so it cannot steal the gesture from `NavHost`'s own
     // (`rememberNavHostEventHandler`) — deliberately NOT `rememberNavigationEventState`, which owns
@@ -431,13 +511,22 @@ fun PlayerPanelHost(
                     targetValue   = 0f,
                     animationSpec = tween((surfaceState.fraction * totalMillis).toInt()),
                 ) { value, _ ->
-                    // seekTo/snapTo suspend, `animate`'s callback does not — hand the work back to
-                    // this effect's own scope, as NavHost does internally.
-                    effectScope.launch {
-                        if (value > 0f)  surfaceState.seekTo(value)
-                        if (value == 0f) surfaceState.snapTo(surfaceTarget)
-                    }
+                    // seekTo suspends, `animate`'s callback does not — hand the work back to this
+                    // effect's own scope, as NavHost does internally.
+                    effectScope.launch { if (value > 0f) surfaceState.seekTo(value) }
                 }
+                // The final snap is made HERE, in this function's own suspend body, and this is a
+                // DELIBERATE deviation from `NavHost.kt`'s template, which launches it into the
+                // effect's scope alongside the seeks above. That is safe there because NavHost's
+                // effect key (the back-stack entry) does not change when a gesture is cancelled.
+                // Ours does: the `Cancelled` branch writes `panelBack = Idle` the instant this
+                // function returns, which re-keys the effect and cancels anything still queued in
+                // its scope — and a snap lost that way leaves the transition parked with
+                // `targetState` still pointing at the surface the gesture abandoned, so nothing
+                // ever settles and the `"album-art"` match is never re-resolved. A `seekTo` that
+                // lands after this snap is inert by construction: `currentState == targetState`
+                // makes `seekTo` return without touching anything.
+                surfaceState.snapTo(surfaceTarget)
             }
 
             // Deliberately NO `animationSpec` on any `animateTo` below. With one,
@@ -562,7 +651,7 @@ fun PlayerPanelHost(
     // `hide()` alone leaves the field focused, and dismissing a sheet the action row opened can
     // then hand focus back and re-show the IME under the panel. Unconditional inside `canShowPanel`
     // — a no-op on Library/Album/Artist, where nothing is focused. (The mini player needs no such
-    // per-route knob: its inset unions the IME on every route, see `miniBottomInset`.)
+    // per-route knob: its inset carries the IME on every route, see `miniBottomInset`.)
     val onRequestPlayer: () -> Unit = {
         if (canShowPanel) {
             focusManager.clearFocus(force = true)
@@ -578,7 +667,13 @@ fun PlayerPanelHost(
     Box(modifier = modifier.fillMaxSize()) {
         // ONE content call site at every width — see the header comment on why an early return for
         // the extra-wide case was a state-wiping trap.
-        CompositionLocalProvider(LocalPopOutPanelOpen provides panelVisible) {
+        // The settle counter is provided here for `PlayerScreen`, which lives inside the NavHost;
+        // the pop-out panel is a SIBLING of the content, so it is provided again around the panel
+        // below rather than by re-parenting this whole Box.
+        CompositionLocalProvider(
+            LocalPopOutPanelOpen       provides panelVisible,
+            LocalPlayerArtSettleCount  provides artSettles,
+        ) {
             content(if (isExtraWide) noPlayerRequest else onRequestPlayer)
         }
 
@@ -675,7 +770,7 @@ fun PlayerPanelHost(
                         label         = "miniWidth",
                     )
 
-                    // Bottom inset for the mini player — ONE modifier that unions the IME
+                    // Bottom inset for the mini player — ONE modifier that includes the IME
                     // UNCONDITIONALLY, on every route.
                     //
                     // It used to be two different modifiers switched by a `miniPlayerAvoidsIme` flag
@@ -684,29 +779,36 @@ fun PlayerPanelHost(
                     // a result row, or the back arrow) swapped the bar to the no-IME inset immediately:
                     // it snapped down behind the still-retracting keyboard and popped back up ~250ms
                     // later when the IME inset finally reached zero. A Boolean that changes a frame
-                    // before the inset it describes cannot be made to agree with it; unioning the IME
-                    // always makes the bar ride the keyboard down instead, with no flag to be out of
-                    // step with. (Search, which auto-focuses its field, is why the lift exists at all.)
+                    // before the inset it describes cannot be made to agree with it; carrying the IME
+                    // term always makes the bar ride the keyboard down instead, with no flag to be out
+                    // of step with. (Search, which auto-focuses its field, is why the lift exists.)
                     //
-                    // `union` takes the LARGER of the two rather than stacking: the IME inset already
-                    // spans the nav bar, so imePadding() + navigationBarsPadding() would leave a
-                    // nav-bar-sized gap above the keyboard. The pop-out panel below deliberately keeps
-                    // plain nav bar + cutout — it is capped at 80 % of the screen height, so lifting it
-                    // above the keyboard would squash it and make it jump on every IME toggle.
+                    // The IME is ADDED to the nav bar rather than unioned with it (2026-09-15), so
+                    // with a keyboard up the bar floats a nav-bar height ABOVE it instead of sitting
+                    // flush on it. That gap is WANTED: Search draws its bottom visualizer wave inside
+                    // its own imePadding() box, bottom-anchored in exactly the nav-bar strip, so the
+                    // wave rides up with the keyboard — and a flush bar covered it completely, while
+                    // at rest it shows in the strip under the bar. Stacking keeps the at-rest look
+                    // with the keyboard up (device report 54). Geometry with the keyboard HIDDEN is
+                    // untouched: `WindowInsets.ime` is zero then, so `add` and the old `union` agree.
+                    // The pop-out panel below deliberately keeps plain nav bar + cutout — it is capped
+                    // at 80 % of the screen height, so lifting it above the keyboard would squash it
+                    // and make it jump on every IME toggle.
                     // Horizontal stays in the side list: the IME has no horizontal inset, so this keeps
                     // the side nav-bar clearance navigationBarsPadding() gives in landscape. The
-                    // DISPLAY CUTOUT is in the union because in landscape the hole-punch camera sits on
-                    // a side edge and screen content clears it via horizontalSystemBarsPadding() — the
-                    // mini player must indent the same way or it pokes out past the content on that
-                    // side (device pass 2026-09-12, item 36). Horizontal + Bottom only: the top stays
-                    // with the content above.
+                    // DISPLAY CUTOUT is UNIONED (a max, not a sum) because in landscape the hole-punch
+                    // camera sits on a side edge and screen content clears it via
+                    // horizontalSystemBarsPadding() — the mini player must indent the same way or it
+                    // pokes out past the content on that side (device pass 2026-09-12, item 36).
+                    // Horizontal + Bottom only: the top stays with the content above.
                     //
                     // Honest note: the activity window still receives IME insets while a DIALOG above
                     // it shows the keyboard (AddToPlaylistSheet's create-playlist dialog runs in its
-                    // own window), so the bar lifts behind that sheet + its scrim. It is invisible and
-                    // harmless — stated here so nobody re-introduces the conditional to "fix" it.
+                    // own window), so the bar lifts behind that sheet + its scrim — now by one extra
+                    // nav-bar height. It is invisible and harmless — stated here so nobody
+                    // re-introduces the conditional to "fix" it.
                     val miniBottomInset = Modifier.windowInsetsPadding(
-                        WindowInsets.ime.union(WindowInsets.navigationBars).union(WindowInsets.displayCutout)
+                        WindowInsets.ime.add(WindowInsets.navigationBars).union(WindowInsets.displayCutout)
                             .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)
                     )
 
@@ -770,27 +872,31 @@ fun PlayerPanelHost(
                         navSharedContentConfig   = navArtConfig,
                     )
 
-                    // Pop-out panel (wide non-short screens only)
+                    // Pop-out panel (wide non-short screens only). The settle counter is provided
+                    // again here because the panel is a SIBLING of `content` above, and its art is
+                    // the participant that SURVIVES a cancelled close gesture.
                     if (canShowPanel) {
-                        PlayerPopOutPanel(
-                            panelTransition            = panelTransition,
-                            playerViewModel            = playerViewModel,
-                            onClose                    = { closePanel() },
-                            onFullScreen               = onOpenPlayer,
-                            onOpenQueue                = onOpenQueue,
-                            localSharedTransitionScope = this@SharedTransitionLayout,
-                            navSharedTransitionScope   = navSharedTransitionScope,
-                            modifier                   = Modifier
-                                .align(Alignment.BottomEnd)
-                                .padding(start = 8.dp, end = 16.dp, bottom = 16.dp)
-                                .fillMaxWidth(0.54f)
-                                .heightIn(max = maxPanelHeight)
-                                // nav bar + camera cutout on the side/bottom edges — never the IME
-                                .windowInsetsPadding(
-                                    WindowInsets.navigationBars.union(WindowInsets.displayCutout)
-                                        .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)
-                                ),
-                        )
+                        CompositionLocalProvider(LocalPlayerArtSettleCount provides artSettles) {
+                            PlayerPopOutPanel(
+                                panelTransition            = panelTransition,
+                                playerViewModel            = playerViewModel,
+                                onClose                    = { closePanel() },
+                                onFullScreen               = onOpenPlayer,
+                                onOpenQueue                = onOpenQueue,
+                                localSharedTransitionScope = this@SharedTransitionLayout,
+                                navSharedTransitionScope   = navSharedTransitionScope,
+                                modifier                   = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .padding(start = 8.dp, end = 16.dp, bottom = 16.dp)
+                                    .fillMaxWidth(0.54f)
+                                    .heightIn(max = maxPanelHeight)
+                                    // nav bar + camera cutout on the side/bottom edges — never the IME
+                                    .windowInsetsPadding(
+                                        WindowInsets.navigationBars.union(WindowInsets.displayCutout)
+                                            .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)
+                                    ),
+                            )
+                        }
                     }
                 }
             }

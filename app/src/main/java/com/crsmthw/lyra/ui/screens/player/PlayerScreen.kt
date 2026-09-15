@@ -69,6 +69,7 @@ import com.crsmthw.lyra.data.repository.LyricsState
 import com.crsmthw.lyra.ui.components.AddToPlaylistSheet
 import com.crsmthw.lyra.ui.components.DevicePickerSheet
 import com.crsmthw.lyra.ui.components.PlainLyricsView
+import com.crsmthw.lyra.ui.components.rememberArtSettleInvalidation
 import com.crsmthw.lyra.ui.components.SyncedLyricsView
 import androidx.compose.ui.platform.LocalHapticFeedback
 import com.crsmthw.lyra.util.confirm
@@ -418,6 +419,13 @@ fun PlayerScreen(
                     val side = minOf(maxWidth, maxHeight * 0.82f)
                     val displaySide = side * artScale
 
+                    // The shared-element modifier, plus a pass-through layout modifier that
+                    // re-measures this art after every settle of the app's floating player surface.
+                    // The big art is the participant that SURVIVES a cancelled back gesture off this
+                    // screen, and the shared-element state machine only re-reads its target bounds
+                    // provider when a node holding the key is measured again — without that, the
+                    // gesture after a cancelled one had no flight and the big art vanished (device
+                    // report 48). See `LocalPlayerArtSettleCount` in PlayerPanelHost.
                     val artMod = if (sharedTransitionScope != null && animatedContentScope != null) {
                         with(sharedTransitionScope) {
                             Modifier.sharedElement(
@@ -427,6 +435,7 @@ fun PlayerScreen(
                             )
                         }
                     } else Modifier
+                    val artSettleMod = rememberArtSettleInvalidation()
 
                     val lyricsContentMod = Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp))
 
@@ -472,6 +481,7 @@ fun PlayerScreen(
                                         contentDescription = stringResource(R.string.cd_album_art),
                                         contentScale       = ContentScale.Crop,
                                         modifier           = artMod
+                                            .then(artSettleMod)
                                             .size(displaySide)
                                             .clip(RoundedCornerShape(16.dp))
                                             .graphicsLayer {
@@ -586,6 +596,8 @@ fun PlayerScreen(
                     val side = minOf(maxWidth, maxHeight)
                     val displaySide = side * artScale
 
+                    // Shared-element modifier + the settle re-measure — see the landscape branch
+                    // above and `LocalPlayerArtSettleCount` in PlayerPanelHost.
                     val artMod = if (sharedTransitionScope != null && animatedContentScope != null) {
                         with(sharedTransitionScope) {
                             Modifier.sharedElement(
@@ -595,6 +607,7 @@ fun PlayerScreen(
                             )
                         }
                     } else Modifier
+                    val artSettleMod = rememberArtSettleInvalidation()
 
                     val lyricsContentMod = Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp))
 
@@ -640,6 +653,7 @@ fun PlayerScreen(
                                         contentDescription = stringResource(R.string.cd_album_art),
                                         contentScale       = ContentScale.Crop,
                                         modifier           = artMod
+                                            .then(artSettleMod)
                                             .size(displaySide)
                                             .clip(RoundedCornerShape(16.dp))
                                             .graphicsLayer {
