@@ -83,10 +83,12 @@ internal fun TwoPaneLayout(
     }
 
     // No statusBarsPadding here — the panes go edge-to-edge under a transparent status bar (like the
-    // single-pane screens). Each pane self-pads its top inset: the LEFT pane's app bar takes the
-    // status-bar inset as its own `windowInsets` (App bars trial, 2026-09-14); the right pane's hero
-    // bakes `statusBarsPadding()` and fades under a TopScrim. A parent inset here would instead
-    // leave an opaque background band where the status bar sits.
+    // single-pane screens). Each pane self-pads its top inset through its own app bar's
+    // `appBarWindowInsets`: the LEFT pane's browser bar (`LibraryBrowserPane`'s own large/small
+    // pair) and the RIGHT pane's `DetailTopBar`, laid over the list with the hero's art tile
+    // clearing its height. The top scrim the right pane's hero used to fade under went with the
+    // pills. A parent inset here would instead leave an opaque background band where the status bar
+    // sits.
     Box(
         modifier = Modifier
             .fillMaxSize()
