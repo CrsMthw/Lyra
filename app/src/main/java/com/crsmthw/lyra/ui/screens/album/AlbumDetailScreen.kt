@@ -25,8 +25,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfoV2
 import androidx.compose.ui.platform.LocalContext
@@ -42,10 +40,10 @@ import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.remote.model.AlbumTrack
 import com.crsmthw.lyra.data.remote.model.SpotifyAlbumFull
 import com.crsmthw.lyra.ui.components.DetailArtHero
+import com.crsmthw.lyra.ui.components.DetailTopBar
 import com.crsmthw.lyra.ui.components.TopScrim
 import com.crsmthw.lyra.ui.components.TrackActionsHost
-import com.crsmthw.lyra.ui.components.appBarWindowInsets
-import com.crsmthw.lyra.ui.components.rememberHeroScrollProgress
+import com.crsmthw.lyra.ui.components.rememberHeroTitleHandoff
 import com.crsmthw.lyra.ui.components.toTrackActionTarget
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import com.crsmthw.lyra.util.ListScrollHaptics
@@ -78,11 +76,12 @@ fun AlbumDetailScreen(
     val background     = MaterialTheme.colorScheme.background
     val isWideScreen   = currentWindowAdaptiveInfoV2().windowSizeClass.isWidthAtLeastBreakpoint(600)
 
-    // App bars trial (docs/APP_BARS_OPTIONS.md → D1): the floating back / title / share pills and
-    // the single-pane TopScrim are replaced by a small `TopAppBar` PINNED over the hero with a
-    // TRANSPARENT container, which becomes solid once content scrolls under it. One back icon for
-    // every bar on the screen (single-pane, the two-pane LEFT pane, and the loading/error state) so
-    // the gesture, the debounce path (`onBack` → `safeNavigateUp`) and the haptic can't drift.
+    // App bars (docs/APP_BARS_OPTIONS.md → D1): the floating back / title / share pills and the
+    // single-pane TopScrim are replaced by the shared `DetailTopBar` laid over the hero — SOLID, in
+    // the pane's own colour, with no scroll behaviour and no colour change (see its KDoc for the
+    // grey flash the trial's transparent container produced). One back icon for every bar on the
+    // screen (single-pane, the two-pane LEFT pane, and the loading/error state) so the gesture, the
+    // debounce path (`onBack` → `safeNavigateUp`) and the haptic can't drift.
     val backNavIcon: @Composable () -> Unit = {
         IconButton(onClick = { haptics.confirm(); onBack() }) {
             Icon(Icons.AutoMirrored.Filled.ArrowBack,
@@ -218,16 +217,10 @@ fun AlbumDetailScreen(
                                 colors    = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                                 elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                             ) {
-                                // `scrolledContainerColor` is the CARD's colour here, not the
-                                // screen background — the bar has to become whatever is behind it.
-                                val leftBarBehavior = TopAppBarDefaults.pinnedScrollBehavior()
                                 Box(modifier = Modifier.fillMaxSize()) {
                                     Column(
                                         modifier = Modifier
                                             .fillMaxSize()
-                                            // BEFORE verticalScroll: the connection must be the
-                                            // scrollable's PARENT node, or it is silently inert.
-                                            .nestedScroll(leftBarBehavior.nestedScrollConnection)
                                             .verticalScroll(rememberScrollState())
                                             .padding(bottom = navBarBottomDp),
                                     ) {
@@ -244,19 +237,15 @@ fun AlbumDetailScreen(
                                             artContent = albumArt,
                                         )
                                     }
-                                    // No title in this bar: the hero's own name sits right under it
-                                    // and barely scrolls in a pane this short, exactly as the
-                                    // two-pane left pane carried no title pill.
-                                    TopAppBar(
-                                        title          = {},
+                                    // No title in this bar, and so no hand-off: the hero's own name
+                                    // sits right under it and barely scrolls in a pane this short,
+                                    // exactly as the two-pane left pane carried no title pill.
+                                    // `paneColor` is the CARD's colour here, not the screen
+                                    // background — the bar IS whatever pane it sits on.
+                                    DetailTopBar(
+                                        paneColor      = MaterialTheme.colorScheme.surface,
                                         navigationIcon = backNavIcon,
                                         actions        = albumActions,
-                                        windowInsets   = appBarWindowInsets,
-                                        colors         = TopAppBarDefaults.topAppBarColors(
-                                            containerColor         = Color.Transparent,
-                                            scrolledContainerColor = MaterialTheme.colorScheme.surface,
-                                        ),
-                                        scrollBehavior = leftBarBehavior,
                                         modifier       = Modifier.align(Alignment.TopCenter),
                                     )
                                 }
@@ -314,39 +303,35 @@ fun AlbumDetailScreen(
                     ) {
                         val tracksListState = rememberLazyListState()
                         ListScrollHaptics(tracksListState)
-                        // The bar's title crossfade is driven by the SAME helper that drove the
-                        // title pill — `rememberHeroScrollProgress` ramps 0→1 exactly as the hero
-                        // (item 0) leaves the viewport, so the hand-off has no jump. Deliberately
-                        // NOT the bar's own scrolled fraction: `SingleRowTopAppBar` thresholds
-                        // `overlappedFraction` to a binary `if (> 0.01f) 1f else 0f`, so it is not
-                        // a continuous fraction and cannot drive a crossfade at all.
-                        val barTitleAlpha  = rememberHeroScrollProgress(tracksListState)
-                        val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
+                        // The bar title takes over from the hero title over the ~35dp that title
+                        // needs to slide under the bar — M3's own `TopTitleAlphaEasing` hand-off,
+                        // driven by the two composables' measured positions. NOT the whole hero's
+                        // scroll progress (`rememberHeroScrollProgress`), which the trial used: a
+                        // ~400dp ramp reads as a slow crossfade, which Cris rejected on device.
+                        val heroTitle = rememberHeroTitleHandoff()
                         LazyColumn(
                             state          = tracksListState,
-                            modifier       = Modifier
-                                .fillMaxSize()
-                                .nestedScroll(scrollBehavior.nestedScrollConnection),
+                            modifier       = Modifier.fillMaxSize(),
                             // NO extra top inset. `DetailArtHero` already bakes
-                            // `statusBarsPadding() + TopPillHeight + 20.dp` (= status bar + 72dp)
-                            // onto its art tile, which clears the bar's 64dp collapsed row with
-                            // 8dp to spare — adding "status bar + collapsed height" here would
-                            // double it, and forking the component to remove its padding would
-                            // break the two-pane pane and the Library hero that share it.
+                            // `statusBarsPadding()` + the bar's own collapsed height + 8dp onto its
+                            // art tile — adding a top inset here would double it, and forking the
+                            // component to remove its padding would break the two-pane pane and the
+                            // Library hero that share it.
                             contentPadding = PaddingValues(bottom = 100.dp + navBarBottomDp),
                         ) {
                             item(key = "header") {
                                 DetailArtHero(
-                                    title      = album.name,
-                                    subtitle   = album.artists?.joinToString(", ") { it.name },
-                                    meta       = albumMeta,
-                                    onPlay     = onPlayAll,
-                                    onShuffle  = {
+                                    title        = album.name,
+                                    subtitle     = album.artists?.joinToString(", ") { it.name },
+                                    meta         = albumMeta,
+                                    onPlay       = onPlayAll,
+                                    onShuffle    = {
                                         haptics.press()
                                         playerViewModel.shuffleContext(albumUri)
                                         onNavigateToPlayer()
                                     },
-                                    artContent = albumArt,
+                                    titleHandoff = heroTitle,
+                                    artContent   = albumArt,
                                 )
                             }
                             itemsIndexed(tracks, key = { idx, t -> "track_${t.id}_$idx" }) { idx, track ->
@@ -372,31 +357,26 @@ fun AlbumDetailScreen(
                             alpha    = 0.20f,
                         )
 
-                        // The bar, composed LAST so it draws (and hit-tests) over the list. Pinned,
-                        // so its height never changes and overlaying is correct. Transparent over
-                        // the hero — at rest there is only 8dp of page background between its
-                        // bottom edge and the art — turning solid `background` (what the TopScrim
-                        // it replaces faded to) once anything scrolls under it. Default `onSurface`
-                        // icon/title colours are right here: unlike PlayerScreen there is no accent
-                        // gradient behind the bar, just the page background.
-                        TopAppBar(
-                            title          = {
+                        // The bar, composed LAST so it draws (and hit-tests) over the list. Its
+                        // height never changes (no scroll behaviour), so overlaying is correct, and
+                        // it is solid `background` at rest and scrolled — at rest there is only 8dp
+                        // of page background between its bottom edge and the art, so it reads as
+                        // the page until the art arrives. Default `onSurface` icon/title colours are
+                        // right here: unlike PlayerScreen there is no accent gradient behind the
+                        // bar, just the page background.
+                        DetailTopBar(
+                            paneColor      = background,
+                            navigationIcon = backNavIcon,
+                            actions        = albumActions,
+                            heroTitle      = heroTitle,
+                            title          = { titleModifier ->
                                 Text(
                                     text     = album.name,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
-                                    // Draw-phase only, so the crossfade costs no recomposition.
-                                    modifier = Modifier.graphicsLayer { alpha = barTitleAlpha.value },
+                                    modifier = titleModifier,
                                 )
                             },
-                            navigationIcon = backNavIcon,
-                            actions        = albumActions,
-                            windowInsets   = appBarWindowInsets,
-                            colors         = TopAppBarDefaults.topAppBarColors(
-                                containerColor         = Color.Transparent,
-                                scrolledContainerColor = background,
-                            ),
-                            scrollBehavior = scrollBehavior,
                             modifier       = Modifier.align(Alignment.TopCenter),
                         )
                     }
@@ -420,13 +400,11 @@ fun AlbumDetailScreen(
             // 8dp inset so the back arrow doesn't jump when the content lands and the left-pane
             // bar takes over.
             if (state.isLoading || state.error != null || state.album == null) {
-                TopAppBar(
-                    title          = {},
+                DetailTopBar(
+                    // Nothing is loaded, so there is no card behind this one — the page background
+                    // is what it sits on in both configurations.
+                    paneColor      = background,
                     navigationIcon = backNavIcon,
-                    windowInsets   = appBarWindowInsets,
-                    colors         = TopAppBarDefaults.topAppBarColors(
-                        containerColor = Color.Transparent,
-                    ),
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .horizontalSystemBarsPadding()
