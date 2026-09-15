@@ -34,6 +34,17 @@ class SpotifyAuthManager(
         const val TOKEN_ENDPOINT   = "https://accounts.spotify.com/api/token"
         const val REDIRECT_URI     = "com.crsmthw.lyra://callback"
 
+        /**
+         * Populates `resume_point` on episode objects (`shows/{id}`, `shows/{id}/episodes`) — the
+         * Played state and the "N left" progress on the show screen, and the App Remote seek.
+         *
+         * Held out as a constant because the UI has to ask whether the CURRENT grant carries it:
+         * it was added on 2026-09-15, and a token authorized before that keeps working untouched —
+         * a refresh never widens a grant, so the scope arrives only with a fresh authorization
+         * (Settings → Disconnect Spotify → connect). See [hasScope].
+         */
+        const val SCOPE_READ_PLAYBACK_POSITION = "user-read-playback-position"
+
         val SCOPES = listOf(
             "user-library-read",
             "user-library-modify",
@@ -48,6 +59,7 @@ class SpotifyAuthManager(
             "user-read-currently-playing",
             "user-top-read",
             "user-read-recently-played",
+            SCOPE_READ_PLAYBACK_POSITION,   // episode resume points + the Played state
             "streaming",
             "app-remote-control",
         )
@@ -113,6 +125,11 @@ class SpotifyAuthManager(
                             access          = tokenResp.accessToken ?: "",
                             refresh         = tokenResp.refreshToken ?: "",
                             expiresInSeconds= 3600L,  // AppAuth uses elapsedRealtime() not epoch; hardcode
+                            // What Spotify says it GRANTED, never what we asked for: a stored
+                            // scope must be the server's claim, so the worst case of a response
+                            // that omits it is a feature that stays off (and says so) rather than
+                            // one that reports itself available and silently returns nothing.
+                            scope           = tokenResp.scope,
                         )
                         cont.resume(Result.success(Unit))
                     }
@@ -149,6 +166,12 @@ class SpotifyAuthManager(
                             access          = tokenResp.accessToken ?: "",
                             refresh         = tokenResp.refreshToken ?: encryptedPrefs.refreshToken,
                             expiresInSeconds= 3600L,
+                            // A refresh CANNOT widen a grant. When the response omits `scope` the
+                            // stored value stands (null = keep) — treating an omission as "all of
+                            // SCOPES" would make every session authorized before a scope was added
+                            // claim it within the hour, which is exactly the lie the show screen's
+                            // reconnect hint exists to avoid.
+                            scope           = tokenResp.scope,
                         )
                         cont.resume(Result.success(Unit))
                     }
@@ -174,6 +197,18 @@ class SpotifyAuthManager(
     }
 
     fun isAuthenticated(): Boolean = encryptedPrefs.isTokenValid || encryptedPrefs.refreshToken.isNotBlank()
+
+    /**
+     * Whether the CURRENT grant carries [scope] — read off the scope string the token endpoint
+     * returned, so it answers for the token actually in use rather than for [SCOPES].
+     *
+     * Nothing stored reads as **not granted**: that is every session authorized before the grant
+     * was recorded, and a refresh never widens one, so the honest answer for those is "unknown, so
+     * no" until the user reconnects. Compared token-by-token rather than by substring — scope
+     * identifiers share prefixes, and `contains` would happily match one inside another.
+     */
+    fun hasScope(scope: String): Boolean =
+        encryptedPrefs.grantedScopes.split(' ', '\t', '\n').any { it == scope }
 
     fun logout() {
         encryptedPrefs.clearTokens()
