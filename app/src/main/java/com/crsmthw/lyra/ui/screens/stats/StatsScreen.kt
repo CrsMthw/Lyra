@@ -23,7 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -37,12 +37,8 @@ import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.remote.model.SpotifyArtist
 import com.crsmthw.lyra.data.remote.model.SpotifyTrack
 import com.crsmthw.lyra.ui.components.ConnectedChoiceRow
-import com.crsmthw.lyra.ui.components.HeroBandHeight
-import com.crsmthw.lyra.ui.components.TitlePill
-import com.crsmthw.lyra.ui.components.TopActionPill
-import com.crsmthw.lyra.ui.components.TopScrim
+import com.crsmthw.lyra.ui.components.RootTopBar
 import com.crsmthw.lyra.ui.components.TrackActionsHost
-import com.crsmthw.lyra.ui.components.rememberHeroScrollProgress
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import com.crsmthw.lyra.ui.components.toTrackActionTarget
 import com.crsmthw.lyra.util.ListScrollHaptics
@@ -54,7 +50,12 @@ import com.crsmthw.lyra.util.press
 /**
  * "Wrapped-lite" listening stats: top artists (circle row) + top tracks (ranked list) from
  * `/me/top/{type}`, with a connected time-range picker (4 weeks / 6 months / all time).
- * Same OneUI floating-controls chrome as Queue: hero title + TopScrim + back/title pills.
+ *
+ * Root-screen chrome: the shared [RootTopBar] — a large flexible `stats_title` bar that compresses
+ * to a small one as the list scrolls and stays small until the list is back at the top, or a small
+ * pinned bar on a pane under 600dp tall. It is a `Column` sibling of the list, not an overlay, so
+ * the list needs no top inset (the bar owns the status-bar strip) and moves up as the bar collapses.
+ * The range picker stays the first list item, scrolling with the content it re-selects.
  *
  * The floating mini player is NOT this screen's to render — it is hosted app-wide by
  * `LyraNavGraph` around the whole `NavHost` (since 2026-09-13), so playing a top track simply
@@ -72,6 +73,9 @@ fun StatsScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val haptics = LocalHapticFeedback.current
+    // Hoisted at screen level (`rememberTopAppBarState` is `rememberSaveable`) so the bar's collapse
+    // survives navigating away to an artist / album and coming back.
+    val barState = rememberTopAppBarState()
 
     Scaffold(
         contentWindowInsets = WindowInsets(0),
@@ -84,189 +88,187 @@ fun StatsScreen(
         val listBottomPad  = remember(navBarBottomDp) { PaddingValues(bottom = 100.dp + navBarBottomDp) }
         val listState      = rememberLazyListState()
         ListScrollHaptics(listState)
-        val titlePillAlpha = rememberHeroScrollProgress(listState)
 
         // Horizontal system-bar inset, applied ONCE here on the outermost content container: with
         // 3-button navigation the nav bar sits on the left or right edge in landscape, and every
-        // child below it has to clear it — the range picker, the top-artists `LazyRow` (whose own
-        // `contentPadding` is not an inset), the track rows, and the floating back/title pills.
+        // child below it has to clear it — the app bar's own row, the range picker, the top-artists
+        // `LazyRow` (whose own `contentPadding` is not an inset) and the track rows.
         // `paddingValues` is all-zero (`contentWindowInsets = WindowInsets(0)`, no bars), so this
-        // is not the double-padding bug — it is the chain Album/Artist single-pane already use.
-        Box(
+        // is not the double-padding bug. The bar takes `appBarWindowInsets` (top only) and nothing
+        // else, so the horizontal term is applied exactly once, here.
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
                 .horizontalSystemBarsPadding(),
         ) {
-            LazyColumn(
-                state          = listState,
-                modifier       = Modifier.fillMaxSize(),
-                contentPadding = listBottomPad,
-            ) {
-                item(key = "hero") {
-                    Box(
-                        modifier         = Modifier
-                            .fillMaxWidth()
-                            .statusBarsPadding()
-                            .height(HeroBandHeight),
-                        contentAlignment = Alignment.BottomStart,
-                    ) {
-                        Text(
-                            text     = stringResource(R.string.stats_title),
-                            style    = MaterialTheme.typography.displayMedium,
-                            modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
-                        )
-                    }
-                }
-                item(key = "range_picker") {
-                    val options = listOf(
-                        StatsTimeRange.SHORT  to stringResource(R.string.stats_range_short),
-                        StatsTimeRange.MEDIUM to stringResource(R.string.stats_range_medium),
-                        StatsTimeRange.LONG   to stringResource(R.string.stats_range_long),
-                    )
-                    ConnectedChoiceRow(
-                        options  = options,
-                        selected = state.range,
-                        onSelect = viewModel::setRange,
-                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 8.dp),
-                    )
-                }
-
-                when {
-                    state.showLoading -> item(key = "loading") {
-                        Box(
-                            modifier         = Modifier.fillMaxWidth().padding(vertical = 64.dp),
-                            contentAlignment = Alignment.Center,
-                        ) { ContainedLoadingIndicator() }
-                    }
-                    state.error != null && state.range !in state.data -> item(key = "error") {
-                        Column(
-                            modifier            = Modifier.fillMaxWidth().padding(vertical = 48.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                        ) {
-                            Text(
-                                text      = state.error ?: stringResource(R.string.error_generic),
-                                style     = MaterialTheme.typography.bodyMedium,
-                                color     = MaterialTheme.colorScheme.onSurfaceVariant,
-                                textAlign = TextAlign.Center,
-                                modifier  = Modifier.padding(horizontal = 32.dp),
-                            )
-                            Spacer(Modifier.height(12.dp))
-                            Button(onClick = { haptics.press(); viewModel.retry() }) {
-                                Text(stringResource(R.string.action_retry))
-                            }
-                        }
-                    }
-                    state.current.topArtists.isEmpty() && state.current.topTracks.isEmpty() -> item(key = "empty") {
-                        Column(
-                            modifier            = Modifier.fillMaxWidth().padding(vertical = 48.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                        ) {
-                            Icon(
-                                imageVector        = Icons.Default.Insights,
-                                contentDescription = null,
-                                modifier           = Modifier.size(48.dp),
-                                tint               = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
-                            )
-                            Spacer(Modifier.height(12.dp))
-                            Text(
-                                text  = stringResource(R.string.stats_empty),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                    else -> {
-                        if (state.current.topArtists.isNotEmpty()) {
-                            item(key = "artists_header") {
-                                Text(
-                                    text     = stringResource(R.string.stats_top_artists).uppercase(),
-                                    style    = MaterialTheme.typography.labelMedium,
-                                    color    = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 8.dp),
-                                )
-                            }
-                            item(key = "artists_row_${state.range}") {
-                                LazyRow(
-                                    contentPadding        = PaddingValues(horizontal = 16.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                                ) {
-                                    itemsIndexed(state.current.topArtists, key = { _, a -> a.id }) { idx, artist ->
-                                        TopArtistTile(
-                                            artist  = artist,
-                                            rank    = idx + 1,
-                                            onClick = { haptics.confirm(); onOpenArtist(artist.id) },
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                        if (state.current.topTracks.isNotEmpty()) {
-                            item(key = "tracks_header") {
-                                Text(
-                                    text     = stringResource(R.string.stats_top_tracks).uppercase(),
-                                    style    = MaterialTheme.typography.labelMedium,
-                                    color    = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 8.dp),
-                                )
-                            }
-                            itemsIndexed(state.current.topTracks, key = { _, t -> "${state.range}_${t.id}" }) { idx, track ->
-                                TopTrackRow(
-                                    track       = track,
-                                    rank        = idx + 1,
-                                    onClick     = {
-                                        haptics.confirm()
-                                        // Proven play path (state refresh + wake/404 fallback).
-                                        playerViewModel.playTrack(
-                                            uri  = track.uri,
-                                            uris = state.current.topTracks.drop(idx).map { it.uri },
-                                        )
-                                    },
-                                    onLongClick = { viewModel.trackActions.open(track.toTrackActionTarget()) },
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Bottom scrim — fades list content toward background so the nav bar area is clean.
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(scrimHeight)
-                    .align(Alignment.BottomCenter)
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(Color.Transparent, MaterialTheme.colorScheme.background),
-                        )
-                    )
-            )
-
-            // Top scrim — fades content under the status bar.
-            TopScrim(
-                color    = MaterialTheme.colorScheme.background,
-                modifier = Modifier.align(Alignment.TopCenter),
-            )
-
-            // Floating back pill + title pill (fades in once the hero scrolls away).
-            Row(
-                modifier              = Modifier
-                    .align(Alignment.TopStart)
-                    .statusBarsPadding()
-                    .padding(start = 16.dp, top = 8.dp),
-                verticalAlignment     = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                TopActionPill {
+            val scrollBehavior = RootTopBar(
+                title          = stringResource(R.string.stats_title),
+                navigationIcon = {
                     IconButton(onClick = { haptics.confirm(); onBack() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(R.string.nav_back))
                     }
+                },
+                containerColor = MaterialTheme.colorScheme.background,
+                barState       = barState,
+                isContentAtTop = {
+                    listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
+                },
+            )
+
+            Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
+                LazyColumn(
+                    state          = listState,
+                    modifier       = Modifier
+                        .fillMaxSize()
+                        .nestedScroll(scrollBehavior.nestedScrollConnection),
+                    contentPadding = listBottomPad,
+                ) {
+                    item(key = "range_picker") {
+                        val options = listOf(
+                            StatsTimeRange.SHORT  to stringResource(R.string.stats_range_short),
+                            StatsTimeRange.MEDIUM to stringResource(R.string.stats_range_medium),
+                            StatsTimeRange.LONG   to stringResource(R.string.stats_range_long),
+                        )
+                        ConnectedChoiceRow(
+                            options  = options,
+                            selected = state.range,
+                            onSelect = { range ->
+                                // Reset the BAR AND THE LIST TOGETHER, here at the call site, before the
+                                // range changes — the same rule as the Library's filter tabs.
+                                // `ExitUntilCollapsedScrollBehavior` re-expands ONLY from the leftover of
+                                // a downward scroll, which a list at offset 0 never produces, so scrolling
+                                // until the bar collapsed and then picking a range whose content is
+                                // shorter (or empty, or a single loading item) would strand the big title
+                                // with no gesture left to bring it back. Resetting only the bar swaps that
+                                // for an expanded bar over a list parked mid-scroll, so the list goes too,
+                                // and the VM last so the new content measures at index 0.
+                                //
+                                // NOT a `LaunchedEffect(state.range)`: an effect keyed on the range would
+                                // also fire on every re-entry of this screen and wipe the scroll position
+                                // the hoisted state exists to preserve. `ConnectedChoiceRow` calls
+                                // `onSelect` only on a genuine change (and owns the `press` haptic), so
+                                // re-tapping the live segment does nothing.
+                                barState.heightOffset  = 0f
+                                barState.contentOffset = 0f
+                                listState.requestScrollToItem(0)
+                                viewModel.setRange(range)
+                            },
+                            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 8.dp),
+                        )
+                    }
+
+                    when {
+                        state.showLoading -> item(key = "loading") {
+                            Box(
+                                modifier         = Modifier.fillMaxWidth().padding(vertical = 64.dp),
+                                contentAlignment = Alignment.Center,
+                            ) { ContainedLoadingIndicator() }
+                        }
+                        state.error != null && state.range !in state.data -> item(key = "error") {
+                            Column(
+                                modifier            = Modifier.fillMaxWidth().padding(vertical = 48.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                Text(
+                                    text      = state.error ?: stringResource(R.string.error_generic),
+                                    style     = MaterialTheme.typography.bodyMedium,
+                                    color     = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.Center,
+                                    modifier  = Modifier.padding(horizontal = 32.dp),
+                                )
+                                Spacer(Modifier.height(12.dp))
+                                Button(onClick = { haptics.press(); viewModel.retry() }) {
+                                    Text(stringResource(R.string.action_retry))
+                                }
+                            }
+                        }
+                        state.current.topArtists.isEmpty() && state.current.topTracks.isEmpty() -> item(key = "empty") {
+                            Column(
+                                modifier            = Modifier.fillMaxWidth().padding(vertical = 48.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                Icon(
+                                    imageVector        = Icons.Default.Insights,
+                                    contentDescription = null,
+                                    modifier           = Modifier.size(48.dp),
+                                    tint               = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
+                                )
+                                Spacer(Modifier.height(12.dp))
+                                Text(
+                                    text  = stringResource(R.string.stats_empty),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                        else -> {
+                            if (state.current.topArtists.isNotEmpty()) {
+                                item(key = "artists_header") {
+                                    Text(
+                                        text     = stringResource(R.string.stats_top_artists).uppercase(),
+                                        style    = MaterialTheme.typography.labelMedium,
+                                        color    = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 8.dp),
+                                    )
+                                }
+                                item(key = "artists_row_${state.range}") {
+                                    LazyRow(
+                                        contentPadding        = PaddingValues(horizontal = 16.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                                    ) {
+                                        itemsIndexed(state.current.topArtists, key = { _, a -> a.id }) { idx, artist ->
+                                            TopArtistTile(
+                                                artist  = artist,
+                                                rank    = idx + 1,
+                                                onClick = { haptics.confirm(); onOpenArtist(artist.id) },
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                            if (state.current.topTracks.isNotEmpty()) {
+                                item(key = "tracks_header") {
+                                    Text(
+                                        text     = stringResource(R.string.stats_top_tracks).uppercase(),
+                                        style    = MaterialTheme.typography.labelMedium,
+                                        color    = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 8.dp),
+                                    )
+                                }
+                                itemsIndexed(state.current.topTracks, key = { _, t -> "${state.range}_${t.id}" }) { idx, track ->
+                                    TopTrackRow(
+                                        track       = track,
+                                        rank        = idx + 1,
+                                        onClick     = {
+                                            haptics.confirm()
+                                            // Proven play path (state refresh + wake/404 fallback).
+                                            playerViewModel.playTrack(
+                                                uri  = track.uri,
+                                                uris = state.current.topTracks.drop(idx).map { it.uri },
+                                            )
+                                        },
+                                        onLongClick = { viewModel.trackActions.open(track.toTrackActionTarget()) },
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
-                TitlePill(
-                    text     = stringResource(R.string.stats_title),
-                    modifier = Modifier.graphicsLayer { alpha = titlePillAlpha.value },
+
+                // Bottom scrim — fades list content toward background so the nav bar area is clean.
+                // Inside the weighted Box, so it overlays the list and never the bar.
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(scrimHeight)
+                        .align(Alignment.BottomCenter)
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(Color.Transparent, MaterialTheme.colorScheme.background),
+                            )
+                        )
                 )
             }
         }
