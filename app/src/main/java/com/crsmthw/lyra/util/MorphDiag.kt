@@ -23,9 +23,14 @@ import androidx.compose.ui.layout.positionInRoot
 //     adb logcat -s LyraMorph
 //
 // The questions it has to answer for one "cancel, then back again" run: did the surface transition
-// SEEK on the second gesture; did a match form; which participants were enabled and composed;
-// where was each copy actually placed when the match formed; and what did the settle counters do
-// after the cancel.
+// SEEK on the second gesture; did a match form; which participants were enabled and composed; and
+// where was each copy actually placed when the match formed.
+//
+// It already earned its keep once: on the key-only build (2026-09-16) it caught the forward
+// mini → pop-out open configuring the BAR's copy with the PANEL's rect, which is what said the
+// element also needs a fresh NODE per generation (see [LocalPlayerArtKey]). The check to repeat at
+// an open is exactly that line: `mini/primary match=true … at=<the BAR's own rect>`, never the
+// panel's.
 
 /** Master switch. `false` makes every [morphLog] call disappear at the call site (it is inline). */
 internal const val MORPH_DIAG = true
@@ -57,7 +62,8 @@ private class MatchLogState(var lastMatch: Boolean? = null)
  * - an ENTER / EXIT line carrying the element KEY — which is also the self-test for the fresh-key
  *   fix: at the first settle after startup every participant must log an EXIT of `album-art#n`
  *   followed by an ENTER of `album-art#n+1`. No such pair means the re-key never took effect and
- *   nothing else about it matters;
+ *   nothing else about it matters. The `DisposableEffect` is keyed on the STATE, so it fires on a
+ *   re-key whether or not the node itself was recreated — the pair survives the keyed wrapper;
  * - one line per change of [SharedContentState.isMatchFound], emitted from the participant's
  *   PLACEMENT (not from a `snapshotFlow` — `isMatchFound` reads two plain `var`s and only one
  *   snapshot-backed field, so a flow over it can silently stop emitting), carrying the copy's

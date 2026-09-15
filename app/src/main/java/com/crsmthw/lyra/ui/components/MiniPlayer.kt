@@ -24,6 +24,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.movableContentOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
@@ -166,6 +168,8 @@ fun MiniPlayer(
                 // is bumped after every settle of the floating surface, so no morph inherits
                 // shared-element state from the one before it — see that local's KDoc. Read once
                 // here so both registrations in this composable can never use different keys.
+                // It also keys the wrapper `Box` below, so each generation is a fresh LayoutNODE
+                // as well as a fresh element; both registrations sit on that one node.
                 val artKey = LocalPlayerArtKey.current
                 val artModifier = if (sharedTransitionScope != null) {
                     with(sharedTransitionScope) {
@@ -187,17 +191,6 @@ fun MiniPlayer(
                         ).then(rememberMorphDiag("mini/nav", artState))
                     }
                 } else Modifier
-                // A pass-through layout modifier that re-measures this art after every settle of
-                // the floating player surface — the same reader `PlayerCardContent` and
-                // `PlayerScreen` carry, and for the same reason: the shared-element state machine
-                // only re-reads its target bounds provider when a node holding the key is measured
-                // again. Here it is INSURANCE — the bar is not provably the survivor of any
-                // cancelled seek that had a partner, but the argument for that rests entirely on
-                // `LocalPlayerRouteVisible` disabling its nav entry, so see
-                // [LocalPlayerArtSettleCount]'s KDoc. Appended AFTER the shared modifiers so their
-                // place at the head of the chain is unchanged; the invalidation lands on the same
-                // LayoutNode either way.
-                val artSettleMod = rememberArtSettleInvalidation()
 
                 // This art is a shared-element participant: the same "album-art" element morphs into
                 // the full player / pop-out panel, where it is drawn at ~600px. Two things conspired
@@ -217,14 +210,41 @@ fun MiniPlayer(
                         .size(Size.ORIGINAL)
                         .build()
                 }
-                AsyncImage(
-                    model              = artRequest,
-                    contentDescription = shownTrack.album?.name,
-                    contentScale       = ContentScale.Crop,
-                    modifier           = artModifier.then(navArtModifier).then(artSettleMod)
-                        .size(44.dp)
-                        .clip(RoundedCornerShape(10.dp)),
-                )
+                // The IMAGE is hoisted into movable content so that recreating the wrapper below
+                // MOVES its node instead of rebuilding it: no Coil re-request, no reset painter,
+                // no art-less frame at a re-key. Parameterised rather than capturing, because
+                // `remember` runs once — anything the lambda closed over would freeze at the
+                // first track it ever showed. Composable calls INSIDE it (none here) would still
+                // evaluate fresh; only captured locals freeze. Invoked exactly once per
+                // composition, from the single `key` block below.
+                val art = remember {
+                    movableContentOf<Any?, String?> { model, description ->
+                        AsyncImage(
+                            model              = model,
+                            contentDescription = description,
+                            contentScale       = ContentScale.Crop,
+                            modifier           = Modifier.fillMaxSize(),
+                        )
+                    }
+                }
+
+                // ── A fresh NODE per generation, not just a fresh element ────────────────────
+                // The wrapper carries the art's whole modifier chain in its original order, so
+                // the bounds the shared element animates are exactly what they were when these
+                // modifiers sat on the `AsyncImage`. `key(artKey)` recreates it whenever the host
+                // bumps the generation, which is the point: re-keying an EXISTING node clears its
+                // `isPlaced` flag and only ever requests a LOOKAHEAD remeasure, while the flag is
+                // set in the approach PLACEMENT — so a re-keyed lone participant reports no last
+                // bounds and the next morph starts from the destination's own rect (see
+                // [LocalPlayerArtKey]). A node that is inserted has to be measured and placed by
+                // its parent to appear at all, so it can never be in that state.
+                key(artKey) {
+                    Box(
+                        modifier = artModifier.then(navArtModifier)
+                            .size(44.dp)
+                            .clip(RoundedCornerShape(10.dp)),
+                    ) { art(artRequest, shownTrack.album?.name) }
+                }
 
                 Spacer(Modifier.width(10.dp))
 
