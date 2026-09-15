@@ -116,6 +116,10 @@
     </plurals>
     <string name="show_no_episodes">No episodes yet</string>
     <string name="show_fallback_title">Podcast</string>
+    <!-- Episode progress. %1$s is an already-formatted duration ("42m", "1h 5m"), so the phrase
+         needs no plural form of its own. -->
+    <string name="show_episode_played">Played</string>
+    <string name="show_episode_time_left">%1$s left</string>
 
     <!-- Player labels -->
     <string name="player_now_playing_label">NOW PLAYING</string>

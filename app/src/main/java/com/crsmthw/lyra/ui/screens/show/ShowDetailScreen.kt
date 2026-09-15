@@ -14,6 +14,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Podcasts
@@ -85,14 +86,17 @@ private const val RESUME_TAIL_GUARD_MS = 10_000L
  * Where this episode should start when Lyra has to place the playhead itself, or null to start
  * wherever the API decides (the beginning, for the App Remote).
  *
- * **Null in production today.** `resume_point` is only populated for a token carrying the
- * `user-read-playback-position` scope, and `SpotifyAuthManager.SCOPES` does not request it (see the
- * note on [SpotifyEpisode.resumePoint]) — so this is the plumbing the App Remote path needs the
- * moment that scope is added, not something that fires now. The Web API path does not need it at
- * all: `me/player/play` resumes an episode from Spotify's own authoritative position.
+ * **Live**, as of `user-read-playback-position` joining `SpotifyAuthManager.SCOPES` (2026-09-15) —
+ * it is what fills `resume_point`. It still reads null on a session authorized before that scope
+ * existed, until the user reconnects (see [SpotifyEpisode.resumePoint]), and the screen says so in
+ * one line while that is the case. Only the **App Remote fallback** consumes it: its `play(uri)`
+ * always starts at 0:00 and consults no server point. The Web API path still needs nothing —
+ * `me/player/play` with no `position_ms` resumes an episode from Spotify's own authoritative
+ * position, which stays the truth a cached page's resume point can be stale against.
  *
  * Rejected: a fully-played episode, an absent or zero position, and a position inside the last
- * [RESUME_TAIL_GUARD_MS] of a known duration.
+ * [RESUME_TAIL_GUARD_MS] of a known duration. [EpisodeRow]'s "N left" + progress-bar branch reads
+ * this SAME property, so the row and the playhead can never disagree about what is in progress.
  */
 private val SpotifyEpisode.startPositionMs: Long?
     get() {
@@ -516,6 +520,16 @@ private fun EpisodeLoadMoreTrigger(
  * One episode row. `ListItem`'s trailing `content` lambda form (NOT the deprecated
  * `headlineContent`), matching `AlbumTrackRow`.
  *
+ * The subtitle has three shapes, driven by `resume_point` (see [SpotifyEpisode.resumePoint]):
+ *  - **finished** (`fully_played`) → "<date> · Played" with a check, and NO duration — the runtime
+ *    of an episode you have finished is the one number that tells you nothing;
+ *  - **in progress** → "<date> · <remaining> left" plus a thin determinate progress bar under the
+ *    line. The branch is [SpotifyEpisode.startPositionMs], the SAME property the play lambdas hand
+ *    `playTrack`, so a row can never advertise progress the playhead would then ignore (it rejects
+ *    a point inside the last [RESUME_TAIL_GUARD_MS], among others). The bar needs a known duration
+ *    too: a NaN fraction is a crash in `ProgressBarRangeInfo`, not a cosmetic bug;
+ *  - **untouched, or no grant** → "<date> · <duration>", exactly as before.
+ *
  * No `onLongClick`: the song touch-and-hold menu is track-specific — see the screen KDoc.
  */
 @Composable
@@ -524,13 +538,28 @@ private fun EpisodeRow(
     show    : SpotifyShow,
     onClick : () -> Unit,
 ) {
-    val haptics  = LocalHapticFeedback.current
-    val artUrl   = episode.thumbnailUrl.takeIf { it.isNotBlank() }
-                   ?: show.thumbnailUrl.takeIf { it.isNotBlank() }
-    val subtitle = listOfNotNull(
-        formatReleaseDate(episode.releaseDate),
-        episode.durationMs?.takeIf { it > 0L }?.toDurationString(),
-    ).joinToString(" · ").takeIf { it.isNotBlank() }
+    val haptics     = LocalHapticFeedback.current
+    val artUrl      = episode.thumbnailUrl.takeIf { it.isNotBlank() }
+                      ?: show.thumbnailUrl.takeIf { it.isNotBlank() }
+    val durationMs  = episode.durationMs?.takeIf { it > 0L }
+    val fullyPlayed = episode.resumePoint?.fullyPlayed == true
+    val resumeFrom  = episode.startPositionMs
+    // Only with both ends known: an unknown duration has no fraction and no remainder, so such an
+    // episode falls back to the plain shapes rather than painting a bar of nothing.
+    val progress    = if (resumeFrom != null && durationMs != null)
+                          (resumeFrom.toFloat() / durationMs).coerceIn(0f, 1f) else null
+    val tail = when {
+        fullyPlayed      -> stringResource(R.string.show_episode_played)
+        progress != null -> stringResource(
+            R.string.show_episode_time_left,
+            // toDurationString() floors to whole minutes and would read "0m left" for the last
+            // seconds, so a sub-minute remainder rounds up to one minute.
+            (durationMs!! - resumeFrom!!).coerceAtLeast(60_000L).toDurationString(),
+        )
+        else             -> durationMs?.toDurationString()
+    }
+    val subtitle = listOfNotNull(formatReleaseDate(episode.releaseDate), tail)
+        .joinToString(" · ").takeIf { it.isNotBlank() }
 
     ListItem(
         leadingContent = {
@@ -554,13 +583,39 @@ private fun EpisodeRow(
             }
         },
         supportingContent = subtitle?.let { text -> {
-            Text(
-                text     = text,
-                style    = MaterialTheme.typography.bodySmall,
-                color    = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            // The supporting slot is already indented past the leading art, so the bar spans the
+            // text column — the row width minus the thumbnail — without any padding of its own.
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (fullyPlayed) {
+                        // Decorative: the word "Played" beside it is what carries the meaning.
+                        Icon(
+                            imageVector        = Icons.Default.Check,
+                            contentDescription = null,
+                            tint               = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier           = Modifier.size(14.dp),
+                        )
+                        Spacer(Modifier.width(4.dp))
+                    }
+                    Text(
+                        text     = text,
+                        style    = MaterialTheme.typography.bodySmall,
+                        color    = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                if (progress != null) {
+                    // Determinate, and deliberately NOT the wavy indicator: this is a position in
+                    // an episode, not a wait. Default M3 height.
+                    LinearProgressIndicator(
+                        progress   = { progress },
+                        modifier   = Modifier.fillMaxWidth().padding(top = 6.dp),
+                        color      = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                    )
+                }
+            }
         } },
         modifier = Modifier.clickable { haptics.confirm(); onClick() },
         content  = {
