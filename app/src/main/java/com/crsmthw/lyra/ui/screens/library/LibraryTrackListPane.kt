@@ -2,8 +2,10 @@ package com.crsmthw.lyra.ui.screens.library
 
 import androidx.compose.animation.AnimatedContentScope
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
+import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -55,7 +57,7 @@ import kotlinx.coroutines.flow.map
 // the same composable (the two-pane one is this minus the back icon).
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class,
-       ExperimentalSharedTransitionApi::class)
+       ExperimentalSharedTransitionApi::class, ExperimentalAnimationApi::class)
 @Composable
 internal fun RightPaneContent(
     state           : LibraryUiState,
@@ -272,19 +274,49 @@ internal fun RightPaneContent(
         // Selection mode swaps the bar's CONTENTS for the standard M3 contextual bar —
         // [✕] "N selected" [remove] — through the app-wide finite `screenTransitionSpec()`. Never a
         // spring: this can run while the pane swap or a nav transition is in flight (THE HARD RULE,
-        // docs/MOTION.md). The entering bar is composed last, so it is the one that hit-tests
-        // during the fade (alpha does not affect hit testing).
-        Crossfade(
-            targetState   = inSelection,
+        // docs/MOTION.md).
+        //
+        // THE TRANSITION IS HOISTED so each branch can ask whether it is the one currently SHOWN.
+        // `Crossfade` APPENDS the entering state to `currentlyVisible` and renders the list in
+        // order, so the entering bar is the LAST child of its Box: it draws last and therefore
+        // hit-tests FIRST, from its first frame at alpha 0 (alpha does not affect hit testing), and
+        // its only wrapper is a `graphicsLayer` — nothing gates pointer input. Both branches put a
+        // control in the same navigationIcon slot (✕ while selecting, back arrow otherwise), and in
+        // SINGLE-PANE `onBack` is `clearSelection()`, so a second tap on ✕ inside the 300 ms fade
+        // landed on the invisible back arrow and collapsed the whole playlist detail back to the
+        // browser. Same for the actions slot: ⌫ sits where ⋮ was, and the song-menu door into
+        // selection mode pre-checks one uri, so ⌫ is already live on the entering bar's first frame
+        // and a single-row removal skips the confirm dialog.
+        //
+        // During the fade `currentState` is the OUTGOING branch, so `live` makes the invisible
+        // entering bar inert and leaves the visible one usable; once settled both agree and
+        // everything is live (and on first composition `currentState == targetState`, so nothing is
+        // dead on entry). A disabled `IconButton` still installs a pointer node and SWALLOWS the
+        // tap rather than passing it down — which is what we want here: the ✕'s own action is
+        // already in flight, so the swallowed second tap loses nothing.
+        //
+        // A mid-fade REVERSAL is deliberately NOT covered, and needs no defending. `updateTarget`
+        // assigns `currentState =` the OLD `targetState` when the target flips back, i.e. the
+        // branch `Crossfade` appended — so for the rest of the unwind the topmost branch is the
+        // live one and the branch being reverted TO only goes live at the settle. Getting there
+        // takes two deliberate actions inside 300 ms, neither of which can come from this bar (its
+        // own ✕ / ⌫ are the controls the fade has just deadened): a row long-press or the ⋮ menu's
+        // Select row on the way in, the selection `BackHandler` on the way out. And it is no worse
+        // than the pre-fix state, where the topmost branch was live for every fade.
+        val barTransition = updateTransition(inSelection, label = "detail_bar")
+        barTransition.Crossfade(
             animationSpec = screenTransitionSpec(),
-            label         = "detail_bar",
             modifier      = Modifier.align(Alignment.TopCenter),
         ) { selecting ->
+            val live = selecting == barTransition.currentState
             if (selecting) {
                 DetailTopBar(
                     paneColor      = paneColor,
                     navigationIcon = {
-                        IconButton(onClick = { haptics.press(); viewModel.exitSelectionMode() }) {
+                        IconButton(
+                            onClick = { haptics.press(); viewModel.exitSelectionMode() },
+                            enabled = live,
+                        ) {
                             Icon(Icons.Default.Close,
                                 contentDescription = stringResource(R.string.library_selection_cancel))
                         }
@@ -300,7 +332,7 @@ internal fun RightPaneContent(
                                 if (nSelected >= 2) showRemoveConfirm = true
                                 else viewModel.removeSelectedTracks()
                             },
-                            enabled = nSelected > 0 && !state.isRemovingSelection,
+                            enabled = live && nSelected > 0 && !state.isRemovingSelection,
                         ) {
                             Icon(Icons.Default.Delete,
                                 contentDescription = stringResource(R.string.library_selection_remove))
@@ -322,7 +354,10 @@ internal fun RightPaneContent(
                     paneColor      = paneColor,
                     navigationIcon = {
                         if (onBack != null) {
-                            IconButton(onClick = { haptics.confirm(); onBack() }) {
+                            IconButton(
+                                onClick = { haptics.confirm(); onBack() },
+                                enabled = live,
+                            ) {
                                 Icon(Icons.AutoMirrored.Filled.ArrowBack,
                                     contentDescription = stringResource(R.string.cd_back))
                             }
@@ -333,7 +368,10 @@ internal fun RightPaneContent(
                             // The menu anchors to this Box, which is the ⋮ button's own slot in the
                             // actions row.
                             Box {
-                                IconButton(onClick = { haptics.press(); showOverflowMenu = true }) {
+                                IconButton(
+                                    onClick = { haptics.press(); showOverflowMenu = true },
+                                    enabled = live,
+                                ) {
                                     Icon(Icons.Default.MoreVert,
                                         contentDescription = stringResource(R.string.more_options))
                                 }
