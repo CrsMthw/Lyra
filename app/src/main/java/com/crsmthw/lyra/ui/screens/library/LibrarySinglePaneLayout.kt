@@ -21,7 +21,6 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.toShape
 import androidx.compose.material.icons.Icons
@@ -119,11 +118,12 @@ private class PaneStateHolder(var value: LibraryUiState)
 @Composable
 internal fun SinglePaneLayout(
     state                 : LibraryUiState,
-    /** Browser scroll position, owned by `LibraryScreen` so it survives this pane being disposed
-     *  while a detail is open (the `AnimatedContent` below does not save its children's state). */
-    browserListState      : LazyListState,
+    /** Browser scroll positions (one per filter tab), owned by `LibraryScreen` so they survive this
+     *  pane being disposed while a detail is open (the `AnimatedContent` below does not save its
+     *  children's state). */
+    browserListStates     : LibraryBrowserListStates,
     /** Browser app-bar collapse state, owned by `LibraryScreen` for the same reason as
-     *  [browserListState] — this layout disposes the browser pane while a detail is open. */
+     *  [browserListStates] — this layout disposes the browser pane while a detail is open. */
     browserBarState       : TopAppBarState,
     viewModel             : LibraryViewModel,
     playerViewModel       : PlayerViewModel,
@@ -326,7 +326,7 @@ internal fun SinglePaneLayout(
                 } else {
                     LibraryBrowserPane(
                         state          = state,
-                        listState      = browserListState,
+                        listStates     = browserListStates,
                         barState       = browserBarState,
                         viewModel      = viewModel,
                         onOpenSettings = onOpenSettings,

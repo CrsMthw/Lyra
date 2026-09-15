@@ -3,13 +3,15 @@ package com.crsmthw.lyra.ui.screens.library
 import androidx.compose.animation.AnimatedContentScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
-import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -19,7 +21,11 @@ import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
@@ -31,6 +37,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import com.crsmthw.lyra.R
 import com.crsmthw.lyra.ui.components.CrampedLabelAutoSize
@@ -53,14 +60,25 @@ import java.io.File
  */
 private val LargeBarMinPaneHeight = 600.dp
 
+/** Breathing room between the tab row and a page's first row — Search's `SearchTabRowGap`. */
+private val LibraryTabRowGap = 12.dp
+
+/**
+ * How far the pane colour fades out below the tab row, dissolving the first rows into it — Search's
+ * `TopScrimTail`. Only the tail: unlike Search's scrim this has no status bar or bar to hold down,
+ * because the app bar and the tab row are solid and sit above the content in a `Column`.
+ */
+private val LibraryTabFadeHeight = 24.dp
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class,
        ExperimentalSharedTransitionApi::class)
 @Composable
 internal fun LibraryBrowserPane(
     state                 : LibraryUiState,
-    /** Hoisted to `LibraryScreen` so the scroll position outlives this pane — see its KDoc there. */
-    listState             : LazyListState,
-    /** App-bar collapse state, hoisted to `LibraryScreen` for the same reason as [listState] —
+    /** One scroll position per filter tab, hoisted to `LibraryScreen` so they outlive this pane —
+     *  see its KDoc there. Each pager page below scrolls its own. */
+    listStates            : LibraryBrowserListStates,
+    /** App-bar collapse state, hoisted to `LibraryScreen` for the same reason as [listStates] —
      *  see its KDoc there. Only the LARGE bar branch below uses it. */
     barState              : TopAppBarState,
     viewModel             : LibraryViewModel,
@@ -81,7 +99,6 @@ internal fun LibraryBrowserPane(
     val haptics        = LocalHapticFeedback.current
     val paneColor      = if (containerColor == Color.Unspecified)
                              MaterialTheme.colorScheme.background else containerColor
-    ListScrollHaptics(listState)
     val density        = LocalDensity.current
     val navBarBottomDp = with(density) { WindowInsets.navigationBars.getBottom(this).toDp() }
     val context        = LocalContext.current
@@ -95,11 +112,14 @@ internal fun LibraryBrowserPane(
     val myPlaylists = if (userId != null) state.playlists.filter { it.owner?.id == userId } else state.playlists
     val following   = if (userId != null) state.playlists.filter { it.owner?.id != userId } else emptyList()
 
-    // Shared list items. The content-type filter is no longer one of them — it is the pinned
-    // PrimaryTabRow under the app bar (see LibraryTabRow), and the "Lyra" hero band is gone: the
-    // expanded bar's title IS the hero now.
-    val listBody: LazyListScope.() -> Unit = {
-        when (state.libraryFilter) {
+    // ONE page's rows. The content-type filter is not a list item — it is the pinned PrimaryTabRow
+    // under the app bar (see LibraryTabRow), whose four tabs are the four pages of the pager below;
+    // and the "Lyra" hero band is gone, the expanded bar's title IS the hero now.
+    //
+    // Takes the page's filter rather than reading `state.libraryFilter`: a neighbouring page is
+    // composed while a swipe is in flight, and it must render ITS OWN type, not the settled one.
+    val pageBody: LazyListScope.(LibraryFilter) -> Unit = { pageFilter ->
+        when (pageFilter) {
             LibraryFilter.ALBUMS -> {
                 if (state.savedAlbums.isEmpty()) {
                     item(key = "albums_empty") {
@@ -335,8 +355,50 @@ internal fun LibraryBrowserPane(
     val paneHeightDp = with(density) { LocalWindowInfo.current.containerSize.height.toDp() }
     val useLargeBar  = paneHeightDp >= LargeBarMinPaneHeight
 
+    // A page's first row starts a gap below the tab row, and the `LibraryTabFadeHeight` fade at the
+    // top of the content area dissolves it into that row — the same seam Search gives its results.
     val listContentPadding = remember(navBarBottomDp) {
-        PaddingValues(bottom = 100.dp + navBarBottomDp)
+        PaddingValues(top = LibraryTabRowGap, bottom = 100.dp + navBarBottomDp)
+    }
+
+    // The full-area states, hoisted out of the branch below because the pager's sync effect has to
+    // know whether the pager is composed at all. `fullAreaError` also keeps the error non-null for
+    // its own branch without relying on a smart cast.
+    val fullAreaError = state.error?.takeIf { state.playlists.isEmpty() && !state.isLoadingTracks }
+    val pagerVisible  = !state.isLoading && fullAreaError == null
+
+    // The four filter tabs ARE the four pages, so the browser swipes as well as taps. At pane scope,
+    // not inside the content branch: a cold start composes the loading branch first, and a pager
+    // state created inside the branch would be thrown away (and `requestScrollToPage` would have
+    // nothing to write to) every time a full-area state took over.
+    //
+    // `rememberPagerState` is `rememberSaveable`-backed, but the single-pane browser is disposed
+    // whenever a detail opens (`SinglePaneLayout`'s `AnimatedContent` is not a `SaveableStateHolder`),
+    // so this one is rebuilt on every pane re-entry. All that costs is an in-flight swipe offset:
+    // the filter itself lives in the ViewModel, so `initialPage` comes back correct, and the settle
+    // collector's first emission is then the tab the VM already holds — a no-op (`setLibraryFilter`
+    // returns early on an unchanged filter).
+    val pagerState = rememberPagerState(initialPage = state.libraryFilter.ordinal) {
+        LibraryFilter.entries.size
+    }
+
+    // Swipe → filter. `settledPage` changes only once a drag or a programmatic scroll comes to rest:
+    // while one runs it holds the page the scroll STARTED from, which is the value this collector has
+    // already seen, so a tab tap's own `animateScrollToPage` can never write the old tab back
+    // mid-flight. A swipe therefore reaches the VM silently — the `press()` haptic belongs to a TAP,
+    // and is fired from the gesture inside `LibraryTabRow`.
+    LaunchedEffect(pagerState, viewModel) {
+        snapshotFlow { pagerState.settledPage }
+            .collect { viewModel.setLibraryFilter(LibraryFilter.entries[it]) }
+    }
+    // Tab tap → pager. While a full-area state is up the pager is not composed, and a suspending
+    // `animateScrollToPage` would park on its first-layout wait and then animate in front of the
+    // user the moment the content appeared — so jump the state instead in that case.
+    LaunchedEffect(state.libraryFilter, pagerVisible) {
+        val target = state.libraryFilter.ordinal
+        if (pagerState.currentPage == target) return@LaunchedEffect
+        if (pagerVisible) pagerState.animateScrollToPage(target)
+        else              pagerState.requestScrollToPage(target)
     }
 
     Column(modifier = modifier.fillMaxSize()) {
@@ -393,6 +455,12 @@ internal fun LibraryBrowserPane(
             TopAppBarDefaults.pinnedScrollBehavior(state = rememberTopAppBarState())
         }
 
+        // The bar's connection, with purely HORIZONTAL events filtered out — see
+        // [rememberVerticalOnlyNestedScroll]. It rides the pager (below), which dispatches a tab
+        // swipe's deltas and its fling velocity on the x axis, and `settleAppBar` would SNAP a
+        // partially collapsed bar open or closed on the resulting `Velocity(x, 0)`.
+        val barNestedScroll = rememberVerticalOnlyNestedScroll(scrollBehavior.nestedScrollConnection)
+
         if (useLargeBar) {
             LargeFlexibleTopAppBar(
                 title          = { Text(barTitle, maxLines = 1, overflow = TextOverflow.Ellipsis) },
@@ -421,8 +489,9 @@ internal fun LibraryBrowserPane(
         // it is `paneWidth / 4` minus the label's padding versus the label, so the labels are made
         // to FIT (halved padding + a shared auto-size recipe) — see `LibraryTabRow`.
         //
-        // A tap SELECTS, and does nothing else: the bar keeps its collapse and the list keeps its
-        // position, so the row the finger is aiming at does not move under it.
+        // A tap SELECTS, and does nothing else: the bar keeps its collapse and each tab keeps its
+        // own scroll position (`listStates`), so the row the finger is aiming at does not move. The
+        // pager's own settle collector above turns a SWIPE into the same call.
         LibraryTabRow(
             selected       = state.libraryFilter,
             onSelect       = viewModel::setLibraryFilter,
@@ -432,10 +501,10 @@ internal fun LibraryBrowserPane(
         Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
             if (state.isLoading) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { ContainedLoadingIndicator() }
-            } else if (state.error != null && state.playlists.isEmpty() && !state.isLoadingTracks) {
-                val isRateLimit   = state.error.contains("429")
+            } else if (fullAreaError != null) {
+                val isRateLimit   = fullAreaError.contains("429")
                 val retryAfterSec = if (isRateLimit)
-                    Regex("Retry-After=(\\d+)").find(state.error)?.groupValues?.get(1)?.toLongOrNull()
+                    Regex("Retry-After=(\\d+)").find(fullAreaError)?.groupValues?.get(1)?.toLongOrNull()
                 else null
                 val retryDisplay  = when {
                     retryAfterSec == null -> null
@@ -451,7 +520,7 @@ internal fun LibraryBrowserPane(
                                 append("Spotify is rate limiting requests.")
                                 if (retryDisplay != null) append("\n\nRetry-After: $retryDisplay")
                                 append("\n\nWait, then reopen.")
-                            } else state.error,
+                            } else fullAreaError,
                             color     = if (isRateLimit) MaterialTheme.colorScheme.onSurfaceVariant
                                         else MaterialTheme.colorScheme.error,
                             style     = MaterialTheme.typography.bodyMedium,
@@ -478,6 +547,14 @@ internal fun LibraryBrowserPane(
                 // The up-scroll path is unaffected: PTR's `onPreScroll` consumes nothing while
                 // `distancePulled == 0` (`coerceAtLeast(0f)` on a negative delta), and while a pull
                 // IS in progress it correctly shrinks the pull before the bar collapses.
+                //
+                // The PAGER now sits between the two, and does not disturb that ordering: its own
+                // `ScrollableNestedScrollConnection` leaves `onPreScroll` at zero and its
+                // `onPostScroll` runs `performRawScroll`, which takes only the x component for a
+                // horizontal scrollable — so a page's vertical leftover passes through it untouched
+                // and still reaches the bar before PTR. Its `onPostFling` likewise reports only the
+                // x part as consumed (`doFlingAnimation` seeds `result = available` and updates just
+                // its own axis), so a vertical fling's velocity arrives at the bar intact.
                 PullToRefreshBox(
                     isRefreshing = state.isLibraryRefreshing,
                     onRefresh    = viewModel::refreshLibrary,
@@ -501,13 +578,57 @@ internal fun LibraryBrowserPane(
                         }
                     },
                 ) {
-                    LazyColumn(
-                        state          = listState,
-                        modifier       = Modifier
+                    // One page per filter tab, so the browser swipes as well as taps. The bar's
+                    // connection rides the PAGER rather than a page's list: it is the parent of all
+                    // four lists and of the pager's own horizontal scrollable, so one connection
+                    // serves every page (cf. Search's `dismissImeOnScroll` placement).
+                    HorizontalPager(
+                        state                   = pagerState,
+                        modifier                = Modifier
                             .fillMaxSize()
-                            .nestedScroll(scrollBehavior.nestedScrollConnection),
-                        contentPadding = listContentPadding,
-                    ) { listBody() }
+                            .nestedScroll(barNestedScroll),
+                        // Neighbours compose only while a drag is actually in flight; each page
+                        // renders the filter of its OWN index, so a half-swiped page shows the type
+                        // it is sliding in for.
+                        beyondViewportPageCount = 0,
+                    ) { page ->
+                        val pageFilter    = LibraryFilter.entries[page]
+                        val pageListState = listStates[pageFilter]
+                        // Per page, as Search does it: each list keeps its own baseline, and a
+                        // neighbour composing mid-swipe ticks nothing (the helper is gated on that
+                        // list's own `isScrollInProgress`).
+                        ListScrollHaptics(pageListState)
+                        // A LazyColumn even when the page's content cannot fill it (the empty state
+                        // is an item inside it, not a Box in its place): a lazy list that can consume
+                        // nothing still dispatches the drag through nested scroll, which is what lets
+                        // a downward drag on a short pane re-expand the bar and an upward one
+                        // collapse it.
+                        LazyColumn(
+                            state          = pageListState,
+                            modifier       = Modifier.fillMaxSize(),
+                            contentPadding = listContentPadding,
+                        ) { pageBody(pageFilter) }
+                    }
+
+                    // The seam under the tab row: the pane colour fading out over the first rows, so
+                    // they dissolve into the row instead of sliding past its labels — the same effect
+                    // Search's top scrim gives its results, minus the status-bar half (this row is
+                    // solid and sits ABOVE the content in the Column, so nothing scrolls under it).
+                    //
+                    // Composed as the LAST child of the PTR box's content, not after the box: the
+                    // indicator is composed after `content()` (`PullToRefreshBox`: `content();
+                    // indicator()`), so this draws over the rows but under the indicator. A plain
+                    // background Box takes no pointer input, so it cannot eat a drag on the rows
+                    // beneath it.
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .fillMaxWidth()
+                            .height(LibraryTabFadeHeight)
+                            .background(
+                                Brush.verticalGradient(listOf(paneColor, Color.Transparent))
+                            )
+                    )
                 }
             }
         }
@@ -554,6 +675,11 @@ private val LibraryTabIndicatorCompensation = 16.dp
 
 /**
  * The content-type filter as full-width M3 primary tabs, pinned under the app bar.
+ *
+ * The four tabs are the four pages of the browser's `HorizontalPager`, so the lists SWIPE as well as
+ * tap. This row only reports taps: a swipe reaches the ViewModel through the pager's settle
+ * collector (see `LibraryBrowserPane`), which is also why the `press()` haptic lives here — a tap is
+ * a discrete choice, a swipe is its own feedback.
  *
  * Conventions copied from `SearchScreen`'s `SearchTabRow` (already settled): a **fixed**
  * `PrimaryTabRow` (divides the width evenly, unlike the left-aligned scrollable variant),
@@ -686,3 +812,57 @@ private fun CollectionEmptyState(isLoading: Boolean, text: String) {
         }
     }
 }
+
+// ── The app bar's nested-scroll connection, minus the pager's horizontal axis ─
+
+/**
+ * Wraps a nested-scroll [connection] so that purely HORIZONTAL events never reach it.
+ *
+ * The app bar's connection rides the pager, which dispatches a tab swipe's deltas and its fling
+ * velocity on the x axis with `y == 0f`. Two of those matter:
+ * - `ExitUntilCollapsedScrollBehavior.onPostFling` calls `settleAppBar(state, available.y, …)`,
+ *   which on a zero vertical velocity SNAPS a partially collapsed bar fully open or fully closed —
+ *   i.e. a tab swipe would move the bar, which is exactly what this rework removes.
+ * - `onPostScroll` adds `consumed.y` to `contentOffset`, which nothing horizontal should touch.
+ *
+ * The filter is the IDENTITY for everything the old arrangement could deliver (the connection used
+ * to sit on the `LazyColumn`, which dispatches y-only deltas and a y-only fling velocity): it drops
+ * an event only when every y component is zero AND some x component is not. An all-zero event still
+ * goes through, so the bar's own settle behaviour on a vertical gesture is untouched.
+ */
+@Composable
+private fun rememberVerticalOnlyNestedScroll(
+    connection: NestedScrollConnection,
+): NestedScrollConnection = remember(connection) {
+    object : NestedScrollConnection {
+        override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset =
+            if (available.isHorizontalOnly()) Offset.Zero
+            else connection.onPreScroll(available, source)
+
+        override fun onPostScroll(
+            consumed : Offset,
+            available: Offset,
+            source   : NestedScrollSource,
+        ): Offset =
+            if (consumed.isHorizontalOnlyWith(available)) Offset.Zero
+            else connection.onPostScroll(consumed, available, source)
+
+        override suspend fun onPreFling(available: Velocity): Velocity =
+            if (available.isHorizontalOnly()) Velocity.Zero
+            else connection.onPreFling(available)
+
+        override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity =
+            if (consumed.isHorizontalOnlyWith(available)) Velocity.Zero
+            else connection.onPostFling(consumed, available)
+    }
+}
+
+private fun Offset.isHorizontalOnly(): Boolean = y == 0f && x != 0f
+
+private fun Velocity.isHorizontalOnly(): Boolean = y == 0f && x != 0f
+
+private fun Offset.isHorizontalOnlyWith(other: Offset): Boolean =
+    y == 0f && other.y == 0f && (x != 0f || other.x != 0f)
+
+private fun Velocity.isHorizontalOnlyWith(other: Velocity): Boolean =
+    y == 0f && other.y == 0f && (x != 0f || other.x != 0f)

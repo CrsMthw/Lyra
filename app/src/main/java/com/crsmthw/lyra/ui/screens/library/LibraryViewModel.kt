@@ -753,6 +753,13 @@ class LibraryViewModel(
     private var collectionsInFlight = false
 
     fun setLibraryFilter(filter: LibraryFilter) {
+        // Idempotent, because the browser's filter tabs are now the pages of a pager and it reports
+        // its settled page on every entry: the pane is disposed whenever a detail opens, so a
+        // re-entry re-emits the filter the VM already holds. The state write itself would conflate
+        // harmlessly, but `loadCollections()` below would retry any leg that failed earlier this
+        // session — a network call on every re-entry of the Library. A pull-to-refresh already
+        // re-arms those legs; this call must only react to a real change of tab.
+        if (_uiState.value.libraryFilter == filter) return
         _uiState.update { it.copy(libraryFilter = filter) }
         // Cached content (if any) is already in state from loadLibrary; refresh from the network
         // the first time each non-playlist filter's content is needed this session.
