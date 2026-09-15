@@ -68,6 +68,7 @@ import coil3.request.crossfade
 import com.crsmthw.lyra.data.repository.LyricsState
 import com.crsmthw.lyra.ui.components.AddToPlaylistSheet
 import com.crsmthw.lyra.ui.components.DevicePickerSheet
+import com.crsmthw.lyra.ui.components.LocalPlayerArtKey
 import com.crsmthw.lyra.ui.components.PlainLyricsView
 import com.crsmthw.lyra.ui.components.rememberArtSettleInvalidation
 import com.crsmthw.lyra.ui.components.SyncedLyricsView
@@ -77,6 +78,7 @@ import com.crsmthw.lyra.util.loadAlbumArtColors
 import com.crsmthw.lyra.util.press
 import com.crsmthw.lyra.util.reject
 import com.crsmthw.lyra.util.rememberArtBoundsTransform
+import com.crsmthw.lyra.util.rememberMorphDiag
 import com.crsmthw.lyra.util.tick
 import com.crsmthw.lyra.util.toTimeString
 import com.crsmthw.lyra.util.toggle
@@ -421,18 +423,24 @@ fun PlayerScreen(
 
                     // The shared-element modifier, plus a pass-through layout modifier that
                     // re-measures this art after every settle of the app's floating player surface.
-                    // The big art is the participant that SURVIVES a cancelled back gesture off this
-                    // screen, and the shared-element state machine only re-reads its target bounds
-                    // provider when a node holding the key is measured again — without that, the
-                    // gesture after a cancelled one had no flight and the big art vanished (device
-                    // report 48). See `LocalPlayerArtSettleCount` in PlayerPanelHost.
+                    // The big art is the participant that SURVIVES a cancelled back gesture off
+                    // this screen, and the re-measure is what makes the state machine re-read its
+                    // target bounds provider. It was shipped as the fix for the gesture after a
+                    // cancelled one having no flight and the big art vanishing (device report 48)
+                    // and it did NOT fix it on device; it is kept as belt-and-braces. What replaces
+                    // it is the KEY: `LocalPlayerArtKey` carries a generation the host bumps after
+                    // every settle, so this element has no history from the previous morph to
+                    // inherit. Both are explained in PlayerPanelHost — see `LocalPlayerArtKey` and
+                    // `LocalPlayerArtSettleCount`.
+                    // `rememberMorphDiag` is TEMPORARY instrumentation — see util/MorphDiag.kt.
                     val artMod = if (sharedTransitionScope != null && animatedContentScope != null) {
                         with(sharedTransitionScope) {
+                            val artState = rememberSharedContentState(LocalPlayerArtKey.current)
                             Modifier.sharedElement(
-                                sharedContentState      = rememberSharedContentState("album-art"),
+                                sharedContentState      = artState,
                                 animatedVisibilityScope = animatedContentScope,
                                 boundsTransform         = rememberArtBoundsTransform(),
-                            )
+                            ).then(rememberMorphDiag("player/land", artState))
                         }
                     } else Modifier
                     val artSettleMod = rememberArtSettleInvalidation()
@@ -596,15 +604,18 @@ fun PlayerScreen(
                     val side = minOf(maxWidth, maxHeight)
                     val displaySide = side * artScale
 
-                    // Shared-element modifier + the settle re-measure — see the landscape branch
-                    // above and `LocalPlayerArtSettleCount` in PlayerPanelHost.
+                    // Shared-element modifier (keyed on `LocalPlayerArtKey`, a fresh element per
+                    // settle) + the settle re-measure — see the landscape branch above,
+                    // and `LocalPlayerArtKey` / `LocalPlayerArtSettleCount` in PlayerPanelHost.
+                    // `rememberMorphDiag` is TEMPORARY instrumentation — see util/MorphDiag.kt.
                     val artMod = if (sharedTransitionScope != null && animatedContentScope != null) {
                         with(sharedTransitionScope) {
+                            val artState = rememberSharedContentState(LocalPlayerArtKey.current)
                             Modifier.sharedElement(
-                                sharedContentState      = rememberSharedContentState("album-art"),
+                                sharedContentState      = artState,
                                 animatedVisibilityScope = animatedContentScope,
                                 boundsTransform         = rememberArtBoundsTransform(),
-                            )
+                            ).then(rememberMorphDiag("player/port", artState))
                         }
                     } else Modifier
                     val artSettleMod = rememberArtSettleInvalidation()

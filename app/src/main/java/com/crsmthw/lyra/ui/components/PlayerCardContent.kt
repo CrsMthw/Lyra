@@ -58,6 +58,7 @@ import com.crsmthw.lyra.util.loadAlbumArtColors
 import com.crsmthw.lyra.util.press
 import com.crsmthw.lyra.util.reject
 import com.crsmthw.lyra.util.rememberArtBoundsTransform
+import com.crsmthw.lyra.util.rememberMorphDiag
 import com.crsmthw.lyra.util.tick
 import com.crsmthw.lyra.util.toTimeString
 import com.crsmthw.lyra.util.toggle
@@ -276,32 +277,39 @@ fun PlayerCardContent(
             // Album art — participates in two independent shared element transitions:
             // 1. Local scope: mini player ↔ panel expansion
             // 2. Nav scope: panel → full PlayerScreen navigation
+            // `rememberMorphDiag` is TEMPORARY instrumentation — see util/MorphDiag.kt.
+            // The key carries the host's settle generation (`LocalPlayerArtKey`), so each morph
+            // starts from a shared element with no history — read once for both registrations.
+            val artKey = LocalPlayerArtKey.current
             val localArtMod = if (sharedTransitionScope != null && animatedVisibilityScope != null) {
                 with(sharedTransitionScope) {
+                    val artState = rememberSharedContentState(key = artKey)
                     Modifier.sharedElement(
-                        sharedContentState      = rememberSharedContentState(key = "album-art"),
+                        sharedContentState      = artState,
                         animatedVisibilityScope = animatedVisibilityScope,
                         boundsTransform         = rememberArtBoundsTransform(),
-                    )
+                    ).then(rememberMorphDiag("panel/local", artState))
                 }
             } else Modifier
             val navArtMod = if (navSharedTransitionScope != null && animatedVisibilityScope != null) {
                 with(navSharedTransitionScope) {
+                    val artState = rememberSharedContentState(key = artKey)
                     Modifier.sharedElement(
-                        sharedContentState      = rememberSharedContentState(key = "album-art"),
+                        sharedContentState      = artState,
                         animatedVisibilityScope = animatedVisibilityScope,
                         boundsTransform         = rememberArtBoundsTransform(),
-                    )
+                    ).then(rememberMorphDiag("panel/nav", artState))
                 }
             } else Modifier
             // 3. A pass-through layout modifier that re-measures this art after every settle of
-            //    the floating player surface. It is what keeps the morph working on the gesture
-            //    AFTER a cancelled one: this art is the participant that survives a cancelled panel
-            //    close, and the shared-element state machine only re-reads its target bounds
-            //    provider when a node holding the key is measured again — see
-            //    [LocalPlayerArtSettleCount]. Appended after the shared modifiers so their place at
-            //    the head of the chain is unchanged; the invalidation lands on the same LayoutNode
-            //    either way.
+            //    the floating player surface: this art is the participant that survives a cancelled
+            //    panel close, and the re-measure is what makes the state machine re-read its target
+            //    bounds provider. It was shipped as the fix for the morph breaking on the gesture
+            //    AFTER a cancelled one and did NOT fix it on device — what does that job now is the
+            //    KEY above (a fresh element per settle, [LocalPlayerArtKey]); this stays as
+            //    belt-and-braces. See [LocalPlayerArtSettleCount]. Appended after the shared
+            //    modifiers so their place at the head of the chain is unchanged; the invalidation
+            //    lands on the same LayoutNode either way.
             val artSettleMod = rememberArtSettleInvalidation()
             val artSharedMod = localArtMod.then(navArtMod).then(artSettleMod)
             // The art SLOT stays `artSize` whether or not the circle is on — the canvas fills it

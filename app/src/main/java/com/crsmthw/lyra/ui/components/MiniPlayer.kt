@@ -30,6 +30,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import com.crsmthw.lyra.util.confirm
+import com.crsmthw.lyra.util.rememberMorphDiag
 import com.crsmthw.lyra.util.screenTransitionSpec
 import com.crsmthw.lyra.util.press
 import androidx.compose.ui.Modifier
@@ -156,22 +157,34 @@ fun MiniPlayer(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // Album art — chains up to two shared element scopes when both are provided.
+                // `rememberMorphDiag` is TEMPORARY instrumentation (util/MorphDiag.kt): it logs
+                // this copy's key, match state and placed bounds. NOTE for whoever reads the log:
+                // on a NARROW/folded screen the "primary" slot IS the nav scope and there is no
+                // secondary, so `mini/primary` is the participant that morphs with PlayerScreen.
+                //
+                // The KEY comes from the host (`LocalPlayerArtKey`) and carries a generation that
+                // is bumped after every settle of the floating surface, so no morph inherits
+                // shared-element state from the one before it — see that local's KDoc. Read once
+                // here so both registrations in this composable can never use different keys.
+                val artKey = LocalPlayerArtKey.current
                 val artModifier = if (sharedTransitionScope != null) {
                     with(sharedTransitionScope) {
+                        val artState = rememberSharedContentState(artKey, sharedContentConfig)
                         Modifier.sharedElement(
-                            sharedContentState      = rememberSharedContentState("album-art", sharedContentConfig),
+                            sharedContentState      = artState,
                             animatedVisibilityScope = effectiveScope,
                             boundsTransform         = rememberArtBoundsTransform(),
-                        )
+                        ).then(rememberMorphDiag("mini/primary", artState))
                     }
                 } else Modifier
                 val navArtModifier = if (navSharedTransitionScope != null) {
                     with(navSharedTransitionScope) {
+                        val artState = rememberSharedContentState(artKey, navSharedContentConfig)
                         Modifier.sharedElement(
-                            sharedContentState      = rememberSharedContentState("album-art", navSharedContentConfig),
+                            sharedContentState      = artState,
                             animatedVisibilityScope = effectiveScope,
                             boundsTransform         = rememberArtBoundsTransform(),
-                        )
+                        ).then(rememberMorphDiag("mini/nav", artState))
                     }
                 } else Modifier
                 // A pass-through layout modifier that re-measures this art after every settle of
