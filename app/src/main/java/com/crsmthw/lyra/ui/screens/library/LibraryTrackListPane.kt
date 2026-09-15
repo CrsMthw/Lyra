@@ -1,6 +1,7 @@
 package com.crsmthw.lyra.ui.screens.library
 
 import androidx.compose.animation.AnimatedContentScope
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.foundation.background
@@ -20,7 +21,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -32,12 +33,10 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import com.crsmthw.lyra.R
 import com.crsmthw.lyra.ui.components.DetailArtHero
+import com.crsmthw.lyra.ui.components.DetailTopBar
+import com.crsmthw.lyra.ui.components.HeroTitleHandoff
 import com.crsmthw.lyra.ui.components.RemovablePlaylist
-import com.crsmthw.lyra.ui.components.rememberHeroScrollProgress
-import com.crsmthw.lyra.ui.components.TitlePill
-import com.crsmthw.lyra.ui.components.TopActionPill
-import com.crsmthw.lyra.ui.components.TopPillHeight
-import com.crsmthw.lyra.ui.components.TopScrim
+import com.crsmthw.lyra.ui.components.rememberHeroTitleHandoff
 import com.crsmthw.lyra.ui.components.TrackRow
 import com.crsmthw.lyra.ui.components.toTrackActionTarget
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
@@ -45,6 +44,7 @@ import com.crsmthw.lyra.util.ListScrollHaptics
 import com.crsmthw.lyra.util.rememberArtBoundsTransform
 import com.crsmthw.lyra.util.confirm
 import com.crsmthw.lyra.util.press
+import com.crsmthw.lyra.util.screenTransitionSpec
 import java.io.File
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -52,7 +52,7 @@ import kotlinx.coroutines.flow.map
 
 // ── Track-list pane ───────────────────────────────────────────────────────────
 // The playlist / Liked Songs detail: the single-pane detail pane AND the two-pane right pane are
-// the same composable (the two-pane one is this minus the back pill).
+// the same composable (the two-pane one is this minus the back icon).
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class,
        ExperimentalSharedTransitionApi::class)
@@ -64,8 +64,8 @@ internal fun RightPaneContent(
     mosaicDir       : File,
     onTrackClick    : () -> Unit,
     onRefresh       : () -> Unit,
-    onBack          : (() -> Unit)? = null,            // non-null → show the back pill (single-pane)
-    containerColor  : Color = Color.Unspecified,       // scrim target; defaults to background
+    onBack          : (() -> Unit)? = null,            // non-null → the bar shows back (single-pane)
+    containerColor  : Color = Color.Unspecified,       // the pane's own colour; defaults to background
     sharedScope     : SharedTransitionScope? = null,   // container-transform target (single pane)
     animScope       : AnimatedContentScope? = null,
 ) {
@@ -128,10 +128,15 @@ internal fun RightPaneContent(
     val density          = LocalDensity.current
     val navBarBottomDp   = with(density) { WindowInsets.navigationBars.getBottom(this).toDp() }
     val listState        = rememberLazyListState()
-    val titlePillAlpha   = rememberHeroScrollProgress(listState)
+    // The bar title takes over from the hero title over the ~35dp that title needs to slide under
+    // the bar (M3's own `TopTitleAlphaEasing` hand-off, see `HeroTitleHandoff`) — not over the whole
+    // hero's scroll, which read as a slow crossfade on device.
+    val heroTitle        = rememberHeroTitleHandoff()
     val pullToRefreshState   = rememberPullToRefreshState()
     PullThresholdHaptics(pullToRefreshState)
-    val scrimColor       = if (containerColor == Color.Unspecified)
+    // The colour of the pane this content sits in: the screen background single-pane, the Card's
+    // surface in a two-pane card. It is what the app bar paints itself (see `DetailTopBar`).
+    val paneColor        = if (containerColor == Color.Unspecified)
                                MaterialTheme.colorScheme.background else containerColor
 
     val canLoadMore          = if (isLikedSongs)
@@ -151,13 +156,16 @@ internal fun RightPaneContent(
             // flight (nothing gates that on isRefreshing).
             enabled      = !inSelection,
             modifier     = Modifier.fillMaxSize(),
+            // Both indicators clear the app bar laid over this list: the PTR box still spans the
+            // whole pane (the bar is an overlay, not a Column sibling), so an indicator that only
+            // took `statusBarsPadding()` would animate in BEHIND a bar that is now solid.
             indicator    = {
                 if (state.isRefreshing) {
                     ContainedLoadingIndicator(
                         modifier = Modifier
                             .align(Alignment.TopCenter)
                             .statusBarsPadding()
-                            .padding(top = 12.dp),
+                            .padding(top = TopAppBarDefaults.TopAppBarExpandedHeight + 12.dp),
                     )
                 } else {
                     PullToRefreshDefaults.Indicator(
@@ -165,7 +173,8 @@ internal fun RightPaneContent(
                         isRefreshing = false,
                         modifier     = Modifier
                             .align(Alignment.TopCenter)
-                            .statusBarsPadding(),
+                            .statusBarsPadding()
+                            .padding(top = TopAppBarDefaults.TopAppBarExpandedHeight),
                     )
                 }
             },
@@ -211,8 +220,8 @@ internal fun RightPaneContent(
             contentPadding = PaddingValues(bottom = 100.dp + navBarBottomDp),
             listState      = listState,
             headerContent  = {
-                // The same cookie-art hero in both single- and two-pane (the two-pane right pane is
-                // the single-pane track list minus the back pill); its name fades into the title pill.
+                // The same square-art hero in both single- and two-pane (the two-pane right pane is
+                // the single-pane track list minus the back icon); its name hands off to the bar's.
                 TrackListHero(
                     artUrl       = artUrl,
                     isLikedSongs = isLikedSongs,
@@ -224,6 +233,7 @@ internal fun RightPaneContent(
                     playlistId   = playlist?.id,
                     sharedScope  = sharedScope,
                     animScope    = animScope,
+                    titleHandoff = heroTitle,
                 )
             },
             emptyContent = when {
@@ -253,102 +263,118 @@ internal fun RightPaneContent(
         )
         } // PullToRefreshBox
 
-        // Floating controls — shared by single- and two-pane. The back pill shows only in
-        // single-pane (the two-pane right pane sits beside the browser list, so no back is needed).
-        TopScrim(color = scrimColor, modifier = Modifier.align(Alignment.TopCenter))
-        if (inSelection) {
-            // Contextual selection pill — takes over from the back / title / overflow pills for the
-            // duration of the mode: [✕] "N selected" [remove]. A plain conditional swap, not an
-            // AnimatedContent: it's a composition change, not a content transition.
-            TopActionPill(
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .statusBarsPadding()
-                    .padding(start = 16.dp, top = 8.dp),
-            ) {
-                IconButton(onClick = { haptics.press(); viewModel.exitSelectionMode() }) {
-                    Icon(Icons.Default.Close,
-                        contentDescription = stringResource(R.string.library_selection_cancel))
-                }
-                Text(
-                    text     = pluralStringResource(
-                        R.plurals.library_selected_count, nSelected, nSelected,
-                    ),
-                    style    = MaterialTheme.typography.titleMedium,
-                    maxLines = 1,
-                    modifier = Modifier.padding(horizontal = 4.dp),
-                )
-                // press() only — the confirm/reject buzz reports what the API actually did and is
-                // fired once from LibraryScreen when `removeResult` lands.
-                IconButton(
-                    onClick = {
-                        haptics.press()
-                        // A batch is confirmed first; a single checked row is one deliberate tap
-                        // and goes straight through, like the song menu's own remove row.
-                        if (nSelected >= 2) showRemoveConfirm = true else viewModel.removeSelectedTracks()
-                    },
-                    enabled = nSelected > 0 && !state.isRemovingSelection,
-                ) {
-                    Icon(Icons.Default.Delete,
-                        contentDescription = stringResource(R.string.library_selection_remove))
-                }
-            }
-        } else {
-            if (onBack != null) {
-                TopActionPill(
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .statusBarsPadding()
-                        .padding(start = 16.dp, top = 8.dp),
-                ) {
-                    IconButton(onClick = { haptics.confirm(); onBack() }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.cd_back))
-                    }
-                }
-            }
-            TitlePill(
-                text     = playlistName,
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .statusBarsPadding()
-                    .padding(
-                        start = if (onBack != null) 16.dp + TopPillHeight + 8.dp else 16.dp,
-                        top   = 8.dp,
-                    )
-                    .widthIn(max = 220.dp)
-                    .graphicsLayer { alpha = titlePillAlpha.value },
-            )
-            if (canDelete) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .statusBarsPadding()
-                        .padding(end = 16.dp, top = 8.dp),
-                ) {
-                    TopActionPill {
-                        IconButton(onClick = { haptics.press(); showOverflowMenu = true }) {
-                            Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.more_options))
+        // The shared `DetailTopBar`, laid over the list and composed LAST so it draws (and
+        // hit-tests) above the rows — it replaces the floating back / title / overflow pills AND
+        // the TopScrim they sat in (the bar is solid in the pane's own colour, so there is nothing
+        // left to fade content into). Single-pane carries the back icon; the two-pane RIGHT pane
+        // sits beside the browser list and never had one, which is all `onBack == null` now means.
+        //
+        // Selection mode swaps the bar's CONTENTS for the standard M3 contextual bar —
+        // [✕] "N selected" [remove] — through the app-wide finite `screenTransitionSpec()`. Never a
+        // spring: this can run while the pane swap or a nav transition is in flight (THE HARD RULE,
+        // docs/MOTION.md). The entering bar is composed last, so it is the one that hit-tests
+        // during the fade (alpha does not affect hit testing).
+        Crossfade(
+            targetState   = inSelection,
+            animationSpec = screenTransitionSpec(),
+            label         = "detail_bar",
+            modifier      = Modifier.align(Alignment.TopCenter),
+        ) { selecting ->
+            if (selecting) {
+                DetailTopBar(
+                    paneColor      = paneColor,
+                    navigationIcon = {
+                        IconButton(onClick = { haptics.press(); viewModel.exitSelectionMode() }) {
+                            Icon(Icons.Default.Close,
+                                contentDescription = stringResource(R.string.library_selection_cancel))
                         }
-                    }
-                    DropdownMenu(
-                        expanded         = showOverflowMenu,
-                        onDismissRequest = { showOverflowMenu = false },
-                    ) {
-                        // Second door into selection mode — discoverable without a long-press, and
-                        // present for exactly the playlists the menu's "Select" row is (owned ones,
-                        // since this whole pill is gated on ownership).
-                        DropdownMenuItem(
-                            text        = { Text(stringResource(R.string.library_select_songs)) },
-                            leadingIcon = { Icon(Icons.Default.Checklist, contentDescription = null) },
-                            onClick     = { haptics.press(); showOverflowMenu = false; viewModel.enterSelectionMode() },
+                    },
+                    actions        = {
+                        // press() only — the confirm/reject buzz reports what the API actually did
+                        // and is fired once from LibraryScreen when `removeResult` lands.
+                        IconButton(
+                            onClick = {
+                                haptics.press()
+                                // A batch is confirmed first; a single checked row is one deliberate
+                                // tap and goes straight through, like the song menu's remove row.
+                                if (nSelected >= 2) showRemoveConfirm = true
+                                else viewModel.removeSelectedTracks()
+                            },
+                            enabled = nSelected > 0 && !state.isRemovingSelection,
+                        ) {
+                            Icon(Icons.Default.Delete,
+                                contentDescription = stringResource(R.string.library_selection_remove))
+                        }
+                    },
+                    // No hand-off: the count is the whole point of a contextual bar, so it is
+                    // visible from the first frame of the mode regardless of the scroll position.
+                    title          = {
+                        Text(
+                            text     = pluralStringResource(
+                                R.plurals.library_selected_count, nSelected, nSelected,
+                            ),
+                            maxLines = 1,
                         )
-                        DropdownMenuItem(
-                            text        = { Text(stringResource(R.string.delete_playlist)) },
-                            leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
-                            onClick     = { haptics.press(); showOverflowMenu = false; showDeleteConfirm = true },
+                    },
+                )
+            } else {
+                DetailTopBar(
+                    paneColor      = paneColor,
+                    navigationIcon = {
+                        if (onBack != null) {
+                            IconButton(onClick = { haptics.confirm(); onBack() }) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = stringResource(R.string.cd_back))
+                            }
+                        }
+                    },
+                    actions        = {
+                        if (canDelete) {
+                            // The menu anchors to this Box, which is the ⋮ button's own slot in the
+                            // actions row.
+                            Box {
+                                IconButton(onClick = { haptics.press(); showOverflowMenu = true }) {
+                                    Icon(Icons.Default.MoreVert,
+                                        contentDescription = stringResource(R.string.more_options))
+                                }
+                                DropdownMenu(
+                                    expanded         = showOverflowMenu,
+                                    onDismissRequest = { showOverflowMenu = false },
+                                ) {
+                                    // Second door into selection mode — discoverable without a
+                                    // long-press, and present for exactly the playlists the song
+                                    // menu's "Select" row is (owned ones, since this whole action is
+                                    // gated on ownership).
+                                    DropdownMenuItem(
+                                        text        = { Text(stringResource(R.string.library_select_songs)) },
+                                        leadingIcon = { Icon(Icons.Default.Checklist, contentDescription = null) },
+                                        onClick     = {
+                                            haptics.press(); showOverflowMenu = false
+                                            viewModel.enterSelectionMode()
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text        = { Text(stringResource(R.string.delete_playlist)) },
+                                        leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
+                                        onClick     = {
+                                            haptics.press(); showOverflowMenu = false
+                                            showDeleteConfirm = true
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    },
+                    heroTitle      = heroTitle,
+                    title          = { titleModifier ->
+                        Text(
+                            text     = playlistName,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = titleModifier,
                         )
-                    }
-                }
+                    },
+                )
             }
         }
         if (showRemoveConfirm && playlist != null) {
@@ -406,7 +432,7 @@ internal fun RightPaneContent(
     }
 }
 
-// ── Track-list hero (single-pane) ─────────────────────────────────────────────
+// ── Track-list hero ───────────────────────────────────────────────────────────
 // The shared DetailArtHero with the playlist/Liked art (real cover, else the Liked gradient or a
 // music-note fallback) and an "N tracks" subtitle.
 
@@ -423,6 +449,7 @@ private fun TrackListHero(
     playlistId  : String? = null,
     sharedScope : SharedTransitionScope? = null,
     animScope   : AnimatedContentScope? = null,
+    titleHandoff: HeroTitleHandoff? = null,
 ) {
     // Container-transform TARGET (single pane): the hero art tile shares bounds with the tapped
     // browser card (`lib-art-<id>`, or `lib-art-liked`) and flies + cross-fades into the hero. Card
@@ -437,14 +464,15 @@ private fun TrackListHero(
         } else Modifier
 
     DetailArtHero(
-        title       = name,
-        subtitle    = if (trackCount > 0) pluralStringResource(R.plurals.library_track_count, trackCount, trackCount) else null,
+        title        = name,
+        subtitle     = if (trackCount > 0) pluralStringResource(R.plurals.library_track_count, trackCount, trackCount) else null,
         // Play / Shuffle are suspended in selection mode — a tap in the list is a check, so
         // starting playback from the hero mid-selection would be a mixed message. Passing null
         // omits the cookie buttons entirely (the shared hero's own contract).
-        onPlay      = if (selecting) null else onPlay,
-        onShuffle   = if (selecting) null else onShuffle,
-        artModifier = artModifier,
+        onPlay       = if (selecting) null else onPlay,
+        onShuffle    = if (selecting) null else onShuffle,
+        artModifier  = artModifier,
+        titleHandoff = titleHandoff,
     ) {
         if (!artUrl.isNullOrBlank()) {
             AsyncImage(

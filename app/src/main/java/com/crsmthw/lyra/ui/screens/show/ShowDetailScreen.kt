@@ -27,7 +27,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -42,11 +41,9 @@ import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.remote.model.SpotifyEpisode
 import com.crsmthw.lyra.data.remote.model.SpotifyShow
 import com.crsmthw.lyra.ui.components.DetailArtHero
-import com.crsmthw.lyra.ui.components.TitlePill
-import com.crsmthw.lyra.ui.components.TopActionPill
-import com.crsmthw.lyra.ui.components.TopPillHeight
+import com.crsmthw.lyra.ui.components.DetailTopBar
 import com.crsmthw.lyra.ui.components.TopScrim
-import com.crsmthw.lyra.ui.components.rememberHeroScrollProgress
+import com.crsmthw.lyra.ui.components.rememberHeroTitleHandoff
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import com.crsmthw.lyra.util.ListScrollHaptics
 import com.crsmthw.lyra.util.confirm
@@ -107,7 +104,8 @@ private val SpotifyEpisode.startPositionMs: Long?
 /**
  * Podcast show detail — structurally the album screen (`AlbumDetailScreen`): single-pane is a
  * [DetailArtHero] over the episode list, two-pane puts the hero in the left panel and the
- * episodes on the right, both edge-to-edge under a transparent status bar with floating pills.
+ * episodes on the right, both edge-to-edge under a transparent status bar with a [DetailTopBar]
+ * laid over the hero.
  *
  * Three deliberate differences from the album screen:
  *  - **No shuffle button.** A podcast is a chronological feed; shuffling it is meaningless. The
@@ -137,10 +135,22 @@ fun ShowDetailScreen(
     val isWideScreen   = currentWindowAdaptiveInfoV2().windowSizeClass.isWidthAtLeastBreakpoint(600)
     val fallbackTitle  = stringResource(R.string.show_fallback_title)
 
+    // The shared `DetailTopBar` (docs/APP_BARS_OPTIONS.md → D1) replaces the floating back / title /
+    // action pills and the single-pane TopScrim. One back icon for every bar on the screen
+    // (single-pane, the two-pane LEFT pane, loading/error) so the gesture, the debounce path
+    // (`onBack` → `safeNavigateUp`) and the haptic can't drift.
+    val backNavIcon: @Composable () -> Unit = {
+        IconButton(onClick = { haptics.confirm(); onBack() }) {
+            Icon(Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = stringResource(R.string.nav_back))
+        }
+    }
+
     Scaffold(
         contentWindowInsets = WindowInsets(0),
-        // No top app bar in either configuration — both layouts float their own back / share
-        // pills over the hero, and a leftover bar would cover the two-pane ones.
+        // Still NO Scaffold topBar: each configuration lays its own bar over its own scrolling
+        // content (the bar must overlap the hero, and in two-pane it belongs to the left pane only),
+        // so a Scaffold bar would both reserve height and span both cards.
     ) { paddingValues ->
         Box(Modifier.fillMaxSize()) {
         when {
@@ -240,7 +250,10 @@ fun ShowDetailScreen(
                     }
                 }
 
-                val actionPill: @Composable RowScope.() -> Unit = {
+                // The old TopActionPill's contents verbatim (follow heart + share), now the bar's
+                // `actions` slot — one definition for both panes. `@Composable RowScope.() -> Unit`
+                // is exactly the shape `DetailTopBar` wants.
+                val showActions: @Composable RowScope.() -> Unit = {
                     IconButton(
                         onClick = { haptics.toggle(state.isFollowed != true); viewModel.toggleFollowed() },
                         enabled = state.isFollowed != null,
@@ -278,7 +291,8 @@ fun ShowDetailScreen(
                             modifier              = Modifier.fillMaxSize().padding(8.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            // Left pane — the detail hero panel, with floating back + action pills.
+                            // Left pane — the detail hero panel, with the solid DetailTopBar over it
+                            // (was: a top scrim plus back and action pills).
                             Card(
                                 modifier  = Modifier.weight(0.42f).fillMaxHeight(),
                                 shape     = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
@@ -301,25 +315,15 @@ fun ShowDetailScreen(
                                         )
                                         ShowDescription(show)
                                     }
-                                    TopScrim(color = MaterialTheme.colorScheme.surface,
-                                        modifier = Modifier.align(Alignment.TopCenter))
-                                    TopActionPill(
-                                        modifier = Modifier
-                                            .align(Alignment.TopStart)
-                                            .statusBarsPadding()
-                                            .padding(start = 12.dp, top = 8.dp),
-                                    ) {
-                                        IconButton(onClick = { haptics.confirm(); onBack() }) {
-                                            Icon(Icons.AutoMirrored.Filled.ArrowBack,
-                                                contentDescription = stringResource(R.string.nav_back))
-                                        }
-                                    }
-                                    TopActionPill(
-                                        modifier = Modifier
-                                            .align(Alignment.TopEnd)
-                                            .statusBarsPadding()
-                                            .padding(end = 12.dp, top = 8.dp),
-                                        content  = actionPill,
+                                    // No title in this bar, and so no hand-off: the hero's own name
+                                    // sits right under it and barely scrolls in a pane this short,
+                                    // exactly as this pane carried no title pill. `paneColor` is the
+                                    // CARD's colour, not the screen background.
+                                    DetailTopBar(
+                                        paneColor      = MaterialTheme.colorScheme.surface,
+                                        navigationIcon = backNavIcon,
+                                        actions        = showActions,
+                                        modifier       = Modifier.align(Alignment.TopCenter),
                                     )
                                 }
                             }
@@ -374,20 +378,26 @@ fun ShowDetailScreen(
                         val episodesListState = rememberLazyListState()
                         EpisodeLoadMoreTrigger(episodesListState, state, viewModel)
                         ListScrollHaptics(episodesListState)
-                        val titlePillAlpha = rememberHeroScrollProgress(episodesListState)
+                        // The bar title takes over from the hero title over the ~35dp that title
+                        // needs to slide under the bar (M3's own `TopTitleAlphaEasing` hand-off) —
+                        // not over the whole hero's scroll, which read as a slow crossfade.
+                        val heroTitle = rememberHeroTitleHandoff()
                         LazyColumn(
                             state          = episodesListState,
                             modifier       = Modifier.fillMaxSize(),
+                            // No top inset: `DetailArtHero` bakes `statusBarsPadding()` + the bar's
+                            // own collapsed height + 8dp onto its art tile. Adding one here doubles.
                             contentPadding = PaddingValues(bottom = 100.dp + navBarBottomDp),
                         ) {
                             item(key = "header") {
                                 Column {
                                     DetailArtHero(
-                                        title      = showTitle,
-                                        subtitle   = subtitle,
-                                        onPlay     = onPlayNewest,
-                                        onShuffle  = null,
-                                        artContent = showArt,
+                                        title        = showTitle,
+                                        subtitle     = subtitle,
+                                        onPlay       = onPlayNewest,
+                                        onShuffle    = null,
+                                        titleHandoff = heroTitle,
+                                        artContent   = showArt,
                                     )
                                     ShowDescription(show)
                                 }
@@ -410,52 +420,54 @@ fun ShowDetailScreen(
                             alpha    = 0.20f,
                         )
 
-                        // Top scrim — fades the show art under the status bar.
-                        TopScrim(color = background, modifier = Modifier.align(Alignment.TopCenter))
-
-                        // Show-name title pill — fades in as the art scrolls away, sitting just
-                        // right of the screen-level back pill.
-                        TitlePill(
-                            text     = showTitle,
-                            modifier = Modifier
-                                .align(Alignment.TopStart)
-                                .statusBarsPadding()
-                                .padding(start = 16.dp + TopPillHeight + 8.dp, top = 8.dp)
-                                .widthIn(max = 220.dp)
-                                .graphicsLayer { alpha = titlePillAlpha.value },
-                        )
-
-                        TopActionPill(
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .statusBarsPadding()
-                                .padding(end = 16.dp, top = 8.dp),
-                            content  = actionPill,
+                        // The bar, composed LAST so it draws (and hit-tests) over the list. Solid
+                        // `background` at rest and scrolled — at rest only 8dp of page background
+                        // sits between its bottom edge and the art, so it reads as the page until
+                        // the art arrives (it replaces the old TopScrim as well as the pills).
+                        DetailTopBar(
+                            paneColor      = background,
+                            navigationIcon = backNavIcon,
+                            actions        = showActions,
+                            heroTitle      = heroTitle,
+                            title          = { titleModifier ->
+                                Text(
+                                    text     = showTitle,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = titleModifier,
+                                )
+                            },
+                            modifier       = Modifier.align(Alignment.TopCenter),
                         )
                     }
                 }
             }
         }
 
-            // Screen-level back pill. Single-pane: always (loading/error/content). Two-pane: only
-            // while loading/erroring — once the show loads, the left-pane hero carries its own
-            // back, and this one must land exactly where that pill will so it doesn't jump.
-            if (!isWideScreen || state.show == null) {
-                TopActionPill(
+            // Screen-level back bar, for the loading and error states ONLY — once the show loads,
+            // the bar that carries the title and actions lives inside the layout that owns the
+            // scrolling content (single-pane over the list, two-pane over the LEFT card).
+            //
+            // The condition is the exact NEGATION of the `when`'s content arm, not just
+            // `show == null`: a future reload path that set `isLoading` over a loaded show would
+            // otherwise swap the content (bar included) for the spinner and leave back unreachable.
+            //
+            // It carries its own `horizontalSystemBarsPadding()` because it is a SIBLING of those
+            // layouts, not a descendant — still one horizontal application per subtree, not a second
+            // on the same element. In the wide case it also takes the Row's own 8dp inset so the
+            // back arrow doesn't jump when the content lands and the left-pane bar takes over.
+            if (state.isLoading || state.error != null || state.show == null) {
+                DetailTopBar(
+                    // Nothing is loaded, so there is no card behind this one — the page background
+                    // is what it sits on in both configurations.
+                    paneColor      = background,
+                    navigationIcon = backNavIcon,
                     modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .statusBarsPadding()
+                        .align(Alignment.TopCenter)
                         .horizontalSystemBarsPadding()
-                        .padding(
-                            start = if (isWideScreen) 8.dp + 12.dp else 16.dp,
-                            top   = if (isWideScreen) 8.dp + 8.dp  else 8.dp,
-                        ),
-                ) {
-                    IconButton(onClick = { haptics.confirm(); onBack() }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(R.string.nav_back))
-                    }
-                }
+                        .padding(horizontal = if (isWideScreen) 8.dp else 0.dp,
+                                 vertical   = if (isWideScreen) 8.dp else 0.dp),
+                )
             }
         }
     }
