@@ -294,7 +294,16 @@ fun PlayerCardContent(
                     )
                 }
             } else Modifier
-            val artSharedMod = localArtMod.then(navArtMod)
+            // 3. A pass-through layout modifier that re-measures this art after every settle of
+            //    the floating player surface. It is what keeps the morph working on the gesture
+            //    AFTER a cancelled one: this art is the participant that survives a cancelled panel
+            //    close, and the shared-element state machine only re-reads its target bounds
+            //    provider when a node holding the key is measured again — see
+            //    [LocalPlayerArtSettleCount]. Appended after the shared modifiers so their place at
+            //    the head of the chain is unchanged; the invalidation lands on the same LayoutNode
+            //    either way.
+            val artSettleMod = rememberArtSettleInvalidation()
+            val artSharedMod = localArtMod.then(navArtMod).then(artSettleMod)
             // The art SLOT stays `artSize` whether or not the circle is on — the canvas fills it
             // and the art shrinks inside it — so the Column's height is unchanged and
             // `reservedChrome` above still describes the card. Exactly PlayerScreen's arrangement

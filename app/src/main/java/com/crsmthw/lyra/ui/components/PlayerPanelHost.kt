@@ -23,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfoV2
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -99,6 +100,69 @@ val LocalPopOutPanelOpen: ProvidableCompositionLocal<Boolean> = compositionLocal
  * mini player behaves exactly as it did before the gate existed.
  */
 val LocalPlayerRouteVisible: ProvidableCompositionLocal<Boolean> = compositionLocalOf { true }
+
+/** The [LocalPlayerArtSettleCount] default: nothing ever bumps it. */
+private val NoArtSettles: IntState = mutableIntStateOf(0)
+
+/**
+ * How many times this host's floating player surface has SETTLED (reached
+ * `currentState == targetState`). Bumped by [PlayerPanelHost]; read by the `"album-art"`
+ * participants that OUTLIVE a transition — the pop-out panel's art (`PlayerCardContent`) and the
+ * full player's (`PlayerScreen`) — through [rememberArtSettleInvalidation], which turns each bump
+ * into one no-op re-measure of that art.
+ *
+ * **Why the re-measure is needed.** A CANCELLED seek disposes the participant the abandoned
+ * direction was heading for: the mini player for a cancelled panel close, the bar or the pop-out
+ * panel for a cancelled back off `PlayerScreen`. `SharedTransitionStateMachine` keeps that
+ * participant's `BoundsProvider` as its `targetBoundsProvider`, which is the rect the NEXT morph
+ * starts FROM (`ActiveMatchFoundConfigPending.configureActiveMatch` →
+ * `obtainBoundsFromLastTarget`). That field is re-read in exactly one place,
+ * `updateTargetBoundsProvider()`, reached only from `SharedContentNode`'s lookahead placement
+ * (`onLookaheadPlaced`) or approach measure (`tryInitializingCurrentBounds`) — an entry being
+ * forgotten merely POSTS the request. So with nothing left to re-measure, the pointer can survive
+ * the participant: `obtainBoundsFromLastTarget` then returns null (that provider is no longer in
+ * `allEntries`), `configureActiveMatch` falls back to `Rect(topLeft, lookaheadSize)` — the
+ * INCOMING art's own bounds — and the next gesture morphs from the target to itself, i.e. no
+ * flight at all, with the outgoing copy hidden (`SharedElementEntry.shouldRenderAtAll` is false
+ * for a non-target while a match is configured). On device: "cancel the predictive back once,
+ * then back again — the art in the pop-out panel just completely disappears" (report 44, unfolded;
+ * report 48 is the same thing folded, with the full player's art) — while a COMMITTED gesture in
+ * between cures it, because its last target is the participant that stays (2026-09-14).
+ *
+ * Defaults to a counter that never changes, so where the provider is out of scope — a preview, or
+ * the docked third pane, which is composed BESIDE this host — the modifier is inert.
+ */
+val LocalPlayerArtSettleCount: ProvidableCompositionLocal<IntState> =
+    staticCompositionLocalOf { NoArtSettles }
+
+/**
+ * A pass-through layout modifier that re-measures its `LayoutNode` whenever
+ * [LocalPlayerArtSettleCount] is bumped. Chain it onto an `"album-art"` participant that outlives
+ * transitions; see that counter's KDoc for what the re-measure repairs.
+ *
+ * The counter is read INSIDE the measure block on purpose: measure-scope reads are observed
+ * (`OwnerSnapshotObserver.observeMeasureSnapshotReadsAffectingLookahead`), so a bump runs
+ * `LayoutNode.invalidateMeasurements()` → `requestLookaheadRemeasure()` (the node lives in a
+ * lookahead scope) → the whole modifier chain's lookahead measure + placement re-runs, including
+ * the `sharedElement` node's own — which is what calls `processPendingRequest()` →
+ * `updateTargetBoundsProvider()`. Reading it in composition instead would not do: the shared node
+ * is only re-measured when this node is, and the two must be the same `LayoutNode`, which is why
+ * this is a modifier on the art rather than anything around it.
+ */
+@Composable
+fun rememberArtSettleInvalidation(): Modifier {
+    val settles = LocalPlayerArtSettleCount.current
+    return remember(settles) {
+        Modifier.layout { measurable, constraints ->
+            // The counter only ever grows from 0, so this is always 0. It is used (rather than
+            // read and discarded) so the read cannot be optimised away — and it can never move
+            // the art.
+            val settleNudge = settles.intValue.coerceAtMost(0)
+            val placeable   = measurable.measure(constraints)
+            layout(placeable.width, placeable.height) { placeable.place(settleNudge, 0) }
+        }
+    }
+}
 
 /**
  * A [SharedTransitionScope.SharedContentConfig] that enables the shared element only while
@@ -360,6 +424,22 @@ fun PlayerPanelHost(
         it == PlayerSurface.Panel
     }
 
+    // ONE no-op re-measure of the `"album-art"` participants that outlive a transition, after
+    // every SETTLE of the surface — the repair for the broken morph on the gesture that follows a
+    // CANCELLED one (device reports 44 + 48). The whole mechanism is in
+    // [LocalPlayerArtSettleCount]'s KDoc; [rememberArtSettleInvalidation] is the reader.
+    //
+    // Keyed on the pair rather than fired from the cancel path itself: it then runs only from a
+    // composition in which `currentState == targetState`, i.e. one where the surface the gesture
+    // abandoned already reports `target == false` and the state machine can only re-read a
+    // provider that is still on screen. That also covers every other way the surface settles (a
+    // commit, a button back, a fold, the third-state snap) at the cost of one pass-through
+    // re-measure of two art chains, and it needs no knowledge of WHICH path settled it.
+    val artSettles = remember { mutableIntStateOf(0) }
+    LaunchedEffect(surfaceState.currentState, surfaceState.targetState) {
+        if (surfaceState.currentState == surfaceState.targetState) artSettles.intValue++
+    }
+
     // A read-only mirror of the gesture every back handler already sees. Observing this StateFlow
     // registers NO handler, so it cannot steal the gesture from `NavHost`'s own
     // (`rememberNavHostEventHandler`) — deliberately NOT `rememberNavigationEventState`, which owns
@@ -431,13 +511,22 @@ fun PlayerPanelHost(
                     targetValue   = 0f,
                     animationSpec = tween((surfaceState.fraction * totalMillis).toInt()),
                 ) { value, _ ->
-                    // seekTo/snapTo suspend, `animate`'s callback does not — hand the work back to
-                    // this effect's own scope, as NavHost does internally.
-                    effectScope.launch {
-                        if (value > 0f)  surfaceState.seekTo(value)
-                        if (value == 0f) surfaceState.snapTo(surfaceTarget)
-                    }
+                    // seekTo suspends, `animate`'s callback does not — hand the work back to this
+                    // effect's own scope, as NavHost does internally.
+                    effectScope.launch { if (value > 0f) surfaceState.seekTo(value) }
                 }
+                // The final snap is made HERE, in this function's own suspend body, and this is a
+                // DELIBERATE deviation from `NavHost.kt`'s template, which launches it into the
+                // effect's scope alongside the seeks above. That is safe there because NavHost's
+                // effect key (the back-stack entry) does not change when a gesture is cancelled.
+                // Ours does: the `Cancelled` branch writes `panelBack = Idle` the instant this
+                // function returns, which re-keys the effect and cancels anything still queued in
+                // its scope — and a snap lost that way leaves the transition parked with
+                // `targetState` still pointing at the surface the gesture abandoned, so nothing
+                // ever settles and the `"album-art"` match is never re-resolved. A `seekTo` that
+                // lands after this snap is inert by construction: `currentState == targetState`
+                // makes `seekTo` return without touching anything.
+                surfaceState.snapTo(surfaceTarget)
             }
 
             // Deliberately NO `animationSpec` on any `animateTo` below. With one,
@@ -578,7 +667,13 @@ fun PlayerPanelHost(
     Box(modifier = modifier.fillMaxSize()) {
         // ONE content call site at every width — see the header comment on why an early return for
         // the extra-wide case was a state-wiping trap.
-        CompositionLocalProvider(LocalPopOutPanelOpen provides panelVisible) {
+        // The settle counter is provided here for `PlayerScreen`, which lives inside the NavHost;
+        // the pop-out panel is a SIBLING of the content, so it is provided again around the panel
+        // below rather than by re-parenting this whole Box.
+        CompositionLocalProvider(
+            LocalPopOutPanelOpen       provides panelVisible,
+            LocalPlayerArtSettleCount  provides artSettles,
+        ) {
             content(if (isExtraWide) noPlayerRequest else onRequestPlayer)
         }
 
@@ -770,27 +865,31 @@ fun PlayerPanelHost(
                         navSharedContentConfig   = navArtConfig,
                     )
 
-                    // Pop-out panel (wide non-short screens only)
+                    // Pop-out panel (wide non-short screens only). The settle counter is provided
+                    // again here because the panel is a SIBLING of `content` above, and its art is
+                    // the participant that SURVIVES a cancelled close gesture.
                     if (canShowPanel) {
-                        PlayerPopOutPanel(
-                            panelTransition            = panelTransition,
-                            playerViewModel            = playerViewModel,
-                            onClose                    = { closePanel() },
-                            onFullScreen               = onOpenPlayer,
-                            onOpenQueue                = onOpenQueue,
-                            localSharedTransitionScope = this@SharedTransitionLayout,
-                            navSharedTransitionScope   = navSharedTransitionScope,
-                            modifier                   = Modifier
-                                .align(Alignment.BottomEnd)
-                                .padding(start = 8.dp, end = 16.dp, bottom = 16.dp)
-                                .fillMaxWidth(0.54f)
-                                .heightIn(max = maxPanelHeight)
-                                // nav bar + camera cutout on the side/bottom edges — never the IME
-                                .windowInsetsPadding(
-                                    WindowInsets.navigationBars.union(WindowInsets.displayCutout)
-                                        .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)
-                                ),
-                        )
+                        CompositionLocalProvider(LocalPlayerArtSettleCount provides artSettles) {
+                            PlayerPopOutPanel(
+                                panelTransition            = panelTransition,
+                                playerViewModel            = playerViewModel,
+                                onClose                    = { closePanel() },
+                                onFullScreen               = onOpenPlayer,
+                                onOpenQueue                = onOpenQueue,
+                                localSharedTransitionScope = this@SharedTransitionLayout,
+                                navSharedTransitionScope   = navSharedTransitionScope,
+                                modifier                   = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .padding(start = 8.dp, end = 16.dp, bottom = 16.dp)
+                                    .fillMaxWidth(0.54f)
+                                    .heightIn(max = maxPanelHeight)
+                                    // nav bar + camera cutout on the side/bottom edges — never the IME
+                                    .windowInsetsPadding(
+                                        WindowInsets.navigationBars.union(WindowInsets.displayCutout)
+                                            .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)
+                                    ),
+                            )
+                        }
                     }
                 }
             }
