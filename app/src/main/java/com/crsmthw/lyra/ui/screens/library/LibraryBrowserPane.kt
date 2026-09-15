@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -27,7 +28,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -37,8 +37,10 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.lerp
 import com.crsmthw.lyra.R
 import com.crsmthw.lyra.ui.components.CrampedLabelAutoSize
 import com.crsmthw.lyra.ui.components.LargeBarMinPaneHeight
@@ -518,7 +520,7 @@ internal fun LibraryBrowserPane(
         // own scroll position (`listStates`), so the row the finger is aiming at does not move. The
         // pager's own settle collector above turns a SWIPE into the same call.
         LibraryTabRow(
-            selected       = state.libraryFilter,
+            pagerState     = pagerState,
             onSelect       = viewModel::setLibraryFilter,
             containerColor = paneColor,
         )
@@ -701,11 +703,19 @@ private val LibraryTabLabelPadding = 8.dp
  * What [LibraryTabLabelPadding] costs the indicator, and what the [LibraryTabRow] indicator adds
  * back: `2 × (16dp − 8dp)`.
  *
- * `TabRowImpl` derives the indicator width as
+ * `TabRowImpl` derives each tab's `TabPosition.contentWidth` as
  * `min(tabMeasurable.maxIntrinsicWidth, tabWidth) - HorizontalTextPadding * 2` (floored at 24dp) —
  * it assumes the tab's intrinsic width includes M3's own 32dp of text padding. With 8dp a side the
- * intrinsic width is 16dp smaller, so the default indicator would come out 16dp narrower than the
- * label instead of hugging it.
+ * intrinsic width is 16dp smaller, so an indicator sized off `contentWidth` alone would come out
+ * 16dp narrower than the label instead of hugging it.
+ *
+ * It is added to each `contentWidth` the indicator interpolates between (see [LibraryTabRow]). It
+ * used to be added by a `Modifier.layout` nested INSIDE `tabIndicatorOffset`, and that note claimed
+ * the node "reports the child's actual width, which this node is free to make larger" — which is
+ * not true: `Placeable.width` is the measured width COERCED back into the constraints it was
+ * measured with, so the widened child still reported `contentWidth` and only came out right because
+ * the resulting `apparentToRealOffset.x` of −8dp cancelled the difference. That trick is gone from
+ * the app; the compensation now lands in the indicator's own width arithmetic, where it is plain.
  */
 private val LibraryTabIndicatorCompensation = 16.dp
 
@@ -748,59 +758,111 @@ private val LibraryTabIndicatorCompensation = 16.dp
  * `unselectedContentColor` is passed explicitly: `Tab` defaults it to `selectedContentColor`,
  * which `PrimaryTabRow` sets to `primary` for the whole row, so leaving it alone renders all four
  * labels in the accent colour.
+ *
+ * **Which tab reads as selected is the PAGER's `currentPage`, not the ViewModel's filter** — "the
+ * page that sits closest to the snapped position", so it flips at the midpoint of a swipe, which is
+ * exactly when the label should take the accent colour. The VM still learns the filter at settle
+ * (the collector in `LibraryBrowserPane`); this row simply stops waiting for it, as the indicator
+ * does. Reading it in composition recomposes this row once per page change — four `Tab`s and a
+ * `Spacer`, and the indicator's own geometry is layout-only, so nothing else is repeated.
+ *
+ * `selectedTabIndex` is passed for readability and is otherwise INERT: `PrimaryTabRow` uses it only
+ * inside its own default `indicator` lambda, which this row replaces, and `TabRowImpl` never sees
+ * it. Selection for accessibility comes from each `Tab`'s own `selected` flag — do not "restore"
+ * the parameter on the assumption that the indicator depends on it.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun LibraryTabRow(
-    selected       : LibraryFilter,
+    pagerState     : PagerState,
     onSelect       : (LibraryFilter) -> Unit,
     containerColor : Color,
     modifier       : Modifier = Modifier,
 ) {
-    val haptics = LocalHapticFeedback.current
+    val haptics       = LocalHapticFeedback.current
+    val selectedIndex = pagerState.currentPage
     PrimaryTabRow(
-        selectedTabIndex = selected.ordinal,
+        selectedTabIndex = selectedIndex,
         modifier         = modifier,
         containerColor   = containerColor,
-        // M3's default indicator verbatim (`matchContentSize = true`, `width = Dp.Unspecified` — omit
-        // that and every tab gets `PrimaryIndicator`'s 24dp stub), plus the compensation the halved
-        // label padding needs. See [LibraryTabIndicatorCompensation]: `TabRowImpl` subtracts a
-        // hard-coded 32dp from the tab's intrinsic width, so widening the indicator by the 16dp the
-        // label no longer spends restores exactly today's geometry — the bar is the label's width.
+        // THE INDICATOR FOLLOWS THE PAGER, it does not animate after it. `tabIndicatorLayout` is
+        // M3's own hook for exactly this: the block runs on every LAYOUT pass and reads the pager's
+        // live page + offset fraction THERE, so a swipe re-places and re-measures the bar per frame
+        // while recomposing nothing (a state read inside a measure block invalidates layout, not
+        // composition). A TAP rides the same path: `animateScrollToPage` moves the pager, the bar
+        // moves with it — which is why the animated `tabIndicatorOffset` is gone rather than kept
+        // alongside. Two animations over one geometry would fight, and the old one was the whole
+        // defect Cris reported: driven by the ViewModel's filter, it did nothing until the swipe
+        // settled and then slid across on its own.
         //
-        // The widening goes INSIDE `tabIndicatorOffset`, because `TabIndicatorOffsetNode` forces its
-        // child's width by constraint but reports `layout(placeable.width, …)` — the child's actual
-        // width, which this node is free to make larger. Its offset placement is untouched.
+        // THE HARD RULE (docs/MOTION.md) is not in play, and no longer even nearly: there is no
+        // `Animatable` and no `Transition` left in this row at all. The bar is scroll-driven
+        // geometry, like an app bar's collapse.
         //
-        // Where the intrinsic width is clipped to `tabWidth` (the cramped pane) this comes out
-        // WIDER than before — `tabWidth - 16` rather than `tabWidth - 32` — which is right: the
-        // label now occupies that room instead of being ellipsized inside 28.5dp.
+        // Geometry, reproducing what `TabRowImpl` does for the stock indicator:
+        //  - `width` is the lerped CONTENT width (M3's `matchContentSize` look — the bar hugs the
+        //    label and MORPHS between two labels' widths mid-swipe) plus
+        //    [LibraryTabIndicatorCompensation], the 16dp the halved label padding costs;
+        //  - the bar ends up CENTRED in the tab, at `left + (tabWidth - width) / 2`, but that
+        //    centring is NOT added here. Reporting `placeable.width` (the lerped width) while
+        //    `TabRowImpl` measured this node at `minWidth = maxWidth = tabWidth` makes
+        //    `Placeable.width` coerce back up to `tabWidth` and sets
+        //    `apparentToRealOffset.x = (tabWidth - width) / 2`, which `place` applies for us. That
+        //    is stock M3's own mechanism — `TabIndicatorOffsetNode` also places at the bare `left`.
+        //    Adding the half-slack as well would double it: right of centre at rest, and invisible
+        //    mid-swipe, which is how such a bug survives a device pass.
+        //  - the RTL negation is `TabIndicatorOffsetNode`'s, for the same reason: `TabRowImpl`
+        //    places this node with `placeRelative`, so its own box is already mirrored.
+        //
+        // `width = Dp.Unspecified` on the indicator is still mandatory: `PrimaryIndicator`'s own
+        // default is a 24dp stub, and only `Dp.Unspecified` makes its `requiredWidth` a pass-through
+        // so the constraint below is what decides.
         indicator        = {
             TabRowDefaults.PrimaryIndicator(
-                modifier = Modifier
-                    .tabIndicatorOffset(selected.ordinal, matchContentSize = true)
-                    .layout { measurable, constraints ->
-                        // `tabIndicatorOffset` always hands down a FIXED width, so the bounded case
-                        // is the only real one; the unbounded fall-through measures untouched
-                        // rather than building `Constraints(minWidth = Infinity)`, which throws.
-                        val widened = if (constraints.hasBoundedWidth) {
-                            val target =
-                                constraints.maxWidth + LibraryTabIndicatorCompensation.roundToPx()
-                            constraints.copy(minWidth = target, maxWidth = target)
-                        } else constraints
-                        val placeable = measurable.measure(widened)
-                        layout(placeable.width, placeable.height) { placeable.place(0, 0) }
-                    },
+                modifier = Modifier.tabIndicatorLayout { measurable, constraints, tabPositions ->
+                    // Stock `TabIndicatorOffsetNode`'s own guard, kept: `TabRowImpl` publishes the
+                    // tab positions from inside its own measure pass, so a measure that runs before
+                    // that has nothing to place.
+                    if (tabPositions.isEmpty()) return@tabIndicatorLayout layout(0, 0) {}
+                    val lastTab  = tabPositions.lastIndex
+                    val page     = pagerState.currentPage.coerceIn(0, lastTab)
+                    // Within ±0.5: past that `currentPage` flips and the sign inverts, and because
+                    // `lerp(a, b, 0.5) == lerp(b, a, 0.5)` the bar is continuous across the flip.
+                    // Do NOT rescale it to reach 1.0 — |fraction| already IS the distance travelled
+                    // towards the neighbour, and rescaling would overshoot past it.
+                    val fraction = pagerState.currentPageOffsetFraction
+                    val towards  = when {
+                        fraction > 0f -> page + 1
+                        fraction < 0f -> page - 1
+                        else          -> page
+                    }.coerceIn(0, lastTab)
+                    val t     = abs(fraction).coerceIn(0f, 1f)
+                    val left  = lerp(tabPositions[page].left, tabPositions[towards].left, t)
+                    val width = lerp(
+                        tabPositions[page].contentWidth    + LibraryTabIndicatorCompensation,
+                        tabPositions[towards].contentWidth + LibraryTabIndicatorCompensation,
+                        t,
+                    )
+                    val widthPx   = width.roundToPx().coerceAtLeast(0)
+                    val placeable =
+                        measurable.measure(constraints.copy(minWidth = widthPx, maxWidth = widthPx))
+                    val x = left.roundToPx()
+                        .let { if (layoutDirection == LayoutDirection.Ltr) it else -it }
+                    layout(placeable.width, placeable.height) { placeable.place(x, 0) }
+                },
                 width    = Dp.Unspecified,
             )
         },
         divider          = {},
     ) {
-        LibraryFilter.entries.forEach { filter ->
+        LibraryFilter.entries.forEachIndexed { index, filter ->
             Tab(
-                selected = filter == selected,
+                selected = index == selectedIndex,
+                // Fired from the gesture, and only on a genuine change — re-tapping the tab that
+                // is VISUALLY selected (the pager's page, not the VM's filter, which can still be
+                // catching up) is intentionally silent, matching the picker this replaced.
                 onClick  = {
-                    if (filter != selected) {
+                    if (index != selectedIndex) {
                         haptics.press()
                         onSelect(filter)
                     }
