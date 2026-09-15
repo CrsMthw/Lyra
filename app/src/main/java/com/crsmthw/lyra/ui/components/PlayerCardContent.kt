@@ -279,7 +279,9 @@ fun PlayerCardContent(
             // 2. Nav scope: panel → full PlayerScreen navigation
             // `rememberMorphDiag` is TEMPORARY instrumentation — see util/MorphDiag.kt.
             // The key carries the host's settle generation (`LocalPlayerArtKey`), so each morph
-            // starts from a shared element with no history — read once for both registrations.
+            // starts from a shared element with no history — read once for both registrations,
+            // and used again below to key the wrapper `Box`, so each generation is a fresh
+            // LayoutNODE too. Both registrations sit on that one node.
             val artKey = LocalPlayerArtKey.current
             val localArtMod = if (sharedTransitionScope != null && animatedVisibilityScope != null) {
                 with(sharedTransitionScope) {
@@ -301,23 +303,31 @@ fun PlayerCardContent(
                     ).then(rememberMorphDiag("panel/nav", artState))
                 }
             } else Modifier
-            // 3. A pass-through layout modifier that re-measures this art after every settle of
-            //    the floating player surface: this art is the participant that survives a cancelled
-            //    panel close, and the re-measure is what makes the state machine re-read its target
-            //    bounds provider. It was shipped as the fix for the morph breaking on the gesture
-            //    AFTER a cancelled one and did NOT fix it on device — what does that job now is the
-            //    KEY above (a fresh element per settle, [LocalPlayerArtKey]); this stays as
-            //    belt-and-braces. See [LocalPlayerArtSettleCount]. Appended after the shared
-            //    modifiers so their place at the head of the chain is unchanged; the invalidation
-            //    lands on the same LayoutNode either way.
-            val artSettleMod = rememberArtSettleInvalidation()
-            val artSharedMod = localArtMod.then(navArtMod).then(artSettleMod)
+            val artSharedMod = localArtMod.then(navArtMod)
+
+            // The IMAGE is hoisted into movable content so that recreating the wrapper below
+            // MOVES its node instead of rebuilding it: no Coil re-request, no crossfade replay,
+            // no art-less frame at a re-key. Parameterised rather than capturing — `remember`
+            // runs once, so a captured `artImageModel` would freeze at the first track.
+            // Composable calls inside it (`stringResource`) still evaluate fresh. Invoked exactly
+            // once per composition, from the single `key` block below.
+            val art = remember {
+                movableContentOf<Any?> { model ->
+                    AsyncImage(
+                        model              = model,
+                        contentDescription = stringResource(R.string.cd_album_art),
+                        contentScale       = ContentScale.Crop,
+                        modifier           = Modifier.fillMaxSize(),
+                    )
+                }
+            }
+
             // The art SLOT stays `artSize` whether or not the circle is on — the canvas fills it
             // and the art shrinks inside it — so the Column's height is unchanged and
             // `reservedChrome` above still describes the card. Exactly PlayerScreen's arrangement
             // (canvas as a preceding sibling in the slot Box, `displaySide = side * artScale` on
-            // the art), so the shared-element modifiers keep their place at the head of the art's
-            // chain and the mini ↔ panel / panel ↔ full-player morphs are untouched.
+            // the art's wrapper), so the shared-element modifiers keep their place at the head of
+            // the art's chain and the mini ↔ panel / panel ↔ full-player morphs are untouched.
             val displaySide = artSize * artScale
             Box(Modifier.size(artSize), contentAlignment = Alignment.Center) {
                 // No capture plumbing is needed and none should be added: PlayerViewModel starts
@@ -336,37 +346,42 @@ fun PlayerCardContent(
                         enabled  = true,
                     )
                 }
-                AsyncImage(
-                    model              = artImageModel,
-                    contentDescription = stringResource(R.string.cd_album_art),
-                    contentScale       = ContentScale.Crop,
-                    modifier           = artSharedMod
-                        .size(displaySide)
-                        .clip(RoundedCornerShape(16.dp))
-                        .graphicsLayer { translationX = (artDragX * 0.3f).coerceIn(-80f, 80f) + artOffsetX.value }
-                        .pointerInput(Unit) {
-                            detectHorizontalDragGestures(
-                                onDragStart      = { artDragX = 0f },
-                                onDragEnd        = {
-                                    when {
-                                        artDragX < -swipeThresholdPx -> {
-                                            val s = (artDragX * 0.3f).coerceIn(-80f, 80f); artDragX = 0f; skipDirection = 1
-                                            scope.launch { artOffsetX.snapTo(s); artOffsetX.animateTo(-1500f, tween(250, easing = FastOutLinearInEasing)) }
-                                            playerViewModel.skipNext()
+                // A fresh NODE per generation, not just a fresh element: the wrapper carries the
+                // art's whole modifier chain in its original order (so the animated bounds are
+                // unchanged) and `key(artKey)` recreates it whenever the host bumps the
+                // generation. Re-keying an EXISTING node clears its `isPlaced` flag and only
+                // requests a lookahead remeasure, while the flag is set in the approach
+                // PLACEMENT — see [LocalPlayerArtKey].
+                key(artKey) {
+                    Box(
+                        modifier = artSharedMod
+                            .size(displaySide)
+                            .clip(RoundedCornerShape(16.dp))
+                            .graphicsLayer { translationX = (artDragX * 0.3f).coerceIn(-80f, 80f) + artOffsetX.value }
+                            .pointerInput(Unit) {
+                                detectHorizontalDragGestures(
+                                    onDragStart      = { artDragX = 0f },
+                                    onDragEnd        = {
+                                        when {
+                                            artDragX < -swipeThresholdPx -> {
+                                                val s = (artDragX * 0.3f).coerceIn(-80f, 80f); artDragX = 0f; skipDirection = 1
+                                                scope.launch { artOffsetX.snapTo(s); artOffsetX.animateTo(-1500f, tween(250, easing = FastOutLinearInEasing)) }
+                                                playerViewModel.skipNext()
+                                            }
+                                            artDragX > swipeThresholdPx -> {
+                                                val s = (artDragX * 0.3f).coerceIn(-80f, 80f); artDragX = 0f; skipDirection = -1
+                                                scope.launch { artOffsetX.snapTo(s); artOffsetX.animateTo(1500f, tween(250, easing = FastOutLinearInEasing)) }
+                                                playerViewModel.skipPrevious()
+                                            }
+                                            else -> artDragX = 0f
                                         }
-                                        artDragX > swipeThresholdPx -> {
-                                            val s = (artDragX * 0.3f).coerceIn(-80f, 80f); artDragX = 0f; skipDirection = -1
-                                            scope.launch { artOffsetX.snapTo(s); artOffsetX.animateTo(1500f, tween(250, easing = FastOutLinearInEasing)) }
-                                            playerViewModel.skipPrevious()
-                                        }
-                                        else -> artDragX = 0f
-                                    }
-                                },
-                                onDragCancel     = { artDragX = 0f },
-                                onHorizontalDrag = { _, amount -> artDragX += amount },
-                            )
-                        },
-                )
+                                    },
+                                    onDragCancel     = { artDragX = 0f },
+                                    onHorizontalDrag = { _, amount -> artDragX += amount },
+                                )
+                            },
+                    ) { art(artImageModel) }
+                }
             }
 
             Spacer(Modifier.height(16.dp))

@@ -70,7 +70,6 @@ import com.crsmthw.lyra.ui.components.AddToPlaylistSheet
 import com.crsmthw.lyra.ui.components.DevicePickerSheet
 import com.crsmthw.lyra.ui.components.LocalPlayerArtKey
 import com.crsmthw.lyra.ui.components.PlainLyricsView
-import com.crsmthw.lyra.ui.components.rememberArtSettleInvalidation
 import com.crsmthw.lyra.ui.components.SyncedLyricsView
 import androidx.compose.ui.platform.LocalHapticFeedback
 import com.crsmthw.lyra.util.confirm
@@ -421,21 +420,16 @@ fun PlayerScreen(
                     val side = minOf(maxWidth, maxHeight * 0.82f)
                     val displaySide = side * artScale
 
-                    // The shared-element modifier, plus a pass-through layout modifier that
-                    // re-measures this art after every settle of the app's floating player surface.
-                    // The big art is the participant that SURVIVES a cancelled back gesture off
-                    // this screen, and the re-measure is what makes the state machine re-read its
-                    // target bounds provider. It was shipped as the fix for the gesture after a
-                    // cancelled one having no flight and the big art vanishing (device report 48)
-                    // and it did NOT fix it on device; it is kept as belt-and-braces. What replaces
-                    // it is the KEY: `LocalPlayerArtKey` carries a generation the host bumps after
-                    // every settle, so this element has no history from the previous morph to
-                    // inherit. Both are explained in PlayerPanelHost — see `LocalPlayerArtKey` and
-                    // `LocalPlayerArtSettleCount`.
-                    // `rememberMorphDiag` is TEMPORARY instrumentation — see util/MorphDiag.kt.
+                    // The shared-element modifier. `LocalPlayerArtKey` carries a generation the
+                    // host bumps after every settle, so this element has no history from the
+                    // previous morph to inherit — and it also keys the wrapper `Box` below, so
+                    // the LayoutNODE carrying these modifiers is fresh per generation too. See
+                    // `LocalPlayerArtKey` in PlayerPanelHost for why identity alone was not
+                    // enough. `rememberMorphDiag` is TEMPORARY instrumentation — util/MorphDiag.kt.
+                    val artKey = LocalPlayerArtKey.current
                     val artMod = if (sharedTransitionScope != null && animatedContentScope != null) {
                         with(sharedTransitionScope) {
-                            val artState = rememberSharedContentState(LocalPlayerArtKey.current)
+                            val artState = rememberSharedContentState(artKey)
                             Modifier.sharedElement(
                                 sharedContentState      = artState,
                                 animatedVisibilityScope = animatedContentScope,
@@ -443,7 +437,24 @@ fun PlayerScreen(
                             ).then(rememberMorphDiag("player/land", artState))
                         }
                     } else Modifier
-                    val artSettleMod = rememberArtSettleInvalidation()
+
+                    // The IMAGE, hoisted into movable content so recreating the wrapper MOVES its
+                    // node instead of rebuilding it (no Coil re-request, no crossfade replay, no
+                    // art-less frame). Remembered ABOVE the AnimatedContent so a lyrics swap does
+                    // not churn it; parameterised rather than capturing, because `remember` runs
+                    // once and a captured `artImageModel` would freeze at the first track. Only
+                    // the art branch invokes it, and `contentKey` is that branch's Boolean, so
+                    // two art branches can never be composed at the same time.
+                    val art = remember {
+                        movableContentOf<Any?> { model ->
+                            AsyncImage(
+                                model              = model,
+                                contentDescription = stringResource(R.string.cd_album_art),
+                                contentScale       = ContentScale.Crop,
+                                modifier           = Modifier.fillMaxSize(),
+                            )
+                        }
+                    }
 
                     val lyricsContentMod = Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp))
 
@@ -484,50 +495,49 @@ fun PlayerScreen(
                                 }
                             } else {
                                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    AsyncImage(
-                                        model              = artImageModel,
-                                        contentDescription = stringResource(R.string.cd_album_art),
-                                        contentScale       = ContentScale.Crop,
-                                        modifier           = artMod
-                                            .then(artSettleMod)
-                                            .size(displaySide)
-                                            .clip(RoundedCornerShape(16.dp))
-                                            .graphicsLayer {
-                                                translationX = (artDragX * 0.3f).coerceIn(-80f, 80f) + artOffsetX.value
-                                            }
-                                            .pointerInput(Unit) {
-                                                detectHorizontalDragGestures(
-                                                    onDragStart      = { artDragX = 0f },
-                                                    onDragEnd        = {
-                                                        when {
-                                                            artDragX < -swipeThresholdPx -> {
-                                                                val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
-                                                                artDragX = 0f; skipDirection = 1
-                                                                scope.launch {
-                                                                    artOffsetX.snapTo(s)
-                                                                    artOffsetX.animateTo(-1500f, tween(250, easing = FastOutLinearInEasing))
+                                    // A fresh NODE per generation — see the comment on `artKey`.
+                                    key(artKey) {
+                                        Box(
+                                            modifier = artMod
+                                                .size(displaySide)
+                                                .clip(RoundedCornerShape(16.dp))
+                                                .graphicsLayer {
+                                                    translationX = (artDragX * 0.3f).coerceIn(-80f, 80f) + artOffsetX.value
+                                                }
+                                                .pointerInput(Unit) {
+                                                    detectHorizontalDragGestures(
+                                                        onDragStart      = { artDragX = 0f },
+                                                        onDragEnd        = {
+                                                            when {
+                                                                artDragX < -swipeThresholdPx -> {
+                                                                    val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
+                                                                    artDragX = 0f; skipDirection = 1
+                                                                    scope.launch {
+                                                                        artOffsetX.snapTo(s)
+                                                                        artOffsetX.animateTo(-1500f, tween(250, easing = FastOutLinearInEasing))
+                                                                    }
+                                                                    haptics.press()
+                                                                    viewModel.skipNext()
                                                                 }
-                                                                haptics.press()
-                                                                viewModel.skipNext()
-                                                            }
-                                                            artDragX > swipeThresholdPx -> {
-                                                                val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
-                                                                artDragX = 0f; skipDirection = -1
-                                                                scope.launch {
-                                                                    artOffsetX.snapTo(s)
-                                                                    artOffsetX.animateTo(1500f, tween(250, easing = FastOutLinearInEasing))
+                                                                artDragX > swipeThresholdPx -> {
+                                                                    val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
+                                                                    artDragX = 0f; skipDirection = -1
+                                                                    scope.launch {
+                                                                        artOffsetX.snapTo(s)
+                                                                        artOffsetX.animateTo(1500f, tween(250, easing = FastOutLinearInEasing))
+                                                                    }
+                                                                    haptics.press()
+                                                                    viewModel.skipPrevious()
                                                                 }
-                                                                haptics.press()
-                                                                viewModel.skipPrevious()
+                                                                else -> artDragX = 0f
                                                             }
-                                                            else -> artDragX = 0f
-                                                        }
-                                                    },
-                                                    onDragCancel     = { artDragX = 0f },
-                                                    onHorizontalDrag = { _, amount -> artDragX += amount },
-                                                )
-                                            },
-                                    )
+                                                        },
+                                                        onDragCancel     = { artDragX = 0f },
+                                                        onHorizontalDrag = { _, amount -> artDragX += amount },
+                                                    )
+                                                },
+                                        ) { art(artImageModel) }
+                                    }
                                 }
                             }
                         }
@@ -604,13 +614,14 @@ fun PlayerScreen(
                     val side = minOf(maxWidth, maxHeight)
                     val displaySide = side * artScale
 
-                    // Shared-element modifier (keyed on `LocalPlayerArtKey`, a fresh element per
-                    // settle) + the settle re-measure — see the landscape branch above,
-                    // and `LocalPlayerArtKey` / `LocalPlayerArtSettleCount` in PlayerPanelHost.
+                    // Shared-element modifier (keyed on `LocalPlayerArtKey`, a fresh element AND a
+                    // fresh node per settle) — see the landscape branch above, and
+                    // `LocalPlayerArtKey` in PlayerPanelHost.
                     // `rememberMorphDiag` is TEMPORARY instrumentation — see util/MorphDiag.kt.
+                    val artKey = LocalPlayerArtKey.current
                     val artMod = if (sharedTransitionScope != null && animatedContentScope != null) {
                         with(sharedTransitionScope) {
-                            val artState = rememberSharedContentState(LocalPlayerArtKey.current)
+                            val artState = rememberSharedContentState(artKey)
                             Modifier.sharedElement(
                                 sharedContentState      = artState,
                                 animatedVisibilityScope = animatedContentScope,
@@ -618,7 +629,18 @@ fun PlayerScreen(
                             ).then(rememberMorphDiag("player/port", artState))
                         }
                     } else Modifier
-                    val artSettleMod = rememberArtSettleInvalidation()
+
+                    // The IMAGE in movable content — see the landscape branch for why.
+                    val art = remember {
+                        movableContentOf<Any?> { model ->
+                            AsyncImage(
+                                model              = model,
+                                contentDescription = stringResource(R.string.cd_album_art),
+                                contentScale       = ContentScale.Crop,
+                                modifier           = Modifier.fillMaxSize(),
+                            )
+                        }
+                    }
 
                     val lyricsContentMod = Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp))
 
@@ -659,50 +681,49 @@ fun PlayerScreen(
                                 }
                             } else {
                                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    AsyncImage(
-                                        model              = artImageModel,
-                                        contentDescription = stringResource(R.string.cd_album_art),
-                                        contentScale       = ContentScale.Crop,
-                                        modifier           = artMod
-                                            .then(artSettleMod)
-                                            .size(displaySide)
-                                            .clip(RoundedCornerShape(16.dp))
-                                            .graphicsLayer {
-                                                translationX = (artDragX * 0.3f).coerceIn(-80f, 80f) + artOffsetX.value
-                                            }
-                                            .pointerInput(Unit) {
-                                                detectHorizontalDragGestures(
-                                                    onDragStart      = { artDragX = 0f },
-                                                    onDragEnd        = {
-                                                        when {
-                                                            artDragX < -swipeThresholdPx -> {
-                                                                val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
-                                                                artDragX = 0f; skipDirection = 1
-                                                                scope.launch {
-                                                                    artOffsetX.snapTo(s)
-                                                                    artOffsetX.animateTo(-1500f, tween(250, easing = FastOutLinearInEasing))
+                                    // A fresh NODE per generation — see the landscape branch.
+                                    key(artKey) {
+                                        Box(
+                                            modifier = artMod
+                                                .size(displaySide)
+                                                .clip(RoundedCornerShape(16.dp))
+                                                .graphicsLayer {
+                                                    translationX = (artDragX * 0.3f).coerceIn(-80f, 80f) + artOffsetX.value
+                                                }
+                                                .pointerInput(Unit) {
+                                                    detectHorizontalDragGestures(
+                                                        onDragStart      = { artDragX = 0f },
+                                                        onDragEnd        = {
+                                                            when {
+                                                                artDragX < -swipeThresholdPx -> {
+                                                                    val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
+                                                                    artDragX = 0f; skipDirection = 1
+                                                                    scope.launch {
+                                                                        artOffsetX.snapTo(s)
+                                                                        artOffsetX.animateTo(-1500f, tween(250, easing = FastOutLinearInEasing))
+                                                                    }
+                                                                    haptics.press()
+                                                                    viewModel.skipNext()
                                                                 }
-                                                                haptics.press()
-                                                                viewModel.skipNext()
-                                                            }
-                                                            artDragX > swipeThresholdPx -> {
-                                                                val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
-                                                                artDragX = 0f; skipDirection = -1
-                                                                scope.launch {
-                                                                    artOffsetX.snapTo(s)
-                                                                    artOffsetX.animateTo(1500f, tween(250, easing = FastOutLinearInEasing))
+                                                                artDragX > swipeThresholdPx -> {
+                                                                    val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
+                                                                    artDragX = 0f; skipDirection = -1
+                                                                    scope.launch {
+                                                                        artOffsetX.snapTo(s)
+                                                                        artOffsetX.animateTo(1500f, tween(250, easing = FastOutLinearInEasing))
+                                                                    }
+                                                                    haptics.press()
+                                                                    viewModel.skipPrevious()
                                                                 }
-                                                                haptics.press()
-                                                                viewModel.skipPrevious()
+                                                                else -> artDragX = 0f
                                                             }
-                                                            else -> artDragX = 0f
-                                                        }
-                                                    },
-                                                    onDragCancel     = { artDragX = 0f },
-                                                    onHorizontalDrag = { _, amount -> artDragX += amount },
-                                                )
-                                            },
-                                    )
+                                                        },
+                                                        onDragCancel     = { artDragX = 0f },
+                                                        onHorizontalDrag = { _, amount -> artDragX += amount },
+                                                    )
+                                                },
+                                        ) { art(artImageModel) }
+                                    }
                                 }
                             }
                         }
