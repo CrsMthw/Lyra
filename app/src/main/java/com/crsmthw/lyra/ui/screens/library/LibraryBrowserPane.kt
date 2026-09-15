@@ -593,6 +593,17 @@ internal fun LibraryBrowserPane(
                         beyondViewportPageCount = 0,
                     ) { page ->
                         val pageFilter    = LibraryFilter.entries[page]
+                        // Fetch when the page COMPOSES — for a neighbour that is the moment the
+                        // drag starts, whereas `setLibraryFilter` only hears about a swipe once it
+                        // SETTLES. Without this, the first swipe onto a never-loaded Albums /
+                        // Artists / Shows page rendered its empty text ("No saved albums") for the
+                        // whole gesture and swapped to the spinner on release.
+                        // `ensureCollectionsLoaded` is a no-op while a sweep is in flight and once
+                        // every leg has completed, so it cannot race the settle path into two
+                        // fetches — and a swipe the user snaps back simply loads the content early.
+                        LaunchedEffect(pageFilter) {
+                            if (pageFilter != LibraryFilter.PLAYLISTS) viewModel.ensureCollectionsLoaded()
+                        }
                         val pageListState = listStates[pageFilter]
                         // Per page, as Search does it: each list keeps its own baseline, and a
                         // neighbour composing mid-swipe ticks nothing (the helper is gated on that
