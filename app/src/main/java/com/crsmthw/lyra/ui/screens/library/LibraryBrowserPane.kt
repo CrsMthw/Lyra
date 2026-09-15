@@ -49,6 +49,9 @@ import com.crsmthw.lyra.util.confirm
 import com.crsmthw.lyra.util.press
 import com.crsmthw.lyra.util.rememberArtBoundsTransform
 import java.io.File
+import kotlin.math.abs
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
 
 // ── Library browser pane ──────────────────────────────────────────────────────
 
@@ -376,21 +379,49 @@ internal fun LibraryBrowserPane(
         LibraryFilter.entries.size
     }
 
-    // Swipe → filter. `settledPage` changes only once a drag or a programmatic scroll comes to rest:
-    // while one runs it holds the page the scroll STARTED from, which is the value this collector has
-    // already seen, so a tab tap's own `animateScrollToPage` can never write the old tab back
-    // mid-flight. A swipe therefore reaches the VM silently — the `press()` haptic belongs to a TAP,
-    // and is fired from the gesture inside `LibraryTabRow`.
+    // Swipe → filter. A swipe reaches the VM silently — the `press()` haptic belongs to a TAP, and
+    // is fired from the gesture inside `LibraryTabRow`.
+    //
+    // NEITHER `settledPage` NOR `!isScrollInProgress` ALONE MEANS "SETTLED", so the test is the
+    // whole snapped-and-at-rest condition. Two facts force that:
+    //  - a CANCELLED programmatic scroll is never re-settled by anything in the pager package (no
+    //    settle-on-cancel path; `PagerWrapperFlingBehavior` only runs for a gesture fling), so
+    //    `isScrollInProgress` can go false at a FRACTIONAL offset;
+    //  - `PagerState.scroll` writes `settledPageState = currentPage` when it starts over a finished
+    //    scroll, so a "wrong tab" correction tap ~150 ms after the first one (tap Albums, then tap
+    //    Playlists) can make `settledPage` report the INTERMEDIATE page for the whole of the return
+    //    animation — which this collector then pushed into `setLibraryFilter`, losing the user's
+    //    second tap and (with the tap→pager guard below firing on the re-key) parking the pager
+    //    between two pages.
+    // Every state the decision rests on is read INSIDE the `snapshotFlow` block so it is observed —
+    // a `filter {}` over a read outside it would sample a stale value and silently drop emissions.
+    // `distinctUntilChanged()` is load-bearing: `snapshotFlow` only dedupes its own block result,
+    // so a 2 → null → 2 sequence would otherwise deliver 2 twice (harmless, `setLibraryFilter` is
+    // idempotent, but there is no reason to wake the VM for it).
     LaunchedEffect(pagerState, viewModel) {
-        snapshotFlow { pagerState.settledPage }
+        snapshotFlow {
+            if (pagerState.isScrollInProgress ||
+                abs(pagerState.currentPageOffsetFraction) > 0.01f) null
+            else pagerState.currentPage
+        }
+            .filterNotNull()
+            .distinctUntilChanged()
             .collect { viewModel.setLibraryFilter(LibraryFilter.entries[it]) }
     }
     // Tab tap → pager. While a full-area state is up the pager is not composed, and a suspending
     // `animateScrollToPage` would park on its first-layout wait and then animate in front of the
     // user the moment the content appeared — so jump the state instead in that case.
+    //
+    // The early return carries BOTH halves of `animateScrollToPage`'s own guard
+    // (`page == currentPage && currentPageOffsetFraction == pageOffsetFraction`). The offset half is
+    // the one that matters: `currentPage` is the page nearest the snap position, so it flips at the
+    // halfway mark while the offset is still fractional — and a re-key that cancels an in-flight
+    // programmatic scroll at that instant would otherwise return early and leave the pager parked
+    // between two pages with nothing to settle it.
     LaunchedEffect(state.libraryFilter, pagerVisible) {
         val target = state.libraryFilter.ordinal
-        if (pagerState.currentPage == target) return@LaunchedEffect
+        if (pagerState.currentPage == target &&
+            pagerState.currentPageOffsetFraction == 0f) return@LaunchedEffect
         if (pagerVisible) pagerState.animateScrollToPage(target)
         else              pagerState.requestScrollToPage(target)
     }
