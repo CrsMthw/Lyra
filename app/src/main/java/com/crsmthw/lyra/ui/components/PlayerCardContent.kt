@@ -58,6 +58,7 @@ import com.crsmthw.lyra.util.loadAlbumArtColors
 import com.crsmthw.lyra.util.press
 import com.crsmthw.lyra.util.reject
 import com.crsmthw.lyra.util.rememberArtBoundsTransform
+import com.crsmthw.lyra.util.rememberMorphDiag
 import com.crsmthw.lyra.util.tick
 import com.crsmthw.lyra.util.toTimeString
 import com.crsmthw.lyra.util.toggle
@@ -276,22 +277,25 @@ fun PlayerCardContent(
             // Album art — participates in two independent shared element transitions:
             // 1. Local scope: mini player ↔ panel expansion
             // 2. Nav scope: panel → full PlayerScreen navigation
+            // `rememberMorphDiag` is TEMPORARY instrumentation — see util/MorphDiag.kt.
             val localArtMod = if (sharedTransitionScope != null && animatedVisibilityScope != null) {
                 with(sharedTransitionScope) {
+                    val artState = rememberSharedContentState(key = "album-art")
                     Modifier.sharedElement(
-                        sharedContentState      = rememberSharedContentState(key = "album-art"),
+                        sharedContentState      = artState,
                         animatedVisibilityScope = animatedVisibilityScope,
                         boundsTransform         = rememberArtBoundsTransform(),
-                    )
+                    ).then(rememberMorphDiag("panel/local", artState))
                 }
             } else Modifier
             val navArtMod = if (navSharedTransitionScope != null && animatedVisibilityScope != null) {
                 with(navSharedTransitionScope) {
+                    val artState = rememberSharedContentState(key = "album-art")
                     Modifier.sharedElement(
-                        sharedContentState      = rememberSharedContentState(key = "album-art"),
+                        sharedContentState      = artState,
                         animatedVisibilityScope = animatedVisibilityScope,
                         boundsTransform         = rememberArtBoundsTransform(),
-                    )
+                    ).then(rememberMorphDiag("panel/nav", artState))
                 }
             } else Modifier
             // 3. A pass-through layout modifier that re-measures this art after every settle of

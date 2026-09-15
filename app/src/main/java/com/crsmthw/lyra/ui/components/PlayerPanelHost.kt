@@ -34,6 +34,7 @@ import androidx.navigationevent.NavigationEventTransitionState
 import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
 import com.crsmthw.lyra.util.NavTransitionMillis
 import com.crsmthw.lyra.util.confirm
+import com.crsmthw.lyra.util.morphLog
 import com.crsmthw.lyra.util.screenTransitionSpec
 import androidx.compose.ui.unit.dp
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
@@ -255,6 +256,13 @@ private enum class PanelBackPhase { Idle, Seeking, Committing, Cancelled }
 /** Non-snapshot cell for the mini player's last on-screen width fraction — see its use site. */
 private class MiniWidthHolder(var value: Float)
 
+/**
+ * Non-snapshot scratch for the TEMPORARY morph diagnostics (`util/MorphDiag.kt`) — it keeps a
+ * per-gesture "already logged" flag so the seek branches can log their FIRST progress frame
+ * without logging every frame. Delete with the diagnostics.
+ */
+private class MorphDiagState(var seekLogged: Boolean = false)
+
 /** Non-snapshot cell for the last browse surface the panel was seen over — see its use site. */
 private class SurfaceKeyHolder(var value: String?)
 
@@ -454,7 +462,16 @@ fun PlayerPanelHost(
     // re-measure of three art chains, and it needs no knowledge of WHICH path settled it.
     val artSettles = remember { mutableIntStateOf(0) }
     LaunchedEffect(surfaceState.currentState, surfaceState.targetState) {
-        if (surfaceState.currentState == surfaceState.targetState) artSettles.intValue++
+        if (surfaceState.currentState == surfaceState.targetState) {
+            artSettles.intValue++
+            morphLog {   // TEMPORARY
+                "settle bump artSettles=${artSettles.intValue} at ${surfaceState.currentState}"
+            }
+        } else {
+            morphLog {   // TEMPORARY
+                "settle hold cur=${surfaceState.currentState} tgt=${surfaceState.targetState}"
+            }
+        }
     }
 
     // A read-only mirror of the gesture every back handler already sees. Observing this StateFlow
@@ -486,12 +503,35 @@ fun PlayerPanelHost(
     var panelBack         by remember { mutableStateOf(PanelBackPhase.Idle) }
     var panelBackProgress by remember { mutableFloatStateOf(0f) }
 
+    // TEMPORARY diagnostics scratch + one line per PHASE change of the back gesture (never per
+    // progress frame: the key is a Boolean, and the direction is carried in the message). See
+    // util/MorphDiag.kt — delete both with it.
+    val diag          = remember { MorphDiagState() }
+    val gestureActive = inProgress != null
+    LaunchedEffect(gestureActive) {
+        morphLog {
+            val phase = if (gestureActive) "InProgress(dir=${inProgress.direction})" else "Idle"
+            "gesture $phase target=$surfaceTarget afterBack=$surfaceAfterBack" +
+                " cur=${surfaceState.currentState} tgt=${surfaceState.targetState}" +
+                " panelVisible=$panelVisible panelBack=$panelBack"
+        }
+    }
+
     // ── What drives the transition: the panel's close gesture, a route gesture, or a plain change ─
     when {
         // (1) The panel's own close gesture: the panel retreats and the bar rises with the finger,
         //     the art flying between them because both are children of this one transition.
         panelBack == PanelBackPhase.Seeking ->
             LaunchedEffect(panelBackProgress, surfaceAfterPanelClose) {
+                // TEMPORARY: the FIRST progress frame only (the flag is cleared by branch 3).
+                if (!diag.seekLogged) {
+                    diag.seekLogged = true
+                    morphLog {
+                        "seek(panel) -> $surfaceAfterPanelClose p=$panelBackProgress" +
+                            " cur=${surfaceState.currentState} tgt=${surfaceState.targetState}" +
+                            " f=${surfaceState.fraction} panelBack=$panelBack"
+                    }
+                }
                 surfaceState.seekTo(panelBackProgress.coerceIn(0f, 1f), surfaceAfterPanelClose)
             }
 
@@ -508,12 +548,30 @@ fun PlayerPanelHost(
         panelBack == PanelBackPhase.Idle && !panelVisible &&
             backProgress != null && surfaceAfterBack != surfaceTarget ->
             LaunchedEffect(backProgress, surfaceAfterBack) {
+                // TEMPORARY: the FIRST progress frame only (the flag is cleared by branch 3).
+                if (!diag.seekLogged) {
+                    diag.seekLogged = true
+                    morphLog {
+                        "seek(route) -> $surfaceAfterBack p=$backProgress" +
+                            " cur=${surfaceState.currentState} tgt=${surfaceState.targetState}" +
+                            " f=${surfaceState.fraction} panelBack=$panelBack"
+                    }
+                }
                 surfaceState.seekTo(backProgress, surfaceAfterBack)
             }
 
         // (3) Everything else: the commit or cancel of either gesture, and every ordinary change.
         else -> LaunchedEffect(surfaceTarget, panelBack) {
             val effectScope = this
+
+            // TEMPORARY: one line per entry of this branch — i.e. per commit, cancel or ordinary
+            // change — and re-arm the seek branches' first-frame log. See util/MorphDiag.kt.
+            diag.seekLogged = false
+            morphLog {
+                "settled-branch panelBack=$panelBack target=$surfaceTarget" +
+                    " cur=${surfaceState.currentState} tgt=${surfaceState.targetState}" +
+                    " f=${surfaceState.fraction}"
+            }
 
             // Wind a released-but-uncommitted seek back to `currentState`. The duration is scaled
             // by how far the gesture actually got — `NavHost.kt`'s cancel formula, mirrored in
@@ -523,6 +581,11 @@ fun PlayerPanelHost(
             suspend fun unwindSeek() {
                 val totalMillis = (surfaceTransition.totalDurationNanos / 1_000_000)
                     .coerceAtLeast(NavTransitionMillis.toLong())
+                morphLog {   // TEMPORARY
+                    "unwind start f=${surfaceState.fraction} cur=${surfaceState.currentState}" +
+                        " tgt=${surfaceState.targetState} snapTarget=$surfaceTarget" +
+                        " totalMs=$totalMillis"
+                }
                 animate(
                     initialValue  = surfaceState.fraction,
                     targetValue   = 0f,
@@ -544,6 +607,10 @@ fun PlayerPanelHost(
                 // lands after this snap is inert by construction: `currentState == targetState`
                 // makes `seekTo` return without touching anything.
                 surfaceState.snapTo(surfaceTarget)
+                morphLog {   // TEMPORARY
+                    "unwind end snapTo=$surfaceTarget cur=${surfaceState.currentState}" +
+                        " tgt=${surfaceState.targetState} f=${surfaceState.fraction}"
+                }
             }
 
             // Deliberately NO `animationSpec` on any `animateTo` below. With one,
@@ -563,6 +630,7 @@ fun PlayerPanelHost(
                 // `surfaceTarget` is still `Panel` would REVERSE the gesture. The seek already set
                 // `targetState`, so `animateTo` finds it unchanged and plays only the remainder.
                 PanelBackPhase.Committing -> if (surfaceTarget != PlayerSurface.Panel) {
+                    morphLog { "commit: animateTo($surfaceTarget)" }   // TEMPORARY
                     surfaceState.animateTo(surfaceTarget)
                     panelBack = PanelBackPhase.Idle
                 } else {
@@ -586,10 +654,12 @@ fun PlayerPanelHost(
                     // `panelVisible` is true again — the scrim composed WITH its `clickable`, i.e.
                     // a permanent half-opacity tap sink over the browse screen with
                     // `LocalPopOutPanelOpen` true, so every hosted back handler yielded to it.
+                    morphLog { "commit: panel re-opened mid-close -> Idle" }   // TEMPORARY
                     panelBack = PanelBackPhase.Idle
                 }
                 // Released without committing: unwind, leaving the panel open.
                 PanelBackPhase.Cancelled -> {
+                    morphLog { "cancel(panel): unwind" }   // TEMPORARY
                     unwindSeek()
                     panelBack = PanelBackPhase.Idle
                 }
@@ -625,14 +695,19 @@ fun PlayerPanelHost(
                             surfaceTarget != surfaceState.targetState &&
                             surfaceTarget != surfaceState.currentState
                         ) {
+                            morphLog { "idle: snapTo in-flight ${surfaceState.targetState}" }   // TEMPORARY
                             surfaceState.snapTo(surfaceState.targetState)
                         }
+                        morphLog { "idle: animateTo($surfaceTarget)" }   // TEMPORARY
                         surfaceState.animateTo(surfaceTarget)
                     }
                     // A route gesture released without committing, or a reversal of a running
                     // change back to where it started.
-                    surfaceState.targetState != surfaceTarget -> unwindSeek()
-                    else -> Unit
+                    surfaceState.targetState != surfaceTarget -> {
+                        morphLog { "idle: cancel/reversal -> unwind" }   // TEMPORARY
+                        unwindSeek()
+                    }
+                    else -> morphLog { "idle: nothing to do" }   // TEMPORARY
                 }
                 // Driven by branch (1); this effect is not even composed then.
                 PanelBackPhase.Seeking -> Unit
@@ -860,7 +935,19 @@ fun PlayerPanelHost(
                     // Deliberately NOT applied to the mini's primary scope on WIDE screens: there the
                     // primary is the LOCAL mini↔pop-out morph, which has nothing to do with nav
                     // transitions.
-                    val navArtConfig = rememberMatchWhenConfig(LocalPlayerRouteVisible.current)
+                    val routeVisible = LocalPlayerRouteVisible.current
+                    val navArtConfig = rememberMatchWhenConfig(routeVisible)
+
+                    // TEMPORARY: one line whenever the scope routing or the match gate changes —
+                    // this is what says WHICH participants were eligible on a given gesture.
+                    // Read inside this scope (not at host-body scope) so the diagnostics do not
+                    // move where `LocalPlayerRouteVisible` is subscribed. See util/MorphDiag.kt.
+                    LaunchedEffect(routeVisible, canShowPanel, miniNeedsNavScope, panelPresent) {
+                        morphLog {
+                            "gates routeVisible=$routeVisible canShowPanel=$canShowPanel" +
+                                " miniNavScope=$miniNeedsNavScope panelPresent=$panelPresent"
+                        }
+                    }
 
                     // The mini player's own AnimatedVisibility — a child of `barTransition` above — is
                     // its shared-element scope in BOTH layers (MiniPlayer falls back to its inner scope,

@@ -77,6 +77,7 @@ import com.crsmthw.lyra.util.loadAlbumArtColors
 import com.crsmthw.lyra.util.press
 import com.crsmthw.lyra.util.reject
 import com.crsmthw.lyra.util.rememberArtBoundsTransform
+import com.crsmthw.lyra.util.rememberMorphDiag
 import com.crsmthw.lyra.util.tick
 import com.crsmthw.lyra.util.toTimeString
 import com.crsmthw.lyra.util.toggle
@@ -426,13 +427,15 @@ fun PlayerScreen(
                     // provider when a node holding the key is measured again — without that, the
                     // gesture after a cancelled one had no flight and the big art vanished (device
                     // report 48). See `LocalPlayerArtSettleCount` in PlayerPanelHost.
+                    // `rememberMorphDiag` is TEMPORARY instrumentation — see util/MorphDiag.kt.
                     val artMod = if (sharedTransitionScope != null && animatedContentScope != null) {
                         with(sharedTransitionScope) {
+                            val artState = rememberSharedContentState("album-art")
                             Modifier.sharedElement(
-                                sharedContentState      = rememberSharedContentState("album-art"),
+                                sharedContentState      = artState,
                                 animatedVisibilityScope = animatedContentScope,
                                 boundsTransform         = rememberArtBoundsTransform(),
-                            )
+                            ).then(rememberMorphDiag("player/land", artState))
                         }
                     } else Modifier
                     val artSettleMod = rememberArtSettleInvalidation()
@@ -598,13 +601,15 @@ fun PlayerScreen(
 
                     // Shared-element modifier + the settle re-measure — see the landscape branch
                     // above and `LocalPlayerArtSettleCount` in PlayerPanelHost.
+                    // `rememberMorphDiag` is TEMPORARY instrumentation — see util/MorphDiag.kt.
                     val artMod = if (sharedTransitionScope != null && animatedContentScope != null) {
                         with(sharedTransitionScope) {
+                            val artState = rememberSharedContentState("album-art")
                             Modifier.sharedElement(
-                                sharedContentState      = rememberSharedContentState("album-art"),
+                                sharedContentState      = artState,
                                 animatedVisibilityScope = animatedContentScope,
                                 boundsTransform         = rememberArtBoundsTransform(),
-                            )
+                            ).then(rememberMorphDiag("player/port", artState))
                         }
                     } else Modifier
                     val artSettleMod = rememberArtSettleInvalidation()
