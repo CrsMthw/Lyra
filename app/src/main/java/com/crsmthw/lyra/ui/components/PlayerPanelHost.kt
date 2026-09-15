@@ -102,6 +102,55 @@ val LocalPopOutPanelOpen: ProvidableCompositionLocal<Boolean> = compositionLocal
  */
 val LocalPlayerRouteVisible: ProvidableCompositionLocal<Boolean> = compositionLocalOf { true }
 
+/** The shared-element key of the app-wide album art, before the settle generation is appended. */
+private const val AlbumArtKeyBase = "album-art"
+
+/**
+ * The KEY every `"album-art"` shared-element participant must register under — the app's ONE
+ * floating-player morph. [PlayerPanelHost] provides it as `"album-art#<generation>"` and bumps the
+ * generation after every SETTLE of the floating surface, so each morph runs on a shared element
+ * with **no history**.
+ *
+ * **Why identity rather than another repair of the state machine.** A cancelled predictive-back
+ * gesture disposes the participant the abandoned direction was heading for (the mini player for a
+ * cancelled panel close, the bar or the pop-out panel for a cancelled back off `PlayerScreen`), and
+ * the NEXT gesture then had no flight at all: the art in the pop-out panel (device report 44,
+ * unfolded) or the full player's big art (report 48, folded) simply disappeared, while a COMMITTED
+ * gesture in between cured it. `SharedElement` keeps per-key state that outlives the participants —
+ * `SharedTransitionStateMachine.state`, its `targetBoundsProvider` (the rect the next morph starts
+ * FROM), and a configured match's `targetData`/`currentBounds` — and a cancelled seek can strand any
+ * of them. The 2026-09-15 repair targeted exactly one (the provider) by forcing a re-measure of the
+ * survivor; it did not fix the device (see [LocalPlayerArtSettleCount], which still carries it as
+ * belt-and-braces). A fresh key does not need to know WHICH field went stale:
+ * `rememberSharedContentState` is `remember(key)` and `sharedBoundsImpl` wraps everything in
+ * `key(key) { remember { sharedElementsFor(key) } }` (SharedTransitionScope.kt), so a new key means a
+ * new `SharedElement` with a new `SharedTransitionStateMachine` at `NoMatchFound`, no
+ * `targetBoundsProvider`, no `targetData`, no `currentBounds` — i.e. exactly the state the app is in
+ * before the FIRST gesture, which is the one that always works.
+ *
+ * With a null provider `ActiveMatchFoundConfigPending.configureActiveMatch` falls back to
+ * `allEntries.fastFirstOrNull { enabledEntries.contains(it) }` and morphs from THAT copy's last
+ * bounds. **That fallback is only correct because a settled surface never leaves two participants
+ * composed in one scope**, so the first entry is always the one that was already there — the
+ * OUTGOING copy — in all four directions (bar→player, player→bar, bar→panel, panel→bar). The two
+ * `if (!currentState && !targetState) return@AnimatedVisibility` bail-outs in [MiniPlayer] and
+ * [PlayerPopOutPanel] are what enforce that (they exist for the two-target rule; see [PlayerSurface]).
+ * If either is ever "simplified" away, an idle surface composed in `PreEnter` becomes the first
+ * entry and the fallback picks the INCOMING copy — a WRONG flight, which is harder to spot than no
+ * flight at all.
+ *
+ * **When the generation may change.** Only from a composition where the surface transition is
+ * settled AND no back gesture is in progress AND the panel's close phase is `Idle` AND the nav
+ * `SharedTransitionScope` reports no active shared transition — see the bump site. Re-keying while a
+ * morph is live would replace the element (and the `createChildTransition` its bounds animation
+ * hangs off) mid-flight and drop the rest of the flight.
+ *
+ * Defaults to the bare key so that anywhere the provider is out of scope the behaviour is exactly
+ * what it was before this existed — a preview, and the docked third pane's `PlayerScreen`, which is
+ * composed BESIDE this host and is handed no shared scopes at all.
+ */
+val LocalPlayerArtKey: ProvidableCompositionLocal<Any> = compositionLocalOf { AlbumArtKeyBase }
+
 /** The [LocalPlayerArtSettleCount] default: nothing ever bumps it. */
 private val NoArtSettles: IntState = mutableIntStateOf(0)
 
@@ -128,9 +177,9 @@ private val NoArtSettles: IntState = mutableIntStateOf(0)
  * no-op re-measure of a 44dp art per surface settle, against a class of bug that is invisible until
  * the SECOND gesture.
  *
- * **Why the re-measure is needed.** A CANCELLED seek disposes the participant the abandoned
- * direction was heading for: the mini player for a cancelled panel close, the bar or the pop-out
- * panel for a cancelled back off `PlayerScreen`. `SharedTransitionStateMachine` keeps that
+ * **What the re-measure is for, and what it is NOT.** A CANCELLED seek disposes the participant the
+ * abandoned direction was heading for: the mini player for a cancelled panel close, the bar or the
+ * pop-out panel for a cancelled back off `PlayerScreen`. `SharedTransitionStateMachine` keeps that
  * participant's `BoundsProvider` as its `targetBoundsProvider`, which is the rect the NEXT morph
  * starts FROM (`ActiveMatchFoundConfigPending.configureActiveMatch` →
  * `obtainBoundsFromLastTarget`). That field is re-read in exactly one place,
@@ -139,12 +188,24 @@ private val NoArtSettles: IntState = mutableIntStateOf(0)
  * forgotten merely POSTS the request. So with nothing left to re-measure, the pointer can survive
  * the participant: `obtainBoundsFromLastTarget` then returns null (that provider is no longer in
  * `allEntries`), `configureActiveMatch` falls back to `Rect(topLeft, lookaheadSize)` — the
- * INCOMING art's own bounds — and the next gesture morphs from the target to itself, i.e. no
- * flight at all, with the outgoing copy hidden (`SharedElementEntry.shouldRenderAtAll` is false
- * for a non-target while a match is configured). On device: "cancel the predictive back once,
- * then back again — the art in the pop-out panel just completely disappears" (report 44, unfolded;
- * report 48 is the same thing folded, with the full player's art) — while a COMMITTED gesture in
- * between cures it, because its last target is the participant that stays (2026-09-14).
+ * INCOMING art's own bounds — and the gesture morphs from the target to itself, i.e. no flight at
+ * all, with the outgoing copy hidden (`SharedElementEntry.shouldRenderAtAll` is false for a
+ * non-target while a match is configured).
+ *
+ * **That was shipped (2026-09-15) as THE repair for device reports 44/48, and it did not fix them.**
+ * Cris, on a build carrying both it and the direct `snapTo` in `unwindSeek`: "the full player to mini
+ * player container morph is still broken if I cancel a predictive back and then go back". The trace
+ * above is sound about what the state machine DOES, but a stranded provider is only one of the
+ * states a cancelled seek can leave behind (the match state itself, a configured match's
+ * `targetData`/`currentBounds`), and two paths in the sources say even that one should self-heal
+ * within a frame. So the actual fix is [LocalPlayerArtKey]: give the element a FRESH IDENTITY after
+ * every settle, which cannot depend on knowing which field went stale. This counter and its
+ * re-measure are kept as **belt-and-braces** — they are cheap, they are idempotent
+ * (`updateTargetBoundsProvider` is gated on a request id, and `invalidateTargetBoundsProvider`
+ * early-returns while the live target's provider already matches), and they still repair the one
+ * case a fresh key cannot reach: a stale provider on an element whose key did NOT change because the
+ * bump gate was closed. Its trigger is deliberately left exactly as it was — the strict
+ * "nothing is moving anywhere" gate belongs to the key, not to a no-op re-measure.
  *
  * Defaults to a counter that never changes, so where the provider is out of scope — a preview, or
  * the docked third pane, which is composed BESIDE this host — the modifier is inert.
@@ -449,14 +510,18 @@ fun PlayerPanelHost(
     }
 
     // ONE no-op re-measure of all three `"album-art"` participants (pop-out card, full player, and
-    // the bar as insurance), after every SETTLE of the surface — the repair for the broken morph on
-    // the gesture that follows a CANCELLED one (device reports 44 + 48). The whole mechanism, and
+    // the bar as insurance), after every SETTLE of the surface. It shipped as the repair for the
+    // morph breaking on the gesture that follows a CANCELLED one (device reports 44 + 48) and did
+    // NOT fix it; the fix is the fresh element identity below ([LocalPlayerArtKey]), and this stays
+    // as belt-and-braces for the one case a fresh key cannot reach — a stale target bounds provider
+    // on an element whose key did not change because the bump gate was closed. The mechanism, and
     // why the bar has a reader at all, is in [LocalPlayerArtSettleCount]'s KDoc;
     // [rememberArtSettleInvalidation] is the reader.
     //
-    // Keyed on the pair rather than fired from the cancel path itself: it then runs only from a
-    // composition in which `currentState == targetState`, i.e. one where the surface the gesture
-    // abandoned already reports `target == false` and the state machine can only re-read a
+    // Its trigger is deliberately UNCHANGED (the strict gate belongs to the key, not to a no-op
+    // re-measure): keyed on the pair rather than fired from the cancel path itself, so it runs only
+    // from a composition in which `currentState == targetState`, i.e. one where the surface the
+    // gesture abandoned already reports `target == false` and the state machine can only re-read a
     // provider that is still on screen. That also covers every other way the surface settles (a
     // commit, a button back, a fold, the third-state snap) at the cost of one pass-through
     // re-measure of three art chains, and it needs no knowledge of WHICH path settled it.
@@ -502,6 +567,54 @@ fun PlayerPanelHost(
     // read here, because every suspending call has to live outside that handler's cancellable job.
     var panelBack         by remember { mutableStateOf(PanelBackPhase.Idle) }
     var panelBackProgress by remember { mutableFloatStateOf(0f) }
+
+    // ── A FRESH IDENTITY for the `"album-art"` element after every settle ────────────────────────
+    //
+    // The key every participant registers under is `"album-art#<generation>"`, and the generation is
+    // bumped whenever nothing is moving. A new key is a new `SharedElement` with a new state machine
+    // at `NoMatchFound` — no target bounds provider, no target data, no current bounds — so each
+    // morph runs from the same standing start as the FIRST one, which is the only one that never
+    // broke. The full argument, and the load-bearing dependency on the two
+    // `!currentState && !targetState` bail-outs, are in [LocalPlayerArtKey]'s KDoc.
+    //
+    // The gate is four things, and each is needed:
+    //   * the surface transition is SETTLED — `seekTo` never assigns `currentState`, so no seek
+    //     frame can satisfy this, and neither can a running bar/panel slide;
+    //   * no back GESTURE is in progress — a gesture that seeks nothing (browse→browse) would
+    //     otherwise re-key in the middle of the user's drag;
+    //   * the panel's close phase is `Idle` — `Committing` is a wait for `closePanel()` to be read
+    //     back, i.e. a change still in flight;
+    //   * the nav `SharedTransitionScope` reports no active shared transition. This is the one that
+    //     covers `PlayerScreen`'s art, whose bounds animation hangs off the NAV transition rather
+    //     than off the surface: `BoundsAnimation.isRunning` walks to the ROOT transition, so
+    //     `isTransitionActive` stays true for the whole of a nav morph even after the surface has
+    //     settled. Re-keying there would replace the element and the `createChildTransition` its
+    //     bounds animation hangs off, mid-flight. (The LOCAL mini↔panel morph needs no equivalent
+    //     term: both its participants' parent transitions are children of the surface transition,
+    //     so "settled" already implies that scope is inactive.)
+    // If some future bug pinned `isTransitionActive` true for good the generation would simply stop
+    // advancing, i.e. exactly today's behaviour — never a wedge.
+    val artKeyGen = remember { mutableIntStateOf(0) }
+    val artKey    = remember(artKeyGen.intValue) { "$AlbumArtKeyBase#${artKeyGen.intValue}" }
+    val morphQuiet = surfaceState.currentState == surfaceState.targetState &&
+        panelBack == PanelBackPhase.Idle &&
+        backProgress == null &&
+        navSharedTransitionScope?.isTransitionActive != true
+    LaunchedEffect(morphQuiet, surfaceState.currentState) {
+        if (!morphQuiet) {
+            morphLog {   // TEMPORARY
+                "artKey hold gen=${artKeyGen.intValue} settled=" +
+                    "${surfaceState.currentState == surfaceState.targetState}" +
+                    " panelBack=$panelBack gesture=${backProgress != null}" +
+                    " navMorph=${navSharedTransitionScope?.isTransitionActive}"
+            }
+            return@LaunchedEffect
+        }
+        artKeyGen.intValue++
+        morphLog {   // TEMPORARY
+            "artKey bump -> $AlbumArtKeyBase#${artKeyGen.intValue} at ${surfaceState.currentState}"
+        }
+    }
 
     // TEMPORARY diagnostics scratch + one line per PHASE change of the back gesture (never per
     // progress frame: the key is a Boolean, and the direction is carried in the message). See
@@ -759,12 +872,17 @@ fun PlayerPanelHost(
     Box(modifier = modifier.fillMaxSize()) {
         // ONE content call site at every width — see the header comment on why an early return for
         // the extra-wide case was a state-wiping trap.
-        // The settle counter is provided here for `PlayerScreen`, which lives inside the NavHost;
-        // the mini player and the pop-out panel are SIBLINGS of the content, so it is provided
-        // again around each of them below rather than by re-parenting this whole Box.
+        // The `"album-art"` KEY and the settle counter are provided here for `PlayerScreen`, which
+        // lives inside the NavHost; the mini player and the pop-out panel are SIBLINGS of the
+        // content, so both are provided again around each of them below rather than by re-parenting
+        // this whole Box. EVERY registration must read the same key — the mini player's two scopes,
+        // the pop-out card's two, and `PlayerScreen`'s (one per orientation). They cannot disagree:
+        // one dynamic `compositionLocalOf` invalidates all of its readers together, and they all
+        // then read the same snapshot value.
         CompositionLocalProvider(
             LocalPopOutPanelOpen       provides panelVisible,
             LocalPlayerArtSettleCount  provides artSettles,
+            LocalPlayerArtKey          provides artKey,
         ) {
             content(if (isExtraWide) noPlayerRequest else onRequestPlayer)
         }
@@ -963,15 +1081,19 @@ fun PlayerPanelHost(
                     // an AnimatedContent-scoped PlayerScreen do match — and because both parents are
                     // being seeked by the same gesture progress, the morph tracks the finger.
                     //
-                    // The settle counter is provided here because the bar, like the panel below, is
-                    // a SIBLING of `content` above — so without this wrapper the bar's art would
-                    // read the inert `NoArtSettles` and its `rememberArtSettleInvalidation()` would
-                    // do nothing at all. UNCONDITIONAL on purpose: a conditional provider would
+                    // The art key and the settle counter are provided here because the bar, like
+                    // the panel below, is a SIBLING of `content` above — so without this wrapper the
+                    // bar's art would register under the bare default key (never matching the
+                    // generation the full player and the panel use) and would read the inert
+                    // `NoArtSettles`. UNCONDITIONAL on purpose: a conditional provider would
                     // flip the holder's composition group every time the condition changed and
                     // reset everything it remembers (the art slide `Animatable` included), which is
                     // the same trap as the old `if (isExtraWide) { …; return }` in the header
                     // comment.
-                    CompositionLocalProvider(LocalPlayerArtSettleCount provides artSettles) {
+                    CompositionLocalProvider(
+                        LocalPlayerArtSettleCount provides artSettles,
+                        LocalPlayerArtKey         provides artKey,
+                    ) {
                         MiniPlayerHolder(
                             playerViewModel          = playerViewModel,
                             onExpand                 = onRequestPlayer,
@@ -987,11 +1109,14 @@ fun PlayerPanelHost(
                         )
                     }
 
-                    // Pop-out panel (wide non-short screens only). The settle counter is provided
-                    // again here because the panel is a SIBLING of `content` above, and its art is
-                    // the participant that SURVIVES a cancelled close gesture.
+                    // Pop-out panel (wide non-short screens only). The art key and the settle
+                    // counter are provided again here because the panel is a SIBLING of `content`
+                    // above, and its art is the participant that SURVIVES a cancelled close gesture.
                     if (canShowPanel) {
-                        CompositionLocalProvider(LocalPlayerArtSettleCount provides artSettles) {
+                        CompositionLocalProvider(
+                            LocalPlayerArtSettleCount provides artSettles,
+                            LocalPlayerArtKey         provides artKey,
+                        ) {
                             PlayerPopOutPanel(
                                 panelTransition            = panelTransition,
                                 playerViewModel            = playerViewModel,

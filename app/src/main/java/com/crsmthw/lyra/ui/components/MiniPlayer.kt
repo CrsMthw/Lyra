@@ -161,9 +161,15 @@ fun MiniPlayer(
                 // this copy's key, match state and placed bounds. NOTE for whoever reads the log:
                 // on a NARROW/folded screen the "primary" slot IS the nav scope and there is no
                 // secondary, so `mini/primary` is the participant that morphs with PlayerScreen.
+                //
+                // The KEY comes from the host (`LocalPlayerArtKey`) and carries a generation that
+                // is bumped after every settle of the floating surface, so no morph inherits
+                // shared-element state from the one before it — see that local's KDoc. Read once
+                // here so both registrations in this composable can never use different keys.
+                val artKey = LocalPlayerArtKey.current
                 val artModifier = if (sharedTransitionScope != null) {
                     with(sharedTransitionScope) {
-                        val artState = rememberSharedContentState("album-art", sharedContentConfig)
+                        val artState = rememberSharedContentState(artKey, sharedContentConfig)
                         Modifier.sharedElement(
                             sharedContentState      = artState,
                             animatedVisibilityScope = effectiveScope,
@@ -173,7 +179,7 @@ fun MiniPlayer(
                 } else Modifier
                 val navArtModifier = if (navSharedTransitionScope != null) {
                     with(navSharedTransitionScope) {
-                        val artState = rememberSharedContentState("album-art", navSharedContentConfig)
+                        val artState = rememberSharedContentState(artKey, navSharedContentConfig)
                         Modifier.sharedElement(
                             sharedContentState      = artState,
                             animatedVisibilityScope = effectiveScope,
