@@ -43,6 +43,7 @@ import com.crsmthw.lyra.data.remote.model.SpotifyEpisode
 import com.crsmthw.lyra.data.remote.model.SpotifyShow
 import com.crsmthw.lyra.ui.components.DetailArtHero
 import com.crsmthw.lyra.ui.components.DetailTopBar
+import com.crsmthw.lyra.ui.components.DetailTopBarFade
 import com.crsmthw.lyra.ui.components.TopScrim
 import com.crsmthw.lyra.ui.components.rememberHeroTitleHandoff
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
@@ -319,6 +320,12 @@ fun ShowDetailScreen(
                                         )
                                         ShowDescription(show)
                                     }
+                                    // The seam under the bar — composed after the pane's content and
+                                    // before the bar, so it draws over the hero and under the bar.
+                                    DetailTopBarFade(
+                                        paneColor = MaterialTheme.colorScheme.surface,
+                                        modifier  = Modifier.align(Alignment.TopCenter),
+                                    )
                                     // No title in this bar, and so no hand-off: the hero's own name
                                     // sits right under it and barely scrolls in a pane this short,
                                     // exactly as this pane carried no title pill. `paneColor` is the
@@ -390,7 +397,8 @@ fun ShowDetailScreen(
                             state          = episodesListState,
                             modifier       = Modifier.fillMaxSize(),
                             // No top inset: `DetailArtHero` bakes `statusBarsPadding()` + the bar's
-                            // own collapsed height + 8dp onto its art tile. Adding one here doubles.
+                            // own collapsed height + 8dp + `BarContentGap` onto its art tile. Adding
+                            // one here doubles.
                             contentPadding = PaddingValues(bottom = 100.dp + navBarBottomDp),
                         ) {
                             item(key = "header") {
@@ -424,10 +432,21 @@ fun ShowDetailScreen(
                             alpha    = 0.20f,
                         )
 
+                        // The seam under the bar: the page colour fading out over the first rows,
+                        // so the hero and the episodes dissolve into the bar instead of sliding past
+                        // its title — the same strip the Library browser has under its tab row.
+                        // Composed after the list and before the bar, so it draws over the content
+                        // and under the bar, and it takes no pointer input.
+                        DetailTopBarFade(
+                            paneColor = background,
+                            modifier  = Modifier.align(Alignment.TopCenter),
+                        )
+
                         // The bar, composed LAST so it draws (and hit-tests) over the list. Solid
-                        // `background` at rest and scrolled — at rest only 8dp of page background
-                        // sits between its bottom edge and the art, so it reads as the page until
-                        // the art arrives (it replaces the old TopScrim as well as the pills).
+                        // `background` at rest and scrolled — at rest only the hero's 8dp +
+                        // `BarContentGap` of page background sits between its bottom edge and the
+                        // art, so it reads as the page until the art arrives (it replaces the old
+                        // TopScrim as well as the pills).
                         DetailTopBar(
                             paneColor      = background,
                             navigationIcon = backNavIcon,
