@@ -30,7 +30,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import com.crsmthw.lyra.util.confirm
-import com.crsmthw.lyra.util.rememberMorphDiag
 import com.crsmthw.lyra.util.screenTransitionSpec
 import com.crsmthw.lyra.util.press
 import androidx.compose.ui.Modifier
@@ -162,10 +161,9 @@ fun MiniPlayer(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // Album art — chains up to two shared element scopes when both are provided.
-                // `rememberMorphDiag` is TEMPORARY instrumentation (util/MorphDiag.kt): it logs
-                // this copy's key, match state and placed bounds. NOTE for whoever reads the log:
-                // on a NARROW/folded screen the "primary" slot IS the nav scope and there is no
-                // secondary, so `mini/primary` is the participant that morphs with PlayerScreen.
+                // On a NARROW/folded screen the "primary" slot IS the nav scope and there is no
+                // secondary. Both modifiers must be present for the bar's whole life on a wide
+                // screen (see the `navSharedTransitionScope` parameter note above).
                 //
                 // The KEY comes from the host (`LocalPlayerArtKey`) and carries a generation that
                 // advances after an ABANDONED seek and at no other settle, so a morph that follows
@@ -182,7 +180,7 @@ fun MiniPlayer(
                             sharedContentState      = artState,
                             animatedVisibilityScope = effectiveScope,
                             boundsTransform         = rememberArtBoundsTransform(),
-                        ).then(rememberMorphDiag("mini/primary", artState))
+                        )
                     }
                 } else Modifier
                 val navArtModifier = if (navSharedTransitionScope != null) {
@@ -192,7 +190,7 @@ fun MiniPlayer(
                             sharedContentState      = artState,
                             animatedVisibilityScope = effectiveScope,
                             boundsTransform         = rememberArtBoundsTransform(),
-                        ).then(rememberMorphDiag("mini/nav", artState))
+                        )
                     }
                 } else Modifier
 

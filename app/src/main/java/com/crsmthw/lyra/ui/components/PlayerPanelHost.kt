@@ -33,7 +33,6 @@ import androidx.navigationevent.NavigationEventTransitionState
 import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
 import com.crsmthw.lyra.util.NavTransitionMillis
 import com.crsmthw.lyra.util.confirm
-import com.crsmthw.lyra.util.morphLog
 import com.crsmthw.lyra.util.screenTransitionSpec
 import androidx.compose.ui.unit.dp
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
@@ -130,42 +129,27 @@ private const val AlbumArtKeyBase = "album-art"
  * that always works. Device-verified on the first build that carried it (`6d97d78`): both cancel
  * cases fixed, folded and unfolded.
  *
- * **Why ONLY after an abandoned seek — the device settled this (2026-09-16).** Bumping at every
- * settle fixed those two cancel cases and BROKE the plain forward `mini → pop-out` open: tap the
- * bar and the art appeared in the panel at final size with no flight, every try. `LyraMorph` named
- * it exactly — after an ordinary settle the bar re-registered ALONE under the new key at its own
- * rect ("mini/primary match=false … at=1092,1507 size=116x116"), and the open then configured that
- * same copy with `currentBounds` **already equal to the panel's art rect** ("mini/primary
- * match=true … at=1617,566 size=292x292"), i.e. `configureActiveMatch`'s last fallback
- * `Rect(topLeft, lookaheadSize)`, i.e. `obtainBoundsFromLastTarget` returned null for the bar.
- * **A lone participant re-keyed AT REST has no usable last bounds**: a re-key runs `setup()`, which
- * sets `isPlaced = false`, and `isPlaced` is written `true` in exactly one place — inside
- * `approachPlace`'s `layout {}` block, i.e. the approach PLACEMENT, which
- * `isMeasurementApproachInProgress` (`isEnabled && foundMatch && isTransitionActive`) does not ask
- * for on a settled, unmatched node — so `lastBoundsInSharedTransitionScope` hands back
- * `boundsBeforeDetached`, which the last `approachPlace` cleared to null (SharedContentNode.kt).
- * Forcing a brand-new LayoutNode per generation was tried for exactly this and **did not help**
- * (`b97f57a`, byte-identical symptom and log): a node created at rest with no match is not
- * approach-placed either. The first bar of a session escapes all of it only because it is created
- * DURING its slide-in enter, while the approach pass is running. So a STABLE key across ordinary
- * cycles is not a compromise — it is the state the forward open is known to work in (`b250ed4` /
- * `f40ba51`).
+ * **Why ONLY after an abandoned seek (2026-09-16).** Re-keying a participant that sits ALONE at
+ * rest costs it its start bounds for the next morph: a new key is a new `SharedContentState` and a
+ * new `SharedBoundsNodeElement`, but the SAME `SharedBoundsNode` is updated in place — its
+ * `sharedElementEntry` setter runs `setup()`, which resets `isPlaced`, and `isPlaced` is only set
+ * again inside `approachPlace`'s layout block, i.e. by an approach placement that a lone participant
+ * at rest never gets. `lastBoundsInSharedTransitionScope` then reads null, and
+ * `configureActiveMatch` falls back to the TARGET's own rect (`Rect(topLeft, lookaheadSize)`): the
+ * art appears at the destination with no flight. A cancel is different: the abandoned participant
+ * lingers composed for a moment, the re-key re-registers BOTH under the fresh key, a match forms at
+ * rest with the survivor as target and approach-places both nodes — which is exactly the
+ * fresh-but-placed state the very first gesture ever ran from. (The forward `mini → pop-out` open
+ * broke on the 2026-09-16 builds for a SECOND, independent reason with the same `setup()` signature:
+ * the bar used to add/remove its nav-scope registration, and Compose's modifier-chain diff re-paired
+ * the surviving entry onto the old node — see the chain-stability note at the `MiniPlayerHolder`
+ * call. Both causes are closed.)
  *
- * **Why the abandoned seek is the one case where a re-key both helps and is safe.** The cancel path
- * leaves the abandoned participant LINGERING composed for a frame or two past the unwind's snap, so
- * the two participants re-register under the new key TOGETHER and form a match at rest — and a
- * configured match is what gets `approachPlace` to run for both, giving each a real last bounds for
- * the next morph in either direction. The 00:17 trace of `6d97d78` reads `unwind end snapTo=None` →
- * **12 ms** → `artKey bump -> album-art#4` → **9 ms** → `mini/primary EXIT #3 / ENTER #4` and
- * `player/port EXIT #3 / ENTER #4`, both `match=true` at their own rects; the next gesture flew.
- * That window is the mechanism, so the bump must stay on the same frame chain as the snap — never
- * behind a frame delay, a `withFrameNanos` or an extra effect hop.
- *
- * **Two accepted residuals, both legible in the `LyraMorph` log.** (1) A cancel where the abandoned
+ * **Two accepted residuals, each of which would show as ONE missing flight.** (1) A cancel where the abandoned
  * participant does NOT linger would leave a lone re-keyed survivor with no start bounds — the
  * forward failure above, reached from a cancel instead of a settle. Why the bar lingers at all is
- * still an open question, and it is not the diagnostics' doing (each adds a node to the chain, not a
- * participant) — re-check when `util/MorphDiag.kt` goes. (2) If the unwind is interrupted by a
+ * still an open question (the temporary diagnostics were removed 2026-09-16 without changing it —
+ * to be re-confirmed on the next device pass). (2) If the unwind is interrupted by a
  * committed change before it snaps, the request survives and is honoured at the NEXT quiescent
  * period, which may be an ordinary settle with one participant composed, i.e. residual (1) again.
  * Reachable only when a cancel is released LATE (the unwind is fraction-proportional — a 5 % cancel
@@ -278,13 +262,6 @@ private enum class PanelBackPhase { Idle, Seeking, Committing, Cancelled }
 
 /** Non-snapshot cell for the mini player's last on-screen width fraction — see its use site. */
 private class MiniWidthHolder(var value: Float)
-
-/**
- * Non-snapshot scratch for the TEMPORARY morph diagnostics (`util/MorphDiag.kt`) — it keeps a
- * per-gesture "already logged" flag so the seek branches can log their FIRST progress frame
- * without logging every frame. Delete with the diagnostics.
- */
-private class MorphDiagState(var seekLogged: Boolean = false)
 
 /** Non-snapshot cell for the last browse surface the panel was seen over — see its use site. */
 private class SurfaceKeyHolder(var value: String?)
@@ -568,45 +545,13 @@ fun PlayerPanelHost(
         backProgress == null &&
         navSharedTransitionScope?.isTransitionActive != true
     LaunchedEffect(morphQuiet, surfaceState.currentState) {
-        if (!morphQuiet) {
-            morphLog {   // TEMPORARY
-                "artKey hold gen=${artKeyGen.intValue} settled=" +
-                    "${surfaceState.currentState == surfaceState.targetState}" +
-                    " panelBack=$panelBack gesture=${backProgress != null}" +
-                    " navMorph=${navSharedTransitionScope?.isTransitionActive}" +
-                    " reKeyPending=${artReKey.pending}"
-            }
-            return@LaunchedEffect
-        }
+        if (!morphQuiet) return@LaunchedEffect
         // Quiet, but nothing was abandoned: KEEP the key. This is the steady state — every
         // committed open/close, push/pop, fold and third-state snap lands here, and a bump here is
         // exactly what broke the forward open.
-        if (!artReKey.pending) {
-            morphLog {   // TEMPORARY
-                "artKey keep gen=${artKeyGen.intValue} at ${surfaceState.currentState}"
-            }
-            return@LaunchedEffect
-        }
+        if (!artReKey.pending) return@LaunchedEffect
         artReKey.pending = false
         artKeyGen.intValue++
-        morphLog {   // TEMPORARY
-            "artKey bump -> $AlbumArtKeyBase#${artKeyGen.intValue} at ${surfaceState.currentState}" +
-                " (after an abandoned seek)"
-        }
-    }
-
-    // TEMPORARY diagnostics scratch + one line per PHASE change of the back gesture (never per
-    // progress frame: the key is a Boolean, and the direction is carried in the message). See
-    // util/MorphDiag.kt — delete both with it.
-    val diag          = remember { MorphDiagState() }
-    val gestureActive = inProgress != null
-    LaunchedEffect(gestureActive) {
-        morphLog {
-            val phase = if (gestureActive) "InProgress(dir=${inProgress.direction})" else "Idle"
-            "gesture $phase target=$surfaceTarget afterBack=$surfaceAfterBack" +
-                " cur=${surfaceState.currentState} tgt=${surfaceState.targetState}" +
-                " panelVisible=$panelVisible panelBack=$panelBack"
-        }
     }
 
     // ── What drives the transition: the panel's close gesture, a route gesture, or a plain change ─
@@ -615,15 +560,6 @@ fun PlayerPanelHost(
         //     the art flying between them because both are children of this one transition.
         panelBack == PanelBackPhase.Seeking ->
             LaunchedEffect(panelBackProgress, surfaceAfterPanelClose) {
-                // TEMPORARY: the FIRST progress frame only (the flag is cleared by branch 3).
-                if (!diag.seekLogged) {
-                    diag.seekLogged = true
-                    morphLog {
-                        "seek(panel) -> $surfaceAfterPanelClose p=$panelBackProgress" +
-                            " cur=${surfaceState.currentState} tgt=${surfaceState.targetState}" +
-                            " f=${surfaceState.fraction} panelBack=$panelBack"
-                    }
-                }
                 surfaceState.seekTo(panelBackProgress.coerceIn(0f, 1f), surfaceAfterPanelClose)
             }
 
@@ -640,30 +576,12 @@ fun PlayerPanelHost(
         panelBack == PanelBackPhase.Idle && !panelVisible &&
             backProgress != null && surfaceAfterBack != surfaceTarget ->
             LaunchedEffect(backProgress, surfaceAfterBack) {
-                // TEMPORARY: the FIRST progress frame only (the flag is cleared by branch 3).
-                if (!diag.seekLogged) {
-                    diag.seekLogged = true
-                    morphLog {
-                        "seek(route) -> $surfaceAfterBack p=$backProgress" +
-                            " cur=${surfaceState.currentState} tgt=${surfaceState.targetState}" +
-                            " f=${surfaceState.fraction} panelBack=$panelBack"
-                    }
-                }
                 surfaceState.seekTo(backProgress, surfaceAfterBack)
             }
 
         // (3) Everything else: the commit or cancel of either gesture, and every ordinary change.
         else -> LaunchedEffect(surfaceTarget, panelBack) {
             val effectScope = this
-
-            // TEMPORARY: one line per entry of this branch — i.e. per commit, cancel or ordinary
-            // change — and re-arm the seek branches' first-frame log. See util/MorphDiag.kt.
-            diag.seekLogged = false
-            morphLog {
-                "settled-branch panelBack=$panelBack target=$surfaceTarget" +
-                    " cur=${surfaceState.currentState} tgt=${surfaceState.targetState}" +
-                    " f=${surfaceState.fraction}"
-            }
 
             // Wind a released-but-uncommitted seek back to `currentState`. The duration is scaled
             // by how far the gesture actually got — `NavHost.kt`'s cancel formula, mirrored in
@@ -680,11 +598,6 @@ fun PlayerPanelHost(
                 artReKey.pending = true
                 val totalMillis = (surfaceTransition.totalDurationNanos / 1_000_000)
                     .coerceAtLeast(NavTransitionMillis.toLong())
-                morphLog {   // TEMPORARY
-                    "unwind start f=${surfaceState.fraction} cur=${surfaceState.currentState}" +
-                        " tgt=${surfaceState.targetState} snapTarget=$surfaceTarget" +
-                        " totalMs=$totalMillis"
-                }
                 animate(
                     initialValue  = surfaceState.fraction,
                     targetValue   = 0f,
@@ -706,10 +619,6 @@ fun PlayerPanelHost(
                 // lands after this snap is inert by construction: `currentState == targetState`
                 // makes `seekTo` return without touching anything.
                 surfaceState.snapTo(surfaceTarget)
-                morphLog {   // TEMPORARY
-                    "unwind end snapTo=$surfaceTarget cur=${surfaceState.currentState}" +
-                        " tgt=${surfaceState.targetState} f=${surfaceState.fraction}"
-                }
             }
 
             // Deliberately NO `animationSpec` on any `animateTo` below. With one,
@@ -729,7 +638,6 @@ fun PlayerPanelHost(
                 // `surfaceTarget` is still `Panel` would REVERSE the gesture. The seek already set
                 // `targetState`, so `animateTo` finds it unchanged and plays only the remainder.
                 PanelBackPhase.Committing -> if (surfaceTarget != PlayerSurface.Panel) {
-                    morphLog { "commit: animateTo($surfaceTarget)" }   // TEMPORARY
                     surfaceState.animateTo(surfaceTarget)
                     panelBack = PanelBackPhase.Idle
                 } else {
@@ -753,12 +661,10 @@ fun PlayerPanelHost(
                     // `panelVisible` is true again — the scrim composed WITH its `clickable`, i.e.
                     // a permanent half-opacity tap sink over the browse screen with
                     // `LocalPopOutPanelOpen` true, so every hosted back handler yielded to it.
-                    morphLog { "commit: panel re-opened mid-close -> Idle" }   // TEMPORARY
                     panelBack = PanelBackPhase.Idle
                 }
                 // Released without committing: unwind, leaving the panel open.
                 PanelBackPhase.Cancelled -> {
-                    morphLog { "cancel(panel): unwind" }   // TEMPORARY
                     unwindSeek()
                     panelBack = PanelBackPhase.Idle
                 }
@@ -794,19 +700,16 @@ fun PlayerPanelHost(
                             surfaceTarget != surfaceState.targetState &&
                             surfaceTarget != surfaceState.currentState
                         ) {
-                            morphLog { "idle: snapTo in-flight ${surfaceState.targetState}" }   // TEMPORARY
                             surfaceState.snapTo(surfaceState.targetState)
                         }
-                        morphLog { "idle: animateTo($surfaceTarget)" }   // TEMPORARY
                         surfaceState.animateTo(surfaceTarget)
                     }
                     // A route gesture released without committing, or a reversal of a running
                     // change back to where it started.
                     surfaceState.targetState != surfaceTarget -> {
-                        morphLog { "idle: cancel/reversal -> unwind" }   // TEMPORARY
                         unwindSeek()
                     }
-                    else -> morphLog { "idle: nothing to do" }   // TEMPORARY
+                    else -> Unit
                 }
                 // Driven by branch (1); this effect is not even composed then.
                 PanelBackPhase.Seeking -> Unit
@@ -1008,7 +911,7 @@ fun PlayerPanelHost(
                     //
                     // Why the modifier must not come and go (device, 2026-09-16 — the forward
                     // mini → pop-out open that appeared in the panel with no flight, on every build
-                    // that carried the LyraMorph diagnostics): the bar's art chain was
+                    // that carried the temporary morph diagnostics): the bar's art chain was
                     // [local sharedElement, (diag), nav sharedElement, (diag), size, clip, …] and
                     // dropping the nav registration at the open shrank it by two elements. Compose
                     // reconciles a modifier chain with a Myers diff whose "same item" test is
@@ -1060,17 +963,6 @@ fun PlayerPanelHost(
                     // nav entry AND the pop-out panel must be absent (see the chain-stability note
                     // above). A config, so the modifier itself never changes.
                     val wideNavArtConfig = rememberMatchWhenConfig(routeVisible && miniNeedsNavScope)
-
-                    // TEMPORARY: one line whenever the scope routing or the match gate changes —
-                    // this is what says WHICH participants were eligible on a given gesture.
-                    // Read inside this scope (not at host-body scope) so the diagnostics do not
-                    // move where `LocalPlayerRouteVisible` is subscribed. See util/MorphDiag.kt.
-                    LaunchedEffect(routeVisible, canShowPanel, miniNeedsNavScope, panelPresent) {
-                        morphLog {
-                            "gates routeVisible=$routeVisible canShowPanel=$canShowPanel" +
-                                " miniNavScope=$miniNeedsNavScope panelPresent=$panelPresent"
-                        }
-                    }
 
                     // The mini player's own AnimatedVisibility — a child of `barTransition` above — is
                     // its shared-element scope in BOTH layers (MiniPlayer falls back to its inner scope,

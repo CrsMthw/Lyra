@@ -77,7 +77,6 @@ import com.crsmthw.lyra.util.loadAlbumArtColors
 import com.crsmthw.lyra.util.press
 import com.crsmthw.lyra.util.reject
 import com.crsmthw.lyra.util.rememberArtBoundsTransform
-import com.crsmthw.lyra.util.rememberMorphDiag
 import com.crsmthw.lyra.util.tick
 import com.crsmthw.lyra.util.toTimeString
 import com.crsmthw.lyra.util.toggle
@@ -425,8 +424,7 @@ fun PlayerScreen(
                     // that follows a cancelled gesture has no state from it to inherit. A
                     // generation is a fresh ELEMENT only — recreating the LayoutNode that carries
                     // this modifier was tried and changed nothing on device. See
-                    // `LocalPlayerArtKey` in PlayerPanelHost. `rememberMorphDiag` is TEMPORARY
-                    // instrumentation — util/MorphDiag.kt.
+                    // `LocalPlayerArtKey` in PlayerPanelHost.
                     val artMod = if (sharedTransitionScope != null && animatedContentScope != null) {
                         with(sharedTransitionScope) {
                             val artState = rememberSharedContentState(LocalPlayerArtKey.current)
@@ -434,7 +432,7 @@ fun PlayerScreen(
                                 sharedContentState      = artState,
                                 animatedVisibilityScope = animatedContentScope,
                                 boundsTransform         = rememberArtBoundsTransform(),
-                            ).then(rememberMorphDiag("player/land", artState))
+                            )
                         }
                     } else Modifier
 
@@ -599,7 +597,6 @@ fun PlayerScreen(
                     // Shared-element modifier (keyed on `LocalPlayerArtKey` — a fresh element per
                     // abandoned seek, and nothing at an ordinary settle) — see the landscape
                     // branch above, and `LocalPlayerArtKey` in PlayerPanelHost.
-                    // `rememberMorphDiag` is TEMPORARY instrumentation — see util/MorphDiag.kt.
                     val artMod = if (sharedTransitionScope != null && animatedContentScope != null) {
                         with(sharedTransitionScope) {
                             val artState = rememberSharedContentState(LocalPlayerArtKey.current)
@@ -607,7 +604,7 @@ fun PlayerScreen(
                                 sharedContentState      = artState,
                                 animatedVisibilityScope = animatedContentScope,
                                 boundsTransform         = rememberArtBoundsTransform(),
-                            ).then(rememberMorphDiag("player/port", artState))
+                            )
                         }
                     } else Modifier
 

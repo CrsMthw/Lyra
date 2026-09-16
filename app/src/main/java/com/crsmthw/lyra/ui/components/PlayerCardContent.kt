@@ -58,7 +58,6 @@ import com.crsmthw.lyra.util.loadAlbumArtColors
 import com.crsmthw.lyra.util.press
 import com.crsmthw.lyra.util.reject
 import com.crsmthw.lyra.util.rememberArtBoundsTransform
-import com.crsmthw.lyra.util.rememberMorphDiag
 import com.crsmthw.lyra.util.tick
 import com.crsmthw.lyra.util.toTimeString
 import com.crsmthw.lyra.util.toggle
@@ -277,7 +276,6 @@ fun PlayerCardContent(
             // Album art — participates in two independent shared element transitions:
             // 1. Local scope: mini player ↔ panel expansion
             // 2. Nav scope: panel → full PlayerScreen navigation
-            // `rememberMorphDiag` is TEMPORARY instrumentation — see util/MorphDiag.kt.
             // The key carries the host's re-key generation (`LocalPlayerArtKey`), which advances
             // after an ABANDONED seek and at no other settle, so a morph that follows a cancelled
             // gesture starts from a shared element with no history — read once for both
@@ -291,7 +289,7 @@ fun PlayerCardContent(
                         sharedContentState      = artState,
                         animatedVisibilityScope = animatedVisibilityScope,
                         boundsTransform         = rememberArtBoundsTransform(),
-                    ).then(rememberMorphDiag("panel/local", artState))
+                    )
                 }
             } else Modifier
             val navArtMod = if (navSharedTransitionScope != null && animatedVisibilityScope != null) {
@@ -301,7 +299,7 @@ fun PlayerCardContent(
                         sharedContentState      = artState,
                         animatedVisibilityScope = animatedVisibilityScope,
                         boundsTransform         = rememberArtBoundsTransform(),
-                    ).then(rememberMorphDiag("panel/nav", artState))
+                    )
                 }
             } else Modifier
             val artSharedMod = localArtMod.then(navArtMod)
