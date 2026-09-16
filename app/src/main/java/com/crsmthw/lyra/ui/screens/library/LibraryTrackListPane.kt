@@ -304,14 +304,16 @@ internal fun RightPaneContent(
         // renders the list in order, so the entering content is the LAST child of its slot's Box: it
         // draws last and therefore hit-tests FIRST, from its first frame at alpha 0 (alpha does not
         // affect hit testing), and its only wrapper is a `graphicsLayer` — nothing gates pointer
-        // input. Both branches of the navigationIcon slot put a control in the same place (✕ while
-        // selecting, back arrow otherwise), and in SINGLE-PANE `onBack` is `clearSelection()`, so a
+        // input. In SINGLE-PANE both branches of the navigationIcon slot put a control in the same
+        // place (✕ while selecting, back arrow otherwise) and `onBack` is `clearSelection()`, so a
         // second tap on ✕ inside the 300 ms fade landed on the invisible back arrow and collapsed
-        // the whole playlist detail back to the browser. Same for the actions slot: ⌫ sits where ⋮
-        // was, and the song-menu door into selection mode pre-checks one uri, so ⌫ is already live
-        // on the entering content's first frame and a single-row removal would skip the confirm
-        // dialog. Three `Crossfade`s on one `Transition` is what `Transition` is for — they are its
-        // children, share the one spec and run in lockstep, and `currentState` is the same for all.
+        // the whole playlist detail back to the browser. Same for the ⌫/⋮ slot in BOTH layouts: ⌫
+        // sits where ⋮ was, and the song-menu door into selection mode pre-checks one uri, so ⌫ is
+        // already live on the entering content's first frame and a single-row removal would skip
+        // the confirm dialog. Either layout composes three `Crossfade`s on the ONE `Transition`
+        // (single-pane: nav + ⌫/⋮ + title; two-pane: ✕ + ⌫/⋮ + title) — which is what `Transition`
+        // is for: they are its children, share the one spec and run in lockstep, and `currentState`
+        // is the same for all.
         //
         // During the fade `currentState` is the OUTGOING branch, so `live` makes the invisible
         // entering control inert and leaves the visible one usable; once settled both agree and
@@ -331,36 +333,68 @@ internal fun RightPaneContent(
         DetailTopBar(
             paneColor      = paneColor,
             navigationIcon = {
-                // ACCEPTED COST of sharing one container, and only in the two-pane RIGHT pane:
-                // there `onBack == null`, so this slot is 0dp wide when idle and 48dp while
-                // selecting, and `TopAppBarLayout` insets the title by
-                // `max(TopAppBarTitleInset, navigationIcon.width)` — so the title jumps 16 → 48dp at
-                // the start of the entry fade and back at the SETTLE of the exit one. Visible only
-                // unfolded, in that pane, and only while scrolled past the hero (at the top the
-                // name sits at alpha 0 from the hand-off). Do NOT "fix" it by reserving 48dp in the
-                // idle branch: that would permanently indent the approved two-pane bar's title.
-                barTransition.Crossfade(animationSpec = screenTransitionSpec()) { selecting ->
-                    val live = selecting == barTransition.currentState
-                    if (selecting) {
-                        IconButton(
-                            onClick = { haptics.press(); viewModel.exitSelectionMode() },
-                            enabled = live,
-                        ) {
-                            Icon(Icons.Default.Close,
-                                contentDescription = stringResource(R.string.library_selection_cancel))
-                        }
-                    } else if (onBack != null) {
-                        IconButton(
-                            onClick = { haptics.confirm(); onBack() },
-                            enabled = live,
-                        ) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = stringResource(R.string.cd_back))
+                // SINGLE-PANE ONLY, and that is the fix rather than a cost: a nav slot that is
+                // EMPTY WHEN IDLE MUST STAY EMPTY. `TopAppBarLayout` insets the title by
+                // `max(TopAppBarTitleInset, navigationIcon.width)`, so in the two-pane RIGHT pane
+                // (`onBack == null`, no back icon, ever) a ✕ borrowed into this slot for selection
+                // mode took the slot 0 → 48dp, i.e. the title's inset 16 → 48dp at the start of the
+                // entry fade, snapping back at the SETTLE of the exit one — the playlist name
+                // sliding ~32dp sideways on every selection swap. Reserving 48dp in the idle branch
+                // is not the fix either: that permanently indents that pane's title. So in two-pane
+                // the ✕ leads the `actions` slot instead (see there) and this slot is composed away
+                // in BOTH branches, leaving the title's inset constant. Single-pane keeps the
+                // standard M3 contextual layout — back arrow ↔ ✕ here, ⌫ in the actions — because
+                // the back arrow already holds the slot at 48dp, so nothing can move.
+                if (onBack != null) {
+                    barTransition.Crossfade(animationSpec = screenTransitionSpec()) { selecting ->
+                        val live = selecting == barTransition.currentState
+                        if (selecting) {
+                            IconButton(
+                                onClick = { haptics.press(); viewModel.exitSelectionMode() },
+                                enabled = live,
+                            ) {
+                                Icon(Icons.Default.Close,
+                                    contentDescription = stringResource(R.string.library_selection_cancel))
+                            }
+                        } else {
+                            IconButton(
+                                onClick = { haptics.confirm(); onBack() },
+                                enabled = live,
+                            ) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = stringResource(R.string.cd_back))
+                            }
                         }
                     }
                 }
             },
             actions        = {
+                // The contextual ✕ (exit selection), TWO-PANE RIGHT PANE ONLY — the pane whose nav
+                // slot has to stay empty (see above). It is its OWN `Crossfade`, a sibling in this
+                // actions `Row`, and NOT a second child inside the ⌫ branch below; that is the
+                // durable half of this note. `Crossfade` renders its branches in a `Box`, i.e.
+                // TopStart-aligned, and `TopAppBarLayout` places the whole actions block flush to
+                // the bar's END. The nav and title slots are start-aligned, so their two branches
+                // coincide there and a width difference costs nothing — but in an END-aligned slot a
+                // two-child branch makes the Box 96dp for the length of the fade and leaves the
+                // one-child branch (⋮) sitting at its START: the title's 32dp snap traded for a
+                // 48dp jump of the ⋮ itself. As two slots in the Row the RIGHTMOST child's right
+                // edge is pinned instead — the block simply grows 48dp leftward while selecting, so
+                // ⌫ / ⋮ never move and the title only loses 48dp of room to ellipsize in.
+                if (onBack == null) {
+                    barTransition.Crossfade(animationSpec = screenTransitionSpec()) { selecting ->
+                        val live = selecting == barTransition.currentState
+                        if (selecting) {
+                            IconButton(
+                                onClick = { haptics.press(); viewModel.exitSelectionMode() },
+                                enabled = live,
+                            ) {
+                                Icon(Icons.Default.Close,
+                                    contentDescription = stringResource(R.string.library_selection_cancel))
+                            }
+                        }
+                    }
+                }
                 barTransition.Crossfade(animationSpec = screenTransitionSpec()) { selecting ->
                     val live = selecting == barTransition.currentState
                     if (selecting) {
