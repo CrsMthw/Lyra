@@ -65,9 +65,18 @@ internal val LargeBarMinPaneHeight = 600.dp
  * `Column { bar; … }` is valid rather than an overlay because `TopAppBarLayout` reports
  * `layout(maxWidth, (maxLayoutHeight + heightOffset).coerceAtLeast(0))` — a collapsing bar's
  * MEASURED height shrinks, it does not merely translate its content, so the content below moves up
- * with no dead gap. Nothing below it needs a top inset: the bar owns that strip via
+ * with no dead gap. Nothing below it needs a top INSET: the bar owns that strip via
  * [appBarWindowInsets] (and never the M3 default, which would apply the horizontal sides a second
  * time on top of the screen's one `horizontalSystemBarsPadding()`).
+ *
+ * ### The gap and the fade under the bar
+ *
+ * Every caller gives its scroller [BarContentGap] of TOP `contentPadding` (a `verticalScroll`
+ * `Column` takes it as a `padding` applied AFTER the scroller, which is the same thing) and composes
+ * a [TopBarFade] as a late child of the weighted `Box`, so the first rows dissolve into the bar
+ * instead of sliding past its title. Neither is an inset: the gap scrolls away with the content, and
+ * because that `Box`'s own top edge already tracks this bar's collapse, the strip needs no offset —
+ * a detail screen's OVERLAY bar is the case that does ([DetailTopBarFade]).
  *
  * ### Nothing resets the large bar's collapse
  *

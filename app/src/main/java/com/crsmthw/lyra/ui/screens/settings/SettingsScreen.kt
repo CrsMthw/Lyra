@@ -53,7 +53,9 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.crsmthw.lyra.BuildConfig
 import com.crsmthw.lyra.R
+import com.crsmthw.lyra.ui.components.BarContentGap
 import com.crsmthw.lyra.ui.components.RootTopBar
+import com.crsmthw.lyra.ui.components.TopBarFade
 import com.crsmthw.lyra.ui.theme.ThemeMode
 import com.crsmthw.lyra.util.visualizer.VisualizerStyle
 import kotlin.math.roundToInt
@@ -145,7 +147,13 @@ fun SettingsScreen(
                         // the connection sits INSIDE the scroller and is silently inert — the build stays
                         // green and the bar simply never collapses.
                         .nestedScroll(scrollBehavior.nestedScrollConnection)
-                        .verticalScroll(scrollState),
+                        .verticalScroll(scrollState)
+                        // The gap under the app bar (device pass #22), AFTER the scroller so it is
+                        // part of the scrollable content — a lazy list's top `contentPadding`, in
+                        // the only form a plain Column has. Before it, it would be a permanent dead
+                        // strip; and it is NOT an inset (the bar is a Column sibling whose measured
+                        // height already owns the strip above this Box).
+                        .padding(top = BarContentGap),
                 ) {
 
                 // ── Spotify ───────────────────────────────────────────────────────
@@ -388,6 +396,17 @@ fun SettingsScreen(
 
                 Spacer(Modifier.height(scrimHeight))
                 }
+
+            // The seam under the bar: the background fading out over the first rows, so they
+            // dissolve into the bar instead of sliding past its title — the same strip the Library
+            // browser has under its tab row. Top-anchored, because this Box's own top edge already
+            // tracks the bar's collapse (the bar is a Column sibling whose MEASURED height shrinks).
+            // Composed after the content so it draws over it; no pointer input, so it cannot eat a
+            // tap on the row beneath it.
+            TopBarFade(
+                paneColor = background,
+                modifier  = Modifier.align(Alignment.TopCenter),
+            )
 
             // Bottom scrim — inside the weighted Box, so it overlays the scrolling content and
             // never the bar.

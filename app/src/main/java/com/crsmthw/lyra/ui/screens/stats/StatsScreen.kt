@@ -37,7 +37,9 @@ import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.remote.model.SpotifyArtist
 import com.crsmthw.lyra.data.remote.model.SpotifyTrack
 import com.crsmthw.lyra.ui.components.ConnectedChoiceRow
+import com.crsmthw.lyra.ui.components.BarContentGap
 import com.crsmthw.lyra.ui.components.RootTopBar
+import com.crsmthw.lyra.ui.components.TopBarFade
 import com.crsmthw.lyra.ui.components.TrackActionsHost
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import com.crsmthw.lyra.ui.components.toTrackActionTarget
@@ -85,7 +87,12 @@ fun StatsScreen(
         val scrimHeight    = navBarBottomDp + 48.dp
         // 100dp of mini-player clearance on top of the nav bar, so the last row scrolls clear of the
         // floating bar (UI_PATTERNS.md → "LazyColumn bottom padding must include nav bar height").
-        val listBottomPad  = remember(navBarBottomDp) { PaddingValues(bottom = 100.dp + navBarBottomDp) }
+        // `BarContentGap` on top is the gap under the app bar (device pass #22) — it is the list's
+        // own contentPadding, not an inset, so it scrolls away with the range picker and nothing
+        // double-pads the collapsing bar (whose measured height already owns the strip above it).
+        val listContentPadding = remember(navBarBottomDp) {
+            PaddingValues(top = BarContentGap, bottom = 100.dp + navBarBottomDp)
+        }
         val listState      = rememberLazyListState()
         ListScrollHaptics(listState)
 
@@ -120,7 +127,7 @@ fun StatsScreen(
                     modifier       = Modifier
                         .fillMaxSize()
                         .nestedScroll(scrollBehavior.nestedScrollConnection),
-                    contentPadding = listBottomPad,
+                    contentPadding = listContentPadding,
                 ) {
                     item(key = "range_picker") {
                         val options = listOf(
@@ -248,6 +255,17 @@ fun StatsScreen(
                         }
                     }
                 }
+
+                // The seam under the bar: the background fading out over the first rows, so they
+                // dissolve into the bar instead of sliding past its title — the same strip the
+                // Library browser has under its tab row. Top-anchored, because this Box's own top
+                // edge already tracks the bar's collapse (the bar is a Column sibling whose
+                // MEASURED height shrinks). Last-but-one child of the Box, so it draws over the
+                // list; no pointer input, so it cannot eat a drag on the rows beneath it.
+                TopBarFade(
+                    paneColor = MaterialTheme.colorScheme.background,
+                    modifier  = Modifier.align(Alignment.TopCenter),
+                )
 
                 // Bottom scrim — fades list content toward background so the nav bar area is clean.
                 // Inside the weighted Box, so it overlays the list and never the bar.

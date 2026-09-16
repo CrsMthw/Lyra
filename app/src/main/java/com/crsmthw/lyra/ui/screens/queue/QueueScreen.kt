@@ -29,7 +29,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.remote.model.SpotifyTrack
+import com.crsmthw.lyra.ui.components.BarContentGap
 import com.crsmthw.lyra.ui.components.RootTopBar
+import com.crsmthw.lyra.ui.components.TopBarFade
 import com.crsmthw.lyra.ui.components.TrackActionsHost
 import com.crsmthw.lyra.ui.components.toTrackActionTarget
 import com.crsmthw.lyra.util.ListScrollHaptics
@@ -85,7 +87,12 @@ fun QueueScreen(
         val density       = LocalDensity.current
         val navBarBottomDp = with(density) { WindowInsets.navigationBars.getBottom(this).toDp() }
         val scrimHeight    = navBarBottomDp + 48.dp
-        val listBottomPad  = remember(navBarBottomDp) { PaddingValues(bottom = navBarBottomDp + 16.dp) }
+        // `BarContentGap` on top is the gap under the app bar (device pass #22) — the list's own
+        // contentPadding, not an inset, so it scrolls away with the first row and nothing
+        // double-pads the collapsing bar (whose measured height already owns the strip above it).
+        val listContentPadding = remember(navBarBottomDp) {
+            PaddingValues(top = BarContentGap, bottom = navBarBottomDp + 16.dp)
+        }
         val haptics        = LocalHapticFeedback.current
         val queueListState = rememberLazyListState()
         ListScrollHaptics(queueListState)
@@ -163,13 +170,14 @@ fun QueueScreen(
                             // The bar's connection goes on the list's OWN modifier (`LazyList` places
                             // the caller's modifier as the parent node of its scrollable), which is
                             // what lets `ExitUntilCollapsedScrollBehavior` see the positive leftover of
-                            // a downward scroll and re-expand. No top `contentPadding`: the bar is a
-                            // Column sibling whose measured height shrinks as it collapses, so a top
-                            // inset here would double it.
+                            // a downward scroll and re-expand. No top INSET: the bar is a Column
+                            // sibling whose measured height shrinks as it collapses, so one here
+                            // would double it. The `BarContentGap` in `listContentPadding` is not an
+                            // inset — it is the gap under the bar, and it scrolls away.
                             modifier       = Modifier
                                 .fillMaxSize()
                                 .nestedScroll(scrollBehavior.nestedScrollConnection),
-                            contentPadding = listBottomPad,
+                            contentPadding = listContentPadding,
                         ) {
                             // ── Now Playing ──────────────────────────────────────────
                             state.currentlyPlaying?.let { track ->
@@ -251,6 +259,17 @@ fun QueueScreen(
                         }
                     }
                 }
+
+                // The seam under the bar: the background fading out over the first rows, so they
+                // dissolve into the bar instead of sliding past its title — the same strip the
+                // Library browser has under its tab row. Top-anchored, because this Box's own top
+                // edge already tracks the bar's collapse (the bar is a Column sibling whose
+                // MEASURED height shrinks). Composed after the content so it draws over the list;
+                // no pointer input, so it cannot eat a drag on the rows beneath it.
+                TopBarFade(
+                    paneColor = MaterialTheme.colorScheme.background,
+                    modifier  = Modifier.align(Alignment.TopCenter),
+                )
 
                 // Bottom scrim — fades list content toward background so the nav bar area is clean.
                 // Inside the weighted Box, so it overlays the list and never the bar.
