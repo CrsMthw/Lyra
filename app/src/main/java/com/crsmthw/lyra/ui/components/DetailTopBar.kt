@@ -1,7 +1,13 @@
 package com.crsmthw.lyra.ui.components
 
 import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -13,10 +19,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.unit.dp
 
 /**
  * The ONE top app bar every Lyra **detail** surface uses — album, artist, show, and the Library
@@ -50,11 +58,15 @@ import androidx.compose.ui.layout.positionInRoot
  * pull-to-refresh and list drags must start below it) whether or not a behaviour is passed. Callers
  * therefore need no `Modifier.nestedScroll` for this bar's sake.
  *
- * ### Hero clearance
+ * ### Hero clearance and the fade strip
  *
- * [DetailArtHero] bakes `statusBarsPadding() + TopAppBarDefaults.TopAppBarExpandedHeight + 8.dp`
- * onto its art tile, i.e. the bar's own collapsed height plus a small gap. Add **nothing** on top of
- * that — no list `contentPadding` top inset (it doubles) and no fork of the hero.
+ * [DetailArtHero] bakes `statusBarsPadding() + TopAppBarDefaults.TopAppBarExpandedHeight + 8.dp +
+ * [BarContentGap]` onto its art tile, i.e. the bar's own collapsed height plus a small gap plus the
+ * app-wide gap under a bar. Add **nothing** on top of that — no list `contentPadding` top inset (it
+ * doubles) and no fork of the hero.
+ *
+ * Pair the bar with [DetailTopBarFade], composed between the scrolling content and the bar, so the
+ * first rows dissolve into the bar instead of sliding past its title.
  *
  * @param paneColor the colour of whatever this bar sits on: the screen background, or the Card's
  *   colour in a two-pane card.
@@ -99,6 +111,86 @@ fun DetailTopBar(
         modifier       = if (heroTitle == null) modifier else modifier.onGloballyPositioned {
             barBottomPx = it.positionInRoot().y + it.size.height
         },
+    )
+}
+
+// ── The gap and the fade strip under an app bar ───────────────────────────────
+// Cris's device pass, 2026-09-16, items #12 and #22: "the detail bars could also use a fade out
+// scrim strip and padding under the bar, just like the one at the bottom of library's tab bar", and
+// the same for the root bars. The Library browser pane has had both since the app bars landed
+// (`LibraryTabRowGap` / `LibraryTabFadeHeight` under its pinned tab row); these are that treatment,
+// shared, for every other bar in the app.
+
+/**
+ * Breathing room between a bar's bottom edge and the first content under it — the Library browser
+ * pane's `LibraryTabRowGap`, which is Search's `SearchTabRowGap`.
+ *
+ * On a detail surface it is part of [DetailArtHero]'s baked clearance (see [DetailTopBar] →
+ * "Hero clearance and the fade strip"); on a root screen it is the scroller's own top
+ * `contentPadding`, so it scrolls away with the content rather than being a permanent dead strip.
+ */
+internal val BarContentGap = 12.dp
+
+/**
+ * How far the pane colour fades out below a bar, dissolving the first rows into it — the Library
+ * browser pane's `LibraryTabFadeHeight`, which is Search's `TopScrimTail`. Only the tail: every bar
+ * in this app is solid and paints its own strip, so there is no status-bar half to hold down.
+ */
+internal val BarFadeHeight = 24.dp
+
+/**
+ * The [BarFadeHeight] `paneColor → Transparent` strip, anchored at the TOP of whatever `Box` it is
+ * composed in. This is the ROOT-screen form (Stats / Settings / Queue): a [RootTopBar] is a `Column`
+ * sibling whose MEASURED height shrinks as it collapses, so the weighted `Box` below it already
+ * starts at the bar's bottom edge and a top-anchored strip tracks the collapse for free.
+ *
+ * A detail bar is an overlay instead, so it needs the offset form — [DetailTopBarFade]. That is the
+ * whole difference between the two; do not "unify" them into one.
+ *
+ * Compose it as the LAST child of the content `Box` (and, where there is one, inside the
+ * `PullToRefreshBox`'s CONTENT lambda — `PullToRefreshBox` emits `content(); indicator()`, so the
+ * strip draws over the rows and the PTR indicator still slides out over the strip). It is a plain
+ * background `Box` with no pointer input, so it cannot eat a drag on the rows beneath it.
+ *
+ * @param paneColor the colour of the pane the strip fades out of — the same colour the bar paints.
+ */
+@Composable
+internal fun TopBarFade(
+    paneColor: Color,
+    modifier : Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(BarFadeHeight)
+            .background(Brush.verticalGradient(listOf(paneColor, Color.Transparent))),
+    )
+}
+
+/**
+ * [TopBarFade] offset to sit directly below an OVERLAY [DetailTopBar]'s bottom edge: the status-bar
+ * inset the bar takes as its `appBarWindowInsets`, plus the bar's own collapsed height. The same
+ * arithmetic the Library detail pane's PTR indicator uses, and it holds in a two-pane card too —
+ * nothing between the window and the card consumes the TOP inset (the `Row`'s 8dp is plain padding),
+ * so `statusBarsPadding()` reads the full status bar wherever this sits, exactly as
+ * [DetailArtHero]'s clearance does.
+ *
+ * Compose it in the same `Box` as the bar, AFTER the scrolling content and BEFORE the bar, so it
+ * draws over the rows and under the bar. It carries no pointer input, so the bar's own full-strip
+ * touch consumption is unchanged and drags on the rows below the strip still reach them.
+ *
+ * @param paneColor the pane's colour — pass whatever the bar's `paneColor` is.
+ */
+@Composable
+internal fun DetailTopBarFade(
+    paneColor: Color,
+    modifier : Modifier = Modifier,
+) {
+    TopBarFade(
+        paneColor = paneColor,
+        modifier  = modifier
+            .statusBarsPadding()
+            .padding(top = TopAppBarDefaults.TopAppBarExpandedHeight),
     )
 }
 

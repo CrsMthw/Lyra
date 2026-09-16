@@ -41,6 +41,7 @@ import com.crsmthw.lyra.data.remote.model.AlbumTrack
 import com.crsmthw.lyra.data.remote.model.SpotifyAlbumFull
 import com.crsmthw.lyra.ui.components.DetailArtHero
 import com.crsmthw.lyra.ui.components.DetailTopBar
+import com.crsmthw.lyra.ui.components.DetailTopBarFade
 import com.crsmthw.lyra.ui.components.TopScrim
 import com.crsmthw.lyra.ui.components.TrackActionsHost
 import com.crsmthw.lyra.ui.components.rememberHeroTitleHandoff
@@ -237,6 +238,12 @@ fun AlbumDetailScreen(
                                             artContent = albumArt,
                                         )
                                     }
+                                    // The seam under the bar — composed after the pane's content and
+                                    // before the bar, so it draws over the hero and under the bar.
+                                    DetailTopBarFade(
+                                        paneColor = MaterialTheme.colorScheme.surface,
+                                        modifier  = Modifier.align(Alignment.TopCenter),
+                                    )
                                     // No title in this bar, and so no hand-off: the hero's own name
                                     // sits right under it and barely scrolls in a pane this short,
                                     // exactly as the two-pane left pane carried no title pill.
@@ -313,10 +320,10 @@ fun AlbumDetailScreen(
                             state          = tracksListState,
                             modifier       = Modifier.fillMaxSize(),
                             // NO extra top inset. `DetailArtHero` already bakes
-                            // `statusBarsPadding()` + the bar's own collapsed height + 8dp onto its
-                            // art tile — adding a top inset here would double it, and forking the
-                            // component to remove its padding would break the two-pane pane and the
-                            // Library hero that share it.
+                            // `statusBarsPadding()` + the bar's own collapsed height + 8dp +
+                            // `BarContentGap` onto its art tile — adding a top inset here would
+                            // double it, and forking the component to remove its padding would break
+                            // the two-pane pane and the Library hero that share it.
                             contentPadding = PaddingValues(bottom = 100.dp + navBarBottomDp),
                         ) {
                             item(key = "header") {
@@ -357,11 +364,22 @@ fun AlbumDetailScreen(
                             alpha    = 0.20f,
                         )
 
+                        // The seam under the bar: the page colour fading out over the first rows, so
+                        // the hero art and the tracks dissolve into the bar instead of sliding past
+                        // its title — the same strip the Library browser has under its tab row.
+                        // Composed after the list and before the bar, so it draws over the content
+                        // and under the bar, and it takes no pointer input.
+                        DetailTopBarFade(
+                            paneColor = background,
+                            modifier  = Modifier.align(Alignment.TopCenter),
+                        )
+
                         // The bar, composed LAST so it draws (and hit-tests) over the list. Its
                         // height never changes (no scroll behaviour), so overlaying is correct, and
-                        // it is solid `background` at rest and scrolled — at rest there is only 8dp
-                        // of page background between its bottom edge and the art, so it reads as
-                        // the page until the art arrives. Default `onSurface` icon/title colours are
+                        // it is solid `background` at rest and scrolled — at rest there is only the
+                        // hero's 8dp + `BarContentGap` of page background between its bottom edge and
+                        // the art, so it reads as the page until the art arrives (and the fade strip
+                        // above covers that gap). Default `onSurface` icon/title colours are
                         // right here: unlike PlayerScreen there is no accent gradient behind the
                         // bar, just the page background.
                         DetailTopBar(

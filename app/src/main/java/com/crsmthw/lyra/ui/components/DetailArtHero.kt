@@ -81,15 +81,17 @@ fun DetailArtHero(
     Column(modifier = modifier.fillMaxWidth()) {
         // Centered square art tile. The top padding clears the DetailTopBar laid over this hero:
         // the status bar plus the bar's OWN collapsed height plus a small gap, so it is expressed in
-        // terms of the thing that is actually above it. Do NOT also add a list contentPadding top
-        // inset — that doubles it (docs/UI_PATTERNS.md → Hero clearance). It is a constant, not a
-        // fraction of the width, so a narrower window only shrinks the art around it: the art can
-        // never ride up under the bar.
+        // terms of the thing that is actually above it — plus the app-wide `BarContentGap` that now
+        // sits under every bar in the app (Cris's device pass, 2026-09-16 #12: the detail bars wanted
+        // the same padding-and-fade seam the Library's tab row has). That gap is baked in HERE rather
+        // than added as a list contentPadding top inset, which would double the whole clearance
+        // (docs/UI_PATTERNS.md → Hero clearance). It is a constant, not a fraction of the width, so a
+        // narrower window only shrinks the art around it: the art can never ride up under the bar.
         Box(
             modifier         = Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .padding(top = TopAppBarDefaults.TopAppBarExpandedHeight + 8.dp),
+                .padding(top = TopAppBarDefaults.TopAppBarExpandedHeight + 8.dp + BarContentGap),
             contentAlignment = Alignment.Center,
         ) {
             val artTileShape = MaterialShapes.Square.toShape()

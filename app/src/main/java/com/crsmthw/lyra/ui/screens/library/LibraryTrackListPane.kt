@@ -36,6 +36,7 @@ import coil3.compose.AsyncImage
 import com.crsmthw.lyra.R
 import com.crsmthw.lyra.ui.components.DetailArtHero
 import com.crsmthw.lyra.ui.components.DetailTopBar
+import com.crsmthw.lyra.ui.components.DetailTopBarFade
 import com.crsmthw.lyra.ui.components.HeroTitleHandoff
 import com.crsmthw.lyra.ui.components.RemovablePlaylist
 import com.crsmthw.lyra.ui.components.rememberHeroTitleHandoff
@@ -262,6 +263,20 @@ internal fun RightPaneContent(
                 } }
                 else -> null
             },
+        )
+
+        // The seam under the bar: the pane colour fading out over the first rows, so the hero art
+        // and the tracks dissolve into the bar instead of sliding past its title — the same strip
+        // the Library browser pane has under its tab row (Cris's device pass, 2026-09-16 #12).
+        //
+        // Composed as the LAST child of the PTR box's CONTENT, not after the box: `PullToRefreshBox`
+        // emits `content(); indicator()`, so the strip draws over the rows and the PTR indicator
+        // still comes out OVER it — which is what we want, since the indicator's own
+        // `padding(top = TopAppBarExpandedHeight)` places it at exactly this strip's top edge. A
+        // plain background Box takes no pointer input, so it cannot eat a drag on the rows beneath.
+        DetailTopBarFade(
+            paneColor = paneColor,
+            modifier  = Modifier.align(Alignment.TopCenter),
         )
         } // PullToRefreshBox
 
