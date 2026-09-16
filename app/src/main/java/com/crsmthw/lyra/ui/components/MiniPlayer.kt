@@ -91,6 +91,11 @@ fun MiniPlayer(
     // match across — see PlayerPanelHost's rememberMatchWhenConfig.
     sharedContentConfig        : SharedTransitionScope.SharedContentConfig = SharedTransitionDefaults.SharedContentConfig,
     // Secondary scope — used when both local (mini↔panel) and nav (mini↔PlayerScreen) are needed.
+    // Must be STRUCTURALLY CONSTANT for the life of the bar (non-null whenever the pop-out panel
+    // can exist, never toggled per state): adding/removing this registration reshapes the art's
+    // modifier chain, and Compose's chain diff can then re-pair the local entry onto the old nav
+    // node, which resets its placed flag and kills the next morph's start bounds (2026-09-16).
+    // Gate WHEN it may match through [navSharedContentConfig] instead.
     navSharedTransitionScope   : SharedTransitionScope? = null,
     navSharedContentConfig     : SharedTransitionScope.SharedContentConfig = SharedTransitionDefaults.SharedContentConfig,
 ) {

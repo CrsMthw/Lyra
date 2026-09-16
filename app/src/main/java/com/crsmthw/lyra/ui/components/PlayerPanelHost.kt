@@ -1000,21 +1000,44 @@ fun PlayerPanelHost(
                             .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom)
                     )
 
-                    // The mini player's SECONDARY nav scope (wide screens only) is held CONTINUOUSLY
-                    // while the pop-out panel is fully closed, and dropped only while it is
-                    // open/animating. Continuous-when-closed is required for the morph to work on POP:
-                    // a shared element added after a pop transition has already begun is too late to be
-                    // captured as the EXIT participant (that is why an isRunning gate morphed on push
-                    // but not back). Dropping it while the panel is present is the actual conflict
-                    // window — it stops the mini and the panel from both claiming "album-art" in the
-                    // nav scope and fighting the local mini↔panel morph.
+                    // The mini player's SECONDARY nav scope (wide screens only) is REGISTERED for the
+                    // whole life of the bar and never added or removed — the "not while the pop-out
+                    // panel is present" rule lives in its `SharedContentConfig` (`wideNavArtConfig`
+                    // below), i.e. in `isEnabled`, exactly as CLAUDE.md's shared-element rule says:
+                    // gate with a config, never by adding or removing the modifier.
+                    //
+                    // Why the modifier must not come and go (device, 2026-09-16 — the forward
+                    // mini → pop-out open that appeared in the panel with no flight, on every build
+                    // that carried the LyraMorph diagnostics): the bar's art chain was
+                    // [local sharedElement, (diag), nav sharedElement, (diag), size, clip, …] and
+                    // dropping the nav registration at the open shrank it by two elements. Compose
+                    // reconciles a modifier chain with a Myers diff whose "same item" test is
+                    // `actionForModifiers(prev, next) != ActionReplace` — SAME CLASS counts as the
+                    // same item (NodeChain.kt) — and the diff's backward snake then aligned the OLD
+                    // NAV node with the NEW LOCAL element. That reuses the nav node for the local
+                    // entry through `SharedBoundsNodeElement.update()` → `setup()`, which resets the
+                    // node's `isPlaced`, so `lastBoundsInSharedTransitionScope` reads null until an
+                    // approach placement that a lone participant at rest never gets. The next
+                    // match then has no start bounds and `configureActiveMatch` falls back to the
+                    // TARGET's own rect (`Rect(topLeft, lookaheadSize)`): the art is simply drawn in
+                    // the panel. With one deletion (no diag) the forward snake happened to keep the
+                    // local node, which is why the open worked before 2026-09-15 — a tie-break, not
+                    // a guarantee. A structurally constant chain has no diff to lose.
+                    //
+                    // Why the nav entry must be DISABLED while the panel is present: otherwise the
+                    // bar and the panel would both claim "album-art" in the NAV scope during the
+                    // local mini↔panel morph and fight it. Held continuously-when-closed because a
+                    // shared element added after a pop transition has already begun is too late to
+                    // be captured as the EXIT participant (an isRunning gate morphed on push but not
+                    // back). `rememberMatchWhenConfig` leaves `shouldKeepEnabledForOngoingAnimation`
+                    // at its default, so a flip cannot strand a running morph.
                     // On NARROW screens the mini's PRIMARY scope (below) is ALREADY the nav scope, so
-                    // this stays false to avoid a double registration that breaks the morph
-                    // asymmetrically.
-                    // Read off the panel's own child transition, which is still the exact animation
-                    // rendering the panel — so this stays true until the panel is genuinely gone,
-                    // and it is now true from the first frame of a gesture that seeks the panel in
-                    // (the raw Boolean and a separate tween could each be a frame or a spring out).
+                    // no secondary registration exists there (a double registration breaks the morph
+                    // asymmetrically).
+                    // `panelPresent` is read off the panel's own child transition, which is still the
+                    // exact animation rendering the panel — so it stays true until the panel is
+                    // genuinely gone, and is true from the first frame of a gesture that seeks the
+                    // panel in.
                     val panelPresent = panelTransition.currentState || panelTransition.targetState ||
                                        panelTransition.isRunning
                     val miniNeedsNavScope = canShowPanel && !panelPresent
@@ -1033,6 +1056,10 @@ fun PlayerPanelHost(
                     // transitions.
                     val routeVisible = LocalPlayerRouteVisible.current
                     val navArtConfig = rememberMatchWhenConfig(routeVisible)
+                    // The wide-screen SECONDARY registration's gate: PlayerScreen must be a visible
+                    // nav entry AND the pop-out panel must be absent (see the chain-stability note
+                    // above). A config, so the modifier itself never changes.
+                    val wideNavArtConfig = rememberMatchWhenConfig(routeVisible && miniNeedsNavScope)
 
                     // TEMPORARY: one line whenever the scope routing or the match gate changes —
                     // this is what says WHICH participants were eligible on a given gesture.
@@ -1078,8 +1105,11 @@ fun PlayerPanelHost(
                                 .then(miniBottomInset),
                             sharedTransitionScope    = if (canShowPanel) this@SharedTransitionLayout else navSharedTransitionScope,
                             sharedContentConfig      = if (canShowPanel) SharedTransitionDefaults.SharedContentConfig else navArtConfig,
-                            navSharedTransitionScope = if (miniNeedsNavScope) navSharedTransitionScope else null,
-                            navSharedContentConfig   = navArtConfig,
+                            // Structurally constant per width (see the chain-stability note above):
+                            // the SCOPE is passed whenever the panel can exist, and the panel-present
+                            // exclusion is `wideNavArtConfig`'s `isEnabled`.
+                            navSharedTransitionScope = if (canShowPanel) navSharedTransitionScope else null,
+                            navSharedContentConfig   = wideNavArtConfig,
                         )
                     }
 
