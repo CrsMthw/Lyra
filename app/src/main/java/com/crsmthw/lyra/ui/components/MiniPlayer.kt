@@ -165,9 +165,10 @@ fun MiniPlayer(
                 // secondary, so `mini/primary` is the participant that morphs with PlayerScreen.
                 //
                 // The KEY comes from the host (`LocalPlayerArtKey`) and carries a generation that
-                // is bumped after every settle of the floating surface, so no morph inherits
-                // shared-element state from the one before it — see that local's KDoc. Read once
-                // here so both registrations in this composable can never use different keys.
+                // advances after an ABANDONED seek and at no other settle, so a morph that follows
+                // a cancelled gesture inherits no shared-element state from it — see that local's
+                // KDoc. Read once here so both registrations in this composable can never use
+                // different keys.
                 // It also keys the wrapper `Box` below, so each generation is a fresh LayoutNODE
                 // as well as a fresh element; both registrations sit on that one node.
                 val artKey = LocalPlayerArtKey.current

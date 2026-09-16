@@ -278,10 +278,11 @@ fun PlayerCardContent(
             // 1. Local scope: mini player ↔ panel expansion
             // 2. Nav scope: panel → full PlayerScreen navigation
             // `rememberMorphDiag` is TEMPORARY instrumentation — see util/MorphDiag.kt.
-            // The key carries the host's settle generation (`LocalPlayerArtKey`), so each morph
-            // starts from a shared element with no history — read once for both registrations,
-            // and used again below to key the wrapper `Box`, so each generation is a fresh
-            // LayoutNODE too. Both registrations sit on that one node.
+            // The key carries the host's re-key generation (`LocalPlayerArtKey`), which advances
+            // after an ABANDONED seek and at no other settle, so a morph that follows a cancelled
+            // gesture starts from a shared element with no history — read once for both
+            // registrations, and used again below to key the wrapper `Box`, so each generation is a
+            // fresh LayoutNODE too. Both registrations sit on that one node.
             val artKey = LocalPlayerArtKey.current
             val localArtMod = if (sharedTransitionScope != null && animatedVisibilityScope != null) {
                 with(sharedTransitionScope) {

@@ -421,11 +421,11 @@ fun PlayerScreen(
                     val displaySide = side * artScale
 
                     // The shared-element modifier. `LocalPlayerArtKey` carries a generation the
-                    // host bumps after every settle, so this element has no history from the
-                    // previous morph to inherit — and it also keys the wrapper `Box` below, so
-                    // the LayoutNODE carrying these modifiers is fresh per generation too. See
-                    // `LocalPlayerArtKey` in PlayerPanelHost for why identity alone was not
-                    // enough. `rememberMorphDiag` is TEMPORARY instrumentation — util/MorphDiag.kt.
+                    // host advances after an ABANDONED seek and at no other settle, so a morph
+                    // that follows a cancelled gesture has no state from it to inherit — and it
+                    // also keys the wrapper `Box` below, so the LayoutNODE carrying these modifiers
+                    // is fresh per generation too. See `LocalPlayerArtKey` in PlayerPanelHost.
+                    // `rememberMorphDiag` is TEMPORARY instrumentation — util/MorphDiag.kt.
                     val artKey = LocalPlayerArtKey.current
                     val artMod = if (sharedTransitionScope != null && animatedContentScope != null) {
                         with(sharedTransitionScope) {
@@ -615,8 +615,8 @@ fun PlayerScreen(
                     val displaySide = side * artScale
 
                     // Shared-element modifier (keyed on `LocalPlayerArtKey`, a fresh element AND a
-                    // fresh node per settle) — see the landscape branch above, and
-                    // `LocalPlayerArtKey` in PlayerPanelHost.
+                    // fresh node per generation — one per abandoned seek) — see the landscape
+                    // branch above, and `LocalPlayerArtKey` in PlayerPanelHost.
                     // `rememberMorphDiag` is TEMPORARY instrumentation — see util/MorphDiag.kt.
                     val artKey = LocalPlayerArtKey.current
                     val artMod = if (sharedTransitionScope != null && animatedContentScope != null) {
