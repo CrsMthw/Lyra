@@ -156,10 +156,12 @@ internal val BarFadeHeight = 24.dp
  * A detail bar is an overlay instead, so it needs the offset form — [DetailTopBarFade]. That is the
  * whole difference between the two; do not "unify" them into one.
  *
- * Compose it as the LAST child of the content `Box` (and, where there is one, inside the
- * `PullToRefreshBox`'s CONTENT lambda — `PullToRefreshBox` emits `content(); indicator()`, so the
- * strip draws over the rows and the PTR indicator still slides out over the strip). It is a plain
- * background `Box` with no pointer input, so it cannot eat a drag on the rows beneath it.
+ * Compose it in the content `Box` AFTER the scrolling content, so it draws over the rows — the
+ * bottom scrim and the wave canvas may follow it, as they do on all three root screens; they do not
+ * overlap it. Where there is a `PullToRefreshBox`, put it inside its CONTENT lambda:
+ * `PullToRefreshBox` emits `content(); indicator()`, so the strip draws over the rows and the PTR
+ * indicator still slides out over the strip. It is a plain background `Box` with no pointer input,
+ * so it cannot eat a drag on the rows beneath it.
  *
  * @param paneColor the colour of the pane the strip fades out of — the same colour the bar paints.
  */
