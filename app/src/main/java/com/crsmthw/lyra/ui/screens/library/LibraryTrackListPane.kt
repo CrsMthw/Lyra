@@ -286,25 +286,35 @@ internal fun RightPaneContent(
         // left to fade content into). Single-pane carries the back icon; the two-pane RIGHT pane
         // sits beside the browser list and never had one, which is all `onBack == null` now means.
         //
-        // Selection mode swaps the bar's CONTENTS for the standard M3 contextual bar —
-        // [✕] "N selected" [remove] — through the app-wide finite `screenTransitionSpec()`. Never a
-        // spring: this can run while the pane swap or a nav transition is in flight (THE HARD RULE,
-        // docs/MOTION.md).
+        // ONE BAR, WHOSE CONTENTS SWAP. Selection mode turns it into the standard M3 contextual bar
+        // — [✕] "N selected" [⌫] — by crossfading each SLOT, while this single opaque container
+        // stays put. That is the M3 contextual-action-bar pattern (the container is kept and its
+        // contents change), and it is the fix for Cris's device pass, 2026-09-16 #18: "during the
+        // bar crossfade in selection mode, the bar goes transparent, revealing contents under it
+        // for a split second, making it look broken." Until then the `Crossfade` wrapped TWO whole
+        // `DetailTopBar`s, containers included, so mid-fade BOTH containers were partly transparent
+        // — 0.4 + 0.6 of `paneColor` never composites to an opaque strip — and the rows showed
+        // through. Do not go back to fading whole bars here.
         //
-        // THE TRANSITION IS HOISTED so each branch can ask whether it is the one currently SHOWN.
-        // `Crossfade` APPENDS the entering state to `currentlyVisible` and renders the list in
-        // order, so the entering bar is the LAST child of its Box: it draws last and therefore
-        // hit-tests FIRST, from its first frame at alpha 0 (alpha does not affect hit testing), and
-        // its only wrapper is a `graphicsLayer` — nothing gates pointer input. Both branches put a
-        // control in the same navigationIcon slot (✕ while selecting, back arrow otherwise), and in
-        // SINGLE-PANE `onBack` is `clearSelection()`, so a second tap on ✕ inside the 300 ms fade
-        // landed on the invisible back arrow and collapsed the whole playlist detail back to the
-        // browser. Same for the actions slot: ⌫ sits where ⋮ was, and the song-menu door into
-        // selection mode pre-checks one uri, so ⌫ is already live on the entering bar's first frame
-        // and a single-row removal skips the confirm dialog.
+        // The fade is the app-wide finite `screenTransitionSpec()`, never a spring: this can run
+        // while the pane swap or a nav transition is in flight (THE HARD RULE, docs/MOTION.md).
+        //
+        // THE TRANSITION IS STILL HOISTED, because every slot's control must ask whether it is the
+        // branch currently SHOWN. `Crossfade` APPENDS the entering state to `currentlyVisible` and
+        // renders the list in order, so the entering content is the LAST child of its slot's Box: it
+        // draws last and therefore hit-tests FIRST, from its first frame at alpha 0 (alpha does not
+        // affect hit testing), and its only wrapper is a `graphicsLayer` — nothing gates pointer
+        // input. Both branches of the navigationIcon slot put a control in the same place (✕ while
+        // selecting, back arrow otherwise), and in SINGLE-PANE `onBack` is `clearSelection()`, so a
+        // second tap on ✕ inside the 300 ms fade landed on the invisible back arrow and collapsed
+        // the whole playlist detail back to the browser. Same for the actions slot: ⌫ sits where ⋮
+        // was, and the song-menu door into selection mode pre-checks one uri, so ⌫ is already live
+        // on the entering content's first frame and a single-row removal would skip the confirm
+        // dialog. Three `Crossfade`s on one `Transition` is what `Transition` is for — they are its
+        // children, share the one spec and run in lockstep, and `currentState` is the same for all.
         //
         // During the fade `currentState` is the OUTGOING branch, so `live` makes the invisible
-        // entering bar inert and leaves the visible one usable; once settled both agree and
+        // entering control inert and leaves the visible one usable; once settled both agree and
         // everything is live (and on first composition `currentState == targetState`, so nothing is
         // dead on entry). A disabled `IconButton` still installs a pointer node and SWALLOWS the
         // tap rather than passing it down — which is what we want here: the ✕'s own action is
@@ -316,18 +326,22 @@ internal fun RightPaneContent(
         // live one and the branch being reverted TO only goes live at the settle. Getting there
         // takes two deliberate actions inside 300 ms, neither of which can come from this bar (its
         // own ✕ / ⌫ are the controls the fade has just deadened): a row long-press or the ⋮ menu's
-        // Select row on the way in, the selection `BackHandler` on the way out. And it is no worse
-        // than the pre-fix state, where the topmost branch was live for every fade.
+        // Select row on the way in, the selection `BackHandler` on the way out.
         val barTransition = updateTransition(inSelection, label = "detail_bar")
-        barTransition.Crossfade(
-            animationSpec = screenTransitionSpec(),
-            modifier      = Modifier.align(Alignment.TopCenter),
-        ) { selecting ->
-            val live = selecting == barTransition.currentState
-            if (selecting) {
-                DetailTopBar(
-                    paneColor      = paneColor,
-                    navigationIcon = {
+        DetailTopBar(
+            paneColor      = paneColor,
+            navigationIcon = {
+                // ACCEPTED COST of sharing one container, and only in the two-pane RIGHT pane:
+                // there `onBack == null`, so this slot is 0dp wide when idle and 48dp while
+                // selecting, and `TopAppBarLayout` insets the title by
+                // `max(TopAppBarTitleInset, navigationIcon.width)` — so the title jumps 16 → 48dp at
+                // the start of the entry fade and back at the SETTLE of the exit one. Visible only
+                // unfolded, in that pane, and only while scrolled past the hero (at the top the
+                // name sits at alpha 0 from the hand-off). Do NOT "fix" it by reserving 48dp in the
+                // idle branch: that would permanently indent the approved two-pane bar's title.
+                barTransition.Crossfade(animationSpec = screenTransitionSpec()) { selecting ->
+                    val live = selecting == barTransition.currentState
+                    if (selecting) {
                         IconButton(
                             onClick = { haptics.press(); viewModel.exitSelectionMode() },
                             enabled = live,
@@ -335,8 +349,21 @@ internal fun RightPaneContent(
                             Icon(Icons.Default.Close,
                                 contentDescription = stringResource(R.string.library_selection_cancel))
                         }
-                    },
-                    actions        = {
+                    } else if (onBack != null) {
+                        IconButton(
+                            onClick = { haptics.confirm(); onBack() },
+                            enabled = live,
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = stringResource(R.string.cd_back))
+                        }
+                    }
+                }
+            },
+            actions        = {
+                barTransition.Crossfade(animationSpec = screenTransitionSpec()) { selecting ->
+                    val live = selecting == barTransition.currentState
+                    if (selecting) {
                         // press() only — the confirm/reject buzz reports what the API actually did
                         // and is fired once from LibraryScreen when `removeResult` lands.
                         IconButton(
@@ -352,84 +379,73 @@ internal fun RightPaneContent(
                             Icon(Icons.Default.Delete,
                                 contentDescription = stringResource(R.string.library_selection_remove))
                         }
-                    },
-                    // No hand-off: the count is the whole point of a contextual bar, so it is
-                    // visible from the first frame of the mode regardless of the scroll position.
-                    title          = {
+                    } else if (canDelete) {
+                        // The menu anchors to this Box, which is the ⋮ button's own slot in the
+                        // actions row.
+                        Box {
+                            IconButton(
+                                onClick = { haptics.press(); showOverflowMenu = true },
+                                enabled = live,
+                            ) {
+                                Icon(Icons.Default.MoreVert,
+                                    contentDescription = stringResource(R.string.more_options))
+                            }
+                            DropdownMenu(
+                                expanded         = showOverflowMenu,
+                                onDismissRequest = { showOverflowMenu = false },
+                            ) {
+                                // Second door into selection mode — discoverable without a
+                                // long-press, and present for exactly the playlists the song
+                                // menu's "Select" row is (owned ones, since this whole action is
+                                // gated on ownership).
+                                DropdownMenuItem(
+                                    text        = { Text(stringResource(R.string.library_select_songs)) },
+                                    leadingIcon = { Icon(Icons.Default.Checklist, contentDescription = null) },
+                                    onClick     = {
+                                        haptics.press(); showOverflowMenu = false
+                                        viewModel.enterSelectionMode()
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text        = { Text(stringResource(R.string.delete_playlist)) },
+                                    leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
+                                    onClick     = {
+                                        haptics.press(); showOverflowMenu = false
+                                        showDeleteConfirm = true
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            // The hand-off stays wired for the whole life of the bar, so the bar keeps measuring its
+            // own bottom edge through a selection and the playlist name is at the right alpha the
+            // instant the mode ends. Only the NAME branch takes `titleModifier`: the count is the
+            // whole point of a contextual bar, so it is fully visible from the first frame of the
+            // mode regardless of the scroll position.
+            heroTitle      = heroTitle,
+            title          = { titleModifier ->
+                barTransition.Crossfade(animationSpec = screenTransitionSpec()) { selecting ->
+                    if (selecting) {
                         Text(
                             text     = pluralStringResource(
                                 R.plurals.library_selected_count, nSelected, nSelected,
                             ),
                             maxLines = 1,
                         )
-                    },
-                )
-            } else {
-                DetailTopBar(
-                    paneColor      = paneColor,
-                    navigationIcon = {
-                        if (onBack != null) {
-                            IconButton(
-                                onClick = { haptics.confirm(); onBack() },
-                                enabled = live,
-                            ) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack,
-                                    contentDescription = stringResource(R.string.cd_back))
-                            }
-                        }
-                    },
-                    actions        = {
-                        if (canDelete) {
-                            // The menu anchors to this Box, which is the ⋮ button's own slot in the
-                            // actions row.
-                            Box {
-                                IconButton(
-                                    onClick = { haptics.press(); showOverflowMenu = true },
-                                    enabled = live,
-                                ) {
-                                    Icon(Icons.Default.MoreVert,
-                                        contentDescription = stringResource(R.string.more_options))
-                                }
-                                DropdownMenu(
-                                    expanded         = showOverflowMenu,
-                                    onDismissRequest = { showOverflowMenu = false },
-                                ) {
-                                    // Second door into selection mode — discoverable without a
-                                    // long-press, and present for exactly the playlists the song
-                                    // menu's "Select" row is (owned ones, since this whole action is
-                                    // gated on ownership).
-                                    DropdownMenuItem(
-                                        text        = { Text(stringResource(R.string.library_select_songs)) },
-                                        leadingIcon = { Icon(Icons.Default.Checklist, contentDescription = null) },
-                                        onClick     = {
-                                            haptics.press(); showOverflowMenu = false
-                                            viewModel.enterSelectionMode()
-                                        },
-                                    )
-                                    DropdownMenuItem(
-                                        text        = { Text(stringResource(R.string.delete_playlist)) },
-                                        leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
-                                        onClick     = {
-                                            haptics.press(); showOverflowMenu = false
-                                            showDeleteConfirm = true
-                                        },
-                                    )
-                                }
-                            }
-                        }
-                    },
-                    heroTitle      = heroTitle,
-                    title          = { titleModifier ->
+                    } else {
                         Text(
                             text     = playlistName,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = titleModifier,
                         )
-                    },
-                )
-            }
-        }
+                    }
+                }
+            },
+            modifier       = Modifier.align(Alignment.TopCenter),
+        )
         if (showRemoveConfirm && playlist != null) {
             AlertDialog(
                 onDismissRequest = { showRemoveConfirm = false },

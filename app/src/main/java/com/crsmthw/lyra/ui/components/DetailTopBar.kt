@@ -68,16 +68,25 @@ import androidx.compose.ui.unit.dp
  * Pair the bar with [DetailTopBarFade], composed between the scrolling content and the bar, so the
  * first rows dissolve into the bar instead of sliding past its title.
  *
+ * ### A contextual (selection) bar swaps the SLOTS, not the bar
+ *
+ * The Library playlist pane's multi-select bar is the standard M3 contextual action bar: ONE of
+ * these, always present and always opaque, whose `navigationIcon` / `title` / `actions` each
+ * `Crossfade` on a hoisted `updateTransition`. Never crossfade two whole bars — mid-fade both
+ * containers are partly transparent, and 0.4 + 0.6 of [paneColor] does not composite to an opaque
+ * strip, so the rows show through (Cris's device pass, 2026-09-16 #18). The call site
+ * (`LibraryTrackListPane`) carries the live-gating rules that come with a hoisted transition.
+ *
  * @param paneColor the colour of whatever this bar sits on: the screen background, or the Card's
  *   colour in a two-pane card.
  * @param navigationIcon usually the back `IconButton` (debounced `onBack` + a `confirm()` haptic).
  * @param actions the screen's actions, as a `TopAppBar` `actions` row.
  * @param heroTitle the hero-title hand-off ([rememberHeroTitleHandoff], also handed to
  *   [DetailArtHero]). Non-null fades [title] in as the hero title slides under this bar; null keeps
- *   [title] permanently visible (the Library's contextual selection bar, and two-pane hero panes
- *   that pass no title at all).
+ *   [title] permanently visible (the two-pane hero panes, which pass no title at all).
  * @param title the bar title. It receives the alpha [Modifier] the hand-off drives — put it on the
- *   `Text`; ignore it for an always-visible title.
+ *   `Text`; ignore it for a title that must be visible regardless of the scroll position (the
+ *   contextual bar's "N selected" count does exactly that, inside its own slot `Crossfade`).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
