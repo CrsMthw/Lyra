@@ -422,14 +422,14 @@ fun PlayerScreen(
 
                     // The shared-element modifier. `LocalPlayerArtKey` carries a generation the
                     // host advances after an ABANDONED seek and at no other settle, so a morph
-                    // that follows a cancelled gesture has no state from it to inherit — and it
-                    // also keys the wrapper `Box` below, so the LayoutNODE carrying these modifiers
-                    // is fresh per generation too. See `LocalPlayerArtKey` in PlayerPanelHost.
-                    // `rememberMorphDiag` is TEMPORARY instrumentation — util/MorphDiag.kt.
-                    val artKey = LocalPlayerArtKey.current
+                    // that follows a cancelled gesture has no state from it to inherit. A
+                    // generation is a fresh ELEMENT only — recreating the LayoutNode that carries
+                    // this modifier was tried and changed nothing on device. See
+                    // `LocalPlayerArtKey` in PlayerPanelHost. `rememberMorphDiag` is TEMPORARY
+                    // instrumentation — util/MorphDiag.kt.
                     val artMod = if (sharedTransitionScope != null && animatedContentScope != null) {
                         with(sharedTransitionScope) {
-                            val artState = rememberSharedContentState(artKey)
+                            val artState = rememberSharedContentState(LocalPlayerArtKey.current)
                             Modifier.sharedElement(
                                 sharedContentState      = artState,
                                 animatedVisibilityScope = animatedContentScope,
@@ -437,24 +437,6 @@ fun PlayerScreen(
                             ).then(rememberMorphDiag("player/land", artState))
                         }
                     } else Modifier
-
-                    // The IMAGE, hoisted into movable content so recreating the wrapper MOVES its
-                    // node instead of rebuilding it (no Coil re-request, no crossfade replay, no
-                    // art-less frame). Remembered ABOVE the AnimatedContent so a lyrics swap does
-                    // not churn it; parameterised rather than capturing, because `remember` runs
-                    // once and a captured `artImageModel` would freeze at the first track. Only
-                    // the art branch invokes it, and `contentKey` is that branch's Boolean, so
-                    // two art branches can never be composed at the same time.
-                    val art = remember {
-                        movableContentOf<Any?> { model ->
-                            AsyncImage(
-                                model              = model,
-                                contentDescription = stringResource(R.string.cd_album_art),
-                                contentScale       = ContentScale.Crop,
-                                modifier           = Modifier.fillMaxSize(),
-                            )
-                        }
-                    }
 
                     val lyricsContentMod = Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp))
 
@@ -495,49 +477,49 @@ fun PlayerScreen(
                                 }
                             } else {
                                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    // A fresh NODE per generation — see the comment on `artKey`.
-                                    key(artKey) {
-                                        Box(
-                                            modifier = artMod
-                                                .size(displaySide)
-                                                .clip(RoundedCornerShape(16.dp))
-                                                .graphicsLayer {
-                                                    translationX = (artDragX * 0.3f).coerceIn(-80f, 80f) + artOffsetX.value
-                                                }
-                                                .pointerInput(Unit) {
-                                                    detectHorizontalDragGestures(
-                                                        onDragStart      = { artDragX = 0f },
-                                                        onDragEnd        = {
-                                                            when {
-                                                                artDragX < -swipeThresholdPx -> {
-                                                                    val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
-                                                                    artDragX = 0f; skipDirection = 1
-                                                                    scope.launch {
-                                                                        artOffsetX.snapTo(s)
-                                                                        artOffsetX.animateTo(-1500f, tween(250, easing = FastOutLinearInEasing))
-                                                                    }
-                                                                    haptics.press()
-                                                                    viewModel.skipNext()
+                                    AsyncImage(
+                                        model              = artImageModel,
+                                        contentDescription = stringResource(R.string.cd_album_art),
+                                        contentScale       = ContentScale.Crop,
+                                        modifier           = artMod
+                                            .size(displaySide)
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .graphicsLayer {
+                                                translationX = (artDragX * 0.3f).coerceIn(-80f, 80f) + artOffsetX.value
+                                            }
+                                            .pointerInput(Unit) {
+                                                detectHorizontalDragGestures(
+                                                    onDragStart      = { artDragX = 0f },
+                                                    onDragEnd        = {
+                                                        when {
+                                                            artDragX < -swipeThresholdPx -> {
+                                                                val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
+                                                                artDragX = 0f; skipDirection = 1
+                                                                scope.launch {
+                                                                    artOffsetX.snapTo(s)
+                                                                    artOffsetX.animateTo(-1500f, tween(250, easing = FastOutLinearInEasing))
                                                                 }
-                                                                artDragX > swipeThresholdPx -> {
-                                                                    val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
-                                                                    artDragX = 0f; skipDirection = -1
-                                                                    scope.launch {
-                                                                        artOffsetX.snapTo(s)
-                                                                        artOffsetX.animateTo(1500f, tween(250, easing = FastOutLinearInEasing))
-                                                                    }
-                                                                    haptics.press()
-                                                                    viewModel.skipPrevious()
-                                                                }
-                                                                else -> artDragX = 0f
+                                                                haptics.press()
+                                                                viewModel.skipNext()
                                                             }
-                                                        },
-                                                        onDragCancel     = { artDragX = 0f },
-                                                        onHorizontalDrag = { _, amount -> artDragX += amount },
-                                                    )
-                                                },
-                                        ) { art(artImageModel) }
-                                    }
+                                                            artDragX > swipeThresholdPx -> {
+                                                                val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
+                                                                artDragX = 0f; skipDirection = -1
+                                                                scope.launch {
+                                                                    artOffsetX.snapTo(s)
+                                                                    artOffsetX.animateTo(1500f, tween(250, easing = FastOutLinearInEasing))
+                                                                }
+                                                                haptics.press()
+                                                                viewModel.skipPrevious()
+                                                            }
+                                                            else -> artDragX = 0f
+                                                        }
+                                                    },
+                                                    onDragCancel     = { artDragX = 0f },
+                                                    onHorizontalDrag = { _, amount -> artDragX += amount },
+                                                )
+                                            },
+                                    )
                                 }
                             }
                         }
@@ -614,14 +596,13 @@ fun PlayerScreen(
                     val side = minOf(maxWidth, maxHeight)
                     val displaySide = side * artScale
 
-                    // Shared-element modifier (keyed on `LocalPlayerArtKey`, a fresh element AND a
-                    // fresh node per generation — one per abandoned seek) — see the landscape
+                    // Shared-element modifier (keyed on `LocalPlayerArtKey` — a fresh element per
+                    // abandoned seek, and nothing at an ordinary settle) — see the landscape
                     // branch above, and `LocalPlayerArtKey` in PlayerPanelHost.
                     // `rememberMorphDiag` is TEMPORARY instrumentation — see util/MorphDiag.kt.
-                    val artKey = LocalPlayerArtKey.current
                     val artMod = if (sharedTransitionScope != null && animatedContentScope != null) {
                         with(sharedTransitionScope) {
-                            val artState = rememberSharedContentState(artKey)
+                            val artState = rememberSharedContentState(LocalPlayerArtKey.current)
                             Modifier.sharedElement(
                                 sharedContentState      = artState,
                                 animatedVisibilityScope = animatedContentScope,
@@ -629,18 +610,6 @@ fun PlayerScreen(
                             ).then(rememberMorphDiag("player/port", artState))
                         }
                     } else Modifier
-
-                    // The IMAGE in movable content — see the landscape branch for why.
-                    val art = remember {
-                        movableContentOf<Any?> { model ->
-                            AsyncImage(
-                                model              = model,
-                                contentDescription = stringResource(R.string.cd_album_art),
-                                contentScale       = ContentScale.Crop,
-                                modifier           = Modifier.fillMaxSize(),
-                            )
-                        }
-                    }
 
                     val lyricsContentMod = Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp))
 
@@ -681,49 +650,49 @@ fun PlayerScreen(
                                 }
                             } else {
                                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    // A fresh NODE per generation — see the landscape branch.
-                                    key(artKey) {
-                                        Box(
-                                            modifier = artMod
-                                                .size(displaySide)
-                                                .clip(RoundedCornerShape(16.dp))
-                                                .graphicsLayer {
-                                                    translationX = (artDragX * 0.3f).coerceIn(-80f, 80f) + artOffsetX.value
-                                                }
-                                                .pointerInput(Unit) {
-                                                    detectHorizontalDragGestures(
-                                                        onDragStart      = { artDragX = 0f },
-                                                        onDragEnd        = {
-                                                            when {
-                                                                artDragX < -swipeThresholdPx -> {
-                                                                    val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
-                                                                    artDragX = 0f; skipDirection = 1
-                                                                    scope.launch {
-                                                                        artOffsetX.snapTo(s)
-                                                                        artOffsetX.animateTo(-1500f, tween(250, easing = FastOutLinearInEasing))
-                                                                    }
-                                                                    haptics.press()
-                                                                    viewModel.skipNext()
+                                    AsyncImage(
+                                        model              = artImageModel,
+                                        contentDescription = stringResource(R.string.cd_album_art),
+                                        contentScale       = ContentScale.Crop,
+                                        modifier           = artMod
+                                            .size(displaySide)
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .graphicsLayer {
+                                                translationX = (artDragX * 0.3f).coerceIn(-80f, 80f) + artOffsetX.value
+                                            }
+                                            .pointerInput(Unit) {
+                                                detectHorizontalDragGestures(
+                                                    onDragStart      = { artDragX = 0f },
+                                                    onDragEnd        = {
+                                                        when {
+                                                            artDragX < -swipeThresholdPx -> {
+                                                                val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
+                                                                artDragX = 0f; skipDirection = 1
+                                                                scope.launch {
+                                                                    artOffsetX.snapTo(s)
+                                                                    artOffsetX.animateTo(-1500f, tween(250, easing = FastOutLinearInEasing))
                                                                 }
-                                                                artDragX > swipeThresholdPx -> {
-                                                                    val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
-                                                                    artDragX = 0f; skipDirection = -1
-                                                                    scope.launch {
-                                                                        artOffsetX.snapTo(s)
-                                                                        artOffsetX.animateTo(1500f, tween(250, easing = FastOutLinearInEasing))
-                                                                    }
-                                                                    haptics.press()
-                                                                    viewModel.skipPrevious()
-                                                                }
-                                                                else -> artDragX = 0f
+                                                                haptics.press()
+                                                                viewModel.skipNext()
                                                             }
-                                                        },
-                                                        onDragCancel     = { artDragX = 0f },
-                                                        onHorizontalDrag = { _, amount -> artDragX += amount },
-                                                    )
-                                                },
-                                        ) { art(artImageModel) }
-                                    }
+                                                            artDragX > swipeThresholdPx -> {
+                                                                val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
+                                                                artDragX = 0f; skipDirection = -1
+                                                                scope.launch {
+                                                                    artOffsetX.snapTo(s)
+                                                                    artOffsetX.animateTo(1500f, tween(250, easing = FastOutLinearInEasing))
+                                                                }
+                                                                haptics.press()
+                                                                viewModel.skipPrevious()
+                                                            }
+                                                            else -> artDragX = 0f
+                                                        }
+                                                    },
+                                                    onDragCancel     = { artDragX = 0f },
+                                                    onHorizontalDrag = { _, amount -> artDragX += amount },
+                                                )
+                                            },
+                                    )
                                 }
                             }
                         }

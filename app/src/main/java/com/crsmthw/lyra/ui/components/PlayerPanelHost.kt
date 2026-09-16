@@ -199,8 +199,8 @@ private const val AlbumArtKeyBase = "album-art"
  *
  * Defaults to the bare key so that anywhere the provider is out of scope the behaviour is exactly
  * what it was before this existed — a preview, and the docked third pane's `PlayerScreen`, which is
- * composed BESIDE this host and is handed no shared scopes at all. A constant key never changes, so
- * nothing there is ever recreated.
+ * composed BESIDE this host and is handed no shared scopes at all. A constant key is never re-keyed,
+ * so nothing there ever loses its match state.
  */
 val LocalPlayerArtKey: ProvidableCompositionLocal<Any> = compositionLocalOf { AlbumArtKeyBase }
 

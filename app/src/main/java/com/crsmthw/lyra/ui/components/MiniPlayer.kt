@@ -24,8 +24,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
-import androidx.compose.runtime.movableContentOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
@@ -168,9 +166,9 @@ fun MiniPlayer(
                 // advances after an ABANDONED seek and at no other settle, so a morph that follows
                 // a cancelled gesture inherits no shared-element state from it — see that local's
                 // KDoc. Read once here so both registrations in this composable can never use
-                // different keys.
-                // It also keys the wrapper `Box` below, so each generation is a fresh LayoutNODE
-                // as well as a fresh element; both registrations sit on that one node.
+                // different keys. Both sit on the `AsyncImage` itself: a generation is a fresh
+                // ELEMENT only — recreating the LayoutNode as well was tried and changed nothing on
+                // device (see [LocalPlayerArtKey]).
                 val artKey = LocalPlayerArtKey.current
                 val artModifier = if (sharedTransitionScope != null) {
                     with(sharedTransitionScope) {
@@ -211,41 +209,14 @@ fun MiniPlayer(
                         .size(Size.ORIGINAL)
                         .build()
                 }
-                // The IMAGE is hoisted into movable content so that recreating the wrapper below
-                // MOVES its node instead of rebuilding it: no Coil re-request, no reset painter,
-                // no art-less frame at a re-key. Parameterised rather than capturing, because
-                // `remember` runs once — anything the lambda closed over would freeze at the
-                // first track it ever showed. Composable calls INSIDE it (none here) would still
-                // evaluate fresh; only captured locals freeze. Invoked exactly once per
-                // composition, from the single `key` block below.
-                val art = remember {
-                    movableContentOf<Any?, String?> { model, description ->
-                        AsyncImage(
-                            model              = model,
-                            contentDescription = description,
-                            contentScale       = ContentScale.Crop,
-                            modifier           = Modifier.fillMaxSize(),
-                        )
-                    }
-                }
-
-                // ── A fresh NODE per generation, not just a fresh element ────────────────────
-                // The wrapper carries the art's whole modifier chain in its original order, so
-                // the bounds the shared element animates are exactly what they were when these
-                // modifiers sat on the `AsyncImage`. `key(artKey)` recreates it whenever the host
-                // bumps the generation, which is the point: re-keying an EXISTING node clears its
-                // `isPlaced` flag and only ever requests a LOOKAHEAD remeasure, while the flag is
-                // set in the approach PLACEMENT — so a re-keyed lone participant reports no last
-                // bounds and the next morph starts from the destination's own rect (see
-                // [LocalPlayerArtKey]). A node that is inserted has to be measured and placed by
-                // its parent to appear at all, so it can never be in that state.
-                key(artKey) {
-                    Box(
-                        modifier = artModifier.then(navArtModifier)
-                            .size(44.dp)
-                            .clip(RoundedCornerShape(10.dp)),
-                    ) { art(artRequest, shownTrack.album?.name) }
-                }
+                AsyncImage(
+                    model              = artRequest,
+                    contentDescription = shownTrack.album?.name,
+                    contentScale       = ContentScale.Crop,
+                    modifier           = artModifier.then(navArtModifier)
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(10.dp)),
+                )
 
                 Spacer(Modifier.width(10.dp))
 
