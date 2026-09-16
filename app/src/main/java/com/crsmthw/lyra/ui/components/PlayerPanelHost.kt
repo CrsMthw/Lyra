@@ -101,23 +101,23 @@ val LocalPopOutPanelOpen: ProvidableCompositionLocal<Boolean> = compositionLocal
  */
 val LocalPlayerRouteVisible: ProvidableCompositionLocal<Boolean> = compositionLocalOf { true }
 
-/** The shared-element key of the app-wide album art, before the settle generation is appended. */
+/** The shared-element key of the app-wide album art, before the re-key generation is appended. */
 private const val AlbumArtKeyBase = "album-art"
 
 /**
  * The KEY every `"album-art"` shared-element participant must register under — the app's ONE
- * floating-player morph. [PlayerPanelHost] provides it as `"album-art#<generation>"` and bumps the
- * generation after every SETTLE of the floating surface, so each morph runs on a shared element
- * with **no history**. Every participant ALSO wraps its art in `key(LocalPlayerArtKey.current) {
- * Box(…the shared modifiers…) { art() } }`, so each generation is a fresh **node** as well as a
- * fresh element — see "why a fresh key alone was not enough" below.
+ * floating-player morph. [PlayerPanelHost] provides it as `"album-art#<generation>"` and advances
+ * the generation in exactly ONE situation: the first quiescent moment after a seek was
+ * **ABANDONED** (a predictive-back gesture released without committing, or a change reversed while
+ * it was still running). Every other settle — a committed open or close, a push or pop, a fold, the
+ * M4 third-state snap — keeps the key it has.
  *
- * **Why identity rather than another repair of the state machine.** A cancelled predictive-back
- * gesture disposes the participant the abandoned direction was heading for (the mini player for a
- * cancelled panel close, the bar or the pop-out panel for a cancelled back off `PlayerScreen`), and
- * the NEXT gesture then had no flight at all: the art in the pop-out panel (device report 44,
- * unfolded) or the full player's big art (report 48, folded) simply disappeared, while a COMMITTED
- * gesture in between cured it. `SharedElement` keeps per-key state that outlives the participants —
+ * **Why a fresh identity at all.** A cancelled predictive-back gesture disposes the participant the
+ * abandoned direction was heading for (the mini player for a cancelled panel close, the bar or the
+ * pop-out panel for a cancelled back off `PlayerScreen`), and the NEXT gesture then had no flight at
+ * all: the art in the pop-out panel (device report 44, unfolded) or the full player's big art
+ * (report 48, folded) simply disappeared, while a COMMITTED gesture in between cured it.
+ * `SharedElement` keeps per-key state that outlives the participants —
  * `SharedTransitionStateMachine.state`, its `targetBoundsProvider` (the rect the next morph starts
  * FROM), and a configured match's `targetData`/`currentBounds` — and a cancelled seek can strand any
  * of them. The 2026-09-15 repair targeted exactly one (the provider) by forcing a no-op re-measure
@@ -127,64 +127,80 @@ private const val AlbumArtKeyBase = "album-art"
  * (SharedTransitionScope.kt), so a new key means a new `SharedElement` with a new
  * `SharedTransitionStateMachine` at `NoMatchFound`, no `targetBoundsProvider`, no `targetData`, no
  * `currentBounds` — i.e. exactly the state the app is in before the FIRST gesture, which is the one
- * that always works.
+ * that always works. Device-verified on the first build that carried it (`6d97d78`): both cancel
+ * cases fixed, folded and unfolded.
  *
- * **Why a fresh key alone was NOT enough, and the node must be fresh too (device, 2026-09-16).** On
- * the build that carried only the key, the cancelled-back cases were fixed in both directions — and
- * the plain forward `mini → pop-out` open broke: the art appeared in the panel at final size with no
- * flight. `LyraMorph` caught it exactly: after a settle the bar re-registered alone under a new key
- * ("mini/primary match=false … at=1092,1507 size=116x116" — the bar's own rect), and 1.4 s later the
- * open configured that same copy with `currentBounds` **already equal to the panel's art rect**
- * ("mini/primary match=true … at=1617,566 size=292x292"), i.e.
- * `configureActiveMatch`'s last fallback `Rect(topLeft, lookaheadSize)`, i.e.
- * `obtainBoundsFromLastTarget` returned null for the bar.
+ * **Why ONLY after an abandoned seek — the device settled this (2026-09-16).** Bumping at every
+ * settle fixed those two cancel cases and BROKE the plain forward `mini → pop-out` open: tap the
+ * bar and the art appeared in the panel at final size with no flight, every try. `LyraMorph` named
+ * it exactly — after an ordinary settle the bar re-registered ALONE under the new key at its own
+ * rect ("mini/primary match=false … at=1092,1507 size=116x116"), and the open then configured that
+ * same copy with `currentBounds` **already equal to the panel's art rect** ("mini/primary
+ * match=true … at=1617,566 size=292x292"), i.e. `configureActiveMatch`'s last fallback
+ * `Rect(topLeft, lookaheadSize)`, i.e. `obtainBoundsFromLastTarget` returned null for the bar.
+ * **A lone participant re-keyed AT REST has no usable last bounds**: a re-key runs `setup()`, which
+ * sets `isPlaced = false`, and `isPlaced` is written `true` in exactly one place — inside
+ * `approachPlace`'s `layout {}` block, i.e. the approach PLACEMENT, which
+ * `isMeasurementApproachInProgress` (`isEnabled && foundMatch && isTransitionActive`) does not ask
+ * for on a settled, unmatched node — so `lastBoundsInSharedTransitionScope` hands back
+ * `boundsBeforeDetached`, which the last `approachPlace` cleared to null (SharedContentNode.kt).
+ * Forcing a brand-new LayoutNode per generation was tried for exactly this and **did not help**
+ * (`b97f57a`, byte-identical symptom and log): a node created at rest with no match is not
+ * approach-placed either. The first bar of a session escapes all of it only because it is created
+ * DURING its slide-in enter, while the approach pass is running. So a STABLE key across ordinary
+ * cycles is not a compromise — it is the state the forward open is known to work in (`b250ed4` /
+ * `f40ba51`).
  *
- * The mechanism, as far as the sources establish it: a new key produces a new `SharedContentState`
- * and therefore a new `SharedBoundsNodeElement`, but the SAME `SharedBoundsNode` is **updated** —
- * `update()` assigns `node.sharedElementEntry`, whose setter calls `setup()`, which sets
- * `isPlaced = false` (SharedContentNode.kt). `isPlaced` is written `true` in exactly one place:
- * inside `approachPlace`'s `layout {}` block, i.e. during the APPROACH **placement** — while the
- * auto-invalidation that follows a node update (`autoInvalidateUpdatedNode` →
- * `LayoutModifierNode.invalidateMeasurement()` → `LayoutNode.invalidateMeasurements()`) requests a
- * **lookahead** remeasure. Those are different passes, and the device says the approach placement
- * did not re-run for a settled node whose size had not changed: `lastBoundsInSharedTransitionScope`
- * returns null while `!isPlaced` (and `boundsBeforeDetached` is null, cleared by the last
- * `approachPlace`), so the next morph starts from the destination's own rect. A FIRST-EVER
- * registration cannot be in that state — a node that is inserted has to be measured and placed by
- * its parent to appear at all, and `LayoutModifierNodeCoordinator.measure` calls `approachMeasure`
- * unconditionally — which is why the very first open of the app always morphed. So each generation
- * now recreates the LayoutNode that carries the shared modifiers, putting every morph in the
- * first-ever-registration state. (The image itself is hoisted into `movableContentOf` and MOVED
- * across generations, so there is no Coil re-request and no art-less frame.)
+ * **Why the abandoned seek is the one case where a re-key both helps and is safe.** The cancel path
+ * leaves the abandoned participant LINGERING composed for a frame or two past the unwind's snap, so
+ * the two participants re-register under the new key TOGETHER and form a match at rest — and a
+ * configured match is what gets `approachPlace` to run for both, giving each a real last bounds for
+ * the next morph in either direction. The 00:17 trace of `6d97d78` reads `unwind end snapTo=None` →
+ * **12 ms** → `artKey bump -> album-art#4` → **9 ms** → `mini/primary EXIT #3 / ENTER #4` and
+ * `player/port EXIT #3 / ENTER #4`, both `match=true` at their own rects; the next gesture flew.
+ * That window is the mechanism, so the bump must stay on the same frame chain as the snap — never
+ * behind a frame delay, a `withFrameNanos` or an extra effect hop.
+ *
+ * **Two accepted residuals, both legible in the `LyraMorph` log.** (1) A cancel where the abandoned
+ * participant does NOT linger would leave a lone re-keyed survivor with no start bounds — the
+ * forward failure above, reached from a cancel instead of a settle. Why the bar lingers at all is
+ * still an open question, and it is not the diagnostics' doing (each adds a node to the chain, not a
+ * participant) — re-check when `util/MorphDiag.kt` goes. (2) If the unwind is interrupted by a
+ * committed change before it snaps, the request survives and is honoured at the NEXT quiescent
+ * period, which may be an ordinary settle with one participant composed, i.e. residual (1) again.
+ * Reachable only when a cancel is released LATE (the unwind is fraction-proportional — a 5 % cancel
+ * unwinds in ~15 ms) and something commits inside that window; it degrades to one missing flight,
+ * never a wedge, and clearing the request instead would trade it for a cancel whose stale state is
+ * never re-keyed at all. The tell for both is an `artKey bump` logged at a state a COMMITTED change
+ * reached.
  *
  * With a null provider `ActiveMatchFoundConfigPending.configureActiveMatch` falls back to
  * `allEntries.fastFirstOrNull { enabledEntries.contains(it) }` and morphs from THAT copy's last
- * bounds. **That fallback is only correct because a settled surface never leaves two participants
- * composed in one scope**, so the first entry is always the one that was already there — the
- * OUTGOING copy — in all four directions (bar→player, player→bar, bar→panel, panel→bar). The two
+ * bounds, so the first entry has to be the copy that was already there — the OUTGOING one — in all
+ * four directions (bar→player, player→bar, bar→panel, panel→bar). The two
  * `if (!currentState && !targetState) return@AnimatedVisibility` bail-outs in [MiniPlayer] and
- * [PlayerPopOutPanel] are what enforce that (they exist for the two-target rule; see [PlayerSurface]).
+ * [PlayerPopOutPanel] are what keep it so (they exist for the two-target rule; see [PlayerSurface]).
  * If either is ever "simplified" away, an idle surface composed in `PreEnter` becomes the first
  * entry and the fallback picks the INCOMING copy — a WRONG flight, which is harder to spot than no
  * flight at all.
  *
  * **The settle re-measure is gone (2026-09-16).** `LocalPlayerArtSettleCount` +
  * `rememberArtSettleInvalidation()` read a counter in **measure** scope, so their only lever was
- * `requestLookaheadRemeasure()` — the same pass that demonstrably does not restore `isPlaced`. They
- * were a no-op against this failure, and the fresh node supersedes what they were aiming at (its
- * first lookahead placement re-runs `processPendingRequest()` → `updateTargetBoundsProvider()`
- * anyway).
+ * `requestLookaheadRemeasure()` — a pass that does not restore `isPlaced`. They were a no-op against
+ * this failure, not insurance against it.
  *
- * **When the generation may change.** Only from a composition where the surface transition is
- * settled AND no back gesture is in progress AND the panel's close phase is `Idle` AND the nav
- * `SharedTransitionScope` reports no active shared transition — see the bump site. Re-keying while a
- * morph is live would replace the element (and the `createChildTransition` its bounds animation
- * hangs off) mid-flight and drop the rest of the flight.
+ * **When the generation may change.** Only from a composition where an [ArtReKeyRequest] is pending
+ * AND the surface transition is settled AND no back gesture is in progress AND the panel's close
+ * phase is `Idle` AND the nav `SharedTransitionScope` reports no active shared transition — see the
+ * bump site. The request says *whether*; that four-term gate says *when*, and it is not redundant
+ * with the request: when `unwindSeek()` returns from a cancelled ROUTE gesture, NavHost's own
+ * transition can still be running, and re-keying there would replace the element (and the
+ * `createChildTransition` its bounds animation hangs off) mid-flight and drop the rest of it.
  *
  * Defaults to the bare key so that anywhere the provider is out of scope the behaviour is exactly
  * what it was before this existed — a preview, and the docked third pane's `PlayerScreen`, which is
- * composed BESIDE this host and is handed no shared scopes at all. A constant key never changes, so
- * nothing there is ever recreated.
+ * composed BESIDE this host and is handed no shared scopes at all. A constant key is never re-keyed,
+ * so nothing there ever loses its match state.
  */
 val LocalPlayerArtKey: ProvidableCompositionLocal<Any> = compositionLocalOf { AlbumArtKeyBase }
 
@@ -272,6 +288,24 @@ private class MorphDiagState(var seekLogged: Boolean = false)
 
 /** Non-snapshot cell for the last browse surface the panel was seen over — see its use site. */
 private class SurfaceKeyHolder(var value: String?)
+
+/**
+ * "A seek was ABANDONED, so the `"album-art"` element owes itself a fresh identity."
+ *
+ * Written in exactly one place — the first line of `unwindSeek()`, whose only two callers are the
+ * two abandon paths (the panel close gesture's `Cancelled` arm, and `Idle`'s cancel/reversal arm) —
+ * and cleared by the generation bump that honours it. See [LocalPlayerArtKey] for why only an
+ * abandoned seek may re-key, and why this is a REQUEST rather than a bump made on the spot: the
+ * four-term gate stays the arbiter of *when* (at the instant `unwindSeek()` returns, a cancelled
+ * route gesture can still have NavHost's own transition running, and re-keying there would replace
+ * the element and the `createChildTransition` its bounds animation hangs off, mid-morph), while this
+ * flag decides *whether*.
+ *
+ * Non-snapshot, the `MiniWidthHolder` / `SurfaceKeyHolder` idiom: it is written from an effect and
+ * read from an effect, so nothing should subscribe to it — and the recomposition that re-runs the
+ * bump effect is the transition settling, which happens anyway.
+ */
+private class ArtReKeyRequest(var pending: Boolean = false)
 
 // `createChildTransition` — the one experimental API here; the shared-transition API itself is
 // stable as of compose-animation 1.12.
@@ -484,21 +518,23 @@ fun PlayerPanelHost(
     var panelBack         by remember { mutableStateOf(PanelBackPhase.Idle) }
     var panelBackProgress by remember { mutableFloatStateOf(0f) }
 
-    // ── A FRESH IDENTITY for the `"album-art"` element after every settle ────────────────────────
+    // ── A FRESH IDENTITY for the `"album-art"` element after an ABANDONED seek ───────────────────
     //
-    // The key every participant registers under is `"album-art#<generation>"`, and the generation is
-    // bumped whenever nothing is moving. A new key is a new `SharedElement` with a new state machine
-    // at `NoMatchFound` — no target bounds provider, no target data, no current bounds — AND, since
-    // every participant wraps its art in `key(artKey) { Box(…shared modifiers…) }`, a brand-new
-    // LayoutNode carrying the registration, so each morph runs from the same standing start as the
-    // FIRST one, which is the only one that never broke. Both halves are needed: the key alone
-    // shipped 2026-09-15/16 and left the forward `mini → pop-out` open with no flight, because
-    // re-keying an EXISTING node clears its `isPlaced` flag and only requests a lookahead remeasure,
-    // while the flag is set in the approach PLACEMENT. The full argument, and the load-bearing
-    // dependency on the two `!currentState && !targetState` bail-outs, are in [LocalPlayerArtKey]'s
-    // KDoc.
+    // The key every participant registers under is `"album-art#<generation>"`. The generation
+    // advances at the first quiescent moment after a seek was ABANDONED — and at NO other settle.
+    // A new key is a new `SharedElement` with a new state machine at `NoMatchFound` (no target
+    // bounds provider, no target data, no current bounds), which is what clears whatever a
+    // cancelled gesture stranded; and the cancel path is the one where that works, because the
+    // abandoned participant lingers composed long enough for the pair to re-register together and
+    // form a match AT REST, which approach-places both and so gives both real last bounds.
+    // Re-keying at ORDINARY settles is what broke the forward `mini → pop-out` open on 6d97d78 and
+    // b97f57a (a lone participant re-keyed at rest is never approach-placed, so it reports no last
+    // bounds and the next morph starts from its destination) — the full argument, the device
+    // evidence, the two accepted residuals and the load-bearing dependency on the two
+    // `!currentState && !targetState` bail-outs are all in [LocalPlayerArtKey]'s KDoc.
     //
-    // The gate is four things, and each is needed:
+    // A pending request is necessary but never sufficient: the gate is four more things, each
+    // needed —
     //   * the surface transition is SETTLED — `seekTo` never assigns `currentState`, so no seek
     //     frame can satisfy this, and neither can a running bar/panel slide;
     //   * no back GESTURE is in progress — a gesture that seeks nothing (browse→browse) would
@@ -514,9 +550,19 @@ fun PlayerPanelHost(
     //     term: both its participants' parent transitions are children of the surface transition,
     //     so "settled" already implies that scope is inactive.)
     // If some future bug pinned `isTransitionActive` true for good the generation would simply stop
-    // advancing, i.e. exactly today's behaviour — never a wedge.
+    // advancing, i.e. exactly the stable-key behaviour the forward open needs — never a wedge.
+    //
+    // The effect is keyed on `(morphQuiet, currentState)`, so there is at most ONE bump per
+    // quiescent period. The request can never be armed DURING one: both paths that arm it run from
+    // a state that is either unsettled (`Idle`'s cancel/reversal arm needs
+    // `targetState != surfaceTarget` while `currentState == surfaceTarget`) or `panelBack ==
+    // Cancelled` — so `morphQuiet` is false when it is written, and the recomposition that flips it
+    // true is `unwindSeek()`'s own final `snapTo` (plus, on the panel path, the `panelBack = Idle`
+    // that follows it). That is what keeps the bump in the same frame window it had when it fired at
+    // every settle — 12 ms after the snap in the 00:17 trace — with nothing added in between.
     val artKeyGen = remember { mutableIntStateOf(0) }
     val artKey    = remember(artKeyGen.intValue) { "$AlbumArtKeyBase#${artKeyGen.intValue}" }
+    val artReKey  = remember { ArtReKeyRequest() }
     val morphQuiet = surfaceState.currentState == surfaceState.targetState &&
         panelBack == PanelBackPhase.Idle &&
         backProgress == null &&
@@ -527,13 +573,25 @@ fun PlayerPanelHost(
                 "artKey hold gen=${artKeyGen.intValue} settled=" +
                     "${surfaceState.currentState == surfaceState.targetState}" +
                     " panelBack=$panelBack gesture=${backProgress != null}" +
-                    " navMorph=${navSharedTransitionScope?.isTransitionActive}"
+                    " navMorph=${navSharedTransitionScope?.isTransitionActive}" +
+                    " reKeyPending=${artReKey.pending}"
             }
             return@LaunchedEffect
         }
+        // Quiet, but nothing was abandoned: KEEP the key. This is the steady state — every
+        // committed open/close, push/pop, fold and third-state snap lands here, and a bump here is
+        // exactly what broke the forward open.
+        if (!artReKey.pending) {
+            morphLog {   // TEMPORARY
+                "artKey keep gen=${artKeyGen.intValue} at ${surfaceState.currentState}"
+            }
+            return@LaunchedEffect
+        }
+        artReKey.pending = false
         artKeyGen.intValue++
         morphLog {   // TEMPORARY
-            "artKey bump -> $AlbumArtKeyBase#${artKeyGen.intValue} at ${surfaceState.currentState}"
+            "artKey bump -> $AlbumArtKeyBase#${artKeyGen.intValue} at ${surfaceState.currentState}" +
+                " (after an abandoned seek)"
         }
     }
 
@@ -613,6 +671,13 @@ fun PlayerPanelHost(
             // back. Floored so a transition that momentarily reports no duration can't compute
             // `tween(0)` and snap.
             suspend fun unwindSeek() {
+                // This function IS the "a seek was abandoned" path — its only two callers are the
+                // panel gesture's `Cancelled` arm and `Idle`'s cancel/reversal arm — so arming the
+                // `"album-art"` re-key here keeps one writer that cannot drift from the decision.
+                // The bump itself is NOT made here: the four-term gate must still agree, and when a
+                // cancelled ROUTE gesture unwinds, NavHost's own transition can still be running.
+                // See [ArtReKeyRequest] and [LocalPlayerArtKey].
+                artReKey.pending = true
                 val totalMillis = (surfaceTransition.totalDurationNanos / 1_000_000)
                     .coerceAtLeast(NavTransitionMillis.toLong())
                 morphLog {   // TEMPORARY

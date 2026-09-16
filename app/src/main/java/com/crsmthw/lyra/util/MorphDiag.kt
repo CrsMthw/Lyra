@@ -26,11 +26,18 @@ import androidx.compose.ui.layout.positionInRoot
 // SEEK on the second gesture; did a match form; which participants were enabled and composed; and
 // where was each copy actually placed when the match formed.
 //
-// It already earned its keep once: on the key-only build (2026-09-16) it caught the forward
-// mini → pop-out open configuring the BAR's copy with the PANEL's rect, which is what said the
-// element also needs a fresh NODE per generation (see [LocalPlayerArtKey]). The check to repeat at
-// an open is exactly that line: `mini/primary match=true … at=<the BAR's own rect>`, never the
-// panel's.
+// It has earned its keep twice. On the key-only build (2026-09-16) it caught the forward
+// mini → pop-out open configuring the BAR's copy with the PANEL's rect; when a fresh LayoutNode per
+// generation failed identically, that pair of traces is what said the re-key itself was in the wrong
+// PLACE — it now happens only after an ABANDONED seek (see [LocalPlayerArtKey]). The two lines to
+// read, in that order:
+//   * at a forward open — `mini/primary match=true … at=<the BAR's own ~116x116 rect>`, never the
+//     panel's 292x292, which is `configureActiveMatch`'s `Rect(topLeft, lookaheadSize)` fallback and
+//     means the bar had no last bounds;
+//   * around each settle — `artKey keep` after every committed open/close/push/pop/fold, and
+//     exactly one `artKey bump` after a cancelled or reversed seek. A bump logged at a state a
+//     COMMITTED change reached is the residual documented on [LocalPlayerArtKey], and it is what
+//     breaks the open above.
 
 /** Master switch. `false` makes every [morphLog] call disappear at the call site (it is inline). */
 internal const val MORPH_DIAG = true
@@ -59,11 +66,12 @@ private class MatchLogState(var lastMatch: Boolean? = null)
  * Diagnostics for ONE `"album-art"` shared-element participant, in the scope it is registered in.
  *
  * Installs, for the life of the registration:
- * - an ENTER / EXIT line carrying the element KEY — which is also the self-test for the fresh-key
- *   fix: at the first settle after startup every participant must log an EXIT of `album-art#n`
- *   followed by an ENTER of `album-art#n+1`. No such pair means the re-key never took effect and
- *   nothing else about it matters. The `DisposableEffect` is keyed on the STATE, so it fires on a
- *   re-key whether or not the node itself was recreated — the pair survives the keyed wrapper;
+ * - an ENTER / EXIT line carrying the element KEY — the self-test for the re-key. The pair
+ *   (`EXIT album-art#n` immediately followed by `ENTER album-art#n+1`, on EVERY participant) must
+ *   appear after a CANCELLED or reversed seek, within a frame or two of `unwind end`, and must NOT
+ *   appear at any other settle: an ordinary settle keeps the key on purpose, and the absence of a
+ *   pair there is the fix working, not a missing re-key. The `DisposableEffect` is keyed on the
+ *   STATE, so the pair is emitted by the re-key itself;
  * - one line per change of [SharedContentState.isMatchFound], emitted from the participant's
  *   PLACEMENT (not from a `snapshotFlow` — `isMatchFound` reads two plain `var`s and only one
  *   snapshot-backed field, so a flow over it can silently stop emitting), carrying the copy's
