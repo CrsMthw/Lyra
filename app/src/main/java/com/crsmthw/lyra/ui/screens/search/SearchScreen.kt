@@ -55,6 +55,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import com.crsmthw.lyra.R
@@ -725,28 +727,43 @@ fun SearchScreen(
     // half (Cris, 2026-09-17). The host drops focus when it opens the panel precisely so the IME
     // cannot cover it (`onRequestPlayer`), and the blank-field re-entry rule below undid that.
     // The FIRST entry is exempt: arriving from the FAB is a request to type, and a panel left open
-    // on the Library is disowned by the new surface key anyway. The flag is read AFTER the settle
-    // wait below, through `rememberUpdatedState`, never captured at launch: on a predictive back
-    // the NavHost composes this screen while the current route is still the full player, and the
-    // host derives the panel's visibility from the current route — so at launch it reads FALSE and
-    // only flips true once the pop commits, which is before the transition settles. The first
-    // build of this fix captured it at launch and changed nothing on device (2026-09-17).
+    // on the Library is disowned by the new surface key anyway. The flag is read AFTER the wait
+    // below, through `rememberUpdatedState`, never captured at launch: on the pop back off the
+    // full player (button or gesture alike) the NavHost composes this screen while the host still
+    // derives the panel's visibility from the OUTGOING route — so at launch it reads FALSE and only
+    // flips true once the pop's back-stack state lands, which is before the entry resumes. The
+    // first build of this fix captured it at launch and changed nothing on device (2026-09-17).
     //
-    // If we arrived via the FAB→bar shared-element morph, wait for it to settle before popping the
-    // keyboard so the layout shift doesn't stutter the transition. The wait is unconditional:
-    // `first { it }` returns on the spot when the transition has already settled, and on a blank
-    // re-entry it also keeps the focus request out of the pop slide.
+    // The wait itself is for this DESTINATION to be RESUMED. Inside the NavHost `LocalLifecycleOwner`
+    // is the NavBackStackEntry, and Navigation resumes an entry only once it is the current
+    // destination AND its transition has completed (`onTransitionComplete` →
+    // `markTransitionComplete`), so one signal says "settled, and into view". It does what the old
+    // wait was for — the keyboard pops only after the FAB→bar shared-element morph has settled, so
+    // the layout shift cannot stutter it, and a blank re-entry's request stays out of the pop slide
+    // — and it closes the gap the old wait had. That wait was on `animatedContentScope.transition`
+    // (this content's own `Transition<EnterExitState>`) settling, which is NOT a settle into view:
+    // a predictive back off the full player composes Search as the seek's TARGET, PreEnter →
+    // Visible under the finger, and a CANCELLED gesture ends in the NavHost's `snapTo(fullPlayer)`,
+    // whose `onTransitionEnd()` recurses into every child transition and sets
+    // `currentState = targetState` — with the child's target still the stale `Visible`, because
+    // only the next composition re-derives it as PreEnter (compose-animation
+    // `SeekableTransitionState.snapTo`, `Transition.onTransitionEnd`, `targetEnterExit`). For one
+    // snapshot the child read Visible == Visible, the equality test fired, the pop-out is of course
+    // not visible over the full player, and this effect focused a screen about to be disposed: the
+    // keyboard rose over the full player the user had just decided to stay on (Cris, 2026-09-17 —
+    // twice: a `== Visible` term added to the same test fell through the same one-snapshot gap).
+    // A cancelled seek never resumes this entry — it is not the current destination — and the
+    // disposal that follows cancels the wait.
     var autoFocused by rememberSaveable { mutableStateOf(false) }
     val popOutPanelOpen = rememberUpdatedState(LocalPopOutPanelOpen.current)
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(Unit) {
         // The field's own text, not `state.query`: the field is the thing being focused, and this
         // reads it once from a coroutine, so the screen scope gains no subscription to it.
         val reEntry = autoFocused
         if (reEntry && queryState.text.isNotBlank()) return@LaunchedEffect
         autoFocused = true
-        animatedContentScope?.transition?.let { t ->
-            snapshotFlow { t.currentState == t.targetState }.first { it }
-        }
+        lifecycle.currentStateFlow.first { it.isAtLeast(Lifecycle.State.RESUMED) }
         // Read only now — see above: at launch the route may still be the full player's.
         if (reEntry && popOutPanelOpen.value) return@LaunchedEffect
         focusRequester.requestFocus()
