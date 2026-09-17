@@ -725,25 +725,30 @@ fun SearchScreen(
     // half (Cris, 2026-09-17). The host drops focus when it opens the panel precisely so the IME
     // cannot cover it (`onRequestPlayer`), and the blank-field re-entry rule below undid that.
     // The FIRST entry is exempt: arriving from the FAB is a request to type, and a panel left open
-    // on the Library is disowned by the new surface key anyway. `LocalPopOutPanelOpen` is read in
-    // composition and captured by the effect at launch — the value at the moment of re-entry is
-    // exactly the one that matters.
+    // on the Library is disowned by the new surface key anyway. The flag is read AFTER the settle
+    // wait below, through `rememberUpdatedState`, never captured at launch: on a predictive back
+    // the NavHost composes this screen while the current route is still the full player, and the
+    // host derives the panel's visibility from the current route — so at launch it reads FALSE and
+    // only flips true once the pop commits, which is before the transition settles. The first
+    // build of this fix captured it at launch and changed nothing on device (2026-09-17).
     //
     // If we arrived via the FAB→bar shared-element morph, wait for it to settle before popping the
     // keyboard so the layout shift doesn't stutter the transition. The wait is unconditional:
     // `first { it }` returns on the spot when the transition has already settled, and on a blank
     // re-entry it also keeps the focus request out of the pop slide.
     var autoFocused by rememberSaveable { mutableStateOf(false) }
-    val popOutPanelOpen = LocalPopOutPanelOpen.current
+    val popOutPanelOpen = rememberUpdatedState(LocalPopOutPanelOpen.current)
     LaunchedEffect(Unit) {
         // The field's own text, not `state.query`: the field is the thing being focused, and this
         // reads it once from a coroutine, so the screen scope gains no subscription to it.
         val reEntry = autoFocused
-        if (reEntry && (queryState.text.isNotBlank() || popOutPanelOpen)) return@LaunchedEffect
+        if (reEntry && queryState.text.isNotBlank()) return@LaunchedEffect
         autoFocused = true
         animatedContentScope?.transition?.let { t ->
             snapshotFlow { t.currentState == t.targetState }.first { it }
         }
+        // Read only now — see above: at launch the route may still be the full player's.
+        if (reEntry && popOutPanelOpen.value) return@LaunchedEffect
         focusRequester.requestFocus()
     }
 }
