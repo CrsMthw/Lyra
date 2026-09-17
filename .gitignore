@@ -48,3 +48,4 @@ docs/
 
 # macOS
 .DS_Store
+.kotlin/

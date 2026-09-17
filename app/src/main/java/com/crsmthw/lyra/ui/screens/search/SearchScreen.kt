@@ -507,22 +507,31 @@ fun SearchScreen(
         if (queryBlank && recents.isNotEmpty()) {
             // A full cap-10 list plus its header and Clear all overruns the shorter geometries
             // (folded outer screen, any landscape), and Clear all sits at the END — so the column
-            // scrolls. The bottom inset is max(IME, nav bar) and is applied OUTSIDE the scroll, so
-            // the viewport ends above the keyboard rather than behind it: the screen auto-focuses,
-            // so the keyboard is up by default and a viewport that ran under it would park Clear all
-            // out of reach at full scroll. Top-anchoring (the reason this lives in the outer,
-            // non-imePadding Box) is untouched — only the viewport's bottom edge moves.
+            // scrolls. Only the IME is applied OUTSIDE the scroll: the screen auto-focuses, so the
+            // keyboard is up by default and a viewport that ran under it would park Clear all out of
+            // reach at full scroll. Everything else is scroll CONTENT, exactly like the results'
+            // contentPadding — the leading Spacer puts the first row under the floating bar (so the
+            // top scrim has rows to fade) and the trailing one carries the nav bar + mini-player
+            // clearance, so with the keyboard down the last rows scroll under the nav bar and
+            // dissolve into the bottom scrim instead of stopping dead above it. Until 2026-09-17 the
+            // nav bar was part of the OUTSIDE inset, which left a solid `background` strip the height
+            // of the nav bar under the fade with nothing ever passing beneath it — Cris read it as an
+            // opaque bar (checklist 14). Top-anchoring (the reason this lives in the outer,
+            // non-imePadding Box) is untouched.
+            //
+            // `dismissImeOnScroll` BEFORE `verticalScroll`, as on the results pager: a real drag on
+            // the recents drops the keyboard and the cursor the same way (Cris, 2026-09-17). The
+            // connection observes and never consumes, and the ordering is load-bearing — after the
+            // scrollable it would be silently inert.
             Column(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .fillMaxWidth()
-                    .padding(top = barInset)
-                    .windowInsetsPadding(
-                        WindowInsets.ime.union(WindowInsets.navigationBars)
-                            .only(WindowInsetsSides.Bottom)
-                    )
+                    .windowInsetsPadding(WindowInsets.ime.only(WindowInsetsSides.Bottom))
+                    .nestedScroll(dismissImeOnScroll)
                     .verticalScroll(rememberScrollState()),
             ) {
+                Spacer(Modifier.height(barInset))
                 SectionHeader(stringResource(R.string.search_recent))
                 recents.forEach { recent ->
                     RecentSearchRow(
@@ -556,14 +565,14 @@ fun SearchScreen(
                 ) {
                     Text(stringResource(R.string.search_recent_clear_all))
                 }
-                // Mini-player AND bottom-scrim clearance, INSIDE the scroll: "Clear all" is the last
-                // thing in the list, and both the floating bar (once something is playing) and the
-                // scrim + wave that now draw over this list would otherwise cover it. 100dp clears
-                // the scrim's whole `navBarBottom + 48dp` with the keyboard down and all but a few
-                // dp of it with the keyboard up, where the top of that strip is fully transparent
-                // anyway. The rows' tappability does NOT depend on this spacer — the overlay below
-                // has no pointer input — so it stays at the mini player's figure.
-                Spacer(Modifier.height(100.dp))
+                // Nav bar + mini-player + bottom-scrim clearance, INSIDE the scroll (the results'
+                // `bottom = 100.dp + navBarBottomDp` contentPadding, in Column form): "Clear all" is
+                // the last thing in the list, and the floating bar (once something is playing) and
+                // the scrim + wave that draw over this list would otherwise cover it. With the
+                // keyboard up the IME inset outside already spans the nav bar, so this is a little
+                // generous there — harmless, it only lets the list scroll a touch further. The rows'
+                // tappability does NOT depend on this spacer — the overlay below has no pointer input.
+                Spacer(Modifier.height(100.dp + navBarBottomDp))
             }
         }
 
@@ -609,13 +618,20 @@ fun SearchScreen(
         // visibly past the tab labels and the fade read as aimed at the status bar instead (device
         // pass 2026-09-12, checklist 10). So while the tabs are up the gradient stays fully opaque
         // down to the tab row's BOTTOM edge and only fades out over a `TopScrimTail` below it, and
-        // rows dissolve into the tabs. A blank query has no tab row and keeps `TopScrim`'s exact
-        // two-stop brush and height, so that state is pixel-identical.
+        // rows dissolve into the tabs. A blank query has no tab row, so its scrim holds the
+        // background down to the floating BAR's bottom edge instead and fades over the same tail:
+        // the recents now scroll under the bar (their top inset is scroll content since
+        // 2026-09-17), and without this they slid past it with no fade at all (checklist 14 —
+        // "the top fade scrim is either non-existent or behind").
         val (topScrimHeight, topScrimBrush) =
-            remember(queryBlank, statusBarTopDp, tabRowBottom, background) {
+            remember(queryBlank, barInset, tabRowBottom, background) {
                 if (queryBlank) {
-                    (statusBarTopDp + TopScrimTail) to
-                        Brush.verticalGradient(listOf(background, Color.Transparent))
+                    val height = barInset + TopScrimTail
+                    height to Brush.verticalGradient(
+                        0f                   to background,
+                        (barInset / height)  to background,
+                        1f                   to Color.Transparent,
+                    )
                 } else {
                     val height = tabRowBottom + TopScrimTail
                     height to Brush.verticalGradient(
