@@ -62,6 +62,7 @@ import com.crsmthw.lyra.data.local.RecentSearch
 import com.crsmthw.lyra.data.remote.model.SpotifyAlbum
 import com.crsmthw.lyra.data.remote.model.SpotifyArtist
 import com.crsmthw.lyra.data.remote.model.SpotifyShow
+import com.crsmthw.lyra.ui.components.LocalPopOutPanelOpen
 import com.crsmthw.lyra.ui.components.TrackActionTarget
 import com.crsmthw.lyra.ui.components.TrackActionsHost
 import com.crsmthw.lyra.ui.components.TrackRow
@@ -718,15 +719,27 @@ fun SearchScreen(
     // The flag is `rememberSaveable` for the same reason the scroll-reset guard above is: it has to
     // survive the save/restore a pop performs, or every re-entry would read it fresh and focus.
     //
+    // Never on a re-entry while the POP-OUT PANEL is open: on a wide screen the panel is what the
+    // user is looking at — open it over the Recent list (blank field), tap its full-screen button,
+    // back out of the full player, and the panel comes back with a keyboard rising over its lower
+    // half (Cris, 2026-09-17). The host drops focus when it opens the panel precisely so the IME
+    // cannot cover it (`onRequestPlayer`), and the blank-field re-entry rule below undid that.
+    // The FIRST entry is exempt: arriving from the FAB is a request to type, and a panel left open
+    // on the Library is disowned by the new surface key anyway. `LocalPopOutPanelOpen` is read in
+    // composition and captured by the effect at launch — the value at the moment of re-entry is
+    // exactly the one that matters.
+    //
     // If we arrived via the FAB→bar shared-element morph, wait for it to settle before popping the
     // keyboard so the layout shift doesn't stutter the transition. The wait is unconditional:
     // `first { it }` returns on the spot when the transition has already settled, and on a blank
     // re-entry it also keeps the focus request out of the pop slide.
     var autoFocused by rememberSaveable { mutableStateOf(false) }
+    val popOutPanelOpen = LocalPopOutPanelOpen.current
     LaunchedEffect(Unit) {
         // The field's own text, not `state.query`: the field is the thing being focused, and this
         // reads it once from a coroutine, so the screen scope gains no subscription to it.
-        if (autoFocused && queryState.text.isNotBlank()) return@LaunchedEffect
+        val reEntry = autoFocused
+        if (reEntry && (queryState.text.isNotBlank() || popOutPanelOpen)) return@LaunchedEffect
         autoFocused = true
         animatedContentScope?.transition?.let { t ->
             snapshotFlow { t.currentState == t.targetState }.first { it }
