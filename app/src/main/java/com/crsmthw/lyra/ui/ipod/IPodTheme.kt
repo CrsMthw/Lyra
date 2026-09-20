@@ -31,6 +31,8 @@ object IPodColors {
     /** The letterbox around the body when the window is wider than the body's max aspect. */
     val Surround       = Color.Black
     val SurroundText   = Color(0xFF8A8D91)
+    /** Landscape-only "works best in portrait" hint, over the silver body gradient. */
+    val LandscapeHintText = Color(0xFF6B6E73)
 
     // ── Click wheel ───────────────────────────────────────────────────────
     val WheelTop       = Color(0xFFF3F4F6)

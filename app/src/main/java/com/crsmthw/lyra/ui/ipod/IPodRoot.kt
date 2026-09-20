@@ -3,6 +3,9 @@ package com.crsmthw.lyra.ui.ipod
 import android.content.pm.ActivityInfo
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
@@ -10,7 +13,6 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
@@ -67,6 +69,8 @@ import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModelFactory
 import com.crsmthw.lyra.util.confirm
 import com.crsmthw.lyra.util.press
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
@@ -74,9 +78,13 @@ import kotlinx.coroutines.launch
  * true (the flag is read before the first frame, so neither UI flashes). Owns:
  *  - the immersive window state (system bars hidden, swipe-to-reveal), the portrait request,
  *    the display-cutout mode, forced LTR — all restored on dispose;
- *  - the body layout: fills a portrait window; on a wider window a body of at most
- *    [IPodDimens.BodyMaxAspect] is centred on [IPodColors.Surround] with the portrait hint
- *    under it;
+ *  - the body layout: the silver body ALWAYS fills the full window (width AND height; the rounded
+ *    corners stay). Inside the body padding and cutout inset: the LCD's width =
+ *    min(available width, bodyHeight * [IPodDimens.LcdMaxHeightFraction] * [IPodDimens.LcdAspect]),
+ *    centred horizontally, height = width / LcdAspect. The wheel = min(bodyWidth *
+ *    [IPodDimens.WheelDiameterFraction], remaining height * 0.92), centred in the remaining space.
+ *    In landscape (maxWidth > maxHeight) a small "works best in portrait" hint overlays the body's
+ *    bottom edge;
  *  - the LCD (4:3, top) and the ClickWheel (bottom), wiring wheel events into [IPodViewModel]
  *    and [IPodEffect]s out to the Activity-scoped [PlayerViewModel];
  *  - the exit confirmation (BackHandler -> dialog -> setIpodEnabled(false)), the session-expired
@@ -146,8 +154,12 @@ fun IPodRoot(container: AppContainer, modifier: Modifier = Modifier) {
                     uris = effect.uris,
                     index = effect.index,
                     startPositionMs = effect.startPositionMs,
+                    shuffle = effect.shuffle,
                 )
-                is IPodEffect.PlayLikedSong -> playerVm.playFromLikedSongs(effect.uri)
+                is IPodEffect.PlayLikedSong -> playerVm.playFromLikedSongs(
+                    trackUri = effect.uri,
+                    shuffle = effect.shuffle,
+                )
                 is IPodEffect.ShuffleContext -> playerVm.shuffleContext(effect.contextUri)
                 IPodEffect.PlayPause -> playerVm.playPause()
                 IPodEffect.Next -> playerVm.skipNext()
@@ -167,73 +179,92 @@ fun IPodRoot(container: AppContainer, modifier: Modifier = Modifier) {
     // ── Click sounds ────────────────────────────────────────────────────────
     val sounds = remember { ClickSounds(context) }
     DisposableEffect(sounds) { onDispose { sounds.release() } }
-    SideEffect { sounds.configure(state.clickSounds) }
+    // Why a LaunchedEffect + Flow instead of SideEffect: the outer recomposition scope reads
+    // nothing from `state` at composition time (all snapshot reads happen inside the
+    // BoxWithConstraints content lambda, which is a separate scope), so a SideEffect here
+    // only re-ran when something IT DID read changed — the sole composition-time read in this
+    // scope was `rememberBatteryState()`, meaning the ~1-minute battery broadcast. A Flow
+    // collector reacts to every emission, not just recompositions of this scope.
+    LaunchedEffect(vm, sounds) {
+        vm.uiState.map { it.clickSounds }.distinctUntilChanged().collect { config ->
+            sounds.configure(config)
+        }
+    }
 
     // ── Exit dialog ─────────────────────────────────────────────────────────
     var showExitDialog by remember { mutableStateOf(false) }
     BackHandler(enabled = !showExitDialog) { showExitDialog = true }
 
     // ── Layout ──────────────────────────────────────────────────────────────
+    // The body ALWAYS fills the whole window (no letterboxing). In landscape
+    // (maxWidth > maxHeight) a small hint overlays the body's bottom edge.
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
         BoxWithConstraints(
             modifier = modifier
                 .fillMaxSize()
-                .background(IPodColors.Surround),
-            contentAlignment = Alignment.Center,
+                .clip(RoundedCornerShape(IPodDimens.BodyCornerRadius))
+                .background(
+                    Brush.verticalGradient(
+                        listOf(IPodColors.BodyTop, IPodColors.BodyBottom),
+                    ),
+                )
+                .border(
+                    width = 1.dp,
+                    color = IPodColors.BodyEdge,
+                    shape = RoundedCornerShape(IPodDimens.BodyCornerRadius),
+                ),
         ) {
-            // Letterboxing: decide from the full window BEFORE consuming height, so the
-            // hint space is reserved and the body does not push it off-screen.
-            val letterboxed = maxWidth > maxHeight * IPodDimens.BodyMaxAspect
-            val hintSpace = if (letterboxed) 40.dp else 0.dp
-            val bodyHeight = (maxHeight - hintSpace).coerceAtLeast(0.dp)
-            val bodyWidth = min(maxWidth, bodyHeight * IPodDimens.BodyMaxAspect)
+            val isLandscape = maxWidth > maxHeight
 
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                // ── iPod body ────────────────────────────────────────────────
-                Box(
-                    modifier = Modifier
-                        .width(bodyWidth)
-                        .height(bodyHeight)
-                        .clip(RoundedCornerShape(IPodDimens.BodyCornerRadius))
-                        .background(
-                            Brush.verticalGradient(
-                                listOf(IPodColors.BodyTop, IPodColors.BodyBottom),
-                            ),
-                        )
-                        .border(
-                            width = 1.dp,
-                            color = IPodColors.BodyEdge,
-                            shape = RoundedCornerShape(IPodDimens.BodyCornerRadius),
-                        ),
-                ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(IPodDimens.BodyPadding)
+                    // Pad for the display cutout so the LCD sits below the camera hole
+                    // while the silver body runs behind it.
+                    .windowInsetsPadding(WindowInsets.displayCutout),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                // Read available size AFTER padding + cutout inset, so the LCD cap
+                // is computed against the space it actually lives in.
+                BoxWithConstraints(modifier = Modifier.weight(1f)) {
+                    val innerWidth = maxWidth
+                    val innerHeight = maxHeight
+
+                    // LCD width = min(available width, height * LcdMaxHeightFraction * LcdAspect)
+                    // so on a tall phone the width wins and the LCD spans the body; on a
+                    // near-square (unfolded) window it is capped at 46 % of the height.
+                    val lcdWidth = min(
+                        innerWidth,
+                        innerHeight * IPodDimens.LcdMaxHeightFraction * IPodDimens.LcdAspect,
+                    )
+                    val lcdHeight = lcdWidth / IPodDimens.LcdAspect
+                    val remainingHeight = (innerHeight - lcdHeight).coerceAtLeast(0.dp)
+
+                    // Wheel = min(body width * WheelDiameterFraction, remaining * 0.92)
+                    val wheelSize = min(
+                        innerWidth * IPodDimens.WheelDiameterFraction,
+                        remainingHeight * 0.92f,
+                    ).coerceAtLeast(0.dp)
+
                     Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(IPodDimens.BodyPadding)
-                            // Pad for the display cutout so the LCD sits below the camera hole
-                            // while the silver body runs behind it.
-                            .windowInsetsPadding(WindowInsets.displayCutout),
+                        modifier = Modifier.fillMaxSize(),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        // LCD: 4:3, fills the padded width and respects the cutout
-                        // inset applied by windowInsetsPadding above.
+                        // ── LCD: 4:3, centred horizontally ───────────────────
                         LcdScreen(
                             state = state,
                             battery = battery,
                             modifier = Modifier
-                                .fillMaxWidth()
+                                .width(lcdWidth)
                                 .aspectRatio(IPodDimens.LcdAspect),
                         )
 
-                        // ── Wheel area: fills the remaining space ────────────
-                        BoxWithConstraints(
+                        // ── Wheel area: centred in the remaining space ───────
+                        Box(
                             modifier = Modifier.weight(1f),
                             contentAlignment = Alignment.Center,
                         ) {
-                            val wheelSize = min(
-                                bodyWidth * IPodDimens.WheelDiameterFraction,
-                                maxHeight * 0.92f,
-                            ).coerceAtLeast(0.dp)
                             ClickWheel(
                                 onEvent = vm::onWheelEvent,
                                 sounds = sounds,
@@ -246,18 +277,24 @@ fun IPodRoot(container: AppContainer, modifier: Modifier = Modifier) {
                         Spacer(Modifier.height(4.dp))
                     }
                 }
+            }
 
-                // ── Portrait hint (shown only when letterboxed) ──────────────
-                if (letterboxed) {
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        text = stringResource(R.string.ipod_portrait_hint),
-                        color = IPodColors.SurroundText,
-                        fontFamily = IPodFontFamily,
-                        fontSize = 13.sp,
-                        textAlign = TextAlign.Center,
-                    )
-                }
+            // ── Landscape hint (overlays the body's bottom edge) ─────────
+            AnimatedVisibility(
+                visible = isLandscape,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = IPodDimens.BodyPadding),
+                enter = fadeIn(animationSpec = androidx.compose.animation.core.tween(300)),
+                exit = fadeOut(animationSpec = androidx.compose.animation.core.tween(300)),
+            ) {
+                Text(
+                    text = stringResource(R.string.ipod_portrait_hint),
+                    color = IPodColors.LandscapeHintText,
+                    fontFamily = IPodFontFamily,
+                    fontSize = 13.sp,
+                    textAlign = TextAlign.Center,
+                )
             }
         }
     }
