@@ -25,6 +25,7 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Rect
@@ -557,8 +558,9 @@ private fun NowPlayingProgressStrip(
 /**
  * The Classic's progress bar: an inset channel (darker at the top, white at the bottom, hairline
  * edge) filled with "aqua" glass — pale at the top, deep blue through the middle, a lighter band at
- * the bottom, and a white specular sheen over the upper half. No playhead while playing; a small
- * dark diamond appears only while the wheel scrubs.
+ * the bottom, and a white specular sheen over the upper half. Beneath it, the bar's own mirror image
+ * (channel, edge and fill, rounded ends and all) fading into the LCD white. No playhead while
+ * playing; a small dark diamond appears only while the wheel scrubs.
  */
 private fun DrawScope.drawProgressBar(
     fraction: Float,
@@ -570,85 +572,81 @@ private fun DrawScope.drawProgressBar(
     val barBottom = barTop + barHeight
     val corner = CornerRadius(barHeight * 0.18f)
     val track = Rect(0f, barTop, size.width, barBottom)
-
-    // Channel.
-    drawRoundRect(
-        brush = Brush.verticalGradient(
-            colors = listOf(IPodColors.ProgressTrackTop, IPodColors.ProgressTrackBottom),
-            startY = barTop,
-            endY = barBottom,
-        ),
-        topLeft = track.topLeft,
-        size = track.size,
-        cornerRadius = corner,
-    )
-    drawRoundRect(
-        color = IPodColors.ProgressTrackEdge,
-        topLeft = track.topLeft,
-        size = track.size,
-        cornerRadius = corner,
-        style = Stroke(width = 1f),
-    )
-
-    // Glass fill, clipped to the channel's shape.
     val fillWidth = (size.width * fraction).coerceIn(0f, size.width)
-    if (fillWidth > 1f) {
-        val fillClip = Path().apply {
-            addRoundRect(RoundRect(Rect(0f, barTop, fillWidth, barBottom), corner))
-        }
-        clipPath(fillClip) {
-            drawRect(
-                brush = Brush.verticalGradient(
-                    0f to IPodColors.ProgressGlassTop,
-                    0.45f to IPodColors.ProgressGlassMid,
-                    0.5f to IPodColors.ProgressGlassLow,
-                    1f to IPodColors.ProgressGlassBottom,
-                    startY = barTop,
-                    endY = barBottom,
-                ),
-                topLeft = Offset(0f, barTop),
-                size = Size(fillWidth, barHeight),
-            )
-            // Specular sheen over the upper half.
-            drawRect(
-                brush = Brush.verticalGradient(
-                    0f to IPodColors.HighlightText.copy(alpha = 0.6f),
-                    1f to IPodColors.HighlightText.copy(alpha = 0f),
-                    startY = barTop,
-                    endY = barTop + barHeight * 0.48f,
-                ),
-                topLeft = Offset(0f, barTop),
-                size = Size(fillWidth, barHeight * 0.48f),
-            )
+    val fillClip = Path().apply {
+        addRoundRect(RoundRect(Rect(0f, barTop, fillWidth, barBottom), corner))
+    }
+    val channelBrush = Brush.verticalGradient(
+        colors = listOf(IPodColors.ProgressTrackTop, IPodColors.ProgressTrackBottom),
+        startY = barTop,
+        endY = barBottom,
+    )
+    val glassBrush = Brush.verticalGradient(
+        0f to IPodColors.ProgressGlassTop,
+        0.45f to IPodColors.ProgressGlassMid,
+        0.5f to IPodColors.ProgressGlassLow,
+        1f to IPodColors.ProgressGlassBottom,
+        startY = barTop,
+        endY = barBottom,
+    )
+
+    /** The bar — channel, edge, glass fill, sheen — drawn at [alpha]; called upright and mirrored. */
+    fun DrawScope.drawBar(alpha: Float) {
+        drawRoundRect(brush = channelBrush, topLeft = track.topLeft, size = track.size, cornerRadius = corner, alpha = alpha)
+        drawRoundRect(
+            color = IPodColors.ProgressTrackEdge,
+            topLeft = track.topLeft,
+            size = track.size,
+            cornerRadius = corner,
+            style = Stroke(width = 1f),
+            alpha = alpha,
+        )
+        if (fillWidth > 1f) {
+            clipPath(fillClip) {
+                drawRect(brush = glassBrush, topLeft = Offset(0f, barTop), size = Size(fillWidth, barHeight), alpha = alpha)
+                drawRect(
+                    brush = Brush.verticalGradient(
+                        0f to IPodColors.HighlightText.copy(alpha = 0.6f),
+                        1f to IPodColors.HighlightText.copy(alpha = 0f),
+                        startY = barTop,
+                        endY = barTop + barHeight * 0.48f,
+                    ),
+                    topLeft = Offset(0f, barTop),
+                    size = Size(fillWidth, barHeight * 0.48f),
+                    alpha = alpha,
+                )
+            }
         }
     }
 
-    // Reflection under the bar: the Classic's bar sits on a glossy surface, so a faint flipped
-    // echo fades away beneath it — grey under the channel, blue under the filled part.
-    val reflectionTop = barBottom + 1f
-    val reflectionHeight = barHeight * 0.7f
+    // Reflection first: the bar mirrored about its own bottom edge, then faded into the LCD white
+    // over REFLECTION of its height and covered entirely below that. The upright bar is drawn on
+    // top so the seam stays crisp.
+    val reflectionHeight = barHeight * 0.75f
+    withTransform({ scale(scaleX = 1f, scaleY = -1f, pivot = Offset(size.width / 2f, barBottom)) }) {
+        drawBar(alpha = 0.55f)
+    }
     drawRect(
         brush = Brush.verticalGradient(
-            0f to IPodColors.ProgressTrackTop.copy(alpha = 0.22f),
-            1f to IPodColors.ProgressTrackTop.copy(alpha = 0f),
-            startY = reflectionTop,
-            endY = reflectionTop + reflectionHeight,
+            0f to IPodColors.LcdBackground.copy(alpha = 0.35f),
+            1f to IPodColors.LcdBackground,
+            startY = barBottom,
+            endY = barBottom + reflectionHeight,
         ),
-        topLeft = Offset(0f, reflectionTop),
+        topLeft = Offset(0f, barBottom),
         size = Size(size.width, reflectionHeight),
     )
-    if (fillWidth > 1f) {
+    val coverTop = barBottom + reflectionHeight
+    if (coverTop < size.height) {
         drawRect(
-            brush = Brush.verticalGradient(
-                0f to IPodColors.ProgressGlassBottom.copy(alpha = 0.38f),
-                1f to IPodColors.ProgressGlassBottom.copy(alpha = 0f),
-                startY = reflectionTop,
-                endY = reflectionTop + reflectionHeight,
-            ),
-            topLeft = Offset(0f, reflectionTop),
-            size = Size(fillWidth, reflectionHeight),
+            color = IPodColors.LcdBackground,
+            topLeft = Offset(0f, coverTop),
+            size = Size(size.width, size.height - coverTop),
         )
     }
+
+    // The bar itself.
+    drawBar(alpha = 1f)
 
     // Scrub diamond only.
     if (isScrubbing) {
