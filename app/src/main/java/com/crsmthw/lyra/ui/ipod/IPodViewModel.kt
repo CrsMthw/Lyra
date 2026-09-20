@@ -527,17 +527,15 @@ class IPodViewModel(
                 onSuccess = { result ->
                     nextOffsetByKey[key] = result.nextOffset
                     val newItems = result.albums.map { album ->
-                        val subtitle = buildString {
-                            album.releaseYear.takeIf { it.isNotBlank() }?.let { append(it) }
-                            album.albumType?.takeIf { it.isNotBlank() }?.let {
-                                if (isNotEmpty()) append(" · ")
-                                append(it.replaceFirstChar { c -> c.uppercaseChar() })
-                            }
-                        }
+                        val parts = listOfNotNull(
+                            album.releaseYear.takeIf { it.isNotBlank() }?.let { LcdLabel.Text(it) },
+                            album.albumType?.takeIf { it.isNotBlank() }
+                                ?.let { LcdLabel.Text(it.replaceFirstChar { c -> c.uppercaseChar() }) },
+                        )
                         LcdItem(
                             id = album.id,
                             title = LcdLabel.Text(album.name),
-                            subtitle = if (subtitle.isNotBlank()) LcdLabel.Text(subtitle) else null,
+                            subtitle = if (parts.isEmpty()) null else LcdLabel.Joined(parts),
                             hasSubmenu = true,
                         )
                     }
@@ -586,7 +584,7 @@ class IPodViewModel(
                         LcdItem(
                             id = playlist.id,
                             title = LcdLabel.Text(playlist.name),
-                            subtitle = LcdLabel.Text("${playlist.trackCount} songs"),
+                            subtitle = LcdLabel.Plural(R.plurals.library_track_count, playlist.trackCount),
                             hasSubmenu = true,
                         )
                     }
@@ -683,15 +681,12 @@ class IPodViewModel(
                         val id = show.id ?: return@mapNotNull null
                         val name = show.name ?: return@mapNotNull null
                         val episodeCount = show.totalEpisodes
-                        val subtitle = if (episodeCount != null && episodeCount > 0) {
-                            "$episodeCount episodes"
-                        } else {
-                            null
-                        }
+                        val subtitle = episodeCount?.takeIf { it > 0 }
+                            ?.let { LcdLabel.Plural(R.plurals.show_episode_count, it) }
                         LcdItem(
                             id = id,
                             title = LcdLabel.Text(name),
-                            subtitle = subtitle?.let { LcdLabel.Text(it) },
+                            subtitle = subtitle,
                             hasSubmenu = true,
                         )
                     }
@@ -726,7 +721,7 @@ class IPodViewModel(
                         LcdItem(
                             id = ep.id,
                             title = LcdLabel.Text(ep.name),
-                            subtitle = LcdLabel.Text(ep.subtitle),
+                            subtitle = ep.subtitle,
                         )
                     }
                     appendOrReplaceTopItems(
@@ -1091,7 +1086,7 @@ class IPodViewModel(
             LcdItem(
                 id = "clickvolume",
                 title = LcdLabel.Res(R.string.ipod_settings_click_volume),
-                value = LcdLabel.Text("${config.volumePercent}%"),
+                value = LcdLabel.ResArgs(R.string.ipod_value_percent, listOf(config.volumePercent)),
             ),
             LcdItem(
                 id = "clickpitch",

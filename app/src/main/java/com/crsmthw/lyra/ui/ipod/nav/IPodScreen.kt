@@ -1,5 +1,6 @@
 package com.crsmthw.lyra.ui.ipod.nav
 
+import androidx.annotation.PluralsRes
 import androidx.annotation.StringRes
 import androidx.compose.runtime.Immutable
 import com.crsmthw.lyra.ui.ipod.wheel.ClickSoundsConfig
@@ -46,6 +47,12 @@ sealed interface IPodScreen {
 sealed interface LcdLabel {
     data class Text(val value: String) : LcdLabel
     data class Res(@StringRes val id: Int) : LcdLabel
+    /** A format-arg string resource ("%1$d%%", "%1$s left"). */
+    data class ResArgs(@StringRes val id: Int, val args: List<Any>) : LcdLabel
+    /** A plural resource; [quantity] is also passed as its first format argument. */
+    data class Plural(@PluralsRes val id: Int, val quantity: Int) : LcdLabel
+    /** Several labels joined by [separator], blanks dropped — "2019 · Album", "<date> · Played". */
+    data class Joined(val parts: List<LcdLabel>, val separator: String = " · ") : LcdLabel
 }
 
 /** One row of an LCD list. [value] is the right-aligned setting value ("On"/"Off"). */

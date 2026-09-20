@@ -1,5 +1,6 @@
 package com.crsmthw.lyra.ui.ipod
 
+import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.local.LibraryCache
 import com.crsmthw.lyra.data.local.LibraryCacheData
 import com.crsmthw.lyra.data.player.PlayerStateManager
@@ -12,6 +13,7 @@ import com.crsmthw.lyra.data.remote.model.SpotifyPlaylist
 import com.crsmthw.lyra.data.remote.model.SpotifyShow
 import com.crsmthw.lyra.data.remote.model.SpotifyUser
 import com.crsmthw.lyra.data.repository.SpotifyRepository
+import com.crsmthw.lyra.ui.ipod.nav.LcdLabel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -343,7 +345,7 @@ class IPodLibrary(
         val id: String,
         val uri: String,
         val name: String,
-        val subtitle: String,
+        val subtitle: LcdLabel,
         val resumePositionMs: Long?,
         val fullyPlayed: Boolean,
     )
@@ -446,26 +448,18 @@ class IPodLibrary(
             resumeMs > ep.durationMs - 10_000L
         ) null else resumeMs
 
-        // Subtitle: release date + duration or resume state (mirrors ShowDetailScreen's EpisodeRow).
-        val subtitle = buildString {
-            ep.releaseDate?.take(10)?.let { append(it) }
-            when {
-                fullyPlayed -> {
-                    if (isNotEmpty()) append(" · ")
-                    append("Played")
-                }
-                effectiveResume != null && ep.durationMs != null -> {
-                    val remaining = ep.durationMs - effectiveResume
-                    if (isNotEmpty()) append(" · ")
-                    append(formatDuration(remaining))
-                    append(" left")
-                }
-                ep.durationMs != null -> {
-                    if (isNotEmpty()) append(" · ")
-                    append(formatDuration(ep.durationMs))
-                }
-            }
+        // Subtitle: release date + duration or resume state (mirrors ShowDetailScreen's EpisodeRow),
+        // as LABELS so the words come from strings.xml when the LCD resolves them.
+        val playState: LcdLabel? = when {
+            fullyPlayed -> LcdLabel.Res(R.string.show_episode_played)
+            effectiveResume != null && ep.durationMs != null ->
+                LcdLabel.ResArgs(R.string.show_episode_time_left, listOf(formatDuration(ep.durationMs - effectiveResume)))
+            ep.durationMs != null -> LcdLabel.Text(formatDuration(ep.durationMs))
+            else -> null
         }
+        val subtitle = LcdLabel.Joined(
+            listOfNotNull(ep.releaseDate?.take(10)?.let { LcdLabel.Text(it) }, playState),
+        )
 
         return EpisodeItem(
             id = id,
