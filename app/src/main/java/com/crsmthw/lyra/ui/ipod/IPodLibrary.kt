@@ -4,7 +4,6 @@ import com.crsmthw.lyra.data.local.LibraryCache
 import com.crsmthw.lyra.data.local.LibraryCacheData
 import com.crsmthw.lyra.data.player.PlayerStateManager
 import com.crsmthw.lyra.data.remote.model.AlbumTrack
-import com.crsmthw.lyra.data.remote.model.SavedShowsResponse
 import com.crsmthw.lyra.data.remote.model.ShowPage
 import com.crsmthw.lyra.data.remote.model.SpotifyAlbum
 import com.crsmthw.lyra.data.remote.model.SpotifyArtist
@@ -85,6 +84,7 @@ class IPodLibrary(
 
         val albums = mutableListOf<SpotifyAlbum>()
         var offset = 0
+        var complete = false
         while (true) {
             val page = repository.getSavedAlbums(limit = 50, offset = offset)
                 .onFailure { noteIfRateLimited(it) }
@@ -92,10 +92,12 @@ class IPodLibrary(
             val items = page.items.orEmpty()
             albums += items.mapNotNull { it.album }
             offset += page.rawCount
-            if (page.next == null || page.rawCount == 0) break
+            if (page.next == null || page.rawCount == 0) { complete = true; break }
         }
 
-        if (albums.isNotEmpty()) {
+        // Only a COMPLETE sweep is persisted — a truncated prefix must never replace a whole
+        // cached list (mirrors LibraryViewModel.loadCollections).
+        if (complete && albums.isNotEmpty()) {
             withContext(Dispatchers.IO) {
                 libraryCache.saveCollections(savedAlbums = albums)
             }
@@ -149,6 +151,7 @@ class IPodLibrary(
 
         val artists = mutableListOf<SpotifyArtist>()
         var after: String? = null
+        var complete = false
         while (true) {
             val page = repository.getFollowedArtists(after)
                 .onFailure { noteIfRateLimited(it) }
@@ -156,10 +159,10 @@ class IPodLibrary(
             val items = page.items.orEmpty()
             artists += items
             after = page.cursors?.after
-            if (after == null || page.rawCount == 0) break
+            if (after == null || page.rawCount == 0) { complete = true; break }
         }
 
-        if (artists.isNotEmpty()) {
+        if (complete && artists.isNotEmpty()) {
             withContext(Dispatchers.IO) {
                 libraryCache.saveCollections(followedArtists = artists)
             }
@@ -256,12 +259,15 @@ class IPodLibrary(
                 val items = cached.tracks
                     .filter { it.isPlayable != false }
                     .map { PlaylistTrackItem(uri = it.uri, name = it.name, allArtists = it.allArtists) }
-                // rawOffset is the API offset the next page starts at. If null, no more pages.
+                // rawOffset is the API offset the next page starts at. Null means the cache was
+                // written without offset info (liked songs, old cache) → no more pages. A non-null
+                // rawOffset means there MAY be more — we let the next network page decide; the
+                // worst case is one extra request that returns empty and clears hasMore.
                 val nextOffset = cached.rawOffset
                 return Result.success(
                     PlaylistTracksResult(
                         tracks = items,
-                        hasMore = nextOffset != null && nextOffset > 0,
+                        hasMore = nextOffset != null,
                         nextOffset = nextOffset ?: 0,
                     ),
                 )
@@ -305,6 +311,7 @@ class IPodLibrary(
 
         val shows = mutableListOf<SpotifyShow>()
         var offset = 0
+        var complete = false
         while (true) {
             val page = repository.getSavedShows(limit = 50, offset = offset)
                 .onFailure { noteIfRateLimited(it) }
@@ -312,10 +319,10 @@ class IPodLibrary(
             val items = page.items.orEmpty()
             shows += items.mapNotNull { it.show?.copy(episodes = null) }
             offset += page.rawCount
-            if (page.next == null || page.rawCount == 0) break
+            if (page.next == null || page.rawCount == 0) { complete = true; break }
         }
 
-        if (shows.isNotEmpty()) {
+        if (complete && shows.isNotEmpty()) {
             withContext(Dispatchers.IO) {
                 libraryCache.saveCollections(followedShows = shows)
             }

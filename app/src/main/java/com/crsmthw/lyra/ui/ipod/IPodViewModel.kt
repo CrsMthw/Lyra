@@ -123,6 +123,14 @@ class IPodViewModel(
     /** Guards against duplicate fetch launches for paged browse screens. */
     private val pagingInFlight = mutableSetOf<String>()
 
+    /**
+     * The server-computed next offset for each paged screen, keyed by a string that uniquely
+     * identifies the screen instance. Written from `IPodLibrary`'s `nextOffset` on every
+     * successful page; read by [maybeTriggerPaging]. Never derived from `items.size` — the
+     * rendered list is filtered (nulls, isPlayable, de-dup) so its length != the API offset.
+     */
+    private val nextOffsetByKey = mutableMapOf<String, Int>()
+
     init {
         // Mirror all three clicker settings (enabled, volume, pitch) into the UI state.
         viewModelScope.launch {
@@ -159,6 +167,12 @@ class IPodViewModel(
             playerStateManager.state
                 .map { ps ->
                     val track = ps.currentTrack ?: return@map null
+                    // Compute positionInList from the URI — the spec says "ONLY while
+                    // currentTrack.uri == lastSelection.uri". Done here so `distinctUntilChanged`
+                    // on the whole LcdNowPlaying still skips duplicates.
+                    val sel = lastSelection
+                    val posInList = if (sel != null && track.uri == sel.uri) sel.position else null
+                    val listSize = if (posInList != null) sel?.listSize else null
                     LcdNowPlaying(
                         title = track.name,
                         artist = track.allArtists,
@@ -167,22 +181,18 @@ class IPodViewModel(
                         isPlaying = ps.isPlaying,
                         progressMs = ps.progressMs,
                         durationMs = ps.durationMs,
+                        positionInList = posInList,
+                        listSize = listSize,
                     )
                 }
                 .distinctUntilChanged()
                 .collect { np ->
                     _uiState.update { state ->
-                        // Carry forward scrub-in-progress and position-in-list from the old state.
+                        // Carry forward scrub-in-progress from the old state so the 1 Hz tick
+                        // cannot stomp a scrub in progress.
                         val enriched = if (np != null) {
                             val old = state.nowPlaying
-                            val sel = lastSelection
-                            val posInList = if (sel != null && np.title == sel.trackName) sel.position else null
-                            val listSize = if (posInList != null) sel?.listSize else null
-                            np.copy(
-                                scrubProgressMs = old?.scrubProgressMs,
-                                positionInList = posInList,
-                                listSize = listSize,
-                            )
+                            np.copy(scrubProgressMs = old?.scrubProgressMs)
                         } else {
                             null
                         }
@@ -209,11 +219,12 @@ class IPodViewModel(
     }
 
     private fun handleScroll(steps: Int) {
+        var shouldPage = false
         _uiState.update { state ->
             val top = state.current
             if (top.screen is IPodScreen.NowPlaying) {
                 // Scrub: scroll on Now Playing adjusts the playback position.
-                return@update handleScrub(state, steps)
+                return@update computeScrub(state, steps)
             }
             val items = top.list.items
             if (items.isEmpty()) return@update state
@@ -235,41 +246,52 @@ class IPodViewModel(
             )
             val newState = state.copy(stack = state.stack.dropLast(1) + updatedEntry)
 
-            // Trigger paging when close to the end.
-            maybeTriggerPaging(newState)
+            // Decide whether to page — the actual launch happens after update returns.
+            shouldPage = shouldTriggerPaging(newState)
 
             newState
         }
+
+        // Side effects AFTER the update — never inside the CAS lambda.
+        if (shouldPage) triggerPaging()
+
+        // If the last update produced a scrub, launch the debounce.
+        launchScrubCommitIfNeeded()
     }
 
     /**
-     * Scrub the progress bar on the Now Playing screen. Each detent shifts the position by
-     * max(1s, duration / 100). The scrub position is debounced: after [SCRUB_COMMIT_MS] of
-     * idle, a [IPodEffect.SeekTo] is emitted and the scrub position is cleared.
+     * Compute the new state for a scrub step on Now Playing. Pure — no side effects.
+     * The actual commit job is launched AFTER `_uiState.update` returns, via
+     * [launchScrubCommitIfNeeded].
      */
-    private fun handleScrub(state: IPodUiState, steps: Int): IPodUiState {
+    private fun computeScrub(state: IPodUiState, steps: Int): IPodUiState {
         val np = state.nowPlaying ?: return state
         val duration = np.durationMs
         if (duration <= 0) return state
         val step = maxOf(1_000L, duration / 100)
         val base = np.scrubProgressMs ?: np.progressMs
         val newScrub = (base + steps * step).coerceIn(0, duration)
+        return state.copy(nowPlaying = np.copy(scrubProgressMs = newScrub))
+    }
 
-        // Cancel any pending commit and relaunch.
+    /**
+     * If a scrub is in progress (scrubProgressMs != null), cancel the old debounce and start
+     * a new one. Called outside `_uiState.update` to avoid side effects in the CAS lambda.
+     */
+    private fun launchScrubCommitIfNeeded() {
+        val scrubMs = _uiState.value.nowPlaying?.scrubProgressMs ?: return
         scrubJob?.cancel()
         scrubJob = viewModelScope.launch {
             delay(SCRUB_COMMIT_MS)
             val currentDuration = _uiState.value.nowPlaying?.durationMs ?: return@launch
             if (currentDuration <= 0) return@launch
-            _effects.send(IPodEffect.SeekTo(newScrub.toFloat() / currentDuration.toFloat()))
+            _effects.send(IPodEffect.SeekTo(scrubMs.toFloat() / currentDuration.toFloat()))
             // Clear scrubProgressMs so the bar tracks the real position again.
             _uiState.update { s ->
                 val curNp = s.nowPlaying ?: return@update s
                 s.copy(nowPlaying = curNp.copy(scrubProgressMs = null))
             }
         }
-
-        return state.copy(nowPlaying = np.copy(scrubProgressMs = newScrub))
     }
 
     private fun handlePress(button: WheelButton) {
@@ -366,7 +388,7 @@ class IPodViewModel(
     }
 
     private fun activateMusicItem(item: LcdItem, index: Int, listSize: Int) {
-        rememberSelection(item.id, (item.title as? LcdLabel.Text)?.value ?: "", index, listSize)
+        rememberSelection(item.id, index, listSize)
         viewModelScope.launch {
             _effects.send(IPodEffect.PlayLikedSong(item.id, shuffle = false))
         }
@@ -400,9 +422,7 @@ class IPodViewModel(
                     replaceTopItems(IPodScreen.Albums, items)
                 },
                 onFailure = {
-                    setTopError(IPodScreen.Albums, LcdLabel.Text(
-                        resolveErrorLabel(R.string.ipod_menu_albums),
-                    ))
+                    setTopError(IPodScreen.Albums, LcdLabel.Res(R.string.ipod_vm_load_error))
                 },
             )
         }
@@ -431,7 +451,7 @@ class IPodViewModel(
                 onFailure = {
                     setTopError(
                         IPodScreen.AlbumTracks(albumId, albumUri),
-                        LcdLabel.Text(resolveErrorLabel(R.string.ipod_menu_albums)),
+                        LcdLabel.Res(R.string.ipod_vm_load_error),
                     )
                 },
             )
@@ -444,7 +464,7 @@ class IPodViewModel(
         index: Int,
         listSize: Int,
     ) {
-        rememberSelection(item.id, (item.title as? LcdLabel.Text)?.value ?: "", index, listSize)
+        rememberSelection(item.id, index, listSize)
         viewModelScope.launch {
             _effects.send(
                 IPodEffect.PlayTrack(
@@ -482,9 +502,7 @@ class IPodViewModel(
                     replaceTopItems(IPodScreen.Artists, items)
                 },
                 onFailure = {
-                    setTopError(IPodScreen.Artists, LcdLabel.Text(
-                        resolveErrorLabel(R.string.ipod_menu_artists),
-                    ))
+                    setTopError(IPodScreen.Artists, LcdLabel.Res(R.string.ipod_vm_load_error))
                 },
             )
         }
@@ -507,6 +525,7 @@ class IPodViewModel(
         viewModelScope.launch {
             library.artistAlbums(artistId, offset).fold(
                 onSuccess = { result ->
+                    nextOffsetByKey[key] = result.nextOffset
                     val newItems = result.albums.map { album ->
                         val subtitle = buildString {
                             album.releaseYear.takeIf { it.isNotBlank() }?.let { append(it) }
@@ -533,7 +552,7 @@ class IPodViewModel(
                     if (offset == 0) {
                         setTopError(
                             IPodScreen.ArtistAlbums(artistId),
-                            LcdLabel.Text(resolveErrorLabel(R.string.ipod_menu_artists)),
+                            LcdLabel.Res(R.string.ipod_vm_load_error),
                         )
                     }
                 },
@@ -558,9 +577,7 @@ class IPodViewModel(
         viewModelScope.launch {
             val userId = cachedUserId ?: library.resolveUserId().also { cachedUserId = it }
             if (userId == null) {
-                setTopError(IPodScreen.Playlists, LcdLabel.Text(
-                    resolveErrorLabel(R.string.ipod_menu_playlists),
-                ))
+                setTopError(IPodScreen.Playlists, LcdLabel.Res(R.string.ipod_vm_load_error))
                 return@launch
             }
             library.ownedPlaylists(userId).fold(
@@ -576,9 +593,7 @@ class IPodViewModel(
                     replaceTopItems(IPodScreen.Playlists, items)
                 },
                 onFailure = {
-                    setTopError(IPodScreen.Playlists, LcdLabel.Text(
-                        resolveErrorLabel(R.string.ipod_menu_playlists),
-                    ))
+                    setTopError(IPodScreen.Playlists, LcdLabel.Res(R.string.ipod_vm_load_error))
                 },
             )
         }
@@ -602,6 +617,7 @@ class IPodViewModel(
         viewModelScope.launch {
             library.playlistTracks(playlistId, offset).fold(
                 onSuccess = { result ->
+                    nextOffsetByKey[key] = result.nextOffset
                     val newItems = result.tracks.map { track ->
                         LcdItem(
                             id = track.uri,
@@ -620,7 +636,7 @@ class IPodViewModel(
                     if (offset == 0) {
                         setTopError(
                             IPodScreen.PlaylistTracks(playlistId, playlistUri),
-                            LcdLabel.Text(resolveErrorLabel(R.string.ipod_menu_playlists)),
+                            LcdLabel.Res(R.string.ipod_vm_load_error),
                         )
                     }
                 },
@@ -635,7 +651,7 @@ class IPodViewModel(
         index: Int,
         listSize: Int,
     ) {
-        rememberSelection(item.id, (item.title as? LcdLabel.Text)?.value ?: "", index, listSize)
+        rememberSelection(item.id, index, listSize)
         viewModelScope.launch {
             _effects.send(
                 IPodEffect.PlayTrack(
@@ -682,9 +698,7 @@ class IPodViewModel(
                     replaceTopItems(IPodScreen.Podcasts, items)
                 },
                 onFailure = {
-                    setTopError(IPodScreen.Podcasts, LcdLabel.Text(
-                        resolveErrorLabel(R.string.ipod_menu_podcasts),
-                    ))
+                    setTopError(IPodScreen.Podcasts, LcdLabel.Res(R.string.ipod_vm_load_error))
                 },
             )
         }
@@ -707,6 +721,7 @@ class IPodViewModel(
         viewModelScope.launch {
             library.showEpisodes(showId, offset).fold(
                 onSuccess = { result ->
+                    nextOffsetByKey[key] = result.nextOffset
                     val newItems = result.episodes.map { ep ->
                         LcdItem(
                             id = ep.id,
@@ -727,7 +742,7 @@ class IPodViewModel(
                     if (offset == 0) {
                         setTopError(
                             IPodScreen.ShowEpisodes(showId),
-                            LcdLabel.Text(resolveErrorLabel(R.string.ipod_menu_podcasts)),
+                            LcdLabel.Res(R.string.ipod_vm_load_error),
                         )
                     }
                 },
@@ -760,7 +775,7 @@ class IPodViewModel(
         val episode = episodes.find { it.id == episodeId }
         val uri = episode?.uri ?: "spotify:episode:$episodeId"
 
-        rememberSelection(uri, episode?.name ?: "", listState.selectedIndex, items.size)
+        rememberSelection(uri, listState.selectedIndex, items.size)
 
         val queue = library.buildEpisodeQueue(episodes, episodeId)
 
@@ -839,48 +854,57 @@ class IPodViewModel(
 
     // ── Paging ────────────────────────────────────────────────────────────────
 
-    /**
-     * If the selection is within [PAGE_TRIGGER_ROWS] of the end and the screen has more
-     * data, trigger a fetch. Called from within [_uiState.update] so it reads the latest state.
-     */
-    private fun maybeTriggerPaging(state: IPodUiState) {
+    /** Pure check: returns true if the top screen should fetch more. Called inside update. */
+    private fun shouldTriggerPaging(state: IPodUiState): Boolean {
         val top = state.current
-        if (!top.list.hasMore) return
+        if (!top.list.hasMore) return false
         val remaining = top.list.items.size - top.list.selectedIndex - 1
-        if (remaining > PAGE_TRIGGER_ROWS) return
+        return remaining <= PAGE_TRIGGER_ROWS
+    }
 
+    /** Launch the actual paging fetch. Called OUTSIDE `_uiState.update`. */
+    private fun triggerPaging() {
+        val top = _uiState.value.current
         when (val screen = top.screen) {
             is IPodScreen.ArtistAlbums -> {
-                // Need to compute the next offset from the current items.
-                // The items count is the offset for artist albums since it's 10/page.
-                loadArtistAlbums(screen.artistId, top.list.items.size)
+                val key = pagingKey(screen)
+                val offset = nextOffsetByKey[key] ?: return
+                loadArtistAlbums(screen.artistId, offset)
             }
             is IPodScreen.PlaylistTracks -> {
-                // For playlists, we track offset by items; the initial offset from cache may differ.
-                // Use the current items count as a rough offset; the library handles it.
-                loadPlaylistTracks(screen.playlistId, screen.playlistUri, top.list.items.size)
+                val key = pagingKey(screen)
+                val offset = nextOffsetByKey[key] ?: return
+                loadPlaylistTracks(screen.playlistId, screen.playlistUri, offset)
             }
             is IPodScreen.ShowEpisodes -> {
-                loadShowEpisodes(screen.showId, top.list.items.size)
+                val key = pagingKey(screen)
+                val offset = nextOffsetByKey[key] ?: return
+                loadShowEpisodes(screen.showId, offset)
             }
             else -> {}
         }
+    }
+
+    /** Unique key for paging state tracking. */
+    private fun pagingKey(screen: IPodScreen): String = when (screen) {
+        is IPodScreen.ArtistAlbums -> "artist_albums_${screen.artistId}"
+        is IPodScreen.PlaylistTracks -> "playlist_tracks_${screen.playlistId}"
+        is IPodScreen.ShowEpisodes -> "show_episodes_${screen.showId}"
+        else -> ""
     }
 
     // ── Track selection memory ────────────────────────────────────────────────
 
     private data class TrackSelection(
         val uri: String,
-        val trackName: String,
         /** 1-based position in the list. */
         val position: Int,
         val listSize: Int,
     )
 
-    private fun rememberSelection(uri: String, name: String, index: Int, listSize: Int) {
+    private fun rememberSelection(uri: String, index: Int, listSize: Int) {
         lastSelection = TrackSelection(
             uri = uri,
-            trackName = name,
             position = index + 1,
             listSize = listSize,
         )
@@ -1040,16 +1064,6 @@ class IPodViewModel(
     /** Determines the row count: TWO_LINE if any item has a subtitle, SINGLE_LINE otherwise. */
     private fun computeVisibleRows(items: List<LcdItem>): Int =
         if (items.any { it.subtitle != null }) LCD_ROWS_TWO_LINE else LCD_ROWS_SINGLE_LINE
-
-    /**
-     * Build a plain error string. We can't use a format-arg resource with [LcdLabel.Res]
-     * (it calls `stringResource(id)` with no args), so error labels are always [LcdLabel.Text].
-     */
-    private fun resolveErrorLabel(@Suppress("SameParameterValue") fallbackResId: Int): String {
-        // The string "Couldn't load" is all we can do without format args at this layer.
-        // The resource ipod_list_error has a %1$s placeholder; we bypass it.
-        return "Couldn't load"
-    }
 
     // ── Menu builders ─────────────────────────────────────────────────────────
 
