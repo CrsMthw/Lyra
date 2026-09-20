@@ -10,9 +10,13 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import android.widget.Toast
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import com.crsmthw.lyra.ui.components.CappedModalBottomSheet
 import com.crsmthw.lyra.ui.components.ConnectedChoiceRow
@@ -65,7 +69,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun SettingsScreen(
     viewModel: SettingsViewModel,
@@ -93,6 +97,8 @@ fun SettingsScreen(
     val visualizerGainSync  by viewModel.visualizerGainSync.collectAsStateWithLifecycle()
     val hapticsEnabled      by viewModel.hapticsEnabled.collectAsStateWithLifecycle()
     val forYouEnabled       by viewModel.forYouEnabled.collectAsStateWithLifecycle()
+    val ipodUnlocked        by viewModel.ipodUnlocked.collectAsStateWithLifecycle()
+    val ipodEnabled         by viewModel.ipodEnabled.collectAsStateWithLifecycle()
     val haptics              = LocalHapticFeedback.current
     val imageCacheBytes        by viewModel.imageCacheBytes.collectAsStateWithLifecycle()
     val libraryCacheBytes      by viewModel.libraryCacheBytes.collectAsStateWithLifecycle()
@@ -320,6 +326,21 @@ fun SettingsScreen(
                     }
                 }
 
+                // iPod mode — appears after unlocking via 5-tap on the version line
+                AnimatedVisibility(
+                    visible = ipodUnlocked,
+                    enter   = fadeIn() + expandVertically(screenTransitionSpec<IntSize>()),
+                    exit    = shrinkVertically(screenTransitionSpec<IntSize>()) + fadeOut(),
+                ) {
+                    SettingsToggleItem(
+                        icon            = Icons.Default.Album,
+                        title           = stringResource(R.string.settings_ipod),
+                        subtitle        = stringResource(R.string.settings_ipod_desc),
+                        checked         = ipodEnabled,
+                        onCheckedChange = viewModel::setIpodEnabled,
+                    )
+                }
+
                 HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
 
                 // ── Storage ───────────────────────────────────────────────────────
@@ -392,7 +413,13 @@ fun SettingsScreen(
                 }
 
                 // ── About ─────────────────────────────────────────────────────────────
-                AboutSection()
+                AboutSection(
+                    ipodUnlocked = ipodUnlocked,
+                    onIpodUnlocked = {
+                        haptics.confirm()
+                        viewModel.unlockIpod()
+                    },
+                )
 
                 Spacer(Modifier.height(scrimHeight))
                 }
@@ -815,8 +842,12 @@ private fun GainSliderRow(prefix: String?, offset: Int, onOffset: (Int) -> Unit)
 
 // ── About section ────────────────────────────────────────────────────────────
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun AboutSection() {
+private fun AboutSection(
+    ipodUnlocked: Boolean,
+    onIpodUnlocked: () -> Unit,
+) {
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
 
@@ -859,11 +890,30 @@ private fun AboutSection() {
             textAlign = TextAlign.Center,
         )
 
+        // iPod mode unlock: 5 taps within 2 s each on the version line. Once unlocked, taps
+        // are inert (no haptic) — the toggle in the Lyra section is the activation path.
+        var tapCount by remember { mutableIntStateOf(0) }
+        var lastTapMs by remember { mutableLongStateOf(0L) }
         Text(
             text      = stringResource(R.string.settings_version, BuildConfig.VERSION_NAME),
             style     = MaterialTheme.typography.bodySmall,
             color     = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
+            modifier  = Modifier.combinedClickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication        = null,
+                onClick           = {
+                    if (ipodUnlocked) return@combinedClickable
+                    val now = System.currentTimeMillis()
+                    tapCount = if (now - lastTapMs <= 2_000L) tapCount + 1 else 1
+                    lastTapMs = now
+                    if (tapCount >= 5) {
+                        tapCount = 0
+                        onIpodUnlocked()
+                        Toast.makeText(context, context.getString(R.string.settings_ipod_unlocked), Toast.LENGTH_SHORT).show()
+                    }
+                },
+            ),
         )
 
         Spacer(Modifier.height(20.dp))
@@ -902,6 +952,14 @@ private fun AboutSection() {
                         Text(stringResource(R.string.about_credit_icon), style = MaterialTheme.typography.bodyMedium)
                         Text(stringResource(R.string.about_credit_icon_desc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
+                }
+
+                Spacer(Modifier.height(12.dp))
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Favorite, contentDescription = null, tint = Color(0xFFE91E63), modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Text(stringResource(R.string.about_credit_fonts), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
