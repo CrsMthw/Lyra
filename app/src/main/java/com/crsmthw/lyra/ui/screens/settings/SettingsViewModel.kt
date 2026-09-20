@@ -64,6 +64,12 @@ class SettingsViewModel(
     val forYouEnabled: StateFlow<Boolean> = settingsRepo.forYouEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
+    val ipodUnlocked: StateFlow<Boolean> = settingsRepo.ipodUnlocked
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    val ipodEnabled: StateFlow<Boolean> = settingsRepo.ipodEnabled
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
     private val _imageCacheBytes   = MutableStateFlow(0L)
     val imageCacheBytes: StateFlow<Long> = _imageCacheBytes
 
@@ -86,6 +92,8 @@ class SettingsViewModel(
     fun setVisualizerGainSync(sync: Boolean)    { viewModelScope.launch { settingsRepo.setVisualizerGainSync(sync) } }
     fun setHapticsEnabled  (enabled: Boolean)   { viewModelScope.launch { settingsRepo.setHapticsEnabled(enabled)      } }
     fun setForYouEnabled   (enabled: Boolean)   { viewModelScope.launch { settingsRepo.setForYouEnabled(enabled)       } }
+    fun unlockIpod()                             { viewModelScope.launch { settingsRepo.setIpodUnlocked(true)           } }
+    fun setIpodEnabled     (enabled: Boolean)   { viewModelScope.launch { settingsRepo.setIpodEnabled(enabled)         } }
 
     /** Reset every visualizer setting to its default (surfaces=Both, 24 bands, gain 0, synced, mean). */
     fun resetVisualizerSettings() {
