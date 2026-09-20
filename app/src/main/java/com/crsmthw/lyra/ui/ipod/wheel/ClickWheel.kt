@@ -1,7 +1,8 @@
 package com.crsmthw.lyra.ui.ipod.wheel
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
@@ -9,13 +10,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.hapticfeedback.HapticFeedback
-import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -113,6 +114,7 @@ fun ClickWheel(
     // Capture latest callback refs so the pointerInput(enabled) lambda never goes stale.
     val onEventState = rememberUpdatedState(onEvent)
     val soundsState = rememberUpdatedState(sounds)
+    val enabledState = rememberUpdatedState(enabled)
 
     val haptics = LocalHapticFeedback.current
     val cd = stringResource(R.string.ipod_cd_click_wheel)
@@ -126,38 +128,32 @@ fun ClickWheel(
     val wheelEdgeStrokePx = with(density) { WHEEL_EDGE_STROKE_DP.dp.toPx() }
     val centerEdgeStrokePx = with(density) { CENTER_EDGE_STROKE_DP.dp.toPx() }
     val innerShadowWidthPx = with(density) { INNER_SHADOW_WIDTH_DP.dp.toPx() }
+    // Divide by both screen density and font scale so the label is pixel-proportional to the wheel.
+    val spDivisor = density.density * density.fontScale
 
-    BoxWithConstraints(
-        modifier = modifier.semantics { contentDescription = cd }
+    Canvas(
+        modifier = modifier
+            .semantics { contentDescription = cd }
+            .fillMaxSize()
+            .pointerInput(Unit) {
+                wheelGestureLoop(
+                    enabledState = enabledState,
+                    onEventState = onEventState,
+                    soundsState = soundsState,
+                    haptics = haptics,
+                    pressedSector = pressedSector,
+                )
+            }
     ) {
-        val constraintsPx = with(density) {
-            Size(maxWidth.toPx(), maxHeight.toPx())
-        }
-
-        Canvas(
-            modifier = Modifier
-                .fillMaxSize()
-                .pointerInput(enabled) {
-                    if (!enabled) return@pointerInput
-                    wheelGestureLoop(
-                        sizePx = constraintsPx,
-                        onEventState = onEventState,
-                        soundsState = soundsState,
-                        haptics = haptics,
-                        pressedSector = pressedSector,
-                    )
-                }
-        ) {
-            drawWheel(
-                menuLabel = menuLabel,
-                textMeasurer = textMeasurer,
-                pressedSector = pressedSector.value,
-                wheelEdgeStrokePx = wheelEdgeStrokePx,
-                centerEdgeStrokePx = centerEdgeStrokePx,
-                innerShadowWidthPx = innerShadowWidthPx,
-                densityFactor = density.density,
-            )
-        }
+        drawWheel(
+            menuLabel = menuLabel,
+            textMeasurer = textMeasurer,
+            pressedSector = pressedSector.value,
+            wheelEdgeStrokePx = wheelEdgeStrokePx,
+            centerEdgeStrokePx = centerEdgeStrokePx,
+            innerShadowWidthPx = innerShadowWidthPx,
+            spDivisor = spDivisor,
+        )
     }
 }
 
@@ -170,7 +166,7 @@ private fun DrawScope.drawWheel(
     wheelEdgeStrokePx: Float,
     centerEdgeStrokePx: Float,
     innerShadowWidthPx: Float,
-    densityFactor: Float,
+    spDivisor: Float,
 ) {
     val diameter = min(size.width, size.height)
     val radius = diameter / 2f
@@ -209,11 +205,11 @@ private fun DrawScope.drawWheel(
 
     // ── 4. Pressed wedge overlay ────────────────────────────────────
     if (pressedSector != null && pressedSector >= 0) {
-        // Sector angles: MENU=0 (top, 315-45°), NEXT=1 (right, 45-135°),
-        // PLAY_PAUSE=2 (bottom, 135-225°), PREVIOUS=3 (left, 225-315°).
-        // drawArc's 0° is at 3 o'clock, so subtract 90° to convert from our wheel coords.
+        // Sector angles: MENU=0 (top, 315-45 deg), NEXT=1 (right, 45-135 deg),
+        // PLAY_PAUSE=2 (bottom, 135-225 deg), PREVIOUS=3 (left, 225-315 deg).
+        // drawArc's 0 deg is at 3 o'clock, so subtract 90 to convert from our wheel coords.
         val arcStartWheel = pressedSector * 90f - 45f  // wheel coords
-        val arcStartCanvas = arcStartWheel - 90f       // canvas coords (0°=3 o'clock)
+        val arcStartCanvas = arcStartWheel - 90f       // canvas coords (0 deg = 3 o'clock)
         drawArc(
             color = IPodColors.WheelPressed,
             startAngle = arcStartCanvas,
@@ -252,11 +248,11 @@ private fun DrawScope.drawWheel(
     val labelDist = radius * LABEL_RADIUS_FRACTION
     val iconSize = diameter * ICON_SIZE_FRACTION
 
-    // MENU text at 12 o'clock
+    // MENU text at 12 o'clock — size is pixel-proportional to the wheel diameter.
     val menuStyle = TextStyle(
         fontFamily = IPodFontFamily,
         fontWeight = FontWeight.Bold,
-        fontSize = (diameter * 0.038f / densityFactor).sp,
+        fontSize = (diameter * 0.038f / spDivisor).sp,
         color = IPodColors.WheelLabel,
         textAlign = TextAlign.Center,
         letterSpacing = 1.5.sp,
@@ -270,17 +266,17 @@ private fun DrawScope.drawWheel(
         ),
     )
 
-    // ⏮ at left (PREVIOUS): two triangles + bar
+    // Previous (left): two left-pointing triangles + bar
     drawPreviousIcon(cx - labelDist, cy, iconSize)
 
-    // ⏭ at right (NEXT): two triangles + bar
+    // Next (right): two right-pointing triangles + bar
     drawNextIcon(cx + labelDist, cy, iconSize)
 
-    // ⏯ at bottom (PLAY_PAUSE): triangle + two bars
+    // Play/Pause (bottom): triangle + two bars
     drawPlayPauseIcon(cx, cy + labelDist, iconSize)
 }
 
-/** Draw ⏮ (two left-pointing triangles + a bar on the left) centred at (cx, cy). */
+/** Draw two left-pointing triangles + a bar on the left, centred at (cx, cy). */
 private fun DrawScope.drawPreviousIcon(cx: Float, cy: Float, size: Float) {
     val half = size / 2f
     val barW = size * 0.14f
@@ -288,7 +284,7 @@ private fun DrawScope.drawPreviousIcon(cx: Float, cy: Float, size: Float) {
 
     val path = Path().apply {
         // Left bar
-        addRect(androidx.compose.ui.geometry.Rect(cx - half, cy - half * 0.7f, cx - half + barW, cy + half * 0.7f))
+        addRect(Rect(cx - half, cy - half * 0.7f, cx - half + barW, cy + half * 0.7f))
         // First triangle (pointing left)
         moveTo(cx - half + barW, cy)
         lineTo(cx - half + barW + triW, cy - half * 0.7f)
@@ -303,7 +299,7 @@ private fun DrawScope.drawPreviousIcon(cx: Float, cy: Float, size: Float) {
     drawPath(path, IPodColors.WheelLabel)
 }
 
-/** Draw ⏭ (two right-pointing triangles + a bar on the right) centred at (cx, cy). */
+/** Draw two right-pointing triangles + a bar on the right, centred at (cx, cy). */
 private fun DrawScope.drawNextIcon(cx: Float, cy: Float, size: Float) {
     val half = size / 2f
     val barW = size * 0.14f
@@ -321,12 +317,12 @@ private fun DrawScope.drawNextIcon(cx: Float, cy: Float, size: Float) {
         lineTo(cx - half + triW * 2f, cy)
         close()
         // Right bar
-        addRect(androidx.compose.ui.geometry.Rect(cx + half - barW, cy - half * 0.7f, cx + half, cy + half * 0.7f))
+        addRect(Rect(cx + half - barW, cy - half * 0.7f, cx + half, cy + half * 0.7f))
     }
     drawPath(path, IPodColors.WheelLabel)
 }
 
-/** Draw ⏯ (play triangle + pause bars) centred at (cx, cy). */
+/** Draw play triangle + pause bars, centred at (cx, cy). */
 private fun DrawScope.drawPlayPauseIcon(cx: Float, cy: Float, size: Float) {
     val half = size / 2f
     val barW = size * 0.16f
@@ -340,8 +336,8 @@ private fun DrawScope.drawPlayPauseIcon(cx: Float, cy: Float, size: Float) {
         close()
         // Pause bars (right half)
         val barStart = cx + gap / 2f
-        addRect(androidx.compose.ui.geometry.Rect(barStart, cy - half * 0.7f, barStart + barW, cy + half * 0.7f))
-        addRect(androidx.compose.ui.geometry.Rect(barStart + barW + gap, cy - half * 0.7f, barStart + barW * 2f + gap, cy + half * 0.7f))
+        addRect(Rect(barStart, cy - half * 0.7f, barStart + barW, cy + half * 0.7f))
+        addRect(Rect(barStart + barW + gap, cy - half * 0.7f, barStart + barW * 2f + gap, cy + half * 0.7f))
     }
     drawPath(path, IPodColors.WheelLabel)
 }
@@ -352,11 +348,11 @@ private fun DrawScope.drawPlayPauseIcon(cx: Float, cy: Float, size: Float) {
 private const val SECTOR_CENTER = -1
 
 /**
- * Compute the angle in degrees from the wheel centre, 0° at 12 o'clock, clockwise positive,
+ * Compute the angle in degrees from the wheel centre, 0 deg at 12 o'clock, clockwise positive,
  * range [0, 360).
  */
 private fun angleFromCenter(dx: Float, dy: Float): Float {
-    // atan2(dx, -dy): x-axis rightward, -dy makes up positive → 0° at 12 o'clock, CW positive.
+    // atan2(dx, -dy): x-axis rightward, -dy makes up positive -> 0 deg at 12 o'clock, CW positive.
     val deg = Math.toDegrees(atan2(dx.toDouble(), (-dy).toDouble())).toFloat()
     return (deg + 360f) % 360f
 }
@@ -379,7 +375,7 @@ private fun sectorForAngle(angle: Float): Int {
     return (norm / 90f).toInt().coerceIn(0, 3)
 }
 
-/** Map a sector index (0–3) to the corresponding [WheelButton]. */
+/** Map a sector index (0-3) to the corresponding [WheelButton]. */
 private fun buttonForSector(sector: Int): WheelButton = when (sector) {
     0 -> WheelButton.MENU
     1 -> WheelButton.NEXT
@@ -399,69 +395,77 @@ private fun effectiveDetent(velocityDegPerSec: Float): Float {
 }
 
 /**
- * The main gesture loop. Runs inside a [pointerInput] block.
- * Consumes all touches within the wheel circle; touches outside the circle (the square's corners)
- * are consumed and dropped so nothing reaches behind the wheel.
+ * The main gesture loop. Uses [awaitEachGesture] so a cancelled gesture unwinds cleanly and
+ * the `finally` block always clears the pressed visual. Every touch inside the composable is
+ * consumed — corners included — so nothing reaches behind the wheel, even when [enabledState]
+ * is false (disabled only suppresses event emission and feedback, not consumption).
+ *
+ * Reads [size] from the [PointerInputScope] on each gesture start, so it stays correct after
+ * a fold/unfold that changes the wheel dimensions.
  */
 private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.wheelGestureLoop(
-    sizePx: Size,
+    enabledState: androidx.compose.runtime.State<Boolean>,
     onEventState: androidx.compose.runtime.State<(WheelEvent) -> Unit>,
     soundsState: androidx.compose.runtime.State<ClickSounds?>,
     haptics: HapticFeedback,
     pressedSector: androidx.compose.runtime.MutableState<Int?>,
 ) {
-    val diameter = min(sizePx.width, sizePx.height)
-    val radius = diameter / 2f
-    val cx = sizePx.width / 2f
-    val cy = sizePx.height / 2f
-    val centreRadius = radius * IPodDimens.CenterButtonFraction / 2f
-    val deadZoneRadius = radius * DEAD_ZONE_FRACTION
+    awaitEachGesture {
+        // Derive geometry from the scope's live size so a fold/unfold is handled.
+        val w = size.width.toFloat()
+        val h = size.height.toFloat()
+        val diameter = min(w, h)
+        val radius = diameter / 2f
+        val cx = w / 2f
+        val cy = h / 2f
+        val centreRadius = radius * IPodDimens.CenterButtonFraction / 2f
+        val deadZoneRadius = radius * DEAD_ZONE_FRACTION
+        val isEnabled = enabledState.value
 
-    awaitPointerEventScope {
-        while (true) {
-            // Wait for a down event
-            val downEvent = awaitPointerEvent()
-            if (downEvent.type != PointerEventType.Press) continue
+        val down = awaitFirstDown(requireUnconsumed = false)
+        down.consume()
 
-            val down = downEvent.changes.firstOrNull() ?: continue
-            val downPos = down.position
-            val dxDown = downPos.x - cx
-            val dyDown = downPos.y - cy
-            val downDist = hypot(dxDown, dyDown)
+        val downPos = down.position
+        val dxDown = downPos.x - cx
+        val dyDown = downPos.y - cy
+        val downDist = hypot(dxDown, dyDown)
 
-            // Consume the down regardless — no touch should reach behind the wheel.
-            down.consume()
+        // Outside the wheel circle (the square's corners) -> consumed, ignored.
+        if (downDist > radius) return@awaitEachGesture
 
-            // Outside the wheel circle (the square's corners) → consumed, ignored.
-            if (downDist > radius) continue
+        val trackId: PointerId = down.id
+        val downTimeMs = down.uptimeMillis
+        val isCenter = downDist < centreRadius
+        val downAngle = angleFromCenter(dxDown, dyDown)
 
-            val trackId: PointerId = down.id
-            val downTimeMs = down.uptimeMillis
-            val isCenter = downDist < centreRadius
-            val downAngle = angleFromCenter(dxDown, dyDown)
-
-            // Show the pressed visual immediately.
+        // Show the pressed visual immediately (only when enabled).
+        if (isEnabled) {
             pressedSector.value = if (isCenter) SECTOR_CENTER else sectorForAngle(downAngle)
+        }
 
-            // Gesture state
-            var accumulator = 0f          // partial detent progress (degrees, signed)
-            var hasScrolled = false        // once true, the gesture is a scroll to the end
-            var totalTravelDeg = 0f        // total angular displacement for tap classification
-            var lastAngle: Float? = if (downDist >= deadZoneRadius) downAngle else null
-            var lastTimeMs = downTimeMs
-            var smoothedVelocity = 0f      // EMA of |angular velocity| in deg/s
-            var lastTickTimeMs = 0L        // for the tick feedback floor
+        // Gesture state
+        var accumulator = 0f          // partial detent progress (degrees, signed)
+        var hasScrolled = false        // once true, the gesture is a scroll to the end
+        var totalTravelDeg = 0f        // total angular displacement for tap classification
+        var lastAngle: Float? = if (downDist >= deadZoneRadius) downAngle else null
+        var lastTimeMs = downTimeMs
+        var smoothedVelocity = 0f      // EMA of |angular velocity| in deg/s
+        var lastTickTimeMs = 0L        // for the tick feedback floor
 
+        try {
             // Track the pointer through move/up
-            var released = false
-            while (!released) {
+            while (true) {
                 val event = awaitPointerEvent()
+                var foundRelease = false
                 for (change in event.changes) {
                     if (change.id != trackId) {
                         change.consume() // ignore secondary pointers, consume to block pass-through
                         continue
                     }
                     change.consume()
+
+                    // Disabled: consume everything, emit nothing.
+                    if (!isEnabled) continue
 
                     val pos = change.position
                     val dx = pos.x - cx
@@ -470,8 +474,7 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.wheelGes
 
                     if (!change.pressed) {
                         // ── Pointer released ────────────────────────────
-                        released = true
-                        pressedSector.value = null
+                        foundRelease = true
 
                         if (!hasScrolled) {
                             // Tap classification
@@ -537,7 +540,7 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.wheelGes
                             pressedSector.value = null
                         }
 
-                        // At high velocity each detent emits ±2 instead of ±1
+                        // At high velocity each detent emits +/-2 instead of +/-1
                         val batchSize = if (smoothedVelocity >= BATCH_VELOCITY) 2 else 1
                         val sign = if (steps > 0) 1 else -1
 
@@ -555,7 +558,12 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.wheelGes
                         }
                     }
                 }
+                if (foundRelease) break
             }
+        } finally {
+            // Always clear the pressed visual, even on a cancelled gesture.
+            pressedSector.value = null
         }
     }
 }
+
