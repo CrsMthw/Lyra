@@ -72,10 +72,11 @@ private const val BOTTOM_STRIP_FRACTION = 0.20f
 private const val ART_ROTATION_Y = 20f
 
 /** The art's top edge, as a fraction of the content height. */
-private const val ART_TOP_FRACTION = 0.10f
+private const val ART_TOP_FRACTION = 0.09f
 
 /** The art may take at most this fraction of the content height (the reference's is ~0.55). */
-private const val ART_MAX_HEIGHT_FRACTION = 0.62f
+/* Art top 9 % + art 58 % + reflection 22 % of 58 % ≈ 80 % = the strip's top: the reflection ends there. */
+private const val ART_MAX_HEIGHT_FRACTION = 0.58f
 
 /** The title block starts this far below the art's top edge, as a fraction of the art side. */
 private const val TEXT_TOP_OFFSET_FRACTION = 0.12f
@@ -90,7 +91,8 @@ private const val ART_CAMERA_DISTANCE = 7f
 /** Starting alpha of the reflection at its top edge. */
 private const val REFLECTION_ALPHA = 0.6f
 /** Reflection height as a fraction of the art height. */
-private const val REFLECTION_HEIGHT_FRACTION = 0.42f
+/** The Classic's reflection is short and dies fast — it must end above the progress strip. */
+private const val REFLECTION_HEIGHT_FRACTION = 0.22f
 /** Progress bar track height as a fraction of the strip height. */
 /** The Classic's bar is a real channel, not a hairline: ~22 % of the strip (~4 % of the panel). */
 private const val PROGRESS_BAR_HEIGHT_FRACTION = 0.30f
@@ -380,6 +382,7 @@ private fun NowPlayingArt(
                                 brush = Brush.verticalGradient(
                                     0f to Color.Transparent,
                                     (1f - REFLECTION_HEIGHT_FRACTION) to Color.Transparent,
+                                    (1f - REFLECTION_HEIGHT_FRACTION * 0.5f) to Color.Black.copy(alpha = 0.28f),
                                     1f to Color.Black,
                                 ),
                                 blendMode = BlendMode.DstIn,
@@ -513,6 +516,7 @@ private fun NowPlayingProgressStrip(
             Text(
                 text = elapsedText,
                 fontFamily = IPodFontFamily,
+                fontWeight = FontWeight.Bold,
                 fontSize = timeFontSize,
                 color = IPodColors.LcdText,
                 maxLines = 1,
@@ -541,6 +545,7 @@ private fun NowPlayingProgressStrip(
             Text(
                 text = remainingText,
                 fontFamily = IPodFontFamily,
+                fontWeight = FontWeight.Bold,
                 fontSize = timeFontSize,
                 color = IPodColors.LcdText,
                 maxLines = 1,
