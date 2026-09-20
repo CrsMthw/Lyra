@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
@@ -47,7 +49,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.min
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogWindowProvider
-import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.activity.compose.LocalActivity
@@ -168,11 +169,12 @@ fun IPodRoot(container: AppContainer, modifier: Modifier = Modifier) {
                 .background(IPodColors.Surround),
             contentAlignment = Alignment.Center,
         ) {
-            // The body height uses the full window; width is capped by the aspect ratio.
-            val bodyHeight = maxHeight
+            // Letterboxing: decide from the full window BEFORE consuming height, so the
+            // hint space is reserved and the body does not push it off-screen.
+            val letterboxed = maxWidth > maxHeight * IPodDimens.BodyMaxAspect
+            val hintSpace = if (letterboxed) 40.dp else 0.dp
+            val bodyHeight = (maxHeight - hintSpace).coerceAtLeast(0.dp)
             val bodyWidth = min(maxWidth, bodyHeight * IPodDimens.BodyMaxAspect)
-            // When the window is wider than the body (unfolded or landscape), show a hint.
-            val isLetterboxed = maxWidth > bodyWidth + 1.dp
 
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 // ── iPod body ────────────────────────────────────────────────
@@ -201,15 +203,14 @@ fun IPodRoot(container: AppContainer, modifier: Modifier = Modifier) {
                             .windowInsetsPadding(WindowInsets.displayCutout),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        // LCD: 4:3, as wide as the padded body allows.
-                        val lcdW = bodyWidth - IPodDimens.BodyPadding * 2
-                        val lcdH = (lcdW / IPodDimens.LcdAspect).coerceAtLeast(0.dp)
+                        // LCD: 4:3, fills the padded width and respects the cutout
+                        // inset applied by windowInsetsPadding above.
                         LcdScreen(
                             state = state,
                             battery = battery,
                             modifier = Modifier
-                                .width(lcdW)
-                                .height(lcdH),
+                                .fillMaxWidth()
+                                .aspectRatio(IPodDimens.LcdAspect),
                         )
 
                         // ── Wheel area: fills the remaining space ────────────
@@ -235,7 +236,7 @@ fun IPodRoot(container: AppContainer, modifier: Modifier = Modifier) {
                 }
 
                 // ── Portrait hint (shown only when letterboxed) ──────────────
-                if (isLetterboxed) {
+                if (letterboxed) {
                     Spacer(Modifier.height(12.dp))
                     Text(
                         text = stringResource(R.string.ipod_portrait_hint),
