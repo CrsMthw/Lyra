@@ -18,6 +18,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
@@ -27,14 +28,15 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import coil3.compose.AsyncImage
@@ -53,7 +55,7 @@ private const val ART_WIDTH_FRACTION = 0.42f
 /** Gap between the art column and the text column, as a fraction of content width. */
 private const val ART_TEXT_GAP_FRACTION = 0.05f
 /** The upper region holding art + text takes this fraction of the content height. */
-private const val UPPER_REGION_FRACTION = 0.78f
+private const val UPPER_REGION_FRACTION = 0.80f
 /** The bottom progress strip takes this fraction of the content height. */
 private const val BOTTOM_STRIP_FRACTION = 0.20f
 /** Perspective tilt of the album art (degrees around the Y axis). */
@@ -76,6 +78,12 @@ private const val ARTIST_FONT_FRACTION = 0.042f
 private const val ALBUM_FONT_FRACTION = 0.038f
 private const val POSITION_FONT_FRACTION = 0.034f
 private const val TIME_FONT_FRACTION = 0.038f
+/** Art padding from left edge of the content, as a fraction of content width. */
+private const val ART_START_PAD_FRACTION = 0.04f
+/** Text padding from right edge, as a fraction of content width. */
+private const val TEXT_END_PAD_FRACTION = 0.04f
+/** Music note glyph size as a fraction of the art side. */
+private const val NOTE_GLYPH_FRACTION = 0.35f
 
 // ── Entry point ─────────────────────────────────────────────────────────────
 
@@ -85,8 +93,9 @@ private const val TIME_FONT_FRACTION = 0.038f
  * - Right: title (bold, marquee), artist (marquee), album (ellipsised), "N of M".
  * - Bottom strip: elapsed time, progress bar (two-tone blue fill + marker), remaining time.
  *
- * Progress updates at 1 Hz via [LcdNowPlaying.progressMs]; only the [NowPlayingProgressStrip]
- * recomposes on the tick (art and text read stable fields).
+ * The upper region receives only scalar fields (title, artist, album, artUrl, position) so that
+ * the 1 Hz progress tick that changes [LcdNowPlaying.progressMs] does not recompose the art/text
+ * -- only the [NowPlayingProgressStrip] recomposes on the tick.
  */
 @Composable
 internal fun LcdNowPlayingContent(
@@ -104,16 +113,21 @@ internal fun LcdNowPlayingContent(
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val density = LocalDensity.current
         val contentHeightPx = with(density) { contentHeight.toPx() }
-        val contentWidthPx = constraints.maxWidth.toFloat()
-        val contentWidthDp = with(density) { contentWidthPx.toDp() }
+        val contentWidthDp = with(density) { constraints.maxWidth.toDp() }
 
         val upperHeight = contentHeight * UPPER_REGION_FRACTION
         val stripHeight = contentHeight * BOTTOM_STRIP_FRACTION
 
         Column(Modifier.fillMaxSize()) {
             // Upper region: art on the left, text on the right.
+            // Takes only the stable fields so the 1 Hz tick does not recompose this region.
             NowPlayingUpperRegion(
-                nowPlaying = nowPlaying,
+                title = nowPlaying.title,
+                artist = nowPlaying.artist,
+                album = nowPlaying.album,
+                artUrl = nowPlaying.artUrl,
+                positionInList = nowPlaying.positionInList,
+                listSize = nowPlaying.listSize,
                 contentWidthDp = contentWidthDp,
                 contentHeightPx = contentHeightPx,
                 regionHeight = upperHeight,
@@ -123,7 +137,6 @@ internal fun LcdNowPlayingContent(
             )
 
             // Bottom strip: elapsed, progress bar, remaining.
-            // Scoped to its own composable so 1 Hz ticks do not recompose the art/text.
             NowPlayingProgressStrip(
                 progressMs = nowPlaying.scrubProgressMs ?: nowPlaying.progressMs,
                 durationMs = nowPlaying.durationMs,
@@ -141,7 +154,12 @@ internal fun LcdNowPlayingContent(
 
 @Composable
 private fun NowPlayingUpperRegion(
-    nowPlaying: LcdNowPlaying,
+    title: String,
+    artist: String,
+    album: String,
+    artUrl: String,
+    positionInList: Int?,
+    listSize: Int?,
     contentWidthDp: Dp,
     contentHeightPx: Float,
     regionHeight: Dp,
@@ -150,7 +168,8 @@ private fun NowPlayingUpperRegion(
     val density = LocalDensity.current
     val artWidth = contentWidthDp * ART_WIDTH_FRACTION
     val gapWidth = contentWidthDp * ART_TEXT_GAP_FRACTION
-    val textWidth = contentWidthDp - artWidth - gapWidth
+    val textWidth = contentWidthDp - artWidth - gapWidth -
+        contentWidthDp * ART_START_PAD_FRACTION - contentWidthDp * TEXT_END_PAD_FRACTION
 
     val titleFontSize = with(density) { (contentHeightPx * TITLE_FONT_FRACTION).toSp() }
     val artistFontSize = with(density) { (contentHeightPx * ARTIST_FONT_FRACTION).toSp() }
@@ -158,12 +177,15 @@ private fun NowPlayingUpperRegion(
     val positionFontSize = with(density) { (contentHeightPx * POSITION_FONT_FRACTION).toSp() }
 
     Row(
-        modifier = modifier.padding(start = contentWidthDp * 0.04f),
+        modifier = modifier.padding(
+            start = contentWidthDp * ART_START_PAD_FRACTION,
+            end = contentWidthDp * TEXT_END_PAD_FRACTION,
+        ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // Left: album art with tilt + reflection.
         NowPlayingArt(
-            artUrl = nowPlaying.artUrl,
+            artUrl = artUrl,
             modifier = Modifier
                 .width(artWidth)
                 .height(regionHeight),
@@ -172,14 +194,10 @@ private fun NowPlayingUpperRegion(
         Spacer(Modifier.width(gapWidth))
 
         // Right: title / artist / album / position.
-        Column(
-            modifier = Modifier
-                .width(textWidth)
-                .padding(end = contentWidthDp * 0.04f),
-        ) {
+        Column(modifier = Modifier.weight(1f)) {
             // Title (bold, marquee when overflowing).
             Text(
-                text = nowPlaying.title,
+                text = title,
                 fontFamily = IPodFontFamily,
                 fontWeight = FontWeight.Bold,
                 fontSize = titleFontSize,
@@ -196,7 +214,7 @@ private fun NowPlayingUpperRegion(
 
             // Artist (marquee when overflowing).
             Text(
-                text = nowPlaying.artist,
+                text = artist,
                 fontFamily = IPodFontFamily,
                 fontSize = artistFontSize,
                 color = IPodColors.LcdTextSecondary,
@@ -212,7 +230,7 @@ private fun NowPlayingUpperRegion(
 
             // Album (ellipsised, no marquee).
             Text(
-                text = nowPlaying.album,
+                text = album,
                 fontFamily = IPodFontFamily,
                 fontSize = albumFontSize,
                 color = IPodColors.LcdTextSecondary,
@@ -222,13 +240,13 @@ private fun NowPlayingUpperRegion(
             )
 
             // "N of M" — only when both are known (i.e. the user picked a song from a list).
-            if (nowPlaying.positionInList != null && nowPlaying.listSize != null) {
+            if (positionInList != null && listSize != null) {
                 Spacer(Modifier.height(with(density) { (contentHeightPx * 0.01f).toDp() }))
                 Text(
                     text = stringResource(
                         R.string.ipod_now_playing_position,
-                        nowPlaying.positionInList,
-                        nowPlaying.listSize,
+                        positionInList,
+                        listSize,
                     ),
                     fontFamily = IPodFontFamily,
                     fontSize = positionFontSize,
@@ -263,14 +281,14 @@ private fun NowPlayingArt(
         modifier = modifier,
         contentAlignment = Alignment.Center,
     ) {
-        val availableWidth = maxWidth
-        val availableHeight = maxHeight
         // Square art, sized to fit the available space with room for the reflection.
-        val artSide = minOf(availableWidth, availableHeight * (1f / (1f + REFLECTION_HEIGHT_FRACTION)))
+        val artSide = minOf(maxWidth, maxHeight * (1f / (1f + REFLECTION_HEIGHT_FRACTION)))
         val reflectionHeight = artSide * REFLECTION_HEIGHT_FRACTION
 
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             // The main art image with perspective tilt.
+            // Placeholder is always drawn underneath; the AsyncImage lands on top with crossfade,
+            // covering loading, error, and blank-url cases.
             Box(
                 modifier = Modifier
                     .size(artSide)
@@ -280,9 +298,8 @@ private fun NowPlayingArt(
                     },
                 contentAlignment = Alignment.Center,
             ) {
-                if (artUrl.isBlank()) {
-                    ArtPlaceholder(Modifier.fillMaxSize())
-                } else {
+                ArtPlaceholder(Modifier.fillMaxSize(), artSide)
+                if (artUrl.isNotBlank()) {
                     AsyncImage(
                         model = imageRequest,
                         contentDescription = null,
@@ -292,37 +309,50 @@ private fun NowPlayingArt(
                 }
             }
 
-            // Reflection: the same image flipped vertically, alpha fading from top to transparent.
+            // Reflection: the full square image is drawn into a box that clips to the reflection
+            // height, so only the art's bottom edge continues across the seam. The scaleY = -1f
+            // flip means pre-flip "top" is post-flip "bottom" — the DstIn gradient therefore runs
+            // from Transparent at the top (pre-flip = the seam, post-flip = the far edge) to
+            // Black at the bottom (pre-flip = the far edge, post-flip = the seam). After the
+            // flip, the seam edge is opaque and fades to transparent at the bottom.
             Box(
                 modifier = Modifier
-                    .size(width = artSide, height = reflectionHeight)
-                    .graphicsLayer {
-                        rotationY = ART_ROTATION_Y
-                        cameraDistance = ART_CAMERA_DISTANCE_FACTOR * density.density
-                        scaleY = -1f
-                        alpha = REFLECTION_ALPHA
-                        compositingStrategy = CompositingStrategy.Offscreen
-                    }
-                    .drawWithContent {
-                        drawContent()
-                        drawRect(
-                            brush = Brush.verticalGradient(
-                                colors = listOf(Color.Black, Color.Transparent),
-                            ),
-                            blendMode = BlendMode.DstIn,
-                        )
-                    },
-                contentAlignment = Alignment.Center,
+                    .width(artSide)
+                    .height(reflectionHeight)
+                    .clipToBounds(),
             ) {
-                if (artUrl.isBlank()) {
-                    ArtPlaceholder(Modifier.fillMaxSize())
-                } else {
-                    AsyncImage(
-                        model = imageRequest,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize(),
-                    )
+                Box(
+                    modifier = Modifier
+                        .size(artSide) // full square, overflows the clip parent
+                        .graphicsLayer {
+                            rotationY = ART_ROTATION_Y
+                            cameraDistance = ART_CAMERA_DISTANCE_FACTOR * density.density
+                            scaleY = -1f
+                            alpha = REFLECTION_ALPHA
+                            compositingStrategy = CompositingStrategy.Offscreen
+                        }
+                        .drawWithContent {
+                            drawContent()
+                            drawRect(
+                                brush = Brush.verticalGradient(
+                                    0f to Color.Transparent,
+                                    (1f - REFLECTION_HEIGHT_FRACTION) to Color.Transparent,
+                                    1f to Color.Black,
+                                ),
+                                blendMode = BlendMode.DstIn,
+                            )
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    ArtPlaceholder(Modifier.fillMaxSize(), artSide)
+                    if (artUrl.isNotBlank()) {
+                        AsyncImage(
+                            model = imageRequest,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
                 }
             }
         }
@@ -330,31 +360,82 @@ private fun NowPlayingArt(
 }
 
 /**
- * Placeholder when no art is available: a grey square with a music note glyph.
+ * Placeholder drawn behind the art: a grey square with a music note drawn as a [Path]
+ * (not a font glyph — avoids Unicode coverage uncertainty in Liberation Sans). Sized
+ * relative to [artSide] so it scales with the LCD panel.
  */
 @Composable
-private fun ArtPlaceholder(modifier: Modifier = Modifier) {
+private fun ArtPlaceholder(modifier: Modifier, artSide: Dp) {
+    val density = LocalDensity.current
+    val glyphSizePx = with(density) { (artSide * NOTE_GLYPH_FRACTION).toPx() }
+
     Box(
-        modifier = modifier.background(IPodColors.ArtPlaceholder),
-        contentAlignment = Alignment.Center,
-    ) {
-        // A simple music note as unicode glyph, sized relative to the placeholder.
-        Text(
-            text = "♫", // beamed eighth notes
-            fontFamily = IPodFontFamily,
-            fontSize = with(LocalDensity.current) { 24.toDp().toSp() },
-            color = IPodColors.ArtPlaceholderIcon,
-            textAlign = TextAlign.Center,
+        modifier = modifier
+            .background(IPodColors.ArtPlaceholder)
+            .drawBehind {
+                drawMusicNote(
+                    center = Offset(size.width / 2f, size.height / 2f),
+                    noteSize = glyphSizePx,
+                    color = IPodColors.ArtPlaceholderIcon,
+                )
+            },
+    )
+}
+
+/**
+ * Draws a simple single eighth-note: a filled oval head, a vertical stem, and a flag.
+ */
+private fun DrawScope.drawMusicNote(center: Offset, noteSize: Float, color: Color) {
+    val headWidth = noteSize * 0.40f
+    val headHeight = noteSize * 0.28f
+    val stemHeight = noteSize * 0.70f
+    val stemWidth = noteSize * 0.06f
+    val flagWidth = noteSize * 0.22f
+    val flagHeight = noteSize * 0.35f
+
+    // Head: an oval at the bottom-left.
+    val headCx = center.x - noteSize * 0.05f
+    val headCy = center.y + stemHeight * 0.35f
+    drawOval(
+        color = color,
+        topLeft = Offset(headCx - headWidth / 2f, headCy - headHeight / 2f),
+        size = Size(headWidth, headHeight),
+    )
+
+    // Stem: rises from the right edge of the head.
+    val stemX = headCx + headWidth / 2f - stemWidth
+    val stemTop = headCy - stemHeight
+    drawRect(
+        color = color,
+        topLeft = Offset(stemX, stemTop),
+        size = Size(stemWidth, stemHeight),
+    )
+
+    // Flag: a curved stroke from the top of the stem.
+    val flagPath = Path().apply {
+        moveTo(stemX + stemWidth, stemTop)
+        cubicTo(
+            stemX + stemWidth + flagWidth, stemTop + flagHeight * 0.2f,
+            stemX + stemWidth + flagWidth * 0.8f, stemTop + flagHeight * 0.6f,
+            stemX + stemWidth, stemTop + flagHeight,
         )
+        lineTo(stemX + stemWidth, stemTop + flagHeight - stemWidth)
+        cubicTo(
+            stemX + stemWidth + flagWidth * 0.6f, stemTop + flagHeight * 0.5f,
+            stemX + stemWidth + flagWidth * 0.8f, stemTop + flagHeight * 0.25f,
+            stemX + stemWidth, stemTop + stemWidth,
+        )
+        close()
     }
+    drawPath(flagPath, color, style = Fill)
 }
 
 // ── Progress strip ──────────────────────────────────────────────────────────
 
 /**
  * The bottom strip: elapsed time (left), remaining time (right), progress bar between them.
- * This is its own composable so the 1 Hz tick that changes [progressMs] does not recompose the
- * art and text above it.
+ * This is its own composable taking only the three progress-related scalars so the 1 Hz tick
+ * does not recompose the art and text above it.
  */
 @Composable
 private fun NowPlayingProgressStrip(
@@ -394,53 +475,46 @@ private fun NowPlayingProgressStrip(
             )
             .padding(horizontal = with(density) { (contentHeightPx * 0.04f).toDp() }),
     ) {
-        BoxWithConstraints(
+        Row(
             modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            val barWidth = maxWidth - with(density) { (contentHeightPx * 0.20f).toDp() }
+            // Elapsed time.
+            Text(
+                text = elapsedText,
+                fontFamily = IPodFontFamily,
+                fontSize = timeFontSize,
+                color = IPodColors.LcdText,
+                maxLines = 1,
+            )
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                // Elapsed time.
-                Text(
-                    text = elapsedText,
-                    fontFamily = IPodFontFamily,
-                    fontSize = timeFontSize,
-                    color = IPodColors.LcdText,
-                    maxLines = 1,
-                )
+            Spacer(Modifier.width(with(density) { (contentHeightPx * 0.02f).toDp() }))
 
-                Spacer(Modifier.width(with(density) { (contentHeightPx * 0.02f).toDp() }))
+            // Progress bar (custom drawn for the two-tone fill + marker).
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(with(density) { (barHeightPx * 4f).toDp() })
+                    .drawBehind {
+                        drawProgressBar(
+                            fraction = fraction,
+                            barHeight = barHeightPx,
+                            markerRadius = markerRadiusPx,
+                            isScrubbing = isScrubbing,
+                        )
+                    },
+            )
 
-                // Progress bar (custom drawn for the two-tone fill + marker).
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(with(density) { (barHeightPx * 4f).toDp() })
-                        .drawBehind {
-                            drawProgressBar(
-                                fraction = fraction,
-                                barHeight = barHeightPx,
-                                markerRadius = markerRadiusPx,
-                                isScrubbing = isScrubbing,
-                            )
-                        },
-                )
+            Spacer(Modifier.width(with(density) { (contentHeightPx * 0.02f).toDp() }))
 
-                Spacer(Modifier.width(with(density) { (contentHeightPx * 0.02f).toDp() }))
-
-                // Remaining time.
-                Text(
-                    text = remainingText,
-                    fontFamily = IPodFontFamily,
-                    fontSize = timeFontSize,
-                    color = IPodColors.LcdText,
-                    maxLines = 1,
-                )
-            }
+            // Remaining time.
+            Text(
+                text = remainingText,
+                fontFamily = IPodFontFamily,
+                fontSize = timeFontSize,
+                color = IPodColors.LcdText,
+                maxLines = 1,
+            )
         }
     }
 }
