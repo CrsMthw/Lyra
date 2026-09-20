@@ -58,7 +58,7 @@ private const val VEL_LOW_THRESHOLD = 300f
 /** Angular velocity (deg/s) above which the detent is clamped at MIN_DETENT_DEG. */
 private const val VEL_HIGH_THRESHOLD = 900f
 
-/** Angular velocity (deg/s) above which each detent emits Scroll(±2) instead of ±1. */
+/** Angular velocity (deg/s) above which each detent emits Scroll(+/-2) instead of +/-1. */
 private const val BATCH_VELOCITY = 900f
 
 /** Maximum milliseconds from down to up for a tap to register as a button press. */
@@ -70,11 +70,8 @@ private const val TAP_MAX_TRAVEL_DEG = 6f
 /** Minimum milliseconds between consecutive tick feedback events (haptic + sound). */
 private const val MIN_TICK_INTERVAL_MS = 25L
 
-/** EMA smoothing factor for angular velocity (0–1; higher = more responsive). */
+/** EMA smoothing factor for angular velocity (0-1; higher = more responsive). */
 private const val VELOCITY_ALPHA = 0.3f
-
-/** Radius below which angle is meaningless (fraction of the wheel radius). */
-private const val DEAD_ZONE_FRACTION = 0.08f
 
 /** Size of the transport icon glyphs as a fraction of the wheel diameter. */
 private const val ICON_SIZE_FRACTION = 0.07f
@@ -120,7 +117,7 @@ fun ClickWheel(
     val cd = stringResource(R.string.ipod_cd_click_wheel)
     val menuLabel = stringResource(R.string.ipod_wheel_menu)
 
-    // Which sector is pressed: null = nothing, -1 = centre, 0–3 = MENU/NEXT/PLAY_PAUSE/PREVIOUS.
+    // Which sector is pressed: null = nothing, -1 = centre, 0-3 = MENU/NEXT/PLAY_PAUSE/PREVIOUS.
     val pressedSector = remember { mutableStateOf<Int?>(null) }
 
     val textMeasurer = rememberTextMeasurer()
@@ -173,9 +170,11 @@ private fun DrawScope.drawWheel(
     val cx = size.width / 2f
     val cy = size.height / 2f
     val centre = Offset(cx, cy)
-    val centreRadius = radius * IPodDimens.CenterButtonFraction / 2f
+    // CenterButtonFraction is diameter/diameter (0.38), so multiply by radius directly to get the
+    // centre button's radius.  Round A halved again and shipped a button at half the correct size.
+    val centreRadius = radius * IPodDimens.CenterButtonFraction
 
-    // ── 1. Wheel ring: radial gradient top→bottom ───────────────────
+    // ── 1. Wheel ring: radial gradient top -> bottom ───────────────────
     drawCircle(
         brush = Brush.verticalGradient(
             colors = listOf(IPodColors.WheelTop, IPodColors.WheelBottom),
@@ -395,13 +394,22 @@ private fun effectiveDetent(velocityDegPerSec: Float): Float {
 }
 
 /**
- * The main gesture loop. Uses [awaitEachGesture] so a cancelled gesture unwinds cleanly and
- * the `finally` block always clears the pressed visual. Every touch inside the composable is
- * consumed — corners included — so nothing reaches behind the wheel, even when [enabledState]
- * is false (disabled only suppresses event emission and feedback, not consumption).
+ * The main gesture loop.  Uses [awaitEachGesture] so a cancelled gesture unwinds cleanly and
+ * the `finally` block always clears the pressed visual.  Every touch INSIDE the wheel circle
+ * is consumed so nothing reaches behind it, even when [enabledState] is false (disabled only
+ * suppresses event emission and feedback, not consumption).  Touches in the square's corners
+ * (outside the wheel circle) are consumed on down and then the gesture is abandoned.
  *
  * Reads [size] from the [PointerInputScope] on each gesture start, so it stays correct after
  * a fold/unfold that changes the wheel dimensions.
+ *
+ * ### Drag zone
+ *
+ * The scrollable ring is `[centreRadius, radius]`.  A pointer that leaves this ring while
+ * dragging pauses accumulation (the reference angle is lost); re-entering the ring re-seeds
+ * the angle so there is no jump.  A gesture that STARTS in the centre is a SELECT candidate
+ * and never scrolls, even if dragged onto the ring.  A gesture that starts outside the wheel
+ * circle is consumed and ignored (no button, no scroll).
  */
 private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.wheelGestureLoop(
     enabledState: androidx.compose.runtime.State<Boolean>,
@@ -425,8 +433,8 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.wheelGes
         val radius = diameter / 2f
         val cx = w / 2f
         val cy = h / 2f
-        val centreRadius = radius * IPodDimens.CenterButtonFraction / 2f
-        val deadZoneRadius = radius * DEAD_ZONE_FRACTION
+        // CenterButtonFraction is diameter/diameter (0.38); multiply by radius for the button radius.
+        val centreRadius = radius * IPodDimens.CenterButtonFraction
         val isEnabled = enabledState.value
 
         val downPos = down.position
@@ -451,7 +459,8 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.wheelGes
         var accumulator = 0f          // partial detent progress (degrees, signed)
         var hasScrolled = false        // once true, the gesture is a scroll to the end
         var totalTravelDeg = 0f        // total angular displacement for tap classification
-        var lastAngle: Float? = if (downDist >= deadZoneRadius) downAngle else null
+        // Seed the reference angle only when starting on the ring (not in the centre).
+        var lastAngle: Float? = if (!isCenter) downAngle else null
         var lastTimeMs = downTimeMs
         var smoothedVelocity = 0f      // EMA of |angular velocity| in deg/s
         var lastTickTimeMs = 0L        // for the tick feedback floor
@@ -500,19 +509,31 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.wheelGes
                     }
 
                     // ── Pointer moved (still down) ──────────────────
-                    val angle = angleFromCenter(dx, dy)
+
+                    // A gesture that started in the centre never scrolls.  The pressed-centre
+                    // visual stays while the finger wanders onto the ring — accepted, same as
+                    // holding the physical centre button.
+                    if (isCenter) continue
+
                     val nowMs = change.uptimeMillis
 
-                    // Inside the dead zone: lose the reference angle but keep the accumulator.
-                    if (dist < deadZoneRadius) {
+                    // Outside the ring (inside centre or past the outer edge): pause
+                    // accumulation and lose the reference angle.  Re-entering the ring
+                    // re-seeds the angle so there is no angular jump.  Velocity is zeroed
+                    // so the first delta after re-entry starts at the slow detent size,
+                    // not the speed the finger had before it left the ring.
+                    if (dist < centreRadius || dist > radius) {
                         lastAngle = null
+                        smoothedVelocity = 0f
                         continue
                     }
 
+                    val angle = angleFromCenter(dx, dy)
                     val prev = lastAngle
                     if (prev == null) {
-                        // Re-entering from dead zone: seed the reference, emit nothing.
+                        // (Re-)entering the ring: seed the reference, update the time, emit nothing.
                         lastAngle = angle
+                        lastTimeMs = nowMs
                         continue
                     }
 
@@ -570,4 +591,3 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.wheelGes
         }
     }
 }
-

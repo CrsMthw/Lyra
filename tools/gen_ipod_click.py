@@ -3,9 +3,13 @@
 Synthesize the iPod Classic click-wheel samples: ipod_click.wav and ipod_select.wav.
 
 Both are 16-bit mono 44.1 kHz.  The Classic's clicker was a piezo disc driven by a sharp pulse
-through the metal case — a very short, dry, bright tick with most energy in 2-5 kHz, instant
-attack, exponential decay, no low-end thump.  We approximate it with a handful of decaying
-sinusoids plus filtered noise.
+through the metal case — a very short, dry, bright tick with most energy around 1.5-3.5 kHz,
+instant attack, exponential decay, no low-end thump.  We approximate it with a handful of
+decaying sinusoids plus filtered noise.
+
+Round B: lowered partials from the 2.8-6.5 kHz range to 1.3-3.6 kHz and dropped peak from
+-3 dBFS to -10 dBFS.  The round-A samples were too loud and high-pitched on the Fold 8.
+Noise amplitude reduced (click 0.25→0.15, select 0.30→0.18) to tame brightness.
 
 Deterministic: numpy RNG seeded at 0, no scipy.
 
@@ -19,7 +23,7 @@ import wave
 import numpy as np
 
 SAMPLE_RATE = 44100
-PEAK_DBFS = -3.0  # target peak level in dBFS
+PEAK_DBFS = -10.0  # target peak level in dBFS (was -3 in round A)
 
 
 def _make_click(
@@ -84,14 +88,14 @@ def main() -> None:
     os.makedirs(raw_dir, exist_ok=True)
 
     # ── ipod_click.wav — the detent tick (~15 ms) ──────────────────────
-    # Three decaying sinusoids concentrated in the 2-6 kHz piezo range,
-    # plus a wisp of highpassed noise for the metallic transient.
+    # Three decaying sinusoids in the 1.6-3.6 kHz range (was 2.8-6.5 kHz).
+    # Reduced noise amplitude (0.25→0.15) to tame metallic brightness.
     click = _make_click(
         duration_ms=15.0,
-        freqs_hz=[2800.0, 4100.0, 6500.0],
+        freqs_hz=[1600.0, 2400.0, 3600.0],
         decays_ms=[4.0, 3.0, 2.0],
         amps=[1.0, 0.7, 0.35],
-        noise_amp=0.25,
+        noise_amp=0.15,
         noise_decay_ms=2.5,
         fade_out_ms=1.0,
         seed=0,
@@ -100,13 +104,14 @@ def main() -> None:
     write_wav(click_path, click)
 
     # ── ipod_select.wav — the centre-button click (~28 ms) ────────────
-    # Same family, slightly lower fundamental, longer body, a touch louder noise.
+    # Same family, slightly lower fundamental, longer body.
+    # Reduced noise amplitude (0.30→0.18) to tame brightness.
     select = _make_click(
         duration_ms=28.0,
-        freqs_hz=[2200.0, 3500.0, 5400.0],
+        freqs_hz=[1300.0, 2000.0, 3000.0],
         decays_ms=[7.0, 5.0, 3.5],
         amps=[1.0, 0.65, 0.3],
-        noise_amp=0.30,
+        noise_amp=0.18,
         noise_decay_ms=4.0,
         fade_out_ms=1.0,
         seed=0,
