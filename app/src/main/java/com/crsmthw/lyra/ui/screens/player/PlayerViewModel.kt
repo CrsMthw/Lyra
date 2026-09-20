@@ -527,15 +527,18 @@ class PlayerViewModel(
             // ── Shuffle pre-set ──────────────────────────────────────────────
             // When the caller says "turn shuffle OFF before playing" (iPod deliberate selection) or
             // ON, apply it before the play request so the uris body starts at the tapped entry
-            // instead of a random one. A 404 here is NOT an error — it means "no active device",
-            // and the App Remote fallback below will handle both the shuffle and the play.
-            var shuffleViaRemote = false
-            if (shuffle != null && shuffle != _uiState.value.shuffleEnabled) {
+            // instead of a random one. Always sends the PUT when shuffle is non-null: the mirror
+            // may be stale (cold start, Spotify closed → shuffleEnabled defaults false while the
+            // device is actually shuffling), so comparing against it would skip the PUT in exactly
+            // the scenario the user hits first. One idempotent PUT per deliberate selection is the
+            // correct price. A 404 is NOT an error — it means "no active device", and the App
+            // Remote fallback below handles both the shuffle and the play.
+            if (shuffle != null) {
                 val result = playerStateManager.applyShuffle(shuffle)
                 val err = result.exceptionOrNull()
                 if (err != null) {
                     if (err.isRateLimited()) playerStateManager.noteRateLimited()
-                    if (err.isNoActiveDevice()) shuffleViaRemote = true
+                    // A 404 is fine — the App Remote fallback below sends setShuffle too.
                 }
             }
             // The body an EPISODE degrades to, and the body it restores with — null for a track.
@@ -598,11 +601,13 @@ class PlayerViewModel(
                 },
                 onFailure = { e ->
                     if (e.isNoActiveDevice()) {
-                        // When the caller asked for a shuffle change and the Web API 404'd
-                        // (no active device), apply it via the App Remote BEFORE playing.
+                        // When the caller asked for a specific shuffle state, apply it via
+                        // the App Remote BEFORE playing. Always sends when shuffle is
+                        // non-null: whether the pre-set 404'd or not, we're going through
+                        // the SDK now and the remote is the only way to set shuffle here.
                         // remoteManager.setShuffle self-connects, and connectAndPlay reuses
                         // the live connection, so no extra connect round trip.
-                        if (shuffle != null && shuffleViaRemote) {
+                        if (shuffle != null) {
                             remoteManager.setShuffle(shuffle)
                             delay(REMOTE_SHUFFLE_SETTLE_MS)
                         }

@@ -202,6 +202,7 @@ fun IPodRoot(container: AppContainer, modifier: Modifier = Modifier) {
         BoxWithConstraints(
             modifier = modifier
                 .fillMaxSize()
+                .background(IPodColors.Surround)
                 .clip(RoundedCornerShape(IPodDimens.BodyCornerRadius))
                 .background(
                     Brush.verticalGradient(
@@ -239,7 +240,10 @@ fun IPodRoot(container: AppContainer, modifier: Modifier = Modifier) {
                         innerHeight * IPodDimens.LcdMaxHeightFraction * IPodDimens.LcdAspect,
                     )
                     val lcdHeight = lcdWidth / IPodDimens.LcdAspect
-                    val remainingHeight = (innerHeight - lcdHeight).coerceAtLeast(0.dp)
+                    // In landscape the hint overlays the bottom edge; shrink the wheel's
+                    // budget so it doesn't paint behind the text (~30dp: font + padding).
+                    val hintAllowance = if (isLandscape) 30.dp else 0.dp
+                    val remainingHeight = (innerHeight - lcdHeight - hintAllowance).coerceAtLeast(0.dp)
 
                     // Wheel = min(body width * WheelDiameterFraction, remaining * 0.92)
                     val wheelSize = min(
