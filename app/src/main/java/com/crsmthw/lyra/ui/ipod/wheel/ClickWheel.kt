@@ -519,9 +519,12 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.wheelGes
 
                     // Outside the ring (inside centre or past the outer edge): pause
                     // accumulation and lose the reference angle.  Re-entering the ring
-                    // re-seeds the angle so there is no angular jump.
+                    // re-seeds the angle so there is no angular jump.  Velocity is zeroed
+                    // so the first delta after re-entry starts at the slow detent size,
+                    // not the speed the finger had before it left the ring.
                     if (dist < centreRadius || dist > radius) {
                         lastAngle = null
+                        smoothedVelocity = 0f
                         continue
                     }
 
