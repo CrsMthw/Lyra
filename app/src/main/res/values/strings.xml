@@ -311,4 +311,48 @@
     <!-- Incoming Spotify links -->
     <string name="deeplink_resolving">Opening link…</string>
     <string name="deeplink_unsupported">Lyra can\'t open that Spotify link</string>
+
+    <!-- ═══════════════════ iPod mode (easter egg) ═══════════════════ -->
+    <!-- iPod: shared -->
+    <string name="ipod_menu_title">iPod</string>
+    <string name="ipod_menu_cover_flow">Cover Flow</string>
+    <string name="ipod_menu_music">Music</string>
+    <string name="ipod_menu_albums">Albums</string>
+    <string name="ipod_menu_artists">Artists</string>
+    <string name="ipod_menu_playlists">Playlists</string>
+    <string name="ipod_menu_podcasts">Podcasts</string>
+    <string name="ipod_menu_shuffle_songs">Shuffle Songs</string>
+    <string name="ipod_menu_now_playing">Now Playing</string>
+    <string name="ipod_menu_settings">Settings</string>
+    <string name="ipod_settings_click_sounds">Click Sounds</string>
+    <string name="ipod_settings_mode">iPod Mode</string>
+    <string name="ipod_value_on">On</string>
+    <string name="ipod_value_off">Off</string>
+    <string name="ipod_list_empty">No %1$s</string>
+    <string name="ipod_list_loading">Loading…</string>
+    <string name="ipod_list_error">Couldn\'t load %1$s</string>
+    <!-- (end shared) -->
+
+
+    <!-- iPod: shell + Settings row (lane: shell) -->
+    <string name="settings_ipod">iPod</string>
+    <string name="settings_ipod_desc">Relive the click wheel</string>
+    <string name="settings_ipod_unlocked">🎵 iPod mode unlocked</string>
+    <string name="ipod_exit_title">Exit iPod mode?</string>
+    <string name="ipod_exit_yes">Yes</string>
+    <string name="ipod_exit_no">No</string>
+    <string name="ipod_portrait_hint">iPod mode works best in portrait</string>
+    <string name="about_credit_fonts">Liberation Sans font © Red Hat, Inc. — SIL Open Font License 1.1</string>
+    <!-- (end shell) -->
+
+
+    <!-- iPod: click wheel (lane: wheel) -->
+    <string name="ipod_cd_click_wheel">Click wheel</string>
+    <string name="ipod_wheel_menu">MENU</string>
+    <!-- (end wheel) -->
+
+
+    <!-- iPod: LCD + menus (lane: lcd) -->
+    <string name="ipod_cd_lcd">iPod screen</string>
+    <!-- (end lcd) -->
 </resources>

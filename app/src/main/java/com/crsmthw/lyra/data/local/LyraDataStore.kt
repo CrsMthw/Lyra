@@ -85,6 +85,21 @@ class LyraDataStore(private val context: Context) {
         prefs[Keys.FOR_YOU_ENABLED] ?: false
     }
 
+    // ── iPod mode (easter egg) ───────────────────────────────────────────────
+    // `ipodUnlocked` is set once by the 5-tap on the Settings version line and never cleared;
+    // it only gates whether the "iPod" row is visible. `ipodEnabled` swaps the whole UI for the
+    // iPod Classic recreation (MainActivity branches on it, before the first frame). Click
+    // sounds are the iPod's own setting, independent of the Lyra haptics toggle.
+    val ipodUnlocked: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[Keys.IPOD_UNLOCKED] ?: false
+    }
+    val ipodEnabled: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[Keys.IPOD_ENABLED] ?: false
+    }
+    val ipodClickSounds: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[Keys.IPOD_CLICK_SOUNDS] ?: true
+    }
+
     // ── Writes ──────────────────────────────────────────────────────────────
 
     suspend fun setThemeMode(mode: ThemeMode) {
@@ -143,6 +158,18 @@ class LyraDataStore(private val context: Context) {
         context.dataStore.edit { it[Keys.FOR_YOU_ENABLED] = enabled }
     }
 
+    suspend fun setIpodUnlocked(unlocked: Boolean) {
+        context.dataStore.edit { it[Keys.IPOD_UNLOCKED] = unlocked }
+    }
+
+    suspend fun setIpodEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.IPOD_ENABLED] = enabled }
+    }
+
+    suspend fun setIpodClickSounds(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.IPOD_CLICK_SOUNDS] = enabled }
+    }
+
     // ── Keys ────────────────────────────────────────────────────────────────
 
     private object Keys {
@@ -161,5 +188,8 @@ class LyraDataStore(private val context: Context) {
         val VISUALIZER_GAIN_SYNC = booleanPreferencesKey("visualizer_gain_sync")
         val HAPTICS_ENABLED     = booleanPreferencesKey("haptics_enabled")
         val FOR_YOU_ENABLED     = booleanPreferencesKey("for_you_enabled")
+        val IPOD_UNLOCKED       = booleanPreferencesKey("ipod_unlocked")
+        val IPOD_ENABLED        = booleanPreferencesKey("ipod_enabled")
+        val IPOD_CLICK_SOUNDS   = booleanPreferencesKey("ipod_click_sounds")
     }
 }

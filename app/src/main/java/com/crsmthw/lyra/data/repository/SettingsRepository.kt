@@ -22,6 +22,9 @@ class SettingsRepository(private val dataStore: LyraDataStore) {
     val visualizerGainSync: Flow<Boolean>       = dataStore.visualizerGainSync
     val hapticsEnabled   : Flow<Boolean>        = dataStore.hapticsEnabled
     val forYouEnabled    : Flow<Boolean>        = dataStore.forYouEnabled
+    val ipodUnlocked     : Flow<Boolean>        = dataStore.ipodUnlocked
+    val ipodEnabled      : Flow<Boolean>        = dataStore.ipodEnabled
+    val ipodClickSounds  : Flow<Boolean>        = dataStore.ipodClickSounds
 
     suspend fun setThemeMode        (mode   : ThemeMode)      = dataStore.setThemeMode(mode)
     suspend fun setAmoledBlack      (enabled: Boolean)        = dataStore.setAmoledBlack(enabled)
@@ -38,4 +41,7 @@ class SettingsRepository(private val dataStore: LyraDataStore) {
     suspend fun setVisualizerGainSync(sync: Boolean)          = dataStore.setVisualizerGainSync(sync)
     suspend fun setHapticsEnabled   (enabled: Boolean)        = dataStore.setHapticsEnabled(enabled)
     suspend fun setForYouEnabled    (enabled: Boolean)        = dataStore.setForYouEnabled(enabled)
+    suspend fun setIpodUnlocked     (unlocked: Boolean)       = dataStore.setIpodUnlocked(unlocked)
+    suspend fun setIpodEnabled      (enabled: Boolean)        = dataStore.setIpodEnabled(enabled)
+    suspend fun setIpodClickSounds  (enabled: Boolean)        = dataStore.setIpodClickSounds(enabled)
 }
