@@ -368,7 +368,5 @@
     <!-- iPod: LCD + menus (lane: lcd) -->
     <string name="ipod_cd_lcd">iPod screen</string>
     <string name="ipod_now_playing_empty">No Track Selected</string>
-    <string name="ipod_now_playing_playing">Playing</string>
-    <string name="ipod_now_playing_paused">Paused</string>
     <!-- (end lcd) -->
 </resources>
