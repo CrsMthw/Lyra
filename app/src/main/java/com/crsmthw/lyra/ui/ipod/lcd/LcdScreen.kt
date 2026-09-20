@@ -22,12 +22,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -62,9 +58,7 @@ import com.crsmthw.lyra.ui.ipod.nav.IPodStackEntry
 import com.crsmthw.lyra.ui.ipod.nav.IPodUiState
 import com.crsmthw.lyra.ui.ipod.nav.LcdItem
 import com.crsmthw.lyra.ui.ipod.nav.LcdLabel
-import com.crsmthw.lyra.ui.ipod.nav.LcdListState
 import com.crsmthw.lyra.ui.ipod.nav.LcdNavDirection
-import com.crsmthw.lyra.ui.ipod.nav.LcdNowPlaying
 
 // ── Transition key ──────────────────────────────────────────────────────────
 
@@ -377,7 +371,7 @@ private fun DrawScope.drawBattery(
 // ── Menu list ───────────────────────────────────────────────────────────────
 
 @Composable
-private fun LcdMenuList(
+internal fun LcdMenuList(
     entry: IPodStackEntry,
     contentHeight: Dp,
 ) {
@@ -401,13 +395,15 @@ private fun LcdMenuList(
         else -> LcdItemList(
             items = items,
             selectedIndex = list.selectedIndex,
+            firstVisibleIndex = list.firstVisibleIndex,
+            visibleRows = list.visibleRows,
             contentHeight = contentHeight,
         )
     }
 }
 
 @Composable
-private fun LcdCentredMessage(text: String, contentHeight: Dp) {
+internal fun LcdCentredMessage(text: String, contentHeight: Dp) {
     val density = LocalDensity.current
     val fontSize = with(density) { (contentHeight.toPx() * 0.06f).toSp() }
     Box(
@@ -424,60 +420,49 @@ private fun LcdCentredMessage(text: String, contentHeight: Dp) {
     }
 }
 
+/**
+ * A pure-function list: draws exactly the rows in [firstVisibleIndex, firstVisibleIndex + visibleRows)
+ * with the highlight on [selectedIndex]. No LazyColumn, no scroll state, no effects -- the highlight
+ * and the rows move in the SAME frame because both come from the same snapshot of [LcdListState].
+ */
 @Composable
 private fun LcdItemList(
     items: List<LcdItem>,
     selectedIndex: Int,
+    firstVisibleIndex: Int,
+    visibleRows: Int,
     contentHeight: Dp,
 ) {
     val density = LocalDensity.current
     val contentHeightPx = with(density) { contentHeight.toPx() }
     val hasSubtitles = remember(items) { items.any { it.subtitle != null } }
-    val visibleRows = if (hasSubtitles) VISIBLE_ROWS_TWO_LINE else VISIBLE_ROWS_SINGLE_LINE
     val rowHeightPx = contentHeightPx / visibleRows
     val rowHeight = with(density) { rowHeightPx.toDp() }
 
-    // Start with the highlight already in view (a MENU pop re-composes this list fresh); the
-    // effect below keeps it there as the wheel moves it.
-    val listState = rememberLazyListState(
-        initialFirstVisibleItemIndex = (selectedIndex - visibleRows + 1)
-            .coerceIn(0, (items.size - visibleRows).coerceAtLeast(0)),
-    )
-
-    // Classic-style scroll: snap the highlight into view.
-    LaunchedEffect(selectedIndex) {
-        val first = listState.firstVisibleItemIndex
-        if (selectedIndex >= first + visibleRows) {
-            listState.scrollToItem(selectedIndex - visibleRows + 1)
-        } else if (selectedIndex < first) {
-            listState.scrollToItem(selectedIndex)
-        }
-    }
+    val endIndex = minOf(firstVisibleIndex + visibleRows, items.size)
 
     Box(Modifier.fillMaxSize()) {
-        LazyColumn(
-            state = listState,
-            userScrollEnabled = false,
-            modifier = Modifier.fillMaxSize(),
-        ) {
-            itemsIndexed(
-                items = items,
-                key = { _, item -> item.id },
-            ) { index, item ->
+        Column(Modifier.fillMaxSize()) {
+            for (i in firstVisibleIndex until endIndex) {
                 LcdRow(
-                    item = item,
-                    isHighlighted = index == selectedIndex,
+                    item = items[i],
+                    isHighlighted = i == selectedIndex,
                     rowHeight = rowHeight,
                     hasSubtitles = hasSubtitles,
                     contentHeightPx = contentHeightPx,
                 )
+            }
+            // Blank space below when fewer rows than the visible window.
+            val drawn = endIndex - firstVisibleIndex
+            if (drawn < visibleRows) {
+                Spacer(Modifier.weight(1f))
             }
         }
 
         // Scrollbar -- only when items exceed visible rows.
         if (items.size > visibleRows) {
             LcdScrollbar(
-                listState = listState,
+                firstVisibleIndex = firstVisibleIndex,
                 totalItems = items.size,
                 visibleRows = visibleRows,
                 contentHeightPx = contentHeightPx,
@@ -485,9 +470,6 @@ private fun LcdItemList(
         }
     }
 }
-
-private const val VISIBLE_ROWS_SINGLE_LINE = 9
-private const val VISIBLE_ROWS_TWO_LINE = 6
 
 @Composable
 private fun LcdRow(
@@ -570,7 +552,7 @@ private fun LcdRow(
             if (item.hasSubmenu) {
                 Spacer(Modifier.width(4.dp))
                 androidx.compose.material3.Text(
-                    text = "›", // single right-pointing angle quotation mark (›)
+                    text = "›", // single right-pointing angle quotation mark
                     fontFamily = IPodFontFamily,
                     fontWeight = FontWeight.Bold,
                     fontSize = chevronFontSize,
@@ -593,9 +575,13 @@ private fun LcdRow(
 
 // ── Scrollbar ───────────────────────────────────────────────────────────────
 
+/**
+ * The scrollbar reads its position from [firstVisibleIndex] (state), not from a LazyListState,
+ * so it tracks the window in the same frame as the rows.
+ */
 @Composable
 private fun LcdScrollbar(
-    listState: androidx.compose.foundation.lazy.LazyListState,
+    firstVisibleIndex: Int,
     totalItems: Int,
     visibleRows: Int,
     contentHeightPx: Float,
@@ -610,8 +596,6 @@ private fun LcdScrollbar(
             .padding(end = 1.dp),
         contentAlignment = Alignment.TopEnd,
     ) {
-        // Draw scrollbar track + thumb in drawBehind so the firstVisibleItemIndex read is
-        // a draw-phase read and cannot trigger a recomposition of the list itself.
         Spacer(
             modifier = Modifier
                 .width(trackWidth)
@@ -627,7 +611,7 @@ private fun LcdScrollbar(
                     val thumbFraction = (visibleRows.toFloat() / totalItems).coerceIn(0.05f, 1f)
                     val thumbHeight = size.height * thumbFraction
                     val scrollFraction = if (totalItems > visibleRows) {
-                        listState.firstVisibleItemIndex.toFloat() / (totalItems - visibleRows)
+                        firstVisibleIndex.toFloat() / (totalItems - visibleRows)
                     } else {
                         0f
                     }
@@ -647,88 +631,6 @@ private fun LcdScrollbar(
                         cornerRadius = CornerRadius(trackWidthPx / 2f),
                     )
                 },
-        )
-    }
-}
-
-// ── Now Playing placeholder ─────────────────────────────────────────────────
-
-@Composable
-private fun LcdNowPlayingContent(
-    nowPlaying: LcdNowPlaying?,
-    contentHeight: Dp,
-) {
-    val density = LocalDensity.current
-    val contentHeightPx = with(density) { contentHeight.toPx() }
-    val titleFontSize = with(density) { (contentHeightPx * 0.06f).toSp() }
-    val bodyFontSize = with(density) { (contentHeightPx * 0.048f).toSp() }
-    val stateFontSize = with(density) { (contentHeightPx * 0.042f).toSp() }
-
-    if (nowPlaying == null) {
-        LcdCentredMessage(
-            text = stringResource(R.string.ipod_now_playing_empty),
-            contentHeight = contentHeight,
-        )
-        return
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = with(density) { (contentHeightPx * 0.05f).toDp() }),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        // Title (bold).
-        androidx.compose.material3.Text(
-            text = nowPlaying.title,
-            fontFamily = IPodFontFamily,
-            fontWeight = FontWeight.Bold,
-            fontSize = titleFontSize,
-            color = IPodColors.LcdText,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(Modifier.height(4.dp))
-        // Artist.
-        androidx.compose.material3.Text(
-            text = nowPlaying.artist,
-            fontFamily = IPodFontFamily,
-            fontSize = bodyFontSize,
-            color = IPodColors.LcdTextSecondary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(Modifier.height(2.dp))
-        // Album.
-        androidx.compose.material3.Text(
-            text = nowPlaying.album,
-            fontFamily = IPodFontFamily,
-            fontSize = bodyFontSize,
-            color = IPodColors.LcdTextSecondary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(Modifier.height(8.dp))
-        // Play/pause state.
-        val stateText = if (nowPlaying.isPlaying) {
-            stringResource(R.string.ipod_now_playing_playing)
-        } else {
-            stringResource(R.string.ipod_now_playing_paused)
-        }
-        androidx.compose.material3.Text(
-            text = stateText,
-            fontFamily = IPodFontFamily,
-            fontSize = stateFontSize,
-            color = IPodColors.LcdTextSecondary,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth(),
         )
     }
 }
