@@ -103,7 +103,8 @@ private const val INNER_SHADOW_WIDTH_DP = 3f
  */
 @Composable
 fun ClickWheel(
-    onEvent: (WheelEvent) -> Unit,
+    /** Returns whether the event MOVED something (highlight, scrub); detent feedback fires only then. */
+    onEvent: (WheelEvent) -> Boolean,
     sounds: ClickSounds?,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
@@ -413,7 +414,7 @@ private fun effectiveDetent(velocityDegPerSec: Float): Float {
  */
 private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.wheelGestureLoop(
     enabledState: androidx.compose.runtime.State<Boolean>,
-    onEventState: androidx.compose.runtime.State<(WheelEvent) -> Unit>,
+    onEventState: androidx.compose.runtime.State<(WheelEvent) -> Boolean>,
     soundsState: androidx.compose.runtime.State<ClickSounds?>,
     haptics: HapticFeedback,
     pressedSector: androidx.compose.runtime.MutableState<Int?>,
@@ -571,11 +572,13 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.wheelGes
 
                         // Emit scroll events: one per abs(steps), each with batchSize magnitude
                         for (i in 0 until abs(steps)) {
-                            onEventState.value(WheelEvent.Scroll(sign * batchSize))
+                            val moved = onEventState.value(WheelEvent.Scroll(sign * batchSize))
 
-                            // Tick feedback with a floor so fast spins stay a texture
+                            // Tick only when the highlight (or the scrub) actually moved: the Classic's
+                            // clicker marks an item change, not the wheel turning, so the ends of a list
+                            // are silent. The floor keeps a fast spin a texture rather than a smear.
                             val now = System.nanoTime() / 1_000_000L
-                            if (now - lastTickTimeMs >= MIN_TICK_INTERVAL_MS) {
+                            if (moved && now - lastTickTimeMs >= MIN_TICK_INTERVAL_MS) {
                                 lastTickTimeMs = now
                                 haptics.scrollTick()
                                 soundsState.value?.tick()

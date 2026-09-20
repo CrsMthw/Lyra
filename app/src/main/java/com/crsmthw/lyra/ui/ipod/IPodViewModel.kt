@@ -230,26 +230,35 @@ class IPodViewModel(
 
     // ── Wheel event dispatch ──────────────────────────────────────────────────
 
-    fun onWheelEvent(event: WheelEvent) {
-        when (event) {
-            is WheelEvent.Scroll -> handleScroll(event.steps)
-            is WheelEvent.Press -> handlePress(event.button)
-        }
+    /**
+     * Returns whether the event moved something the user can see — the highlight or the scrub
+     * position. The wheel fires its detent click and haptic only on `true`, so the ends of a list
+     * (and of a track) are silent, as on the Classic. Button presses always count.
+     */
+    fun onWheelEvent(event: WheelEvent): Boolean = when (event) {
+        is WheelEvent.Scroll -> handleScroll(event.steps)
+        is WheelEvent.Press -> { handlePress(event.button); true }
     }
 
-    private fun handleScroll(steps: Int) {
+    /** @return true when the highlight or the scrub position actually changed. */
+    private fun handleScroll(steps: Int): Boolean {
         var shouldPage = false
+        var moved = false
         _uiState.update { state ->
+            moved = false   // reset per attempt: the CAS lambda can re-run under contention
             val top = state.current
             if (top.screen is IPodScreen.NowPlaying) {
                 // Scrub: scroll on Now Playing adjusts the playback position.
-                return@update computeScrub(state, steps)
+                val scrubbed = computeScrub(state, steps)
+                moved = scrubbed !== state
+                return@update scrubbed
             }
             val items = top.list.items
             if (items.isEmpty()) return@update state
             val visibleRows = top.list.visibleRows
             val newIndex = (top.list.selectedIndex + steps).coerceIn(0, items.lastIndex)
             if (newIndex == top.list.selectedIndex) return@update state
+            moved = true
 
             // Classic window rule: selection drives the window, window never moves independently.
             var first = top.list.firstVisibleIndex
@@ -277,6 +286,7 @@ class IPodViewModel(
         // The scrub debounce belongs to the Now Playing screen only — a detent on any list
         // must never re-arm (or keep deferring) a seek.
         if (_uiState.value.current.screen is IPodScreen.NowPlaying) launchScrubCommitIfNeeded()
+        return moved
     }
 
     /**
@@ -291,6 +301,7 @@ class IPodViewModel(
         val step = maxOf(1_000L, duration / 100)
         val base = np.scrubProgressMs ?: np.progressMs
         val newScrub = (base + steps * step).coerceIn(0, duration)
+        if (newScrub == base) return state   // already at 0:00 or the end — nothing moved, no click
         return state.copy(nowPlaying = np.copy(scrubProgressMs = newScrub))
     }
 
