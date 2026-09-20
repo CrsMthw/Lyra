@@ -150,7 +150,6 @@ fun ClickWheel(
             palette = palette,
             menuLabel = menuLabel,
             textMeasurer = textMeasurer,
-            pressedSector = pressedSector.value,
             wheelEdgeStrokePx = wheelEdgeStrokePx,
             centerEdgeStrokePx = centerEdgeStrokePx,
             innerShadowWidthPx = innerShadowWidthPx,
@@ -165,7 +164,6 @@ private fun DrawScope.drawWheel(
     palette: IPodBodyPalette,
     menuLabel: String,
     textMeasurer: TextMeasurer,
-    pressedSector: Int?,
     wheelEdgeStrokePx: Float,
     centerEdgeStrokePx: Float,
     innerShadowWidthPx: Float,
@@ -208,31 +206,9 @@ private fun DrawScope.drawWheel(
         style = Stroke(width = innerShadowWidthPx),
     )
 
-    // ── 4. Pressed wedge overlay ────────────────────────────────────
-    if (pressedSector != null && pressedSector >= 0) {
-        // Sector angles: MENU=0 (top, 315-45 deg), NEXT=1 (right, 45-135 deg),
-        // PLAY_PAUSE=2 (bottom, 135-225 deg), PREVIOUS=3 (left, 225-315 deg).
-        // drawArc's 0 deg is at 3 o'clock, so subtract 90 to convert from our wheel coords.
-        val arcStartWheel = pressedSector * 90f - 45f  // wheel coords
-        val arcStartCanvas = arcStartWheel - 90f       // canvas coords (0 deg = 3 o'clock)
-        drawArc(
-            color = palette.wheelPressed,
-            startAngle = arcStartCanvas,
-            sweepAngle = 90f,
-            useCenter = true,
-            topLeft = Offset(cx - radius, cy - radius),
-            size = Size(diameter, diameter),
-        )
-    }
-
-    // ── 5. Centre button (covers the wedge's inner tip) ─────────────
-    if (pressedSector == SECTOR_CENTER) {
-        drawCircle(
-            color = palette.wheelPressed,
-            radius = centreRadius,
-            center = centre,
-        )
-    }
+    // ── 4. Centre button ─────────────────────────────────────────────
+    // (No pressed-state darkening: the real wheel gives no visual feedback, and Cris found the
+    // darkened sector distracting. Feedback is the haptic + the click.)
     drawCircle(
         brush = Brush.verticalGradient(
             colors = listOf(palette.centerTop, palette.centerBottom),
@@ -349,7 +325,7 @@ private fun DrawScope.drawPlayPauseIcon(cx: Float, cy: Float, size: Float, color
 
 // ── Gesture ──────────────────────────────────────────────────────────────
 
-/** Sentinel for the centre button in pressedSector. */
+/** Sentinel for the centre button in pressedSector (gesture bookkeeping only; nothing is drawn from it). */
 private const val SECTOR_CENTER = -1
 
 /**
