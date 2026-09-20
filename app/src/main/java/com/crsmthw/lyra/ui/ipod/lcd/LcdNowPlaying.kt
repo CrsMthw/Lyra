@@ -36,6 +36,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -55,11 +56,10 @@ import com.crsmthw.lyra.util.toTimeString
 // ── Tunables ────────────────────────────────────────────────────────────────
 
 /** Art occupies this fraction of the content width. */
-private const val ART_WIDTH_FRACTION = 0.36f
+private const val ART_WIDTH_FRACTION = 0.44f
 /** Gap between the art column and the text column, as a fraction of content width. */
-private const val ART_TEXT_GAP_FRACTION = 0.05f
+private const val ART_TEXT_GAP_FRACTION = 0.04f
 /** The upper region holding art + text takes this fraction of the content height. */
-private const val UPPER_REGION_FRACTION = 0.80f
 /** The bottom progress strip takes this fraction of the content height. */
 private const val BOTTOM_STRIP_FRACTION = 0.20f
 /** Perspective tilt of the album art (degrees around the Y axis). */
@@ -67,16 +67,31 @@ private const val BOTTOM_STRIP_FRACTION = 0.20f
  * Positive = the RIGHT edge is the near one — the Classic's art turns toward the text. (The first
  * build used −12°, which put the LEFT edge nearer: the mirror image of the reference photo.)
  */
-private const val ART_ROTATION_Y = 12f
+private const val ART_ROTATION_Y = 20f
+
+/** The art's top edge, as a fraction of the content height. */
+private const val ART_TOP_FRACTION = 0.10f
+
+/** The art may take at most this fraction of the content height (the reference's is ~0.55). */
+private const val ART_MAX_HEIGHT_FRACTION = 0.62f
+
+/** The title block starts this far below the art's top edge, as a fraction of the art side. */
+private const val TEXT_TOP_OFFSET_FRACTION = 0.14f
 /** Camera distance for the perspective tilt (multiplied by density). */
-private const val ART_CAMERA_DISTANCE_FACTOR = 8f
+/**
+ * Compose's cameraDistance is in the RenderNode's own units (View.setCameraDistance divides its
+ * pixels by the dpi; the default is 8, NOT 8 × density). The first build multiplied by density and
+ * so viewed the art from ~3× the default distance, which flattened the rotation into a faint skew.
+ * A little closer than the default gives the Classic's visibly receding far edge.
+ */
+private const val ART_CAMERA_DISTANCE = 7f
 /** Starting alpha of the reflection at its top edge. */
-private const val REFLECTION_ALPHA = 0.35f
+private const val REFLECTION_ALPHA = 0.6f
 /** Reflection height as a fraction of the art height. */
-private const val REFLECTION_HEIGHT_FRACTION = 0.30f
+private const val REFLECTION_HEIGHT_FRACTION = 0.42f
 /** Progress bar track height as a fraction of the strip height. */
 /** The Classic's bar is a real channel, not a hairline: ~22 % of the strip (~4 % of the panel). */
-private const val PROGRESS_BAR_HEIGHT_FRACTION = 0.22f
+private const val PROGRESS_BAR_HEIGHT_FRACTION = 0.30f
 /** Progress marker radius as a fraction of the strip height. */
 private const val PROGRESS_MARKER_RADIUS_FRACTION = 0.04f
 /** Scrub-mode marker radius (slightly larger). */
@@ -86,9 +101,9 @@ private const val TITLE_FONT_FRACTION = 0.050f
 private const val ARTIST_FONT_FRACTION = 0.042f
 private const val ALBUM_FONT_FRACTION = 0.038f
 private const val POSITION_FONT_FRACTION = 0.034f
-private const val TIME_FONT_FRACTION = 0.038f
+private const val TIME_FONT_FRACTION = 0.042f
 /** Art padding from left edge of the content, as a fraction of content width. */
-private const val ART_START_PAD_FRACTION = 0.06f
+private const val ART_START_PAD_FRACTION = 0.05f
 /** Text padding from right edge, as a fraction of content width. */
 private const val TEXT_END_PAD_FRACTION = 0.04f
 /** Music note glyph size as a fraction of the art side. */
@@ -124,12 +139,12 @@ internal fun LcdNowPlayingContent(
         val contentHeightPx = with(density) { contentHeight.toPx() }
         val contentWidthDp = with(density) { constraints.maxWidth.toDp() }
 
-        val upperHeight = contentHeight * UPPER_REGION_FRACTION
         val stripHeight = contentHeight * BOTTOM_STRIP_FRACTION
 
-        Column(Modifier.fillMaxSize()) {
-            // Upper region: art on the left, text on the right.
-            // Takes only the stable fields so the 1 Hz tick does not recompose this region.
+        Box(Modifier.fillMaxSize()) {
+            // Art on the left, text on the right — the art column runs the whole content height so
+            // the reflection can reach down toward the bar, as on the Classic. Stable fields only:
+            // the 1 Hz tick does not recompose this region.
             NowPlayingUpperRegion(
                 title = nowPlaying.title,
                 artist = nowPlaying.artist,
@@ -139,19 +154,18 @@ internal fun LcdNowPlayingContent(
                 listSize = nowPlaying.listSize,
                 contentWidthDp = contentWidthDp,
                 contentHeightPx = contentHeightPx,
-                regionHeight = upperHeight,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(upperHeight),
+                contentHeight = contentHeight,
+                modifier = Modifier.fillMaxSize(),
             )
 
-            // Bottom strip: elapsed, progress bar, remaining.
+            // Bottom strip: elapsed, glass bar, remaining — on the plain LCD white.
             NowPlayingProgressStrip(
                 progressMs = nowPlaying.scrubProgressMs ?: nowPlaying.progressMs,
                 durationMs = nowPlaying.durationMs,
                 isScrubbing = nowPlaying.scrubProgressMs != null,
                 contentHeightPx = contentHeightPx,
                 modifier = Modifier
+                    .align(Alignment.BottomCenter)
                     .fillMaxWidth()
                     .height(stripHeight),
             )
@@ -171,11 +185,13 @@ private fun NowPlayingUpperRegion(
     listSize: Int?,
     contentWidthDp: Dp,
     contentHeightPx: Float,
-    regionHeight: Dp,
+    contentHeight: Dp,
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
     val artWidth = contentWidthDp * ART_WIDTH_FRACTION
+    val artSide = minOf(artWidth, contentHeight * ART_MAX_HEIGHT_FRACTION)
+    val artTop = contentHeight * ART_TOP_FRACTION
     val gapWidth = contentWidthDp * ART_TEXT_GAP_FRACTION
     val textWidth = contentWidthDp - artWidth - gapWidth -
         contentWidthDp * ART_START_PAD_FRACTION - contentWidthDp * TEXT_END_PAD_FRACTION
@@ -190,20 +206,26 @@ private fun NowPlayingUpperRegion(
             start = contentWidthDp * ART_START_PAD_FRACTION,
             end = contentWidthDp * TEXT_END_PAD_FRACTION,
         ),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalAlignment = Alignment.Top,
     ) {
-        // Left: album art with tilt + reflection.
+        // Left: album art with tilt + reflection, its top edge at ART_TOP_FRACTION.
         NowPlayingArt(
             artUrl = artUrl,
+            artSide = artSide,
             modifier = Modifier
                 .width(artWidth)
-                .height(regionHeight),
+                .padding(top = artTop),
         )
 
         Spacer(Modifier.width(gapWidth))
 
-        // Right: title / artist / album / position.
-        Column(modifier = Modifier.weight(1f)) {
+        // Right: title / artist / album / position, starting a little below the art's top edge
+        // (the Classic's title sits ~12 % of the art height down from it).
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(top = artTop + artSide * TEXT_TOP_OFFSET_FRACTION),
+        ) {
             // Title (bold, marquee when overflowing).
             Text(
                 text = title,
@@ -273,9 +295,9 @@ private fun NowPlayingUpperRegion(
 @Composable
 private fun NowPlayingArt(
     artUrl: String,
+    artSide: Dp,
     modifier: Modifier = Modifier,
 ) {
-    val density = LocalDensity.current
     val context = LocalContext.current
 
     // Remember the ImageRequest keyed on artUrl so 1 Hz ticks do not rebuild it.
@@ -286,28 +308,28 @@ private fun NowPlayingArt(
             .build()
     }
 
-    BoxWithConstraints(
-        modifier = modifier,
-        contentAlignment = Alignment.Center,
-    ) {
-        // The ART (not art + reflection) sits on the region's vertical centre, level with the
-        // text block: a spacer the reflection's height ABOVE the art balances the reflection below.
-        // Sized so spacer + art + reflection fit the region.
-        val artSide = minOf(maxWidth, maxHeight * (1f / (1f + 2f * REFLECTION_HEIGHT_FRACTION)))
-        val reflectionHeight = artSide * REFLECTION_HEIGHT_FRACTION
+    val reflectionHeight = artSide * REFLECTION_HEIGHT_FRACTION
+    val totalHeight = artSide + reflectionHeight
+    // The rotation axis runs through the ART's centre: art and reflection are one plane, so the
+    // reflection's edges continue the art's (two separately rotated layers met at a visible kink).
+    val pivotY = (artSide / 2) / totalHeight
 
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Spacer(Modifier.height(reflectionHeight))
-            // The main art image with perspective tilt.
-            // Placeholder is always drawn underneath; the AsyncImage lands on top with crossfade,
-            // covering loading, error, and blank-url cases.
+    Box(modifier = modifier, contentAlignment = Alignment.TopCenter) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier
+                .width(artSide)
+                .height(totalHeight)
+                .graphicsLayer {
+                    rotationY = ART_ROTATION_Y
+                    cameraDistance = ART_CAMERA_DISTANCE
+                    transformOrigin = TransformOrigin(0.5f, pivotY)
+                },
+        ) {
+            // The art. Placeholder always underneath; the AsyncImage lands on top with a crossfade,
+            // covering loading, error and blank-url cases.
             Box(
-                modifier = Modifier
-                    .size(artSide)
-                    .graphicsLayer {
-                        rotationY = ART_ROTATION_Y
-                        cameraDistance = ART_CAMERA_DISTANCE_FACTOR * density.density
-                    },
+                modifier = Modifier.size(artSide),
                 contentAlignment = Alignment.Center,
             ) {
                 ArtPlaceholder(Modifier.fillMaxSize(), artSide)
@@ -321,12 +343,11 @@ private fun NowPlayingArt(
                 }
             }
 
-            // Reflection: the full square image is drawn into a box that clips to the reflection
-            // height, so only the art's bottom edge continues across the seam. The scaleY = -1f
-            // flip means pre-flip "top" is post-flip "bottom" — the DstIn gradient therefore runs
-            // from Transparent at the top (pre-flip = the seam, post-flip = the far edge) to
-            // Black at the bottom (pre-flip = the far edge, post-flip = the seam). After the
-            // flip, the seam edge is opaque and fades to transparent at the bottom.
+            // Reflection: the full square, flipped, clipped to the reflection height, so only the
+            // art's bottom edge continues across the seam. scaleY = -1f makes pre-flip "top" the
+            // post-flip "bottom", so the DstIn gradient runs Transparent at the pre-flip top to
+            // Black at the pre-flip bottom (= the seam after the flip): opaque at the seam, gone at
+            // the far end.
             Box(
                 modifier = Modifier
                     .width(artSide)
@@ -337,8 +358,6 @@ private fun NowPlayingArt(
                     modifier = Modifier
                         .size(artSide) // full square, overflows the clip parent
                         .graphicsLayer {
-                            rotationY = ART_ROTATION_Y
-                            cameraDistance = ART_CAMERA_DISTANCE_FACTOR * density.density
                             scaleY = -1f
                             alpha = REFLECTION_ALPHA
                             compositingStrategy = CompositingStrategy.Offscreen
@@ -371,11 +390,6 @@ private fun NowPlayingArt(
     }
 }
 
-/**
- * Placeholder drawn behind the art: a grey square with a music note drawn as a [Path]
- * (not a font glyph — avoids Unicode coverage uncertainty in Liberation Sans). Sized
- * relative to [artSide] so it scales with the LCD panel.
- */
 @Composable
 private fun ArtPlaceholder(modifier: Modifier, artSide: Dp) {
     val density = LocalDensity.current
@@ -477,17 +491,6 @@ private fun NowPlayingProgressStrip(
     // Faint gradient background for the strip.
     Box(
         modifier = modifier
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        IPodColors.LcdStatusTop.copy(alpha = 0.9f),
-                        IPodColors.LcdStatusBottom.copy(alpha = 0.7f),
-                    ),
-                ),
-            )
-            .drawBehind {
-                drawLine(IPodColors.LcdStatusLine, Offset(0f, 0.5f), Offset(size.width, 0.5f), strokeWidth = 1f)
-            }
             .padding(horizontal = with(density) { (contentHeightPx * 0.04f).toDp() }),
     ) {
         Row(
@@ -535,9 +538,10 @@ private fun NowPlayingProgressStrip(
 }
 
 /**
- * The Classic's progress bar: a light inset channel with a hairline edge, filled by TWO bands of
- * blue — a lighter one on top, a deeper one below — with a bright hairline along the fill's top
- * edge. No playhead while playing; a small dark diamond appears only while the wheel scrubs.
+ * The Classic's progress bar: an inset channel (darker at the top, white at the bottom, hairline
+ * edge) filled with "aqua" glass — pale at the top, deep blue through the middle, a lighter band at
+ * the bottom, and a white specular sheen over the upper half. No playhead while playing; a small
+ * dark diamond appears only while the wheel scrubs.
  */
 private fun DrawScope.drawProgressBar(
     fraction: Float,
@@ -546,35 +550,59 @@ private fun DrawScope.drawProgressBar(
     isScrubbing: Boolean,
 ) {
     val barTop = (size.height - barHeight) / 2f
-    val corner = CornerRadius(barHeight * 0.25f)
-    val track = Rect(0f, barTop, size.width, barTop + barHeight)
+    val barBottom = barTop + barHeight
+    val corner = CornerRadius(barHeight * 0.18f)
+    val track = Rect(0f, barTop, size.width, barBottom)
 
-    // Channel + hairline edge.
+    // Channel.
     drawRoundRect(
-        color = IPodColors.ProgressTrack,
+        brush = Brush.verticalGradient(
+            colors = listOf(IPodColors.ProgressTrackTop, IPodColors.ProgressTrackBottom),
+            startY = barTop,
+            endY = barBottom,
+        ),
         topLeft = track.topLeft,
         size = track.size,
         cornerRadius = corner,
     )
     drawRoundRect(
-        color = IPodColors.LcdStatusLine.copy(alpha = 0.55f),
+        color = IPodColors.ProgressTrackEdge,
         topLeft = track.topLeft,
         size = track.size,
         cornerRadius = corner,
         style = Stroke(width = 1f),
     )
 
-    // Two-band fill, clipped to the channel's rounded shape.
+    // Glass fill, clipped to the channel's shape.
     val fillWidth = (size.width * fraction).coerceIn(0f, size.width)
     if (fillWidth > 1f) {
-        val half = barHeight / 2f
         val fillClip = Path().apply {
-            addRoundRect(RoundRect(Rect(0f, barTop, fillWidth, barTop + barHeight), corner))
+            addRoundRect(RoundRect(Rect(0f, barTop, fillWidth, barBottom), corner))
         }
         clipPath(fillClip) {
-            drawRect(IPodColors.ProgressTop, Offset(0f, barTop), Size(fillWidth, half))
-            drawRect(IPodColors.ProgressBottom, Offset(0f, barTop + half), Size(fillWidth, half))
-            drawRect(IPodColors.HighlightText.copy(alpha = 0.45f), Offset(0f, barTop), Size(fillWidth, 1f))
+            drawRect(
+                brush = Brush.verticalGradient(
+                    0f to IPodColors.ProgressGlassTop,
+                    0.45f to IPodColors.ProgressGlassMid,
+                    0.5f to IPodColors.ProgressGlassLow,
+                    1f to IPodColors.ProgressGlassBottom,
+                    startY = barTop,
+                    endY = barBottom,
+                ),
+                topLeft = Offset(0f, barTop),
+                size = Size(fillWidth, barHeight),
+            )
+            // Specular sheen over the upper half.
+            drawRect(
+                brush = Brush.verticalGradient(
+                    0f to IPodColors.HighlightText.copy(alpha = 0.6f),
+                    1f to IPodColors.HighlightText.copy(alpha = 0f),
+                    startY = barTop,
+                    endY = barTop + barHeight * 0.48f,
+                ),
+                topLeft = Offset(0f, barTop),
+                size = Size(fillWidth, barHeight * 0.48f),
+            )
         }
     }
 

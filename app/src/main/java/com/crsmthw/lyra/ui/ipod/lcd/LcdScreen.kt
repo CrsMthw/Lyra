@@ -234,10 +234,12 @@ private fun LcdStatusBar(
     )
 
     Canvas(modifier = modifier) {
-        // Gradient background.
+        // Glossy background: white at the top through a pale mid to grey — the Classic's aqua bar.
         drawRect(
             brush = Brush.verticalGradient(
-                colors = listOf(IPodColors.LcdStatusTop, IPodColors.LcdStatusBottom),
+                0f to IPodColors.LcdStatusGlossTop,
+                0.5f to IPodColors.LcdStatusGlossMid,
+                1f to IPodColors.LcdStatusGlossLow,
             ),
         )
         // 1px divider line at the bottom.
@@ -248,7 +250,7 @@ private fun LcdStatusBar(
             strokeWidth = 1f,
         )
 
-        // Centre: title.
+        // Left: title (the Classic's title bar is left-aligned).
         val titleLayout = textMeasurer.measure(
             text = resolvedTitle,
             style = titleStyle,
@@ -259,48 +261,54 @@ private fun LcdStatusBar(
         drawText(
             textLayoutResult = titleLayout,
             topLeft = Offset(
-                x = (size.width - titleLayout.size.width) / 2f,
+                x = heightPx * 0.35f,
                 y = (size.height - 1f - titleLayout.size.height) / 2f,
             ),
         )
 
-        // Left: play/pause indicator.
-        if (isPlaying != null) {
-            val glyphSize = heightPx * 0.35f
-            val glyphLeft = heightPx * 0.3f
-            val glyphTop = (size.height - 1f - glyphSize) / 2f
-            if (isPlaying) {
-                drawPlayTriangle(glyphLeft, glyphTop, glyphSize, IPodColors.LcdText)
-            } else {
-                drawPauseBars(glyphLeft, glyphTop, glyphSize, IPodColors.LcdText)
-            }
-        }
-
-        // Right: battery.
+        // Right: glossy battery, and the blue play/pause glyph just left of it.
+        val batteryHeight = heightPx * 0.42f
+        val batteryRight = size.width - heightPx * 0.35f
+        val batteryLeft = batteryRight - batteryHeight * (1.8f + 0.12f)
         drawBattery(
-            right = size.width - heightPx * 0.3f,
+            right = batteryRight,
             centerY = (size.height - 1f) / 2f,
-            height = heightPx * 0.4f,
+            height = batteryHeight,
             battery = battery,
         )
+        if (isPlaying != null) {
+            val glyphSize = heightPx * 0.36f
+            val glyphLeft = batteryLeft - heightPx * 0.3f - glyphSize
+            val glyphTop = (size.height - 1f - glyphSize) / 2f
+            val glyphBrush = Brush.verticalGradient(
+                colors = listOf(IPodColors.PlayGlyphTop, IPodColors.PlayGlyphBottom),
+                startY = glyphTop,
+                endY = glyphTop + glyphSize,
+            )
+            if (isPlaying) {
+                drawPlayTriangle(glyphLeft, glyphTop, glyphSize, glyphBrush)
+            } else {
+                drawPauseBars(glyphLeft, glyphTop, glyphSize, glyphBrush)
+            }
+        }
     }
 }
 
-private fun DrawScope.drawPlayTriangle(left: Float, top: Float, size: Float, color: Color) {
+private fun DrawScope.drawPlayTriangle(left: Float, top: Float, size: Float, brush: Brush) {
     val path = Path().apply {
         moveTo(left, top)
         lineTo(left + size, top + size / 2f)
         lineTo(left, top + size)
         close()
     }
-    drawPath(path, color, style = Fill)
+    drawPath(path, brush, style = Fill)
 }
 
-private fun DrawScope.drawPauseBars(left: Float, top: Float, size: Float, color: Color) {
+private fun DrawScope.drawPauseBars(left: Float, top: Float, size: Float, brush: Brush) {
     val barWidth = size * 0.3f
     val gap = size * 0.2f
-    drawRect(color, Offset(left, top), Size(barWidth, size))
-    drawRect(color, Offset(left + barWidth + gap, top), Size(barWidth, size))
+    drawRect(brush, Offset(left, top), Size(barWidth, size))
+    drawRect(brush, Offset(left + barWidth + gap, top), Size(barWidth, size))
 }
 
 private fun DrawScope.drawBattery(
@@ -320,7 +328,7 @@ private fun DrawScope.drawBattery(
 
     // Body outline.
     drawRoundRect(
-        color = IPodColors.BatteryBody,
+        color = IPodColors.BatteryOutline,
         topLeft = Offset(bodyLeft, bodyTop),
         size = Size(bodyWidth, bodyHeight),
         cornerRadius = CornerRadius(height * 0.12f),
@@ -329,7 +337,7 @@ private fun DrawScope.drawBattery(
 
     // Nub.
     drawRoundRect(
-        color = IPodColors.BatteryBody,
+        color = IPodColors.BatteryOutline,
         topLeft = Offset(bodyLeft + bodyWidth, centerY - nubHeight / 2f),
         size = Size(nubWidth, nubHeight),
         cornerRadius = CornerRadius(nubWidth * 0.3f),
@@ -339,12 +347,34 @@ private fun DrawScope.drawBattery(
     val inset = borderWidth * 1.5f
     val fillMaxWidth = bodyWidth - inset * 2f
     val fillWidth = fillMaxWidth * (battery.percent / 100f)
-    val fillColor = if (battery.isCharging) IPodColors.BatteryCharging else IPodColors.BatteryFill
+    val fillTop = bodyTop + inset
+    val fillHeight = bodyHeight - inset * 2f
     if (fillWidth > 0f) {
+        // Glossy fill: pale at the top through the body colour, plus a white sheen on the upper half.
+        val (top, bottom) = if (battery.isCharging) {
+            IPodColors.ProgressGlassTop to IPodColors.BatteryCharging
+        } else {
+            IPodColors.BatteryGreenTop to IPodColors.BatteryGreenBottom
+        }
         drawRoundRect(
-            color = fillColor,
-            topLeft = Offset(bodyLeft + inset, bodyTop + inset),
-            size = Size(fillWidth, bodyHeight - inset * 2f),
+            brush = Brush.verticalGradient(
+                colors = listOf(top, bottom),
+                startY = fillTop,
+                endY = fillTop + fillHeight,
+            ),
+            topLeft = Offset(bodyLeft + inset, fillTop),
+            size = Size(fillWidth, fillHeight),
+            cornerRadius = CornerRadius(height * 0.06f),
+        )
+        drawRoundRect(
+            brush = Brush.verticalGradient(
+                0f to IPodColors.HighlightText.copy(alpha = 0.55f),
+                1f to IPodColors.HighlightText.copy(alpha = 0f),
+                startY = fillTop,
+                endY = fillTop + fillHeight * 0.5f,
+            ),
+            topLeft = Offset(bodyLeft + inset, fillTop),
+            size = Size(fillWidth, fillHeight * 0.5f),
             cornerRadius = CornerRadius(height * 0.06f),
         )
     }
