@@ -17,13 +17,16 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import com.crsmthw.lyra.ui.ipod.IPodRoot
 import com.crsmthw.lyra.ui.navigation.LyraNavGraph
 import com.crsmthw.lyra.ui.theme.LyraTheme
 import com.crsmthw.lyra.ui.theme.ThemeMode
 import com.crsmthw.lyra.util.HapticsConfig
+import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
 
@@ -44,7 +47,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        installSplashScreen()
+        val splash = installSplashScreen()
         super.onCreate(savedInstanceState)
         // Cold-start deep link — seeded only on a FRESH launch. On an Activity recreation the
         // same VIEW intent is re-delivered, and re-firing it would push a second copy of the
@@ -66,6 +69,32 @@ class MainActivity : ComponentActivity() {
             val hapticsEnabled by container.dataStore.hapticsEnabled.collectAsState(initial = true)
             LaunchedEffect(hapticsEnabled) { HapticsConfig.enabled = hapticsEnabled }
 
+            // ── iPod flag: read before the first frame ────────────────────────
+            // `Boolean?` — null means DataStore has not emitted yet; the splash stays on screen
+            // until it does (or the safety timeout fires, so a stuck DataStore never holds the
+            // splash forever). The three-way branch below avoids composing LyraNavGraph while
+            // the flag is still null, which would create and immediately tear down the
+            // NavController, LibraryViewModel.init, PlayerPanelHost, and the deep-link funnel.
+            val ipodEnabled by container.dataStore.ipodEnabled.collectAsState(initial = null)
+            var ipodFlagLoaded by remember { mutableStateOf(false) }
+            var flagTimedOut by remember { mutableStateOf(false) }
+            LaunchedEffect(ipodEnabled) {
+                if (ipodEnabled != null) ipodFlagLoaded = true
+            }
+            LaunchedEffect(Unit) {
+                delay(1_500L)
+                flagTimedOut = true
+            }
+            splash.setKeepOnScreenCondition { !ipodFlagLoaded && !flagTimedOut }
+
+            // Deep link while in iPod mode: auto-exit so the normal funnel handles it.
+            LaunchedEffect(pendingDeepLinkIntent, ipodEnabled) {
+                val intent = pendingDeepLinkIntent ?: return@LaunchedEffect
+                if (ipodEnabled == true && intent.action == Intent.ACTION_VIEW && intent.data != null) {
+                    container.settingsRepository.setIpodEnabled(false)
+                }
+            }
+
             val systemDark = isSystemInDarkTheme()
             val isDark = when (themeMode) {
                 ThemeMode.DARK   -> true
@@ -75,12 +104,19 @@ class MainActivity : ComponentActivity() {
 
             // Re-apply edge-to-edge style whenever dark/light flips so status
             // bar and nav bar icon colors follow the in-app theme, not the system theme.
-            SideEffect {
-                val barStyle = if (isDark)
-                    SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
-                else
-                    SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
-                enableEdgeToEdge(statusBarStyle = barStyle, navigationBarStyle = barStyle)
+            // Skipped while iPod mode is active: it is its own immersive world and the
+            // light/dark icon colours are irrelevant with system bars hidden.
+            if (ipodEnabled != true) {
+                SideEffect {
+                    val barStyle = if (isDark)
+                        SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+                    else
+                        SystemBarStyle.light(
+                            android.graphics.Color.TRANSPARENT,
+                            android.graphics.Color.TRANSPARENT,
+                        )
+                    enableEdgeToEdge(statusBarStyle = barStyle, navigationBarStyle = barStyle)
+                }
             }
 
             LyraTheme(
@@ -89,10 +125,16 @@ class MainActivity : ComponentActivity() {
                 dynamicColor = dynamicColor,
             ) {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    LyraNavGraph(
-                        container              = container,
-                        pendingDeepLinkIntent  = pendingDeepLinkIntent,
-                    )
+                    when {
+                        ipodEnabled == true && container.authManager.isAuthenticated() ->
+                            IPodRoot(container)
+                        ipodEnabled != null || flagTimedOut ->
+                            LyraNavGraph(
+                                container             = container,
+                                pendingDeepLinkIntent = pendingDeepLinkIntent,
+                            )
+                        // else: splash is still up, compose nothing
+                    }
                 }
             }
         }
