@@ -674,7 +674,7 @@ private enum class OptionGlyph { SHUFFLE, REPEAT }
 
 /**
  * The shuffle / repeat bar as the Classic draws it: the mode's glyph, then a segmented switch —
- * the selected segment darker with black bold text, the others lighter with blue text — centred.
+ * the SELECTED segment light with blue bold text, the others darker grey with black text — centred.
  */
 @Composable
 private fun NowPlayingOptionStrip(
@@ -719,9 +719,9 @@ private fun NowPlayingOptionStrip(
                         .background(
                             Brush.verticalGradient(
                                 colors = if (selected) {
-                                    listOf(IPodColors.LcdStatusGlossLow, IPodColors.LcdStatusGlossMid)
-                                } else {
                                     listOf(IPodColors.LcdStatusGlossTop, IPodColors.LcdStatusGlossMid)
+                                } else {
+                                    listOf(IPodColors.LcdStatusGlossLow, IPodColors.LcdStatusGlossMid)
                                 },
                             ),
                         )
@@ -733,7 +733,7 @@ private fun NowPlayingOptionStrip(
                         fontFamily = IPodFontFamily,
                         fontWeight = FontWeight.Bold,
                         fontSize = fontSize,
-                        color = if (selected) IPodColors.LcdText else IPodColors.ProgressGlassLow,
+                        color = if (selected) IPodColors.ProgressGlassLow else IPodColors.LcdText,
                         maxLines = 1,
                     )
                 }
