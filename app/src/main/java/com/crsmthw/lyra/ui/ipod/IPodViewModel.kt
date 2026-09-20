@@ -156,18 +156,16 @@ class IPodViewModel(
                 )
             }.collect { config ->
                 _uiState.update { state ->
-                    val newState = state.copy(clickSounds = config)
-                    // If the Settings screen is on top, rebuild its rows with the new values.
-                    val top = newState.stack.lastOrNull()
-                    if (top?.screen is IPodScreen.Settings) {
-                        val updatedEntry = top.copy(
-                            list = top.list.copy(items = buildSettingsItems(config)),
-                        )
-                        newState.copy(stack = newState.stack.dropLast(1) + updatedEntry)
-                    } else {
-                        newState
-                    }
+                    refreshSettingsRows(state.copy(clickSounds = config))
                 }
+            }
+        }
+
+        // Mirror the body colour (Settings → Color) into the UI state.
+        viewModelScope.launch {
+            settingsRepository.ipodBodyColor.collect { ordinal ->
+                val color = IPodBodyColor.entries.getOrElse(ordinal) { IPodBodyColor.SILVER }
+                _uiState.update { state -> refreshSettingsRows(state.copy(bodyColor = color)) }
             }
         }
 
@@ -925,8 +923,18 @@ class IPodViewModel(
         push(
             screen = IPodScreen.Settings,
             title = LcdLabel.Res(R.string.ipod_menu_settings),
-            items = buildSettingsItems(config),
+            items = buildSettingsItems(config, _uiState.value.bodyColor),
         )
+    }
+
+    /** If the Settings screen is on top, rebuild its rows from [state]'s current values. */
+    private fun refreshSettingsRows(state: IPodUiState): IPodUiState {
+        val top = state.stack.lastOrNull() ?: return state
+        if (top.screen !is IPodScreen.Settings) return state
+        val updatedEntry = top.copy(
+            list = top.list.copy(items = buildSettingsItems(state.clickSounds, state.bodyColor)),
+        )
+        return state.copy(stack = state.stack.dropLast(1) + updatedEntry)
     }
 
     private fun activateSettingsItem(id: String) {
@@ -949,6 +957,11 @@ class IPodViewModel(
                 val current = _uiState.value.clickSounds.pitch
                 val nextOrdinal = (current.ordinal + 1) % ClickPitch.entries.size
                 viewModelScope.launch { settingsRepository.setIpodClickPitch(nextOrdinal) }
+            }
+            "bodycolor" -> {
+                val current = _uiState.value.bodyColor
+                val nextOrdinal = (current.ordinal + 1) % IPodBodyColor.entries.size
+                viewModelScope.launch { settingsRepository.setIpodBodyColor(nextOrdinal) }
             }
             "ipodmode" -> {
                 viewModelScope.launch { settingsRepository.setIpodEnabled(false) }
@@ -1186,7 +1199,7 @@ class IPodViewModel(
             add(LcdItem(id = "settings", title = LcdLabel.Res(R.string.ipod_menu_settings), hasSubmenu = true))
         }
 
-        fun buildSettingsItems(config: ClickSoundsConfig): List<LcdItem> = listOf(
+        fun buildSettingsItems(config: ClickSoundsConfig, bodyColor: IPodBodyColor): List<LcdItem> = listOf(
             LcdItem(
                 id = "clicksounds",
                 title = LcdLabel.Res(R.string.ipod_settings_click_sounds),
@@ -1209,15 +1222,21 @@ class IPodViewModel(
                 ),
             ),
             LcdItem(
+                id = "bodycolor",
+                title = LcdLabel.Res(R.string.ipod_settings_color),
+                value = LcdLabel.Res(
+                    when (bodyColor) {
+                        IPodBodyColor.SILVER -> R.string.ipod_value_silver
+                        IPodBodyColor.BLACK -> R.string.ipod_value_black
+                    },
+                ),
+            ),
+            LcdItem(
                 id = "ipodmode",
                 title = LcdLabel.Res(R.string.ipod_settings_mode),
                 value = LcdLabel.Res(R.string.ipod_value_on),
             ),
         )
-
-        /** Overload for backward compat with the old signature. */
-        fun buildSettingsItems(clickSoundsEnabled: Boolean): List<LcdItem> =
-            buildSettingsItems(ClickSoundsConfig(enabled = clickSoundsEnabled))
     }
 }
 

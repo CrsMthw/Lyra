@@ -142,6 +142,7 @@ fun IPodRoot(container: AppContainer, modifier: Modifier = Modifier) {
         factory = IPodViewModelFactory(container),
     )
     val state by vm.uiState.collectAsStateWithLifecycle()
+    val palette = state.bodyColor.palette()
     val battery: BatteryState = rememberBatteryState()
 
     // ── Effects: VM -> PlayerViewModel ───────────────────────────────────────
@@ -198,7 +199,10 @@ fun IPodRoot(container: AppContainer, modifier: Modifier = Modifier) {
     // ── Layout ──────────────────────────────────────────────────────────────
     // The body ALWAYS fills the whole window (no letterboxing). In landscape
     // (maxWidth > maxHeight) a small hint overlays the body's bottom edge.
-    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+    CompositionLocalProvider(
+        LocalLayoutDirection provides LayoutDirection.Ltr,
+        LocalIPodBodyPalette provides palette,
+    ) {
         BoxWithConstraints(
             modifier = modifier
                 .fillMaxSize()
@@ -206,12 +210,12 @@ fun IPodRoot(container: AppContainer, modifier: Modifier = Modifier) {
                 .clip(RoundedCornerShape(IPodDimens.BodyCornerRadius))
                 .background(
                     Brush.verticalGradient(
-                        listOf(IPodColors.BodyTop, IPodColors.BodyBottom),
+                        listOf(palette.bodyTop, palette.bodyBottom),
                     ),
                 )
                 .border(
                     width = 1.dp,
-                    color = IPodColors.BodyEdge,
+                    color = palette.bodyEdge,
                     shape = RoundedCornerShape(IPodDimens.BodyCornerRadius),
                 ),
         ) {
@@ -294,7 +298,7 @@ fun IPodRoot(container: AppContainer, modifier: Modifier = Modifier) {
             ) {
                 Text(
                     text = stringResource(R.string.ipod_portrait_hint),
-                    color = IPodColors.LandscapeHintText,
+                    color = palette.hintText,
                     fontFamily = IPodFontFamily,
                     fontSize = 13.sp,
                     textAlign = TextAlign.Center,

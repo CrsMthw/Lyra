@@ -3,6 +3,7 @@ package com.crsmthw.lyra.ui.ipod.nav
 import androidx.annotation.PluralsRes
 import androidx.annotation.StringRes
 import androidx.compose.runtime.Immutable
+import com.crsmthw.lyra.ui.ipod.IPodBodyColor
 import com.crsmthw.lyra.ui.ipod.wheel.ClickSoundsConfig
 
 /**
@@ -127,6 +128,8 @@ data class IPodUiState(
     val direction: LcdNavDirection = LcdNavDirection.NONE,
     val nowPlaying: LcdNowPlaying? = null,
     val clickSounds: ClickSoundsConfig = ClickSoundsConfig(),
+    /** Silver or black body — the iPod's own Settings → Color. */
+    val bodyColor: IPodBodyColor = IPodBodyColor.SILVER,
 ) {
     val current: IPodStackEntry get() = stack.last()
 }

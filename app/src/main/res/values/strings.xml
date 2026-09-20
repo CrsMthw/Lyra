@@ -339,6 +339,9 @@
     <string name="ipod_value_high">High</string>
     <string name="ipod_now_playing_position">%1$d of %2$d</string>
     <string name="ipod_now_playing_remaining">-%1$s</string>
+    <string name="ipod_settings_color">Color</string>
+    <string name="ipod_value_silver">Silver</string>
+    <string name="ipod_value_black">Black</string>
     <!-- (end shared) -->
 
 

@@ -107,6 +107,10 @@ class LyraDataStore(private val context: Context) {
     val ipodClickPitch: Flow<Int> = context.dataStore.data.map { prefs ->
         prefs[Keys.IPOD_CLICK_PITCH] ?: 1
     }
+    /** IPodBodyColor ordinal: 0 silver (default), 1 black. */
+    val ipodBodyColor: Flow<Int> = context.dataStore.data.map { prefs ->
+        prefs[Keys.IPOD_BODY_COLOR] ?: 0
+    }
 
     // ── Writes ──────────────────────────────────────────────────────────────
 
@@ -186,6 +190,10 @@ class LyraDataStore(private val context: Context) {
         context.dataStore.edit { it[Keys.IPOD_CLICK_PITCH] = ordinal }
     }
 
+    suspend fun setIpodBodyColor(ordinal: Int) {
+        context.dataStore.edit { it[Keys.IPOD_BODY_COLOR] = ordinal }
+    }
+
     // ── Keys ────────────────────────────────────────────────────────────────
 
     private object Keys {
@@ -209,5 +217,6 @@ class LyraDataStore(private val context: Context) {
         val IPOD_CLICK_SOUNDS   = booleanPreferencesKey("ipod_click_sounds")
         val IPOD_CLICK_VOLUME   = intPreferencesKey("ipod_click_volume")
         val IPOD_CLICK_PITCH    = intPreferencesKey("ipod_click_pitch")
+        val IPOD_BODY_COLOR     = intPreferencesKey("ipod_body_color")
     }
 }

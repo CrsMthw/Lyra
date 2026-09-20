@@ -33,7 +33,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.crsmthw.lyra.R
-import com.crsmthw.lyra.ui.ipod.IPodColors
+import androidx.compose.ui.graphics.Color
+import com.crsmthw.lyra.ui.ipod.IPodBodyPalette
+import com.crsmthw.lyra.ui.ipod.LocalIPodBodyPalette
 import com.crsmthw.lyra.ui.ipod.IPodDimens
 import com.crsmthw.lyra.ui.ipod.IPodFontFamily
 import com.crsmthw.lyra.util.confirm
@@ -115,6 +117,7 @@ fun ClickWheel(
     val enabledState = rememberUpdatedState(enabled)
 
     val haptics = LocalHapticFeedback.current
+    val palette = LocalIPodBodyPalette.current
     val cd = stringResource(R.string.ipod_cd_click_wheel)
     val menuLabel = stringResource(R.string.ipod_wheel_menu)
 
@@ -144,6 +147,7 @@ fun ClickWheel(
             }
     ) {
         drawWheel(
+            palette = palette,
             menuLabel = menuLabel,
             textMeasurer = textMeasurer,
             pressedSector = pressedSector.value,
@@ -158,6 +162,7 @@ fun ClickWheel(
 // ── Drawing ──────────────────────────────────────────────────────────────
 
 private fun DrawScope.drawWheel(
+    palette: IPodBodyPalette,
     menuLabel: String,
     textMeasurer: TextMeasurer,
     pressedSector: Int?,
@@ -178,7 +183,7 @@ private fun DrawScope.drawWheel(
     // ── 1. Wheel ring: radial gradient top -> bottom ───────────────────
     drawCircle(
         brush = Brush.verticalGradient(
-            colors = listOf(IPodColors.WheelTop, IPodColors.WheelBottom),
+            colors = listOf(palette.wheelTop, palette.wheelBottom),
             startY = cy - radius,
             endY = cy + radius,
         ),
@@ -188,7 +193,7 @@ private fun DrawScope.drawWheel(
 
     // ── 2. Outer edge stroke ────────────────────────────────────────
     drawCircle(
-        color = IPodColors.WheelEdge,
+        color = palette.wheelEdge,
         radius = radius - wheelEdgeStrokePx / 2f,
         center = centre,
         style = Stroke(width = wheelEdgeStrokePx),
@@ -197,7 +202,7 @@ private fun DrawScope.drawWheel(
     // ── 3. Faint inner shadow at the outer rim ──────────────────────
     // Derive from WheelEdge (not a hardcoded colour).
     drawCircle(
-        color = IPodColors.WheelEdge.copy(alpha = INNER_SHADOW_ALPHA),
+        color = palette.wheelEdge.copy(alpha = INNER_SHADOW_ALPHA),
         radius = radius - innerShadowWidthPx / 2f,
         center = centre,
         style = Stroke(width = innerShadowWidthPx),
@@ -211,7 +216,7 @@ private fun DrawScope.drawWheel(
         val arcStartWheel = pressedSector * 90f - 45f  // wheel coords
         val arcStartCanvas = arcStartWheel - 90f       // canvas coords (0 deg = 3 o'clock)
         drawArc(
-            color = IPodColors.WheelPressed,
+            color = palette.wheelPressed,
             startAngle = arcStartCanvas,
             sweepAngle = 90f,
             useCenter = true,
@@ -223,14 +228,14 @@ private fun DrawScope.drawWheel(
     // ── 5. Centre button (covers the wedge's inner tip) ─────────────
     if (pressedSector == SECTOR_CENTER) {
         drawCircle(
-            color = IPodColors.WheelPressed,
+            color = palette.wheelPressed,
             radius = centreRadius,
             center = centre,
         )
     }
     drawCircle(
         brush = Brush.verticalGradient(
-            colors = listOf(IPodColors.CenterTop, IPodColors.CenterBottom),
+            colors = listOf(palette.centerTop, palette.centerBottom),
             startY = cy - centreRadius,
             endY = cy + centreRadius,
         ),
@@ -238,7 +243,7 @@ private fun DrawScope.drawWheel(
         center = centre,
     )
     drawCircle(
-        color = IPodColors.CenterEdge,
+        color = palette.centerEdge,
         radius = centreRadius - centerEdgeStrokePx / 2f,
         center = centre,
         style = Stroke(width = centerEdgeStrokePx),
@@ -253,7 +258,7 @@ private fun DrawScope.drawWheel(
         fontFamily = IPodFontFamily,
         fontWeight = FontWeight.Bold,
         fontSize = (diameter * 0.038f / spDivisor).sp,
-        color = IPodColors.WheelLabel,
+        color = palette.wheelLabel,
         textAlign = TextAlign.Center,
         letterSpacing = 1.5.sp,
     )
@@ -267,17 +272,17 @@ private fun DrawScope.drawWheel(
     )
 
     // Previous (left): two left-pointing triangles + bar
-    drawPreviousIcon(cx - labelDist, cy, iconSize)
+    drawPreviousIcon(cx - labelDist, cy, iconSize, palette.wheelLabel)
 
     // Next (right): two right-pointing triangles + bar
-    drawNextIcon(cx + labelDist, cy, iconSize)
+    drawNextIcon(cx + labelDist, cy, iconSize, palette.wheelLabel)
 
     // Play/Pause (bottom): triangle + two bars
-    drawPlayPauseIcon(cx, cy + labelDist, iconSize)
+    drawPlayPauseIcon(cx, cy + labelDist, iconSize, palette.wheelLabel)
 }
 
 /** Draw two left-pointing triangles + a bar on the left, centred at (cx, cy). */
-private fun DrawScope.drawPreviousIcon(cx: Float, cy: Float, size: Float) {
+private fun DrawScope.drawPreviousIcon(cx: Float, cy: Float, size: Float, color: Color) {
     val half = size / 2f
     val barW = size * 0.14f
     val triW = half * 0.85f
@@ -296,11 +301,11 @@ private fun DrawScope.drawPreviousIcon(cx: Float, cy: Float, size: Float) {
         lineTo(cx - half + barW + triW * 2f, cy + half * 0.7f)
         close()
     }
-    drawPath(path, IPodColors.WheelLabel)
+    drawPath(path, color)
 }
 
 /** Draw two right-pointing triangles + a bar on the right, centred at (cx, cy). */
-private fun DrawScope.drawNextIcon(cx: Float, cy: Float, size: Float) {
+private fun DrawScope.drawNextIcon(cx: Float, cy: Float, size: Float, color: Color) {
     val half = size / 2f
     val barW = size * 0.14f
     val triW = half * 0.85f
@@ -319,11 +324,11 @@ private fun DrawScope.drawNextIcon(cx: Float, cy: Float, size: Float) {
         // Right bar
         addRect(Rect(cx + half - barW, cy - half * 0.7f, cx + half, cy + half * 0.7f))
     }
-    drawPath(path, IPodColors.WheelLabel)
+    drawPath(path, color)
 }
 
 /** Draw play triangle + pause bars, centred at (cx, cy). */
-private fun DrawScope.drawPlayPauseIcon(cx: Float, cy: Float, size: Float) {
+private fun DrawScope.drawPlayPauseIcon(cx: Float, cy: Float, size: Float, color: Color) {
     val half = size / 2f
     val barW = size * 0.16f
     val gap = size * 0.10f
@@ -339,7 +344,7 @@ private fun DrawScope.drawPlayPauseIcon(cx: Float, cy: Float, size: Float) {
         addRect(Rect(barStart, cy - half * 0.7f, barStart + barW, cy + half * 0.7f))
         addRect(Rect(barStart + barW + gap, cy - half * 0.7f, barStart + barW * 2f + gap, cy + half * 0.7f))
     }
-    drawPath(path, IPodColors.WheelLabel)
+    drawPath(path, color)
 }
 
 // ── Gesture ──────────────────────────────────────────────────────────────

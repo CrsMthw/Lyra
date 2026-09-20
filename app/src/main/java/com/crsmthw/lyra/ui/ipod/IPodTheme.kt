@@ -1,5 +1,7 @@
 package com.crsmthw.lyra.ui.ipod
 
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
@@ -87,6 +89,65 @@ object IPodColors {
     val ArtPlaceholder    = Color(0xFFBDBDBD)
     val ArtPlaceholderIcon = Color(0xFF7A7A7A)
 }
+
+/** The 6th-gen Classic came in silver and black. The LCD is identical; body and wheel differ. */
+enum class IPodBodyColor { SILVER, BLACK }
+
+/** Everything that changes between the two bodies. Provided by IPodRoot as [LocalIPodBodyPalette]. */
+@Immutable
+data class IPodBodyPalette(
+    val bodyTop: Color,
+    val bodyBottom: Color,
+    val bodyEdge: Color,
+    val wheelTop: Color,
+    val wheelBottom: Color,
+    val wheelEdge: Color,
+    val wheelLabel: Color,
+    val wheelPressed: Color,
+    val centerTop: Color,
+    val centerBottom: Color,
+    val centerEdge: Color,
+    /** The landscape-only "works best in portrait" hint, over this body. */
+    val hintText: Color,
+)
+
+val SilverBody = IPodBodyPalette(
+    bodyTop      = IPodColors.BodyTop,
+    bodyBottom   = IPodColors.BodyBottom,
+    bodyEdge     = IPodColors.BodyEdge,
+    wheelTop     = IPodColors.WheelTop,
+    wheelBottom  = IPodColors.WheelBottom,
+    wheelEdge    = IPodColors.WheelEdge,
+    wheelLabel   = IPodColors.WheelLabel,
+    wheelPressed = IPodColors.WheelPressed,
+    centerTop    = IPodColors.CenterTop,
+    centerBottom = IPodColors.CenterBottom,
+    centerEdge   = IPodColors.CenterEdge,
+    hintText     = IPodColors.LandscapeHintText,
+)
+
+/** Anodised charcoal body, a near-black wheel with a faint lighter rim, white labels. */
+val BlackBody = IPodBodyPalette(
+    bodyTop      = Color(0xFF383A3F),
+    bodyBottom   = Color(0xFF1B1C20),
+    bodyEdge     = Color(0xFF0A0B0D),
+    wheelTop     = Color(0xFF1C1D20),
+    wheelBottom  = Color(0xFF0C0D0F),
+    wheelEdge    = Color(0xFF36383D),
+    wheelLabel   = Color(0xFFDCDEE1),
+    wheelPressed = Color(0x2EFFFFFF),
+    centerTop    = Color(0xFF3F4146),
+    centerBottom = Color(0xFF25272B),
+    centerEdge   = Color(0xFF4E5056),
+    hintText     = Color(0xFFA9ACB1),
+)
+
+fun IPodBodyColor.palette(): IPodBodyPalette = when (this) {
+    IPodBodyColor.SILVER -> SilverBody
+    IPodBodyColor.BLACK  -> BlackBody
+}
+
+val LocalIPodBodyPalette = staticCompositionLocalOf { SilverBody }
 
 /** Proportions of the Classic, expressed so the body can fill any window (see IPodRoot). */
 object IPodDimens {

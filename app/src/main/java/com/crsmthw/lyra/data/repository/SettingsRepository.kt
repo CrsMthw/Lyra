@@ -27,6 +27,7 @@ class SettingsRepository(private val dataStore: LyraDataStore) {
     val ipodClickSounds  : Flow<Boolean>        = dataStore.ipodClickSounds
     val ipodClickVolume  : Flow<Int>            = dataStore.ipodClickVolume
     val ipodClickPitch   : Flow<Int>            = dataStore.ipodClickPitch
+    val ipodBodyColor    : Flow<Int>            = dataStore.ipodBodyColor
 
     suspend fun setThemeMode        (mode   : ThemeMode)      = dataStore.setThemeMode(mode)
     suspend fun setAmoledBlack      (enabled: Boolean)        = dataStore.setAmoledBlack(enabled)
@@ -48,4 +49,5 @@ class SettingsRepository(private val dataStore: LyraDataStore) {
     suspend fun setIpodClickSounds  (enabled: Boolean)        = dataStore.setIpodClickSounds(enabled)
     suspend fun setIpodClickVolume  (percent: Int)            = dataStore.setIpodClickVolume(percent)
     suspend fun setIpodClickPitch   (ordinal: Int)            = dataStore.setIpodClickPitch(ordinal)
+    suspend fun setIpodBodyColor    (ordinal: Int)            = dataStore.setIpodBodyColor(ordinal)
 }
