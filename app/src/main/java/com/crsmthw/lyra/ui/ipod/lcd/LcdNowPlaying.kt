@@ -23,6 +23,10 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
@@ -51,7 +55,7 @@ import com.crsmthw.lyra.util.toTimeString
 // ── Tunables ────────────────────────────────────────────────────────────────
 
 /** Art occupies this fraction of the content width. */
-private const val ART_WIDTH_FRACTION = 0.42f
+private const val ART_WIDTH_FRACTION = 0.36f
 /** Gap between the art column and the text column, as a fraction of content width. */
 private const val ART_TEXT_GAP_FRACTION = 0.05f
 /** The upper region holding art + text takes this fraction of the content height. */
@@ -59,15 +63,20 @@ private const val UPPER_REGION_FRACTION = 0.80f
 /** The bottom progress strip takes this fraction of the content height. */
 private const val BOTTOM_STRIP_FRACTION = 0.20f
 /** Perspective tilt of the album art (degrees around the Y axis). */
-private const val ART_ROTATION_Y = -12f
+/**
+ * Positive = the RIGHT edge is the near one — the Classic's art turns toward the text. (The first
+ * build used −12°, which put the LEFT edge nearer: the mirror image of the reference photo.)
+ */
+private const val ART_ROTATION_Y = 12f
 /** Camera distance for the perspective tilt (multiplied by density). */
 private const val ART_CAMERA_DISTANCE_FACTOR = 8f
 /** Starting alpha of the reflection at its top edge. */
 private const val REFLECTION_ALPHA = 0.35f
 /** Reflection height as a fraction of the art height. */
-private const val REFLECTION_HEIGHT_FRACTION = 0.35f
+private const val REFLECTION_HEIGHT_FRACTION = 0.30f
 /** Progress bar track height as a fraction of the strip height. */
-private const val PROGRESS_BAR_HEIGHT_FRACTION = 0.08f
+/** The Classic's bar is a real channel, not a hairline: ~22 % of the strip (~4 % of the panel). */
+private const val PROGRESS_BAR_HEIGHT_FRACTION = 0.22f
 /** Progress marker radius as a fraction of the strip height. */
 private const val PROGRESS_MARKER_RADIUS_FRACTION = 0.04f
 /** Scrub-mode marker radius (slightly larger). */
@@ -79,7 +88,7 @@ private const val ALBUM_FONT_FRACTION = 0.038f
 private const val POSITION_FONT_FRACTION = 0.034f
 private const val TIME_FONT_FRACTION = 0.038f
 /** Art padding from left edge of the content, as a fraction of content width. */
-private const val ART_START_PAD_FRACTION = 0.04f
+private const val ART_START_PAD_FRACTION = 0.06f
 /** Text padding from right edge, as a fraction of content width. */
 private const val TEXT_END_PAD_FRACTION = 0.04f
 /** Music note glyph size as a fraction of the art side. */
@@ -281,11 +290,14 @@ private fun NowPlayingArt(
         modifier = modifier,
         contentAlignment = Alignment.Center,
     ) {
-        // Square art, sized to fit the available space with room for the reflection.
-        val artSide = minOf(maxWidth, maxHeight * (1f / (1f + REFLECTION_HEIGHT_FRACTION)))
+        // The ART (not art + reflection) sits on the region's vertical centre, level with the
+        // text block: a spacer the reflection's height ABOVE the art balances the reflection below.
+        // Sized so spacer + art + reflection fit the region.
+        val artSide = minOf(maxWidth, maxHeight * (1f / (1f + 2f * REFLECTION_HEIGHT_FRACTION)))
         val reflectionHeight = artSide * REFLECTION_HEIGHT_FRACTION
 
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Spacer(Modifier.height(reflectionHeight))
             // The main art image with perspective tilt.
             // Placeholder is always drawn underneath; the AsyncImage lands on top with crossfade,
             // covering loading, error, and blank-url cases.
@@ -468,11 +480,14 @@ private fun NowPlayingProgressStrip(
             .background(
                 Brush.verticalGradient(
                     colors = listOf(
-                        IPodColors.LcdStatusBottom.copy(alpha = 0.3f),
-                        IPodColors.LcdStatusTop.copy(alpha = 0.15f),
+                        IPodColors.LcdStatusTop.copy(alpha = 0.9f),
+                        IPodColors.LcdStatusBottom.copy(alpha = 0.7f),
                     ),
                 ),
             )
+            .drawBehind {
+                drawLine(IPodColors.LcdStatusLine, Offset(0f, 0.5f), Offset(size.width, 0.5f), strokeWidth = 1f)
+            }
             .padding(horizontal = with(density) { (contentHeightPx * 0.04f).toDp() }),
     ) {
         Row(
@@ -520,7 +535,9 @@ private fun NowPlayingProgressStrip(
 }
 
 /**
- * Draws the Classic's two-tone blue progress bar with a small marker at the playhead.
+ * The Classic's progress bar: a light inset channel with a hairline edge, filled by TWO bands of
+ * blue — a lighter one on top, a deeper one below — with a bright hairline along the fill's top
+ * edge. No playhead while playing; a small dark diamond appears only while the wheel scrubs.
  */
 private fun DrawScope.drawProgressBar(
     fraction: Float,
@@ -529,38 +546,49 @@ private fun DrawScope.drawProgressBar(
     isScrubbing: Boolean,
 ) {
     val barTop = (size.height - barHeight) / 2f
-    val cornerRadius = barHeight / 2f
+    val corner = CornerRadius(barHeight * 0.25f)
+    val track = Rect(0f, barTop, size.width, barTop + barHeight)
 
-    // Track background.
+    // Channel + hairline edge.
     drawRoundRect(
         color = IPodColors.ProgressTrack,
-        topLeft = Offset(0f, barTop),
-        size = Size(size.width, barHeight),
-        cornerRadius = CornerRadius(cornerRadius),
+        topLeft = track.topLeft,
+        size = track.size,
+        cornerRadius = corner,
+    )
+    drawRoundRect(
+        color = IPodColors.LcdStatusLine.copy(alpha = 0.55f),
+        topLeft = track.topLeft,
+        size = track.size,
+        cornerRadius = corner,
+        style = Stroke(width = 1f),
     )
 
-    // Two-tone blue fill.
-    val fillWidth = size.width * fraction
-    if (fillWidth > 0f) {
-        drawRoundRect(
-            brush = Brush.verticalGradient(
-                colors = listOf(IPodColors.ProgressTop, IPodColors.ProgressBottom),
-                startY = barTop,
-                endY = barTop + barHeight,
-            ),
-            topLeft = Offset(0f, barTop),
-            size = Size(fillWidth.coerceAtMost(size.width), barHeight),
-            cornerRadius = CornerRadius(cornerRadius),
-        )
+    // Two-band fill, clipped to the channel's rounded shape.
+    val fillWidth = (size.width * fraction).coerceIn(0f, size.width)
+    if (fillWidth > 1f) {
+        val half = barHeight / 2f
+        val fillClip = Path().apply {
+            addRoundRect(RoundRect(Rect(0f, barTop, fillWidth, barTop + barHeight), corner))
+        }
+        clipPath(fillClip) {
+            drawRect(IPodColors.ProgressTop, Offset(0f, barTop), Size(fillWidth, half))
+            drawRect(IPodColors.ProgressBottom, Offset(0f, barTop + half), Size(fillWidth, half))
+            drawRect(IPodColors.HighlightText.copy(alpha = 0.45f), Offset(0f, barTop), Size(fillWidth, 1f))
+        }
     }
 
-    // Marker at the playhead.
-    val markerCenterX = fillWidth.coerceIn(markerRadius, size.width - markerRadius)
-    val markerCenterY = size.height / 2f
-    val markerColor = if (isScrubbing) IPodColors.LcdText else IPodColors.ProgressBottom
-    drawCircle(
-        color = markerColor,
-        radius = markerRadius,
-        center = Offset(markerCenterX, markerCenterY),
-    )
+    // Scrub diamond only.
+    if (isScrubbing) {
+        val cx = fillWidth.coerceIn(markerRadius, size.width - markerRadius)
+        val cy = size.height / 2f
+        val diamond = Path().apply {
+            moveTo(cx, cy - markerRadius)
+            lineTo(cx + markerRadius, cy)
+            lineTo(cx, cy + markerRadius)
+            lineTo(cx - markerRadius, cy)
+            close()
+        }
+        drawPath(diamond, IPodColors.LcdText, style = Fill)
+    }
 }
