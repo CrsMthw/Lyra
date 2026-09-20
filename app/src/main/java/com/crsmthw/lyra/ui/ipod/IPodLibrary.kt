@@ -241,6 +241,8 @@ class IPodLibrary(
         val tracks: List<PlaylistTrackItem>,
         val hasMore: Boolean,
         val nextOffset: Int,
+        /** True when this page came from the library cache (offset 0) — the caller then reconciles. */
+        val fromCache: Boolean = false,
     )
 
     data class PlaylistTrackItem(
