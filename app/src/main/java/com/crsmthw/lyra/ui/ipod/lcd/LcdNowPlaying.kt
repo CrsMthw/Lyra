@@ -606,6 +606,33 @@ private fun DrawScope.drawProgressBar(
         }
     }
 
+    // Reflection under the bar: the Classic's bar sits on a glossy surface, so a faint flipped
+    // echo fades away beneath it — grey under the channel, blue under the filled part.
+    val reflectionTop = barBottom + 1f
+    val reflectionHeight = barHeight * 0.7f
+    drawRect(
+        brush = Brush.verticalGradient(
+            0f to IPodColors.ProgressTrackTop.copy(alpha = 0.22f),
+            1f to IPodColors.ProgressTrackTop.copy(alpha = 0f),
+            startY = reflectionTop,
+            endY = reflectionTop + reflectionHeight,
+        ),
+        topLeft = Offset(0f, reflectionTop),
+        size = Size(size.width, reflectionHeight),
+    )
+    if (fillWidth > 1f) {
+        drawRect(
+            brush = Brush.verticalGradient(
+                0f to IPodColors.ProgressGlassBottom.copy(alpha = 0.38f),
+                1f to IPodColors.ProgressGlassBottom.copy(alpha = 0f),
+                startY = reflectionTop,
+                endY = reflectionTop + reflectionHeight,
+            ),
+            topLeft = Offset(0f, reflectionTop),
+            size = Size(fillWidth, reflectionHeight),
+        )
+    }
+
     // Scrub diamond only.
     if (isScrubbing) {
         val cx = fillWidth.coerceIn(markerRadius, size.width - markerRadius)
