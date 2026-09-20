@@ -52,6 +52,8 @@ import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.activity.compose.LocalActivity
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.ViewModelStoreOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.crsmthw.lyra.R
@@ -119,8 +121,18 @@ fun IPodRoot(container: AppContainer, modifier: Modifier = Modifier) {
     }
 
     // ── ViewModels ───────────────────────────────────────────────────────────
-    val vm: IPodViewModel = viewModel(factory = IPodViewModelFactory(container))
+    // PlayerViewModel resolves against the ACTIVITY (the same instance LyraNavGraph uses), so
+    // playback state, the poll/tick jobs and the App Remote pre-connect carry across the swap.
     val playerVm: PlayerViewModel = viewModel(factory = PlayerViewModelFactory(container))
+    // IPodViewModel lives exactly as long as the iPod is on screen: its own store, cleared on
+    // dispose. An Activity-scoped instance survived an exit with its stack frozen (re-entry
+    // opened on the iPod's Settings menu) and kept the 1 Hz player mirror running for nobody.
+    val sessionStore = remember { IPodSessionStoreOwner() }
+    DisposableEffect(sessionStore) { onDispose { sessionStore.viewModelStore.clear() } }
+    val vm: IPodViewModel = viewModel(
+        viewModelStoreOwner = sessionStore,
+        factory = IPodViewModelFactory(container),
+    )
     val state by vm.uiState.collectAsStateWithLifecycle()
     val battery: BatteryState = rememberBatteryState()
 
@@ -277,6 +289,11 @@ fun IPodRoot(container: AppContainer, modifier: Modifier = Modifier) {
             },
         )
     }
+}
+
+/** A ViewModelStore that lives for one iPod session — see the ViewModels block in [IPodRoot]. */
+private class IPodSessionStoreOwner : ViewModelStoreOwner {
+    override val viewModelStore: ViewModelStore = ViewModelStore()
 }
 
 /**

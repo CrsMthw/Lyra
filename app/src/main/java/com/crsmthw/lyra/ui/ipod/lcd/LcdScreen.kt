@@ -370,7 +370,7 @@ private fun DrawScope.drawBattery(
             lineTo(boltCx - boltWidth * 0.05f, boltCy - boltHeight * 0.05f)
             close()
         }
-        drawPath(path, Color.White, style = Fill)
+        drawPath(path, IPodColors.BatteryBolt, style = Fill)
     }
 }
 
@@ -437,7 +437,12 @@ private fun LcdItemList(
     val rowHeightPx = contentHeightPx / visibleRows
     val rowHeight = with(density) { rowHeightPx.toDp() }
 
-    val listState = rememberLazyListState()
+    // Start with the highlight already in view (a MENU pop re-composes this list fresh); the
+    // effect below keeps it there as the wheel moves it.
+    val listState = rememberLazyListState(
+        initialFirstVisibleItemIndex = (selectedIndex - visibleRows + 1)
+            .coerceIn(0, (items.size - visibleRows).coerceAtLeast(0)),
+    )
 
     // Classic-style scroll: snap the highlight into view.
     LaunchedEffect(selectedIndex) {

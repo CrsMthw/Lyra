@@ -65,6 +65,7 @@ object IPodColors {
     val BatteryBody       = Color(0xFF3C3C3C)
     val BatteryFill       = Color(0xFF3FA84A)
     val BatteryCharging   = Color(0xFF2B66CF)
+    val BatteryBolt       = Color(0xFFFFFFFF)
     val ArtPlaceholder    = Color(0xFFBDBDBD)
     val ArtPlaceholderIcon = Color(0xFF7A7A7A)
 }

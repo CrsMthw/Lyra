@@ -97,7 +97,11 @@ import com.crsmthw.lyra.ui.screens.settings.SettingsViewModelFactory
 
 @OptIn(ExperimentalSharedTransitionApi::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null) {
+fun LyraNavGraph(
+    container: AppContainer,
+    pendingDeepLinkIntent: Intent? = null,
+    onDeepLinkConsumed: () -> Unit = {},
+) {
     val navController: NavHostController = rememberNavController()
     val playerVm = viewModel<PlayerViewModel>(factory = PlayerViewModelFactory(container))
 
@@ -151,15 +155,24 @@ fun LyraNavGraph(container: AppContainer, pendingDeepLinkIntent: Intent? = null)
     // Skipped while signed out: the resolver's destinations all need the API, and popUpTo
     // (Library) has nothing to pop to. The user lands on Auth.
     val deepLinksEnabled = startDestination == Screen.Library.route
+    //
+    // The intent is CONSUMED (handed back to MainActivity to null out) whatever happens to it:
+    // this graph is disposed and re-created every time iPod mode is toggled, and a second copy
+    // would otherwise replay a link the first already opened — and MainActivity's iPod auto-exit
+    // would re-fire on the stale intent the moment iPod mode was switched back on (2026-09-20).
     LaunchedEffect(pendingDeepLinkIntent) {
-        if (!deepLinksEnabled) return@LaunchedEffect
         val intent = pendingDeepLinkIntent ?: return@LaunchedEffect
-        if (intent.action != Intent.ACTION_VIEW) return@LaunchedEffect
-        val rawUrl = intent.data?.toString().orEmpty()
-        if (rawUrl.isBlank()) return@LaunchedEffect
-        navController.navigate(Screen.LinkResolver.createRoute(rawUrl)) {
-            popUpTo(Screen.Library.route) { inclusive = false }
-            launchSingleTop = true
+        try {
+            if (!deepLinksEnabled) return@LaunchedEffect
+            if (intent.action != Intent.ACTION_VIEW) return@LaunchedEffect
+            val rawUrl = intent.data?.toString().orEmpty()
+            if (rawUrl.isBlank()) return@LaunchedEffect
+            navController.navigate(Screen.LinkResolver.createRoute(rawUrl)) {
+                popUpTo(Screen.Library.route) { inclusive = false }
+                launchSingleTop = true
+            }
+        } finally {
+            onDeepLinkConsumed()
         }
     }
 

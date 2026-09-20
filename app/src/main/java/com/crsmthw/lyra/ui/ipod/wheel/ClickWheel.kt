@@ -411,7 +411,14 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.wheelGes
     pressedSector: androidx.compose.runtime.MutableState<Int?>,
 ) {
     awaitEachGesture {
-        // Derive geometry from the scope's live size so a fold/unfold is handled.
+        val down = awaitFirstDown(requireUnconsumed = false)
+        down.consume()
+
+        // Geometry and the enabled flag are read AFTER the touch lands. awaitEachGesture re-enters
+        // this block the instant the previous gesture ends and then parks at awaitFirstDown, so
+        // anything read above that await describes the world at the END of the last gesture — a
+        // fold, or the exit dialog opening and closing in between, would leave the first touch
+        // on stale values (a swallowed tap, or folded-screen geometry on the inner display).
         val w = size.width.toFloat()
         val h = size.height.toFloat()
         val diameter = min(w, h)
@@ -421,9 +428,6 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.wheelGes
         val centreRadius = radius * IPodDimens.CenterButtonFraction / 2f
         val deadZoneRadius = radius * DEAD_ZONE_FRACTION
         val isEnabled = enabledState.value
-
-        val down = awaitFirstDown(requireUnconsumed = false)
-        down.consume()
 
         val downPos = down.position
         val dxDown = downPos.x - cx

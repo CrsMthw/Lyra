@@ -55,7 +55,6 @@ import kotlinx.coroutines.withContext
 class IPodViewModel(
     private val settingsRepository: SettingsRepository,
     private val libraryCache: LibraryCache,
-    @Suppress("unused") // used in Checkpoint B for paged browsing
     private val repository: SpotifyRepository,
     private val playerStateManager: PlayerStateManager,
 ) : ViewModel() {
@@ -82,6 +81,9 @@ class IPodViewModel(
      * this flips (not on every 1 Hz tick), so the menu items list instance is stable across ticks.
      */
     private var lastHadNowPlaying = false
+
+    /** The signed-in user's id, resolved once per iPod session for the Liked Songs collection URI. */
+    private var cachedUserId: String? = null
 
     init {
         // Mirror the click-sounds setting into the UI state.
@@ -272,20 +274,35 @@ class IPodViewModel(
 
     private fun handleShuffleSongs() {
         viewModelScope.launch {
-            val userId = withContext(Dispatchers.IO) {
-                libraryCache.load()?.user?.id?.takeIf { it.isNotBlank() }
+            val userId = cachedUserId ?: resolveUserId().also { cachedUserId = it }
+            if (userId != null) {
+                _effects.send(IPodEffect.ShuffleContext("spotify:user:$userId:collection"))
             }
-            if (userId == null) return@launch // no cached user -- gap (see knownGaps)
-            _effects.send(IPodEffect.ShuffleContext("spotify:user:$userId:collection"))
-            // Push NowPlaying only if not already there (double-SELECT guard).
-            val state = _uiState.value
-            if (state.current.screen !is IPodScreen.NowPlaying) {
+            // The wheel has already clicked, so the LCD must move either way: with no user id
+            // Now Playing shows its empty state rather than the menu sitting inert.
+            if (_uiState.value.current.screen !is IPodScreen.NowPlaying) {
                 push(
                     IPodScreen.NowPlaying,
                     LcdLabel.Res(R.string.ipod_menu_now_playing),
                 )
             }
         }
+    }
+
+    /**
+     * Cache first (`LibraryCache.load()` parses the whole file, so once per session), then ONE
+     * network read behind the shared rate-limit gate — the cache has no user only before the
+     * Library has ever loaded.
+     */
+    private suspend fun resolveUserId(): String? {
+        val cached = withContext(Dispatchers.IO) {
+            libraryCache.load()?.user?.id?.takeIf { it.isNotBlank() }
+        }
+        if (cached != null) return cached
+        if (playerStateManager.isRateLimited()) return null
+        return repository.getCurrentUser()
+            .onFailure { if (it.message?.contains("429") == true) playerStateManager.noteRateLimited() }
+            .getOrNull()?.id?.takeIf { it.isNotBlank() }
     }
 
     // ── Settings ──────────────────────────────────────────────────────────────

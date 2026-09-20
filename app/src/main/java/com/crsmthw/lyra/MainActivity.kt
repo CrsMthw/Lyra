@@ -87,7 +87,9 @@ class MainActivity : ComponentActivity() {
             }
             splash.setKeepOnScreenCondition { !ipodFlagLoaded && !flagTimedOut }
 
-            // Deep link while in iPod mode: auto-exit so the normal funnel handles it.
+            // Deep link while in iPod mode: auto-exit so the normal funnel handles it. Safe to key
+            // on both because LyraNavGraph nulls the intent once it has acted on it
+            // (onDeepLinkConsumed) — so re-enabling iPod mode later cannot re-fire on a stale link.
             LaunchedEffect(pendingDeepLinkIntent, ipodEnabled) {
                 val intent = pendingDeepLinkIntent ?: return@LaunchedEffect
                 if (ipodEnabled == true && intent.action == Intent.ACTION_VIEW && intent.data != null) {
@@ -132,6 +134,7 @@ class MainActivity : ComponentActivity() {
                             LyraNavGraph(
                                 container             = container,
                                 pendingDeepLinkIntent = pendingDeepLinkIntent,
+                                onDeepLinkConsumed    = { pendingDeepLinkIntent = null },
                             )
                         // else: splash is still up, compose nothing
                     }

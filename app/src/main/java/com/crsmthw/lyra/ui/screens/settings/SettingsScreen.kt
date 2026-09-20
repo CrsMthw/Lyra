@@ -238,8 +238,8 @@ fun SettingsScreen(
                 // bottom sheet (style / resolution / dramatic peaks) to keep the main list tidy.
                 AnimatedVisibility(
                     visible = visualizerEnabled,
-                    enter   = fadeIn() + expandVertically(screenTransitionSpec<IntSize>()),
-                    exit    = shrinkVertically(screenTransitionSpec<IntSize>()) + fadeOut(),
+                    enter   = fadeIn(screenTransitionSpec()) + expandVertically(screenTransitionSpec<IntSize>()),
+                    exit    = shrinkVertically(screenTransitionSpec<IntSize>()) + fadeOut(screenTransitionSpec()),
                 ) {
                     SettingsItem(
                         icon     = Icons.Default.Tune,
@@ -329,8 +329,8 @@ fun SettingsScreen(
                 // iPod mode — appears after unlocking via 5-tap on the version line
                 AnimatedVisibility(
                     visible = ipodUnlocked,
-                    enter   = fadeIn() + expandVertically(screenTransitionSpec<IntSize>()),
-                    exit    = shrinkVertically(screenTransitionSpec<IntSize>()) + fadeOut(),
+                    enter   = fadeIn(screenTransitionSpec()) + expandVertically(screenTransitionSpec<IntSize>()),
+                    exit    = shrinkVertically(screenTransitionSpec<IntSize>()) + fadeOut(screenTransitionSpec()),
                 ) {
                     SettingsToggleItem(
                         icon            = Icons.Default.Album,
