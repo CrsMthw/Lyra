@@ -87,9 +87,10 @@ class IPodLibrary(
         val albums = mutableListOf<SpotifyAlbum>()
         var offset = 0
         var complete = false
+        var sweepError: Throwable? = null
         while (true) {
             val page = repository.getSavedAlbums(limit = 50, offset = offset)
-                .onFailure { noteIfRateLimited(it) }
+                .onFailure { noteIfRateLimited(it); sweepError = it }
                 .getOrNull() ?: break
             val items = page.items.orEmpty()
             albums += items.mapNotNull { it.album }
@@ -105,6 +106,9 @@ class IPodLibrary(
             }
             refreshCache()
         }
+        // Nothing at all came back and the sweep did not finish → a FAILURE the LCD can show
+        // ("Couldn't load"), never an empty list masquerading as "No Albums".
+        if (!complete && albums.isEmpty()) return Result.failure(sweepError ?: IllegalStateException("no page"))
         return Result.success(AlbumListResult(albums))
     }
 
@@ -154,9 +158,10 @@ class IPodLibrary(
         val artists = mutableListOf<SpotifyArtist>()
         var after: String? = null
         var complete = false
+        var sweepError: Throwable? = null
         while (true) {
             val page = repository.getFollowedArtists(after)
-                .onFailure { noteIfRateLimited(it) }
+                .onFailure { noteIfRateLimited(it); sweepError = it }
                 .getOrNull()?.artists ?: break
             val items = page.items.orEmpty()
             artists += items
@@ -170,6 +175,7 @@ class IPodLibrary(
             }
             refreshCache()
         }
+        if (!complete && artists.isEmpty()) return Result.failure(sweepError ?: IllegalStateException("no page"))
         return Result.success(ArtistListResult(artists))
     }
 
@@ -314,9 +320,10 @@ class IPodLibrary(
         val shows = mutableListOf<SpotifyShow>()
         var offset = 0
         var complete = false
+        var sweepError: Throwable? = null
         while (true) {
             val page = repository.getSavedShows(limit = 50, offset = offset)
-                .onFailure { noteIfRateLimited(it) }
+                .onFailure { noteIfRateLimited(it); sweepError = it }
                 .getOrNull() ?: break
             val items = page.items.orEmpty()
             shows += items.mapNotNull { it.show?.copy(episodes = null) }
@@ -330,6 +337,7 @@ class IPodLibrary(
             }
             refreshCache()
         }
+        if (!complete && shows.isEmpty()) return Result.failure(sweepError ?: IllegalStateException("no page"))
         return Result.success(ShowListResult(shows))
     }
 

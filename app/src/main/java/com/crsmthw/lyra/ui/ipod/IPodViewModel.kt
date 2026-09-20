@@ -42,6 +42,13 @@ import kotlinx.coroutines.withContext
 /** Milliseconds before a scrub gesture commits to a seek. */
 private const val SCRUB_COMMIT_MS = 350L
 
+/**
+ * After the seek is sent, the scrubbed position stays on the bar this long so the player's
+ * optimistic progress (set by PlayerStateManager.seekTo) has arrived before the bar reads it —
+ * clearing at once let the bar flick back to the old position for a frame.
+ */
+private const val SCRUB_RELEASE_MS = 300L
+
 /** Paging trigger: fetch more when the highlight is within this many rows of the end. */
 private const val PAGE_TRIGGER_ROWS = 8
 
@@ -120,6 +127,9 @@ class IPodViewModel(
     /** Scrub debounce job — cancelled and relaunched on every scrub step. */
     private var scrubJob: Job? = null
 
+    /** The uri the mirror last emitted — a change cancels any pending scrub commit. */
+    private var mirroredTrackUri: String? = null
+
     /** Guards against duplicate fetch launches for paged browse screens. */
     private val pagingInFlight = mutableSetOf<String>()
 
@@ -174,6 +184,7 @@ class IPodViewModel(
                     val posInList = if (sel != null && track.uri == sel.uri) sel.position else null
                     val listSize = if (posInList != null) sel?.listSize else null
                     LcdNowPlaying(
+                        uri = track.uri,
                         title = track.name,
                         artist = track.allArtists,
                         album = track.album?.name ?: track.show?.name ?: "",
@@ -188,11 +199,13 @@ class IPodViewModel(
                 .distinctUntilChanged()
                 .collect { np ->
                     _uiState.update { state ->
-                        // Carry forward scrub-in-progress from the old state so the 1 Hz tick
-                        // cannot stomp a scrub in progress.
+                        // Carry a scrub-in-progress across the 1 Hz tick — of the SAME track only.
+                        // A scrub belongs to one track; when the track changes (auto-advance, a
+                        // transport button) the position must not leak onto the new one.
                         val enriched = if (np != null) {
                             val old = state.nowPlaying
-                            np.copy(scrubProgressMs = old?.scrubProgressMs)
+                            val sameTrack = old != null && old.uri == np.uri
+                            np.copy(scrubProgressMs = if (sameTrack) old.scrubProgressMs else null)
                         } else {
                             null
                         }
@@ -204,6 +217,12 @@ class IPodViewModel(
                         } else {
                             state.copy(nowPlaying = enriched)
                         }
+                    }
+                    // A pending scrub commit dies with the track it was scrubbing.
+                    if (np?.uri != mirroredTrackUri) {
+                        mirroredTrackUri = np?.uri
+                        scrubJob?.cancel()
+                        scrubJob = null
                     }
                 }
         }
@@ -255,8 +274,9 @@ class IPodViewModel(
         // Side effects AFTER the update — never inside the CAS lambda.
         if (shouldPage) triggerPaging()
 
-        // If the last update produced a scrub, launch the debounce.
-        launchScrubCommitIfNeeded()
+        // The scrub debounce belongs to the Now Playing screen only — a detent on any list
+        // must never re-arm (or keep deferring) a seek.
+        if (_uiState.value.current.screen is IPodScreen.NowPlaying) launchScrubCommitIfNeeded()
     }
 
     /**
@@ -279,18 +299,53 @@ class IPodViewModel(
      * a new one. Called outside `_uiState.update` to avoid side effects in the CAS lambda.
      */
     private fun launchScrubCommitIfNeeded() {
-        val scrubMs = _uiState.value.nowPlaying?.scrubProgressMs ?: return
+        val np = _uiState.value.nowPlaying ?: return
+        if (np.scrubProgressMs == null) return
+        val trackUri = np.uri
         scrubJob?.cancel()
         scrubJob = viewModelScope.launch {
             delay(SCRUB_COMMIT_MS)
-            val currentDuration = _uiState.value.nowPlaying?.durationMs ?: return@launch
-            if (currentDuration <= 0) return@launch
-            _effects.send(IPodEffect.SeekTo(scrubMs.toFloat() / currentDuration.toFloat()))
-            // Clear scrubProgressMs so the bar tracks the real position again.
-            _uiState.update { s ->
-                val curNp = s.nowPlaying ?: return@update s
-                s.copy(nowPlaying = curNp.copy(scrubProgressMs = null))
-            }
+            commitScrub(trackUri)
+        }
+    }
+
+    /** Commit a pending scrub NOW (MENU or Play/Pause pressed while the debounce was running). */
+    private fun commitPendingScrubNow() {
+        val np = _uiState.value.nowPlaying ?: return
+        if (np.scrubProgressMs == null) return
+        scrubJob?.cancel()
+        scrubJob = viewModelScope.launch { commitScrub(np.uri) }
+    }
+
+    /**
+     * Seek to the scrubbed position. Value and duration come from ONE snapshot, and only if the
+     * track is still the one that was scrubbed — otherwise the scrub is dropped, never applied to
+     * whatever started playing since.
+     */
+    private suspend fun commitScrub(trackUri: String) {
+        val np = _uiState.value.nowPlaying
+        val scrubMs = np?.scrubProgressMs
+        if (np == null || scrubMs == null || np.uri != trackUri || np.durationMs <= 0) {
+            clearScrub()
+            return
+        }
+        _effects.send(IPodEffect.SeekTo(scrubMs.toFloat() / np.durationMs.toFloat()))
+        delay(SCRUB_RELEASE_MS)
+        _uiState.update { s ->
+            val cur = s.nowPlaying ?: return@update s
+            // A newer scrub owns the field now — leave it to its own commit.
+            if (cur.scrubProgressMs != scrubMs) return@update s
+            s.copy(nowPlaying = cur.copy(scrubProgressMs = null))
+        }
+    }
+
+    /** Drop any pending scrub without seeking (the track is about to change). */
+    private fun clearScrub() {
+        scrubJob?.cancel()
+        scrubJob = null
+        _uiState.update { s ->
+            val cur = s.nowPlaying ?: return@update s
+            if (cur.scrubProgressMs == null) s else s.copy(nowPlaying = cur.copy(scrubProgressMs = null))
         }
     }
 
@@ -298,13 +353,25 @@ class IPodViewModel(
         when (button) {
             WheelButton.MENU -> handleMenu()
             WheelButton.SELECT -> handleSelect()
-            WheelButton.PLAY_PAUSE -> viewModelScope.launch { _effects.send(IPodEffect.PlayPause) }
-            WheelButton.NEXT -> viewModelScope.launch { _effects.send(IPodEffect.Next) }
-            WheelButton.PREVIOUS -> viewModelScope.launch { _effects.send(IPodEffect.Previous) }
+            WheelButton.PLAY_PAUSE -> {
+                commitPendingScrubNow()
+                viewModelScope.launch { _effects.send(IPodEffect.PlayPause) }
+            }
+            WheelButton.NEXT -> {
+                clearScrub()
+                viewModelScope.launch { _effects.send(IPodEffect.Next) }
+            }
+            WheelButton.PREVIOUS -> {
+                clearScrub()
+                viewModelScope.launch { _effects.send(IPodEffect.Previous) }
+            }
         }
     }
 
     private fun handleMenu() {
+        val leavingNowPlaying = _uiState.value.let {
+            it.stack.size > 1 && it.current.screen is IPodScreen.NowPlaying
+        }
         _uiState.update { state ->
             if (state.stack.size <= 1) return@update state // root — do nothing
             // Pop without mutating the entry we return to — preserves its window exactly.
@@ -313,6 +380,9 @@ class IPodViewModel(
                 direction = LcdNavDirection.BACK,
             )
         }
+        // A scrub left half-done on the way out is applied, not forgotten — and it can never
+        // be re-armed from a list, so this is its last chance.
+        if (leavingNowPlaying) commitPendingScrubNow()
     }
 
     private fun handleSelect() {
@@ -409,7 +479,11 @@ class IPodViewModel(
         viewModelScope.launch {
             library.savedAlbums().fold(
                 onSuccess = { result ->
-                    val items = result.albums.map { album ->
+                    val items = result.albums.mapNotNull { album ->
+                        // Gson allocates via Unsafe: a "non-null" id / name can still arrive null.
+                        @Suppress("SENSELESS_COMPARISON")
+                        val usable = album.id != null && album.name != null
+                        if (!usable) return@mapNotNull null
                         LcdItem(
                             id = album.id,
                             title = LcdLabel.Text(album.name),
@@ -470,7 +544,10 @@ class IPodViewModel(
                 IPodEffect.PlayTrack(
                     uri = item.id,
                     contextUri = screen.albumUri,
-                    index = index,
+                    // No index: it would be this FILTERED list's position, and the App Remote
+                    // fallback would skipToIndex into the real context with it. The Web API path
+                    // positions by uri; the fallback plays the uri itself.
+                    index = null,
                     shuffle = false,
                 ),
             )
@@ -492,7 +569,10 @@ class IPodViewModel(
         viewModelScope.launch {
             library.followedArtists().fold(
                 onSuccess = { result ->
-                    val items = result.artists.map { artist ->
+                    val items = result.artists.mapNotNull { artist ->
+                        @Suppress("SENSELESS_COMPARISON")
+                        val usable = artist.id != null && artist.name != null
+                        if (!usable) return@mapNotNull null
                         LcdItem(
                             id = artist.id,
                             title = LcdLabel.Text(artist.name),
@@ -616,9 +696,24 @@ class IPodViewModel(
             library.playlistTracks(playlistId, offset).fold(
                 onSuccess = { result ->
                     nextOffsetByKey[key] = result.nextOffset
+                    // Row ids are "uri#occurrence" (the project's playlist-row convention): a
+                    // playlist may hold the same track twice, and a bare-uri id would let the
+                    // page-boundary de-dupe drop the second copy.
+                    val occurrences = HashMap<String, Int>()
+                    if (offset != 0) {
+                        val top = _uiState.value.current
+                        if (top.screen == IPodScreen.PlaylistTracks(playlistId, playlistUri)) {
+                            for (row in top.list.items) {
+                                val u = row.id.substringBefore('#')
+                                occurrences[u] = (occurrences[u] ?: 0) + 1
+                            }
+                        }
+                    }
                     val newItems = result.tracks.map { track ->
+                        val n = occurrences[track.uri] ?: 0
+                        occurrences[track.uri] = n + 1
                         LcdItem(
-                            id = track.uri,
+                            id = "${track.uri}#$n",
                             title = LcdLabel.Text(track.name),
                             subtitle = LcdLabel.Text(track.allArtists),
                         )
@@ -649,13 +744,16 @@ class IPodViewModel(
         index: Int,
         listSize: Int,
     ) {
-        rememberSelection(item.id, index, listSize)
+        val trackUri = item.id.substringBefore('#')   // rows are "uri#occurrence"
+        rememberSelection(trackUri, index, listSize)
         viewModelScope.launch {
             _effects.send(
                 IPodEffect.PlayTrack(
-                    uri = item.id,
+                    uri = trackUri,
                     contextUri = screen.playlistUri,
-                    index = index,
+                    // No index — see activateAlbumTrackItem: a filtered-list position must never
+                    // reach skipToIndex (playlists also hide episodes and unplayable tracks).
+                    index = null,
                     shuffle = false,
                 ),
             )

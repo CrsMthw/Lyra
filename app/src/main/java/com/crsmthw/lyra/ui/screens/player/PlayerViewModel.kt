@@ -765,6 +765,7 @@ class PlayerViewModel(
                     playerStateManager.fetchOnce()
                     if (!playerStateManager.state.value.shuffleEnabled) {
                         repository.setShuffle(true)
+                            .onFailure { if (it.isRateLimited()) playerStateManager.noteRateLimited() }
                     }
                 },
                 onFailure = { e ->
@@ -772,7 +773,12 @@ class PlayerViewModel(
                         // The Web API is unreachable — go through App Remote for everything.
                         remoteManager.setShuffle(true)
                         delay(REMOTE_SHUFFLE_SETTLE_MS)
-                        remoteManager.connectAndPlay(contextUri)
+                        val sdkSuccess = remoteManager.connectAndPlay(contextUri)
+                        if (!sdkSuccess) {
+                            // A failed bind must not leave a 5 s "playing" lock with nothing playing.
+                            playerStateManager.releasePlayingOptimism()
+                            _uiState.update { it.copy(error = "Couldn't connect to Spotify", isPlaying = false) }
+                        }
                     } else {
                         if (e.isRateLimited()) playerStateManager.noteRateLimited()
                         playerStateManager.releasePlayingOptimism()

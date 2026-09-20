@@ -104,6 +104,8 @@ enum class LcdNavDirection { NONE, FORWARD, BACK }
 /** The now-playing mirror the LCD renders (status-bar indicator + the Now Playing screen). */
 @Immutable
 data class LcdNowPlaying(
+    /** The playing item's uri — the identity a scrub belongs to. */
+    val uri: String = "",
     val title: String,
     val artist: String,
     val album: String,
