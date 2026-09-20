@@ -1,6 +1,7 @@
 package com.crsmthw.lyra.ui.ipod
 
 import com.crsmthw.lyra.R
+import com.crsmthw.lyra.data.local.CachedTrackList
 import com.crsmthw.lyra.data.local.LibraryCache
 import com.crsmthw.lyra.data.local.LibraryCacheData
 import com.crsmthw.lyra.data.player.PlayerStateManager
@@ -11,6 +12,7 @@ import com.crsmthw.lyra.data.remote.model.SpotifyArtist
 import com.crsmthw.lyra.data.remote.model.SpotifyEpisode
 import com.crsmthw.lyra.data.remote.model.SpotifyPlaylist
 import com.crsmthw.lyra.data.remote.model.SpotifyShow
+import com.crsmthw.lyra.data.remote.model.SpotifyTrack
 import com.crsmthw.lyra.data.remote.model.SpotifyUser
 import com.crsmthw.lyra.data.repository.SpotifyRepository
 import com.crsmthw.lyra.ui.ipod.nav.LcdLabel
@@ -277,6 +279,7 @@ class IPodLibrary(
                         tracks = items,
                         hasMore = nextOffset != null,
                         nextOffset = nextOffset ?: 0,
+                        fromCache = true,
                     ),
                 )
             }
@@ -298,6 +301,85 @@ class IPodLibrary(
                     nextOffset = offset + response.rawCount,
                 )
             }
+    }
+
+    // ── Reconcile (what the Library does after showing a cached list) ────────
+
+    /**
+     * Liked Songs: one `limit = 1` call for the server's total. New songs (a difference of 1..200)
+     * are fetched newest-first and PREPENDED; a shrink or a bigger jump replaces the list with a
+     * fresh first page, as `LibraryViewModel.selectLikedSongs` does. Writes the result back to the
+     * shared cache under the new total. Returns the new full list, or null when nothing changed
+     * (or the network was unavailable — the cache stays on screen).
+     */
+    suspend fun reconcileLikedSongs(cached: CachedTrackList?): List<SpotifyTrack>? {
+        if (checkRateLimit().isFailure) return null
+        val cachedTracks = cached?.tracks?.distinctBy { it.id } ?: emptyList()
+        val cachedCount = cached?.snapshotId?.toIntOrNull() ?: cachedTracks.size
+        val total = repository.getLikedSongs(limit = 1)
+            .onFailure { noteIfRateLimited(it) }
+            .getOrNull()?.total ?: return null
+        val diff = total - cachedCount
+        if (diff == 0 && cachedTracks.isNotEmpty()) return null
+
+        val merged: List<SpotifyTrack> = if (diff in 1..200) {
+            // Newest first, in pages of 50, until `diff` slots have been read.
+            val fresh = mutableListOf<SpotifyTrack>()
+            var offset = 0
+            while (offset < diff) {
+                val page = repository.getLikedSongs(limit = minOf(50, diff - offset), offset = offset)
+                    .onFailure { noteIfRateLimited(it) }
+                    .getOrNull() ?: return null
+                fresh += (page.items ?: emptyList()).mapNotNull { it.track }.filter { it.isPlayable != false }
+                if (page.rawCount == 0) break
+                offset += page.rawCount
+            }
+            (fresh + cachedTracks).distinctBy { it.id }
+        } else {
+            // Shrunk, or jumped by more than we chase: start over with a fresh first page (the
+            // background fetcher and the Library's paging refill the rest).
+            val page = repository.getLikedSongs(limit = 50, offset = 0)
+                .onFailure { noteIfRateLimited(it) }
+                .getOrNull() ?: return null
+            (page.items ?: emptyList()).mapNotNull { it.track }.filter { it.isPlayable != false }
+        }
+        withContext(Dispatchers.IO) {
+            libraryCache.saveTrackList(LibraryCache.LIKED_SONGS_KEY, total.toString(), merged)
+        }
+        return merged
+    }
+
+    /**
+     * A playlist shown from the cache: fetch a fresh first page (one call — `getPlaylistTracks` at
+     * offset 0 is the playlist object with its first page embedded) and compare it with the cached
+     * first page. Same uris in the same order → null (unchanged). Otherwise the fresh page replaces
+     * the cached list (`rawOffset` = its raw size, so paging continues from there) and is returned.
+     */
+    suspend fun reconcilePlaylist(playlistId: String, cachedUris: List<String>): PlaylistTracksResult? {
+        if (checkRateLimit().isFailure) return null
+        val response = repository.getPlaylistTracks(playlistId, limit = 50, offset = 0)
+            .onFailure { noteIfRateLimited(it) }
+            .getOrNull() ?: return null
+        val tracks = response.items
+            ?.mapNotNull { it.resolvedTrack }
+            ?.filter { it.isPlayable != false }
+            ?: emptyList()
+        val freshUris = tracks.map { it.uri }
+        val sameStart = freshUris == cachedUris.take(freshUris.size)
+        val sameLength = response.next != null || cachedUris.size == freshUris.size
+        if (sameStart && sameLength) return null
+
+        val existing = withContext(Dispatchers.IO) { libraryCache.loadTrackList(playlistId) }
+        withContext(Dispatchers.IO) {
+            // The snapshot id stays whatever the cache held: the Library compares it against the
+            // playlist list's snapshot and simply refetches on a mismatch — one harmless extra call.
+            libraryCache.saveTrackList(playlistId, existing?.snapshotId ?: "", tracks, response.rawCount)
+        }
+        return PlaylistTracksResult(
+            tracks = tracks.map { PlaylistTrackItem(uri = it.uri, name = it.name, allArtists = it.allArtists) },
+            hasMore = response.next != null && tracks.isNotEmpty(),
+            nextOffset = response.rawCount,
+        )
     }
 
     // ── Followed shows ───────────────────────────────────────────────────────

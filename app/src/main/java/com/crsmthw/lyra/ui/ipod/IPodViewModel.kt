@@ -551,23 +551,24 @@ class IPodViewModel(
             loading = true,
         )
         viewModelScope.launch {
-            val tracks = withContext(Dispatchers.IO) {
+            val cached = withContext(Dispatchers.IO) {
                 libraryCache.loadTrackList(LibraryCache.LIKED_SONGS_KEY)
             }
-            val items = tracks?.tracks
-                ?.distinctBy { it.uri }
-                ?.map { track ->
-                    LcdItem(
-                        id = track.uri,
-                        title = LcdLabel.Text(track.name),
-                        subtitle = LcdLabel.Text(track.allArtists),
-                    )
-                }
-                ?: emptyList()
+            replaceTopItems(IPodScreen.Music, cached?.tracks.orEmpty().distinctBy { it.uri }.map(::likedRow))
 
-            replaceTopItems(IPodScreen.Music, items)
+            // Then reconcile exactly as the Library does when it opens Liked Songs: one count
+            // call, new songs prepended, the cache updated — so what you liked since last time
+            // appears here without a detour through the normal UI.
+            val merged = library.reconcileLikedSongs(cached) ?: return@launch
+            retopItemsPreservingHighlight(IPodScreen.Music, merged.distinctBy { it.uri }.map(::likedRow))
         }
     }
+
+    private fun likedRow(track: com.crsmthw.lyra.data.remote.model.SpotifyTrack) = LcdItem(
+        id = track.uri,
+        title = LcdLabel.Text(track.name),
+        subtitle = LcdLabel.Text(track.allArtists),
+    )
 
     private fun activateMusicItem(item: LcdItem, index: Int, items: List<LcdItem>) {
         rememberSelection(item.id, index, items.map { it.id })
@@ -836,6 +837,10 @@ class IPodViewModel(
                         result.hasMore,
                         isFirstPage = offset == 0,
                     )
+                    // A cached first page is shown at once, then checked against a fresh one.
+                    if (offset == 0 && result.fromCache) {
+                        reconcilePlaylistRows(playlistId, playlistUri, result.tracks.map { it.uri }, key)
+                    }
                 },
                 onFailure = {
                     if (offset == 0) {
@@ -1222,6 +1227,52 @@ class IPodViewModel(
                     selectedIndex = sel,
                     firstVisibleIndex = first,
                     hasMore = hasMore,
+                ),
+            )
+        }
+    }
+
+    /** Fresh first page for a playlist shown from the cache; replaces the rows if it differs. */
+    private fun reconcilePlaylistRows(playlistId: String, playlistUri: String, cachedUris: List<String>, key: String) {
+        viewModelScope.launch {
+            val fresh = library.reconcilePlaylist(playlistId, cachedUris) ?: return@launch
+            nextOffsetByKey[key] = fresh.nextOffset
+            val occurrences = HashMap<String, Int>()
+            val rows = fresh.tracks.map { track ->
+                val n = occurrences[track.uri] ?: 0
+                occurrences[track.uri] = n + 1
+                LcdItem(
+                    id = "${track.uri}#$n",
+                    title = LcdLabel.Text(track.name),
+                    subtitle = LcdLabel.Text(track.allArtists),
+                )
+            }
+            retopItemsPreservingHighlight(IPodScreen.PlaylistTracks(playlistId, playlistUri), rows, hasMore = fresh.hasMore)
+        }
+    }
+
+    /**
+     * Replace the top entry's rows while keeping the highlight on the same row id and the window
+     * moving with it — a reconcile that prepends new songs must not yank the list under the user.
+     */
+    private fun retopItemsPreservingHighlight(expectedScreen: IPodScreen, items: List<LcdItem>, hasMore: Boolean? = null) {
+        updateTopEntry(expectedScreen) { entry ->
+            val visibleRows = computeVisibleRows(items)
+            val oldSelectedId = entry.list.items.getOrNull(entry.list.selectedIndex)?.id
+            val newSelected = oldSelectedId?.let { id -> items.indexOfFirst { it.id == id } }
+                ?.takeIf { it >= 0 }
+                ?: entry.list.selectedIndex.coerceIn(0, maxOf(0, items.lastIndex))
+            val delta = newSelected - entry.list.selectedIndex
+            val first = (entry.list.firstVisibleIndex + delta).coerceIn(0, maxOf(0, items.size - visibleRows))
+            entry.copy(
+                list = entry.list.copy(
+                    items = items,
+                    isLoading = false,
+                    error = null,
+                    visibleRows = visibleRows,
+                    selectedIndex = newSelected,
+                    firstVisibleIndex = first,
+                    hasMore = hasMore ?: entry.list.hasMore,
                 ),
             )
         }
