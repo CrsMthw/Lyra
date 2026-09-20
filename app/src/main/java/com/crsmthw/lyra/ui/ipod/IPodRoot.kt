@@ -167,7 +167,7 @@ fun IPodRoot(container: AppContainer, modifier: Modifier = Modifier) {
     // ── Click sounds ────────────────────────────────────────────────────────
     val sounds = remember { ClickSounds(context) }
     DisposableEffect(sounds) { onDispose { sounds.release() } }
-    SideEffect { sounds.enabled = state.clickSoundsEnabled }
+    SideEffect { sounds.configure(state.clickSounds) }
 
     // ── Exit dialog ─────────────────────────────────────────────────────────
     var showExitDialog by remember { mutableStateOf(false) }

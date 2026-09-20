@@ -99,6 +99,14 @@ class LyraDataStore(private val context: Context) {
     val ipodClickSounds: Flow<Boolean> = context.dataStore.data.map { prefs ->
         prefs[Keys.IPOD_CLICK_SOUNDS] ?: true
     }
+    /** 0..100, default 50 — the first clicker was too loud on the Fold. */
+    val ipodClickVolume: Flow<Int> = context.dataStore.data.map { prefs ->
+        prefs[Keys.IPOD_CLICK_VOLUME] ?: 50
+    }
+    /** ClickPitch ordinal: 0 low, 1 medium (default), 2 high. */
+    val ipodClickPitch: Flow<Int> = context.dataStore.data.map { prefs ->
+        prefs[Keys.IPOD_CLICK_PITCH] ?: 1
+    }
 
     // ── Writes ──────────────────────────────────────────────────────────────
 
@@ -170,6 +178,14 @@ class LyraDataStore(private val context: Context) {
         context.dataStore.edit { it[Keys.IPOD_CLICK_SOUNDS] = enabled }
     }
 
+    suspend fun setIpodClickVolume(percent: Int) {
+        context.dataStore.edit { it[Keys.IPOD_CLICK_VOLUME] = percent.coerceIn(0, 100) }
+    }
+
+    suspend fun setIpodClickPitch(ordinal: Int) {
+        context.dataStore.edit { it[Keys.IPOD_CLICK_PITCH] = ordinal }
+    }
+
     // ── Keys ────────────────────────────────────────────────────────────────
 
     private object Keys {
@@ -191,5 +207,7 @@ class LyraDataStore(private val context: Context) {
         val IPOD_UNLOCKED       = booleanPreferencesKey("ipod_unlocked")
         val IPOD_ENABLED        = booleanPreferencesKey("ipod_enabled")
         val IPOD_CLICK_SOUNDS   = booleanPreferencesKey("ipod_click_sounds")
+        val IPOD_CLICK_VOLUME   = intPreferencesKey("ipod_click_volume")
+        val IPOD_CLICK_PITCH    = intPreferencesKey("ipod_click_pitch")
     }
 }

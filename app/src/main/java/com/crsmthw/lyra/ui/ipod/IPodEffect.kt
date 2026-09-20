@@ -7,17 +7,24 @@ package com.crsmthw.lyra.ui.ipod
  * iPod's own settings) stays inside the ViewModel.
  */
 sealed interface IPodEffect {
-    /** → PlayerViewModel.playTrack(uri, contextUri, uris, index, startPositionMs). */
+    /**
+     * → PlayerViewModel.playTrack(uri, contextUri, uris, index, startPositionMs, shuffle).
+     * [shuffle] = false means "the user picked THIS song, so turn shuffle off first" — with shuffle
+     * left on, Spotify starts a uris body at a random entry (the "tapped one song, got another"
+     * bug). null leaves the device's shuffle state alone; Shuffle Songs is the only path that turns
+     * it on, through [ShuffleContext].
+     */
     data class PlayTrack(
         val uri: String,
         val contextUri: String? = null,
         val uris: List<String>? = null,
         val index: Int? = null,
         val startPositionMs: Long? = null,
+        val shuffle: Boolean? = false,
     ) : IPodEffect
 
-    /** → PlayerViewModel.playFromLikedSongs(uri) — the cached-uris path Liked Songs uses. */
-    data class PlayLikedSong(val uri: String) : IPodEffect
+    /** → PlayerViewModel.playFromLikedSongs(uri, shuffle) — the cached-uris path Liked Songs uses. */
+    data class PlayLikedSong(val uri: String, val shuffle: Boolean? = false) : IPodEffect
 
     /** → PlayerViewModel.shuffleContext(contextUri) — shuffle on, then play the context. */
     data class ShuffleContext(val contextUri: String) : IPodEffect

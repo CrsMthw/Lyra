@@ -80,9 +80,19 @@ object IPodDimens {
     const val LcdAspect = 4f / 3f
     val LcdBezelWidth   = 10.dp
     val LcdCornerRadius = 6.dp
-    /** Wheel diameter as a fraction of the body width; centre button as a fraction of the wheel. */
+    /** Wheel diameter as a fraction of the body width. */
     const val WheelDiameterFraction = 0.78f
-    const val CenterButtonFraction  = 0.36f
+    /**
+     * Centre button DIAMETER as a fraction of the wheel DIAMETER (a real Classic's is ~0.38).
+     * Radius = wheelRadius * CenterButtonFraction — NOT halved again (the first build did, and
+     * shipped a centre button half the size it should be).
+     */
+    const val CenterButtonFraction  = 0.38f
+    /**
+     * The LCD may take at most this fraction of the body HEIGHT. On a tall phone the width wins and
+     * the cap is never reached; on a near-square (unfolded) window it keeps the wheel its room.
+     */
+    const val LcdMaxHeightFraction  = 0.46f
     /** Menu push/pop slide — the spec's 200–250 ms; finite, never a spring. */
     const val LcdSlideMillis = 220
 }

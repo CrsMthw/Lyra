@@ -331,7 +331,19 @@
     <string name="ipod_list_empty">No %1$s</string>
     <string name="ipod_list_loading">Loading…</string>
     <string name="ipod_list_error">Couldn\'t load %1$s</string>
+    <string name="ipod_settings_click_volume">Click Volume</string>
+    <string name="ipod_settings_click_pitch">Click Pitch</string>
+    <string name="ipod_value_percent">%1$d%%</string>
+    <string name="ipod_value_low">Low</string>
+    <string name="ipod_value_medium">Medium</string>
+    <string name="ipod_value_high">High</string>
+    <string name="ipod_now_playing_position">%1$d of %2$d</string>
+    <string name="ipod_now_playing_remaining">-%1$s</string>
     <!-- (end shared) -->
+
+
+    <!-- iPod: ViewModel + data (lane: vm) -->
+    <!-- (end vm) -->
 
 
     <!-- iPod: shell + Settings row (lane: shell) -->

@@ -60,6 +60,14 @@ class ClickSounds(context: Context) {
         if (id != 0) pool.play(id, 1f, 1f, 1, 0, 1f)
     }
 
+    /**
+     * Apply the iPod's clicker settings: enabled, volume (0..100) and pitch (a playback rate).
+     * STUB for volume/pitch — the wheel lane implements; `enabled` is honoured already.
+     */
+    fun configure(config: ClickSoundsConfig) {
+        enabled = config.enabled
+    }
+
     /** Release the pool. Further calls to [tick]/[select] are silent no-ops. */
     fun release() {
         if (released) return

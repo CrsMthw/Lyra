@@ -2,6 +2,7 @@ package com.crsmthw.lyra.ui.ipod.nav
 
 import androidx.annotation.StringRes
 import androidx.compose.runtime.Immutable
+import com.crsmthw.lyra.ui.ipod.wheel.ClickSoundsConfig
 
 /**
  * Every screen the iPod's LCD can show. The back stack is a list of [IPodStackEntry]; MENU pops,
@@ -58,10 +59,24 @@ data class LcdItem(
     val hasSubmenu: Boolean = false,
 )
 
+/** Rows the LCD shows for a list of single-line items (menus) and of two-line items (songs). */
+const val LCD_ROWS_SINGLE_LINE = 9
+const val LCD_ROWS_TWO_LINE = 6
+
 @Immutable
 data class LcdListState(
     val items: List<LcdItem> = emptyList(),
     val selectedIndex: Int = 0,
+    /**
+     * Index of the row at the TOP of the visible window. The ViewModel maintains it with the
+     * Classic rule (selection past the bottom row → it becomes the bottom row; above the top → the
+     * top row; otherwise unchanged), so the LCD renders the right window in the SAME frame as the
+     * selection change (no flash) and a MENU pop restores exactly the window the user left.
+     * The LCD never scrolls on its own: it draws rows [firstVisibleIndex, +visibleRows).
+     */
+    val firstVisibleIndex: Int = 0,
+    /** [LCD_ROWS_SINGLE_LINE] or [LCD_ROWS_TWO_LINE], decided by the ViewModel when it builds the list. */
+    val visibleRows: Int = LCD_ROWS_SINGLE_LINE,
     val isLoading: Boolean = false,
     val error: LcdLabel? = null,
     /** More pages exist server-side; the ViewModel fetches them as the highlight nears the end. */
@@ -91,6 +106,9 @@ data class LcdNowPlaying(
     val durationMs: Long,
     /** Non-null while the wheel is scrubbing; the bar shows this instead of [progressMs]. */
     val scrubProgressMs: Long? = null,
+    /** "N of M" under the album name, known only while the playing track is the one the user picked from a list. */
+    val positionInList: Int? = null,
+    val listSize: Int? = null,
 )
 
 @Immutable
@@ -99,7 +117,7 @@ data class IPodUiState(
     val stack: List<IPodStackEntry>,
     val direction: LcdNavDirection = LcdNavDirection.NONE,
     val nowPlaying: LcdNowPlaying? = null,
-    val clickSoundsEnabled: Boolean = true,
+    val clickSounds: ClickSoundsConfig = ClickSoundsConfig(),
 ) {
     val current: IPodStackEntry get() = stack.last()
 }

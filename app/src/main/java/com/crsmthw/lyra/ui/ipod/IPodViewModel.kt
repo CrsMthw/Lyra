@@ -90,7 +90,7 @@ class IPodViewModel(
         viewModelScope.launch {
             settingsRepository.ipodClickSounds.collect { enabled ->
                 _uiState.update { state ->
-                    val newState = state.copy(clickSoundsEnabled = enabled)
+                    val newState = state.copy(clickSounds = state.clickSounds.copy(enabled = enabled))
                     // If the Settings screen is on top, rebuild its rows with the new value.
                     val top = newState.stack.lastOrNull()
                     if (top?.screen is IPodScreen.Settings) {
@@ -308,7 +308,7 @@ class IPodViewModel(
     // ── Settings ──────────────────────────────────────────────────────────────
 
     private fun pushSettings() {
-        val clickSounds = _uiState.value.clickSoundsEnabled
+        val clickSounds = _uiState.value.clickSounds.enabled
         push(
             screen = IPodScreen.Settings,
             title = LcdLabel.Res(R.string.ipod_menu_settings),
@@ -319,7 +319,7 @@ class IPodViewModel(
     private fun activateSettingsItem(id: String) {
         when (id) {
             "clicksounds" -> {
-                val current = _uiState.value.clickSoundsEnabled
+                val current = _uiState.value.clickSounds.enabled
                 viewModelScope.launch { settingsRepository.setIpodClickSounds(!current) }
                 // The flow collector above rebuilds the row's value.
             }
