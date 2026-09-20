@@ -365,6 +365,18 @@ class PlayerStateManager(
         }
     }
 
+    /** Sets repeat to an explicit state ("off" / "context" / "track") — the iPod's repeat bar. */
+    fun setRepeat(state: String) {
+        lockRepeat()
+        _state.update { it.copy(repeatState = state) }
+        val sdkMode = when (state) { "context" -> 1; "track" -> 2; else -> 0 }
+        scope.launch {
+            repository.setRepeat(state).onFailure { e ->
+                if (e.message?.contains("404") == true) remoteManager.setRepeat(sdkMode)
+            }
+        }
+    }
+
     // ── Sleep timer ───────────────────────────────────────────────────────────
 
     fun setSleepTimer(minutes: Int) {

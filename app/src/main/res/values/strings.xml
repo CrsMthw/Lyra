@@ -342,6 +342,10 @@
     <string name="ipod_settings_color">Color</string>
     <string name="ipod_value_silver">Silver</string>
     <string name="ipod_value_black">Black</string>
+    <string name="ipod_np_shuffle">Shuffle</string>
+    <string name="ipod_np_repeat">Repeat</string>
+    <string name="ipod_value_all">All</string>
+    <string name="ipod_value_one">One</string>
     <!-- (end shared) -->
 
 

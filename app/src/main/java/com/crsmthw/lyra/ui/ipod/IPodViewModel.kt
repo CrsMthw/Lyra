@@ -1,5 +1,7 @@
 package com.crsmthw.lyra.ui.ipod
 
+import android.content.Context
+import android.media.AudioManager
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -19,6 +21,8 @@ import com.crsmthw.lyra.ui.ipod.nav.LcdLabel
 import com.crsmthw.lyra.ui.ipod.nav.LcdListState
 import com.crsmthw.lyra.ui.ipod.nav.LcdNavDirection
 import com.crsmthw.lyra.ui.ipod.nav.LcdNowPlaying
+import com.crsmthw.lyra.ui.ipod.nav.LcdRepeat
+import com.crsmthw.lyra.ui.ipod.nav.NowPlayingMode
 import com.crsmthw.lyra.ui.ipod.wheel.ClickPitch
 import com.crsmthw.lyra.ui.ipod.wheel.ClickSoundsConfig
 import com.crsmthw.lyra.ui.ipod.wheel.WheelButton
@@ -88,6 +92,8 @@ class IPodViewModel(
     private val libraryCache: LibraryCache,
     private val repository: SpotifyRepository,
     private val playerStateManager: PlayerStateManager,
+    /** Application-context AudioManager — the Now Playing volume bar drives Android's media stream. */
+    private val audioManager: AudioManager?,
 ) : ViewModel() {
 
     private val library = IPodLibrary(libraryCache, repository, playerStateManager)
@@ -193,6 +199,12 @@ class IPodViewModel(
                         durationMs = ps.durationMs,
                         positionInList = posInList,
                         listSize = listSize,
+                        shuffleEnabled = ps.shuffleEnabled,
+                        repeat = when (ps.repeatState) {
+                            "context" -> LcdRepeat.ALL
+                            "track" -> LcdRepeat.ONE
+                            else -> LcdRepeat.OFF
+                        },
                     )
                 }
                 .distinctUntilChanged()
@@ -204,7 +216,14 @@ class IPodViewModel(
                         val enriched = if (np != null) {
                             val old = state.nowPlaying
                             val sameTrack = old != null && old.uri == np.uri
-                            np.copy(scrubProgressMs = if (sameTrack) old.scrubProgressMs else null)
+                            // The bar mode outlives the track; the volume is re-read while its bar shows
+                            // so a hardware-key change reaches the LCD within a tick.
+                            val mode = old?.mode ?: NowPlayingMode.SCRUB
+                            np.copy(
+                                scrubProgressMs = if (sameTrack) old.scrubProgressMs else null,
+                                mode = mode,
+                                volumePercent = if (mode == NowPlayingMode.VOLUME) readVolumePercent() else (old?.volumePercent ?: 0),
+                            )
                         } else {
                             null
                         }
@@ -243,14 +262,40 @@ class IPodViewModel(
     private fun handleScroll(steps: Int): Boolean {
         var shouldPage = false
         var moved = false
+        var pendingEffect: IPodEffect? = null
         _uiState.update { state ->
             moved = false   // reset per attempt: the CAS lambda can re-run under contention
+            pendingEffect = null
             val top = state.current
             if (top.screen is IPodScreen.NowPlaying) {
-                // Scrub: scroll on Now Playing adjusts the playback position.
-                val scrubbed = computeScrub(state, steps)
-                moved = scrubbed !== state
-                return@update scrubbed
+                // The wheel drives whatever bar is showing: position, media volume, shuffle, repeat.
+                val np = state.nowPlaying ?: return@update state
+                val next = when (np.mode) {
+                    NowPlayingMode.SCRUB -> computeScrub(state, steps)
+                    NowPlayingMode.VOLUME -> computeVolume(state, steps)
+                    NowPlayingMode.SHUFFLE -> {
+                        val target = steps > 0   // clockwise = on, counter-clockwise = off
+                        if (target == np.shuffleEnabled) {
+                            state
+                        } else {
+                            pendingEffect = IPodEffect.SetShuffle(target)
+                            state.copy(nowPlaying = np.copy(shuffleEnabled = target))
+                        }
+                    }
+                    NowPlayingMode.REPEAT -> {
+                        // Off → All → One, clockwise; back again counter-clockwise; silent at the ends.
+                        val idx = (np.repeat.ordinal + (if (steps > 0) 1 else -1)).coerceIn(0, LcdRepeat.entries.lastIndex)
+                        val target = LcdRepeat.entries[idx]
+                        if (target == np.repeat) {
+                            state
+                        } else {
+                            pendingEffect = IPodEffect.SetRepeat(target.spotifyState())
+                            state.copy(nowPlaying = np.copy(repeat = target))
+                        }
+                    }
+                }
+                moved = next !== state
+                return@update next
             }
             val items = top.list.items
             if (items.isEmpty()) return@update state
@@ -281,11 +326,57 @@ class IPodViewModel(
 
         // Side effects AFTER the update — never inside the CAS lambda.
         if (shouldPage) triggerPaging()
+        pendingEffect?.let { effect -> viewModelScope.launch { _effects.send(effect) } }
 
         // The scrub debounce belongs to the Now Playing screen only — a detent on any list
         // must never re-arm (or keep deferring) a seek.
         if (_uiState.value.current.screen is IPodScreen.NowPlaying) launchScrubCommitIfNeeded()
         return moved
+    }
+
+    private fun LcdRepeat.spotifyState(): String = when (this) {
+        LcdRepeat.OFF -> "off"
+        LcdRepeat.ALL -> "context"
+        LcdRepeat.ONE -> "track"
+    }
+
+    /** Android media volume as 0..100, or 0 without an AudioManager. */
+    private fun readVolumePercent(): Int {
+        val am = audioManager ?: return 0
+        val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        if (max <= 0) return 0
+        return am.getStreamVolume(AudioManager.STREAM_MUSIC) * 100 / max
+    }
+
+    /**
+     * One wheel detent on the volume bar = one Android media-volume step. Returns the same state at
+     * the ends so the wheel stays silent there. (The set is idempotent, so a CAS re-run is harmless.)
+     */
+    private fun computeVolume(state: IPodUiState, steps: Int): IPodUiState {
+        val am = audioManager ?: return state
+        val np = state.nowPlaying ?: return state
+        val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        if (max <= 0) return state
+        val current = am.getStreamVolume(AudioManager.STREAM_MUSIC)
+        val target = (current + steps).coerceIn(0, max)
+        if (target == current) return state
+        am.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0)
+        return state.copy(nowPlaying = np.copy(volumePercent = target * 100 / max))
+    }
+
+    /** SELECT on Now Playing: scrubber → volume → shuffle → repeat → scrubber. */
+    private fun cycleNowPlayingMode() {
+        commitPendingScrubNow()
+        _uiState.update { state ->
+            val np = state.nowPlaying ?: return@update state
+            val next = NowPlayingMode.entries[(np.mode.ordinal + 1) % NowPlayingMode.entries.size]
+            state.copy(
+                nowPlaying = np.copy(
+                    mode = next,
+                    volumePercent = if (next == NowPlayingMode.VOLUME) readVolumePercent() else np.volumePercent,
+                ),
+            )
+        }
     }
 
     /**
@@ -388,6 +479,13 @@ class IPodViewModel(
             state.copy(
                 stack = state.stack.dropLast(1),
                 direction = LcdNavDirection.BACK,
+                // Leaving Now Playing puts the bar back to the scrubber (the Classic does the same
+                // after a moment), so the next visit starts where the wheel is expected to scrub.
+                nowPlaying = if (state.current.screen is IPodScreen.NowPlaying) {
+                    state.nowPlaying?.copy(mode = NowPlayingMode.SCRUB)
+                } else {
+                    state.nowPlaying
+                },
             )
         }
         // A scrub left half-done on the way out is applied, not forgotten — and it can never
@@ -398,6 +496,10 @@ class IPodViewModel(
     private fun handleSelect() {
         val state = _uiState.value
         val top = state.current
+        if (top.screen is IPodScreen.NowPlaying) {
+            cycleNowPlayingMode()
+            return
+        }
         val items = top.list.items
         if (items.isEmpty()) return
         val selected = items.getOrNull(top.list.selectedIndex) ?: return
@@ -1245,7 +1347,10 @@ class IPodViewModel(
     }
 }
 
-class IPodViewModelFactory(private val container: AppContainer) : ViewModelProvider.Factory {
+class IPodViewModelFactory(
+    private val container: AppContainer,
+    private val appContext: Context,
+) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T =
         IPodViewModel(
@@ -1253,5 +1358,6 @@ class IPodViewModelFactory(private val container: AppContainer) : ViewModelProvi
             libraryCache       = container.libraryCache,
             repository         = container.spotifyRepository,
             playerStateManager = container.playerStateManager,
+            audioManager       = appContext.getSystemService(AudioManager::class.java),
         ) as T
 }

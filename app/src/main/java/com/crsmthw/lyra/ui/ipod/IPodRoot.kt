@@ -139,7 +139,7 @@ fun IPodRoot(container: AppContainer, modifier: Modifier = Modifier) {
     DisposableEffect(sessionStore) { onDispose { sessionStore.viewModelStore.clear() } }
     val vm: IPodViewModel = viewModel(
         viewModelStoreOwner = sessionStore,
-        factory = IPodViewModelFactory(container),
+        factory = IPodViewModelFactory(container, context.applicationContext),
     )
     val state by vm.uiState.collectAsStateWithLifecycle()
     val palette = state.bodyColor.palette()
@@ -166,6 +166,8 @@ fun IPodRoot(container: AppContainer, modifier: Modifier = Modifier) {
                 IPodEffect.Next -> playerVm.skipNext()
                 IPodEffect.Previous -> playerVm.skipPrevious()
                 is IPodEffect.SeekTo -> playerVm.seekTo(effect.fraction)
+                is IPodEffect.SetShuffle -> container.playerStateManager.setShuffle(effect.enabled)
+                is IPodEffect.SetRepeat -> container.playerStateManager.setRepeat(effect.state)
             }
         }
     }

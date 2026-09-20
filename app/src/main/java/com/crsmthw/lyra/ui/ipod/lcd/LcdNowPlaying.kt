@@ -2,6 +2,16 @@ package com.crsmthw.lyra.ui.ipod.lcd
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
+import com.crsmthw.lyra.ui.ipod.nav.NowPlayingMode
+import com.crsmthw.lyra.ui.ipod.nav.LcdRepeat
+import com.crsmthw.lyra.ui.ipod.IPodDimens
+import androidx.compose.foundation.Canvas
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.AnimatedContent
+import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -163,17 +173,52 @@ internal fun LcdNowPlayingContent(
                 modifier = Modifier.fillMaxSize(),
             )
 
-            // Bottom strip: elapsed, glass bar, remaining — on the plain LCD white.
-            NowPlayingProgressStrip(
-                progressMs = nowPlaying.scrubProgressMs ?: nowPlaying.progressMs,
-                durationMs = nowPlaying.durationMs,
-                isScrubbing = nowPlaying.scrubProgressMs != null,
-                contentHeightPx = contentHeightPx,
+            // Bottom strip: whatever the wheel drives right now — scrubber, media volume, shuffle
+            // or repeat. SELECT cycles them; the old bar slides out to the left as the new one
+            // comes in from the right.
+            AnimatedContent(
+                targetState = nowPlaying.mode,
+                transitionSpec = {
+                    slideInHorizontally(tween(IPodDimens.LcdSlideMillis)) { it } togetherWith
+                        slideOutHorizontally(tween(IPodDimens.LcdSlideMillis)) { -it }
+                },
+                label = "now_playing_bar",
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
                     .height(stripHeight),
-            )
+            ) { mode ->
+                when (mode) {
+                    NowPlayingMode.SCRUB -> NowPlayingProgressStrip(
+                        progressMs = nowPlaying.scrubProgressMs ?: nowPlaying.progressMs,
+                        durationMs = nowPlaying.durationMs,
+                        isScrubbing = nowPlaying.scrubProgressMs != null,
+                        contentHeightPx = contentHeightPx,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    NowPlayingMode.VOLUME -> NowPlayingVolumeStrip(
+                        volumePercent = nowPlaying.volumePercent,
+                        contentHeightPx = contentHeightPx,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    NowPlayingMode.SHUFFLE -> NowPlayingOptionStrip(
+                        label = R.string.ipod_np_shuffle,
+                        value = if (nowPlaying.shuffleEnabled) R.string.ipod_value_on else R.string.ipod_value_off,
+                        contentHeightPx = contentHeightPx,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    NowPlayingMode.REPEAT -> NowPlayingOptionStrip(
+                        label = R.string.ipod_np_repeat,
+                        value = when (nowPlaying.repeat) {
+                            LcdRepeat.OFF -> R.string.ipod_value_off
+                            LcdRepeat.ALL -> R.string.ipod_value_all
+                            LcdRepeat.ONE -> R.string.ipod_value_one
+                        },
+                        contentHeightPx = contentHeightPx,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+            }
         }
     }
 }
@@ -552,6 +597,103 @@ private fun NowPlayingProgressStrip(
                 maxLines = 1,
             )
         }
+    }
+}
+
+// ── Volume / option bars (the other three things SELECT cycles to) ─────────
+
+/** The media-volume bar: the same glass channel between a quiet and a loud speaker glyph. */
+@Composable
+private fun NowPlayingVolumeStrip(
+    volumePercent: Int,
+    contentHeightPx: Float,
+    modifier: Modifier = Modifier,
+) {
+    val density = LocalDensity.current
+    val stripHeightPx = contentHeightPx * BOTTOM_STRIP_FRACTION
+    val barHeightPx = stripHeightPx * PROGRESS_BAR_HEIGHT_FRACTION
+    val glyphSize = with(density) { (stripHeightPx * 0.42f).toDp() }
+    val fraction = (volumePercent / 100f).coerceIn(0f, 1f)
+
+    Box(modifier.padding(horizontal = with(density) { (contentHeightPx * 0.04f).toDp() })) {
+        Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+            Canvas(Modifier.size(glyphSize)) { drawSpeaker(loud = false) }
+            Spacer(Modifier.width(with(density) { (contentHeightPx * 0.02f).toDp() }))
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(with(density) { (barHeightPx * 4f).toDp() })
+                    .drawBehind {
+                        drawProgressBar(fraction = fraction, barHeight = barHeightPx, markerRadius = 0f, isScrubbing = false)
+                    },
+            )
+            Spacer(Modifier.width(with(density) { (contentHeightPx * 0.02f).toDp() }))
+            Canvas(Modifier.size(glyphSize)) { drawSpeaker(loud = true) }
+        }
+    }
+}
+
+/** A small speaker glyph; [loud] adds two sound arcs. */
+private fun DrawScope.drawSpeaker(loud: Boolean) {
+    val w = size.width
+    val h = size.height
+    val color = IPodColors.LcdText
+    val body = Path().apply {
+        moveTo(w * 0.05f, h * 0.36f)
+        lineTo(w * 0.30f, h * 0.36f)
+        lineTo(w * 0.55f, h * 0.12f)
+        lineTo(w * 0.55f, h * 0.88f)
+        lineTo(w * 0.30f, h * 0.64f)
+        lineTo(w * 0.05f, h * 0.64f)
+        close()
+    }
+    drawPath(body, color)
+    if (loud) {
+        for (r in floatArrayOf(0.22f, 0.36f)) {
+            drawArc(
+                color = color,
+                startAngle = -40f,
+                sweepAngle = 80f,
+                useCenter = false,
+                topLeft = Offset(w * 0.55f - w * r, h * 0.5f - h * r),
+                size = Size(2f * w * r, 2f * h * r),
+                style = Stroke(width = maxOf(1f, h * 0.07f)),
+            )
+        }
+    }
+}
+
+/** The shuffle / repeat bar: a bold label at the left, the current value in blue at the right. */
+@Composable
+private fun NowPlayingOptionStrip(
+    @StringRes label: Int,
+    @StringRes value: Int,
+    contentHeightPx: Float,
+    modifier: Modifier = Modifier,
+) {
+    val density = LocalDensity.current
+    val fontSize = with(density) { (contentHeightPx * TIME_FONT_FRACTION * 1.15f).toSp() }
+    Row(
+        modifier = modifier.padding(horizontal = with(density) { (contentHeightPx * 0.05f).toDp() }),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = stringResource(label),
+            fontFamily = IPodFontFamily,
+            fontWeight = FontWeight.Bold,
+            fontSize = fontSize,
+            color = IPodColors.LcdText,
+            maxLines = 1,
+        )
+        Spacer(Modifier.weight(1f))
+        Text(
+            text = stringResource(value),
+            fontFamily = IPodFontFamily,
+            fontWeight = FontWeight.Bold,
+            fontSize = fontSize,
+            color = IPodColors.ProgressGlassLow,
+            maxLines = 1,
+        )
     }
 }
 

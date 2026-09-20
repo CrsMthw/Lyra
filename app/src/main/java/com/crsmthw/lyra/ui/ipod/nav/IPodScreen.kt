@@ -102,6 +102,12 @@ data class IPodStackEntry(
 /** Which way the LCD content slides on the next change: push = FORWARD (in from the right). */
 enum class LcdNavDirection { NONE, FORWARD, BACK }
 
+/** What the Now Playing bottom bar shows and what the wheel drives there; SELECT cycles them. */
+enum class NowPlayingMode { SCRUB, VOLUME, SHUFFLE, REPEAT }
+
+/** Repeat as the LCD names it (Spotify's "off" / "context" / "track"). */
+enum class LcdRepeat { OFF, ALL, ONE }
+
 /** The now-playing mirror the LCD renders (status-bar indicator + the Now Playing screen). */
 @Immutable
 data class LcdNowPlaying(
@@ -119,6 +125,12 @@ data class LcdNowPlaying(
     /** "N of M" under the album name, known only while the playing track is the one the user picked from a list. */
     val positionInList: Int? = null,
     val listSize: Int? = null,
+    /** Which bar the bottom strip shows; SELECT on Now Playing cycles it. Carried across ticks. */
+    val mode: NowPlayingMode = NowPlayingMode.SCRUB,
+    /** Android media volume, 0..100 — refreshed while the volume bar shows. */
+    val volumePercent: Int = 0,
+    val shuffleEnabled: Boolean = false,
+    val repeat: LcdRepeat = LcdRepeat.OFF,
 )
 
 @Immutable

@@ -33,6 +33,12 @@ sealed interface IPodEffect {
     data object Next : IPodEffect
     data object Previous : IPodEffect
 
+    /** → PlayerStateManager.setShuffle — the Now Playing shuffle bar (clockwise = on). */
+    data class SetShuffle(val enabled: Boolean) : IPodEffect
+
+    /** → PlayerStateManager.setRepeat("off" / "context" / "track") — the Now Playing repeat bar. */
+    data class SetRepeat(val state: String) : IPodEffect
+
     /** → PlayerViewModel.seekTo(fraction) — committed once per scrub, never per detent. */
     data class SeekTo(val fraction: Float) : IPodEffect
 }
