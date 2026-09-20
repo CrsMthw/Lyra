@@ -96,6 +96,18 @@ class AppContainer(context: Context) {
         .callTimeout   (10.seconds)
         .build()
 
+    // ── Image client (token-free) ─────────────────────────────────────────────
+    // Album art comes from Spotify's image CDN (i.scdn.co and friends), which needs no bearer
+    // token and is not the Web API. Coil used to fetch through `okHttpClient`, so every art
+    // request carried the user's access token to the CDN, could block on a token refresh inside
+    // TokenManager's synchronized block, and shared the API client's dispatcher and connection
+    // pool with the player poll. A dedicated client keeps the token where it belongs and isolates
+    // a burst of art fetches (the iPod CoverFlow prefetch) from API latency (2026-09-20).
+    private val imageOkHttpClient = OkHttpClient.Builder()
+        .connectTimeout(15.seconds)
+        .readTimeout   (15.seconds)
+        .build()
+
     // ── Image loader (permanent disk cache in filesDir) ──────────────────────
     val imageLoader: ImageLoader = ImageLoader.Builder(context)
         .memoryCache {
@@ -109,7 +121,7 @@ class AppContainer(context: Context) {
                 .maxSizeBytes(150L * 1024 * 1024)
                 .build()
         }
-        .components { add(OkHttpNetworkFetcherFactory(okHttpClient)) }
+        .components { add(OkHttpNetworkFetcherFactory(imageOkHttpClient)) }
         .build()
 
     // ── Spotify App Remote ───────────────────────────────────────────────────
