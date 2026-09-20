@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Text
@@ -58,7 +59,7 @@ import com.crsmthw.lyra.util.toTimeString
 /** Art occupies this fraction of the content width. */
 private const val ART_WIDTH_FRACTION = 0.44f
 /** Gap between the art column and the text column, as a fraction of content width. */
-private const val ART_TEXT_GAP_FRACTION = 0.04f
+private const val ART_TEXT_GAP_FRACTION = 0.06f
 /** The upper region holding art + text takes this fraction of the content height. */
 /** The bottom progress strip takes this fraction of the content height. */
 private const val BOTTOM_STRIP_FRACTION = 0.20f
@@ -76,7 +77,7 @@ private const val ART_TOP_FRACTION = 0.10f
 private const val ART_MAX_HEIGHT_FRACTION = 0.62f
 
 /** The title block starts this far below the art's top edge, as a fraction of the art side. */
-private const val TEXT_TOP_OFFSET_FRACTION = 0.14f
+private const val TEXT_TOP_OFFSET_FRACTION = 0.12f
 /** Camera distance for the perspective tilt (multiplied by density). */
 /**
  * Compose's cameraDistance is in the RenderNode's own units (View.setCameraDistance divides its
@@ -97,10 +98,10 @@ private const val PROGRESS_MARKER_RADIUS_FRACTION = 0.04f
 /** Scrub-mode marker radius (slightly larger). */
 private const val SCRUB_MARKER_RADIUS_FRACTION = 0.06f
 /** Font sizes as fractions of the content height. */
-private const val TITLE_FONT_FRACTION = 0.050f
-private const val ARTIST_FONT_FRACTION = 0.042f
-private const val ALBUM_FONT_FRACTION = 0.038f
-private const val POSITION_FONT_FRACTION = 0.034f
+private const val TITLE_FONT_FRACTION = 0.062f
+private const val ARTIST_FONT_FRACTION = 0.050f
+private const val ALBUM_FONT_FRACTION = 0.050f
+private const val POSITION_FONT_FRACTION = 0.050f
 private const val TIME_FONT_FRACTION = 0.042f
 /** Art padding from left edge of the content, as a fraction of content width. */
 private const val ART_START_PAD_FRACTION = 0.05f
@@ -221,6 +222,10 @@ private fun NowPlayingUpperRegion(
 
         // Right: title / artist / album / position, starting a little below the art's top edge
         // (the Classic's title sits ~12 % of the art height down from it).
+        // Artist / album / position are dark grey on the Classic, not light; lines sit a clear
+        // half-line apart.
+        val secondary = IPodColors.LcdText.copy(alpha = 0.72f)
+        val lineGap = artSide * 0.055f
         Column(
             modifier = Modifier
                 .weight(1f)
@@ -241,14 +246,14 @@ private fun NowPlayingUpperRegion(
                     .basicMarquee(iterations = Int.MAX_VALUE),
             )
 
-            Spacer(Modifier.height(with(density) { (contentHeightPx * 0.01f).toDp() }))
+            Spacer(Modifier.height(lineGap))
 
             // Artist (marquee when overflowing).
             Text(
                 text = artist,
                 fontFamily = IPodFontFamily,
                 fontSize = artistFontSize,
-                color = IPodColors.LcdTextSecondary,
+                color = secondary,
                 maxLines = 1,
                 softWrap = false,
                 overflow = TextOverflow.Clip,
@@ -257,14 +262,14 @@ private fun NowPlayingUpperRegion(
                     .basicMarquee(iterations = Int.MAX_VALUE),
             )
 
-            Spacer(Modifier.height(with(density) { (contentHeightPx * 0.005f).toDp() }))
+            Spacer(Modifier.height(lineGap))
 
             // Album (ellipsised, no marquee).
             Text(
                 text = album,
                 fontFamily = IPodFontFamily,
                 fontSize = albumFontSize,
-                color = IPodColors.LcdTextSecondary,
+                color = secondary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.fillMaxWidth(),
@@ -272,7 +277,7 @@ private fun NowPlayingUpperRegion(
 
             // "N of M" — only when both are known (i.e. the user picked a song from a list).
             if (positionInList != null && listSize != null) {
-                Spacer(Modifier.height(with(density) { (contentHeightPx * 0.01f).toDp() }))
+                Spacer(Modifier.height(lineGap))
                 Text(
                     text = stringResource(
                         R.string.ipod_now_playing_position,
@@ -281,7 +286,7 @@ private fun NowPlayingUpperRegion(
                     ),
                     fontFamily = IPodFontFamily,
                     fontSize = positionFontSize,
-                    color = IPodColors.LcdTextSecondary,
+                    color = secondary,
                     maxLines = 1,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -356,7 +361,10 @@ private fun NowPlayingArt(
             ) {
                 Box(
                     modifier = Modifier
-                        .size(artSide) // full square, overflows the clip parent
+                        // requiredSize, not size: `size` yields to the clip box's fixed height, so the
+                        // copy was squeezed to the reflection's height and Crop showed the art's MIDDLE
+                        // band flipped. The full square must overflow the clip; only its bottom shows.
+                        .requiredSize(artSide)
                         .graphicsLayer {
                             scaleY = -1f
                             alpha = REFLECTION_ALPHA
