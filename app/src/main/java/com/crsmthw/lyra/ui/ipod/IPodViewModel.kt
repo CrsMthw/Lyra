@@ -155,7 +155,7 @@ class IPodViewModel(
             val newIndex = (top.list.selectedIndex + steps).coerceIn(0, items.lastIndex)
             if (newIndex == top.list.selectedIndex) return@update state
             val updatedEntry = top.copy(list = top.list.copy(selectedIndex = newIndex))
-            state.copy(stack = state.stack.dropLast(1) + updatedEntry, direction = LcdNavDirection.NONE)
+            state.copy(stack = state.stack.dropLast(1) + updatedEntry)
         }
     }
 
@@ -242,7 +242,7 @@ class IPodViewModel(
                 libraryCache.loadTrackList(LibraryCache.LIKED_SONGS_KEY)
             }
             val items = tracks?.tracks
-                ?.distinctBy { it.id }
+                ?.distinctBy { it.uri }
                 ?.map { track ->
                     LcdItem(
                         id = track.uri,

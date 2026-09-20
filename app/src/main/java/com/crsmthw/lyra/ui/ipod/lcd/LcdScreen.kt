@@ -99,7 +99,7 @@ fun LcdScreen(
     modifier: Modifier = Modifier,
 ) {
     val accessibilityDesc = stringResource(R.string.ipod_cd_lcd)
-    BoxWithConstraints(
+    Box(
         modifier = modifier
             .clip(RoundedCornerShape(IPodDimens.LcdCornerRadius))
             .border(
