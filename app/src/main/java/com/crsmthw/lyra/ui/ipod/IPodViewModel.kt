@@ -175,12 +175,13 @@ class IPodViewModel(
             playerStateManager.state
                 .map { ps ->
                     val track = ps.currentTrack ?: return@map null
-                    // Compute positionInList from the URI — the spec says "ONLY while
-                    // currentTrack.uri == lastSelection.uri". Done here so `distinctUntilChanged`
-                    // on the whole LcdNowPlaying still skips duplicates.
+                    // "N of M": the current track's position in the list the user last picked from,
+                    // so it follows skips and auto-advance. Done here so `distinctUntilChanged` on the
+                    // whole LcdNowPlaying still skips duplicates. (indexOf over a few thousand uris
+                    // once a second is nothing.)
                     val sel = lastSelection
-                    val posInList = if (sel != null && track.uri == sel.uri) sel.position else null
-                    val listSize = if (posInList != null) sel?.listSize else null
+                    val posInList = sel?.positionOf(track.uri)
+                    val listSize = if (posInList != null) sel.sourceUris.size else null
                     LcdNowPlaying(
                         uri = track.uri,
                         title = track.name,
@@ -403,14 +404,14 @@ class IPodViewModel(
 
         when (top.screen) {
             is IPodScreen.MainMenu -> activateMainMenuItem(selected.id)
-            is IPodScreen.Music -> activateMusicItem(selected, top.list.selectedIndex, items.size)
+            is IPodScreen.Music -> activateMusicItem(selected, top.list.selectedIndex, items)
             is IPodScreen.Settings -> activateSettingsItem(selected.id)
             is IPodScreen.Albums -> activateAlbumItem(selected)
-            is IPodScreen.AlbumTracks -> activateAlbumTrackItem(top.screen, selected, top.list.selectedIndex, items.size)
+            is IPodScreen.AlbumTracks -> activateAlbumTrackItem(top.screen, selected, top.list.selectedIndex, items)
             is IPodScreen.Artists -> activateArtistItem(selected)
             is IPodScreen.ArtistAlbums -> activateArtistAlbumItem(selected)
             is IPodScreen.Playlists -> activatePlaylistItem(selected)
-            is IPodScreen.PlaylistTracks -> activatePlaylistTrackItem(top.screen, selected, top.list.selectedIndex, items.size)
+            is IPodScreen.PlaylistTracks -> activatePlaylistTrackItem(top.screen, selected, top.list.selectedIndex, items)
             is IPodScreen.Podcasts -> activateShowItem(selected)
             is IPodScreen.ShowEpisodes -> activateEpisodeItem(top.screen, selected, top.list, items)
             else -> {}
@@ -466,8 +467,8 @@ class IPodViewModel(
         }
     }
 
-    private fun activateMusicItem(item: LcdItem, index: Int, listSize: Int) {
-        rememberSelection(item.id, index, listSize)
+    private fun activateMusicItem(item: LcdItem, index: Int, items: List<LcdItem>) {
+        rememberSelection(item.id, index, items.map { it.id })
         viewModelScope.launch {
             _effects.send(IPodEffect.PlayLikedSong(item.id, shuffle = false))
         }
@@ -545,9 +546,9 @@ class IPodViewModel(
         screen: IPodScreen.AlbumTracks,
         item: LcdItem,
         index: Int,
-        listSize: Int,
+        items: List<LcdItem>,
     ) {
-        rememberSelection(item.id, index, listSize)
+        rememberSelection(item.id, index, items.map { it.id })
         viewModelScope.launch {
             _effects.send(
                 IPodEffect.PlayTrack(
@@ -751,10 +752,10 @@ class IPodViewModel(
         screen: IPodScreen.PlaylistTracks,
         item: LcdItem,
         index: Int,
-        listSize: Int,
+        items: List<LcdItem>,
     ) {
         val trackUri = item.id.substringBefore('#')   // rows are "uri#occurrence"
-        rememberSelection(trackUri, index, listSize)
+        rememberSelection(trackUri, index, items.map { it.id.substringBefore('#') })
         viewModelScope.launch {
             _effects.send(
                 IPodEffect.PlayTrack(
@@ -877,7 +878,7 @@ class IPodViewModel(
         val episode = episodes.find { it.id == episodeId }
         val uri = episode?.uri ?: "spotify:episode:$episodeId"
 
-        rememberSelection(uri, listState.selectedIndex, items.size)
+        rememberSelection(uri, listState.selectedIndex, items.map { "spotify:episode:${it.id}" })
 
         val queue = library.buildEpisodeQueue(episodes, episodeId)
 
@@ -1012,19 +1013,23 @@ class IPodViewModel(
 
     // ── Track selection memory ────────────────────────────────────────────────
 
+    /**
+     * The list a song was picked from. "N of M" is the CURRENT track's position in that list — so it
+     * survives a skip or an auto-advance (the Classic shows the position in the playing context) and
+     * only disappears when something outside the list starts playing.
+     */
     private data class TrackSelection(
         val uri: String,
-        /** 1-based position in the list. */
-        val position: Int,
-        val listSize: Int,
-    )
+        /** Every row's uri in the list the selection came from, in order. */
+        val sourceUris: List<String>,
+    ) {
+        /** 1-based position of [trackUri] in the source list, or null if it is not in it. */
+        fun positionOf(trackUri: String): Int? =
+            sourceUris.indexOf(trackUri).takeIf { it >= 0 }?.plus(1)
+    }
 
-    private fun rememberSelection(uri: String, index: Int, listSize: Int) {
-        lastSelection = TrackSelection(
-            uri = uri,
-            position = index + 1,
-            listSize = listSize,
-        )
+    private fun rememberSelection(uri: String, index: Int, sourceUris: List<String>) {
+        lastSelection = TrackSelection(uri = uri, sourceUris = sourceUris)
     }
 
     // ── Stack helpers ─────────────────────────────────────────────────────────
