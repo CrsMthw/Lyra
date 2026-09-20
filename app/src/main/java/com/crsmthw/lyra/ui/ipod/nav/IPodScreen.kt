@@ -1,6 +1,7 @@
 package com.crsmthw.lyra.ui.ipod.nav
 
 import androidx.annotation.StringRes
+import androidx.compose.runtime.Immutable
 
 /**
  * Every screen the iPod's LCD can show. The back stack is a list of [IPodStackEntry]; MENU pops,
@@ -29,16 +30,25 @@ sealed interface IPodScreen {
     data object Settings : IPodScreen
 }
 
+/*
+ * `@Immutable` on the LCD state types: `LcdLabel` is a sealed interface, so without the annotation
+ * the Compose compiler infers every class that carries one as UNSTABLE and skipping would rest
+ * solely on the ViewModel preserving instances across the 1 Hz progress tick. With it, skipping
+ * falls back to equals(). The contract: never mutate one of these after construction.
+ */
+
 /**
  * A string the LCD resolves at draw time: a resource for fixed menu text, plain text for data
  * from Spotify. Lets the ViewModel build menus without touching `Resources`.
  */
+@Immutable
 sealed interface LcdLabel {
     data class Text(val value: String) : LcdLabel
     data class Res(@StringRes val id: Int) : LcdLabel
 }
 
 /** One row of an LCD list. [value] is the right-aligned setting value ("On"/"Off"). */
+@Immutable
 data class LcdItem(
     val id: String,
     val title: LcdLabel,
@@ -48,6 +58,7 @@ data class LcdItem(
     val hasSubmenu: Boolean = false,
 )
 
+@Immutable
 data class LcdListState(
     val items: List<LcdItem> = emptyList(),
     val selectedIndex: Int = 0,
@@ -57,6 +68,7 @@ data class LcdListState(
     val hasMore: Boolean = false,
 )
 
+@Immutable
 data class IPodStackEntry(
     val screen: IPodScreen,
     /** The status-bar title while this entry is on top ("iPod", "Music", "Now Playing"…). */
@@ -68,6 +80,7 @@ data class IPodStackEntry(
 enum class LcdNavDirection { NONE, FORWARD, BACK }
 
 /** The now-playing mirror the LCD renders (status-bar indicator + the Now Playing screen). */
+@Immutable
 data class LcdNowPlaying(
     val title: String,
     val artist: String,
@@ -80,6 +93,7 @@ data class LcdNowPlaying(
     val scrubProgressMs: Long? = null,
 )
 
+@Immutable
 data class IPodUiState(
     /** Never empty; the last entry is showing. */
     val stack: List<IPodStackEntry>,
