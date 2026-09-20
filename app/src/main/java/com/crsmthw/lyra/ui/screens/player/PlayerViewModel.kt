@@ -43,6 +43,14 @@ private const val TAG = "PlayerVM"
 private const val SDK_SEEK_SETTLE_MS = 1_200L
 
 /**
+ * Settle time between `remoteManager.setShuffle(...)` and the subsequent `connectAndPlay(...)` in
+ * the App Remote fallback path. `playerApi.setShuffle` is fire-and-forget IPC — it returns on
+ * DISPATCH, not completion. If the play arrives before shuffle takes effect the first item is still
+ * picked at random (the exact bug the user reports). Tunable on device.
+ */
+private const val REMOTE_SHUFFLE_SETTLE_MS = 300L
+
+/**
  * "No active device" — `me/player/play` answers 404 when Spotify is not running anywhere. It is the
  * trigger for the App Remote fallback, NOT a rejection of the request body, so nothing may degrade
  * on it. Matches the long-standing `message.contains("404")` test: `SpotifyRepository.safeCall`
@@ -375,7 +383,7 @@ class PlayerViewModel(
         }
     }
 
-    fun playFromLikedSongs(trackUri: String) {
+    fun playFromLikedSongs(trackUri: String, shuffle: Boolean? = null) {
         viewModelScope.launch {
             val cached = withContext(Dispatchers.IO) {
                 // distinctBy { it.id }: guard the play queue against a not-yet-healed cache that may
@@ -384,9 +392,9 @@ class PlayerViewModel(
             }
             if (cached != null) {
                 val idx = cached.indexOfFirst { it.uri == trackUri }.coerceAtLeast(0)
-                playTrack(trackUri, uris = cached.drop(idx).map { it.uri }.take(750))
+                playTrack(trackUri, uris = cached.drop(idx).map { it.uri }.take(750), shuffle = shuffle)
             } else {
-                playTrack(trackUri)
+                playTrack(trackUri, shuffle = shuffle)
             }
         }
     }
@@ -489,12 +497,19 @@ class PlayerViewModel(
      *   the user has never started — in both cases the REST path's server-side resume, unchanged
      *   here, is what places the playhead.
      */
+    /**
+     * @param shuffle When non-null and different from the current shuffle state, the shuffle mode is
+     *   changed BEFORE the play request. iPod mode passes `false` for a deliberate song selection
+     *   (with shuffle on, a uris body starts at a random entry — the "tapped one song, got another"
+     *   bug) and `null` for non-iPod callers that leave the device state alone.
+     */
     fun playTrack(
         uri            : String,
         contextUri     : String?       = null,
         uris           : List<String>? = null,
         index          : Int?          = null,
         startPositionMs: Long?         = null,
+        shuffle        : Boolean?      = null,
     ) {
         val isEpisode = uri.startsWith("spotify:episode:")
         playerStateManager.setOptimisticallyPlaying()
@@ -509,6 +524,23 @@ class PlayerViewModel(
             viewModelScope.launch { checkIsLiked(trackId) }
         }
         viewModelScope.launch {
+            // ── Shuffle pre-set ──────────────────────────────────────────────
+            // When the caller says "turn shuffle OFF before playing" (iPod deliberate selection) or
+            // ON, apply it before the play request so the uris body starts at the tapped entry
+            // instead of a random one. Always sends the PUT when shuffle is non-null: the mirror
+            // may be stale (cold start, Spotify closed → shuffleEnabled defaults false while the
+            // device is actually shuffling), so comparing against it would skip the PUT in exactly
+            // the scenario the user hits first. One idempotent PUT per deliberate selection is the
+            // correct price. A 404 is NOT an error — it means "no active device", and the App
+            // Remote fallback below handles both the shuffle and the play.
+            if (shuffle != null) {
+                val result = playerStateManager.applyShuffle(shuffle)
+                val err = result.exceptionOrNull()
+                if (err != null) {
+                    if (err.isRateLimited()) playerStateManager.noteRateLimited()
+                    // A 404 is fine — the App Remote fallback below sends setShuffle too.
+                }
+            }
             // The body an EPISODE degrades to, and the body it restores with — null for a track.
             // `repository.play` is wire-identical for `uris = [uri]` and `uri = uri` (both send
             // `PlayRequest(uris = listOf(uri))`), so this changes nothing about the request; what it
@@ -569,6 +601,16 @@ class PlayerViewModel(
                 },
                 onFailure = { e ->
                     if (e.isNoActiveDevice()) {
+                        // When the caller asked for a specific shuffle state, apply it via
+                        // the App Remote BEFORE playing. Always sends when shuffle is
+                        // non-null: whether the pre-set 404'd or not, we're going through
+                        // the SDK now and the remote is the only way to set shuffle here.
+                        // remoteManager.setShuffle self-connects, and connectAndPlay reuses
+                        // the live connection, so no extra connect round trip.
+                        if (shuffle != null) {
+                            remoteManager.setShuffle(shuffle)
+                            delay(REMOTE_SHUFFLE_SETTLE_MS)
+                        }
                         val sdkSuccess = when {
                             contextUri != null && index != null -> {
                                 val ok = remoteManager.connectAndPlay(contextUri)
@@ -692,18 +734,51 @@ class PlayerViewModel(
         }
     }
 
-    /** Play a context (album/playlist) with shuffle enabled — mirrors LibraryViewModel.shufflePlaylist. */
+    /**
+     * Play a context (album/playlist) with shuffle enabled — mirrors LibraryViewModel.shufflePlaylist.
+     *
+     * Hardened: the Web API shuffle PUT is fire-and-forget and 404s silently when no device is active,
+     * after which the play starts in order. The fix: on a 404 connect via App Remote, apply shuffle
+     * there, THEN play. After success, re-assert shuffle once (Spotify sometimes applies the play
+     * before the shuffle). Rate-limit-gated throughout.
+     */
     fun shuffleContext(contextUri: String) {
+        if (playerStateManager.isRateLimited()) return
         playerStateManager.setOptimisticallyPlaying()
         viewModelScope.launch {
-            repository.setShuffle(true)
-            repository.play(contextUri = contextUri).onFailure { e ->
-                if (e.message?.contains("404") == true) {
-                    remoteManager.connectAndPlay(contextUri)
-                } else {
-                    playerStateManager.releasePlayingOptimism()
-                }
+            val shuffleResult = playerStateManager.applyShuffle(true)
+            val shuffleErr = shuffleResult.exceptionOrNull()
+            if (shuffleErr != null && shuffleErr.isRateLimited()) {
+                playerStateManager.noteRateLimited()
+                playerStateManager.releasePlayingOptimism()
+                return@launch
             }
+            val shuffleWas404 = shuffleErr != null && shuffleErr.isNoActiveDevice()
+
+            repository.play(contextUri = contextUri).fold(
+                onSuccess = {
+                    // Re-assert: Spotify sometimes applies the play before the shuffle, so the
+                    // first item is in-order. Clear the optimistic lock so fetchOnce reads the
+                    // server's truth, then re-set shuffle if it didn't stick.
+                    delay(1_500L)
+                    playerStateManager.clearShuffleLock()
+                    playerStateManager.fetchOnce()
+                    if (!playerStateManager.state.value.shuffleEnabled) {
+                        repository.setShuffle(true)
+                    }
+                },
+                onFailure = { e ->
+                    if (e.isNoActiveDevice() || shuffleWas404) {
+                        // The Web API is unreachable — go through App Remote for everything.
+                        remoteManager.setShuffle(true)
+                        delay(REMOTE_SHUFFLE_SETTLE_MS)
+                        remoteManager.connectAndPlay(contextUri)
+                    } else {
+                        if (e.isRateLimited()) playerStateManager.noteRateLimited()
+                        playerStateManager.releasePlayingOptimism()
+                    }
+                },
+            )
         }
     }
 }
