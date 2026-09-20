@@ -11,7 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Text
@@ -59,7 +59,8 @@ import com.crsmthw.lyra.util.toTimeString
 /** Art occupies this fraction of the content width. */
 private const val ART_WIDTH_FRACTION = 0.44f
 /** Gap between the art column and the text column, as a fraction of content width. */
-private const val ART_TEXT_GAP_FRACTION = 0.06f
+/** Small: the far edge already recedes toward the text, and the Classic sets the text right beside the art. */
+private const val ART_TEXT_GAP_FRACTION = 0.025f
 /** The upper region holding art + text takes this fraction of the content height. */
 /** The bottom progress strip takes this fraction of the content height. */
 private const val BOTTOM_STRIP_FRACTION = 0.20f
@@ -214,7 +215,7 @@ private fun NowPlayingUpperRegion(
             artUrl = artUrl,
             artSide = artSide,
             modifier = Modifier
-                .width(artWidth)
+                .width(artSide)   // exactly the art: no slack column pushing the text away
                 .padding(top = artTop),
         )
 
@@ -361,10 +362,13 @@ private fun NowPlayingArt(
             ) {
                 Box(
                     modifier = Modifier
-                        // requiredSize, not size: `size` yields to the clip box's fixed height, so the
-                        // copy was squeezed to the reflection's height and Crop showed the art's MIDDLE
-                        // band flipped. The full square must overflow the clip; only its bottom shows.
-                        .requiredSize(artSide)
+                        // The full square must overflow the clip box with its TOP at the box's top.
+                        // Neither `size` nor `requiredSize` does that: a child that violates its
+                        // constraints is reported at the coerced size and its content CENTRED in the
+                        // slot, which showed the art's middle band. wrapContentSize(TopStart,
+                        // unbounded) measures the square unconstrained and pins it top-start.
+                        .wrapContentSize(Alignment.TopStart, unbounded = true)
+                        .size(artSide)
                         .graphicsLayer {
                             scaleY = -1f
                             alpha = REFLECTION_ALPHA
