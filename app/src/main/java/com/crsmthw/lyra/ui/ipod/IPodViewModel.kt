@@ -53,6 +53,9 @@ private const val SCRUB_COMMIT_MS = 350L
  */
 private const val SCRUB_RELEASE_MS = 300L
 
+/** A volume / shuffle / repeat bar left alone this long drops back to the scrubber, as the Classic's does. */
+private const val MODE_IDLE_RESET_MS = 5_000L
+
 /** Paging trigger: fetch more when the highlight is within this many rows of the end. */
 private const val PAGE_TRIGGER_ROWS = 8
 
@@ -132,6 +135,9 @@ class IPodViewModel(
 
     /** Scrub debounce job — cancelled and relaunched on every scrub step. */
     private var scrubJob: Job? = null
+
+    /** Returns the Now Playing bar to the scrubber after [MODE_IDLE_RESET_MS] without interaction. */
+    private var modeIdleJob: Job? = null
 
     /** The uri the mirror last emitted — a change cancels any pending scrub commit. */
     private var mirroredTrackUri: String? = null
@@ -330,7 +336,10 @@ class IPodViewModel(
 
         // The scrub debounce belongs to the Now Playing screen only — a detent on any list
         // must never re-arm (or keep deferring) a seek.
-        if (_uiState.value.current.screen is IPodScreen.NowPlaying) launchScrubCommitIfNeeded()
+        if (_uiState.value.current.screen is IPodScreen.NowPlaying) {
+            launchScrubCommitIfNeeded()
+            armModeIdleReset()   // a turn on the volume / shuffle / repeat bar keeps it up
+        }
         return moved
     }
 
@@ -376,6 +385,24 @@ class IPodViewModel(
                     volumePercent = if (next == NowPlayingMode.VOLUME) readVolumePercent() else np.volumePercent,
                 ),
             )
+        }
+        armModeIdleReset()
+    }
+
+    /**
+     * (Re)start the idle timer while a non-scrubber bar shows; on expiry the bar slides back to the
+     * scrubber. Cancelled when the scrubber is already showing or Now Playing is left.
+     */
+    private fun armModeIdleReset() {
+        modeIdleJob?.cancel()
+        val mode = _uiState.value.nowPlaying?.mode ?: return
+        if (mode == NowPlayingMode.SCRUB) return
+        modeIdleJob = viewModelScope.launch {
+            delay(MODE_IDLE_RESET_MS)
+            _uiState.update { state ->
+                val np = state.nowPlaying ?: return@update state
+                if (np.mode == NowPlayingMode.SCRUB) state else state.copy(nowPlaying = np.copy(mode = NowPlayingMode.SCRUB))
+            }
         }
     }
 
@@ -490,7 +517,11 @@ class IPodViewModel(
         }
         // A scrub left half-done on the way out is applied, not forgotten — and it can never
         // be re-armed from a list, so this is its last chance.
-        if (leavingNowPlaying) commitPendingScrubNow()
+        if (leavingNowPlaying) {
+            commitPendingScrubNow()
+            modeIdleJob?.cancel()
+            modeIdleJob = null
+        }
     }
 
     private fun handleSelect() {
