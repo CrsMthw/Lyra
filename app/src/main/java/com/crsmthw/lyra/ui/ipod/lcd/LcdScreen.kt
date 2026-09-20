@@ -250,7 +250,8 @@ private fun LcdStatusBar(
             strokeWidth = 1f,
         )
 
-        // Left: title (the Classic's title bar is left-aligned).
+        // Centre: title. (The pre-split-screen Classic firmware centres it; the later left-aligned
+        // bar belongs to the split-screen menus, which this is not.)
         val titleLayout = textMeasurer.measure(
             text = resolvedTitle,
             style = titleStyle,
@@ -261,24 +262,24 @@ private fun LcdStatusBar(
         drawText(
             textLayoutResult = titleLayout,
             topLeft = Offset(
-                x = heightPx * 0.35f,
+                x = (size.width - titleLayout.size.width) / 2f,
                 y = (size.height - 1f - titleLayout.size.height) / 2f,
             ),
         )
 
-        // Right: glossy battery, and the blue play/pause glyph just left of it.
+        // Right: glossy battery.
         val batteryHeight = heightPx * 0.42f
-        val batteryRight = size.width - heightPx * 0.35f
-        val batteryLeft = batteryRight - batteryHeight * (1.8f + 0.12f)
         drawBattery(
-            right = batteryRight,
+            right = size.width - heightPx * 0.35f,
             centerY = (size.height - 1f) / 2f,
             height = batteryHeight,
             battery = battery,
         )
+
+        // Left: the blue play/pause glyph.
         if (isPlaying != null) {
             val glyphSize = heightPx * 0.36f
-            val glyphLeft = batteryLeft - heightPx * 0.3f - glyphSize
+            val glyphLeft = heightPx * 0.35f
             val glyphTop = (size.height - 1f - glyphSize) / 2f
             val glyphBrush = Brush.verticalGradient(
                 colors = listOf(IPodColors.PlayGlyphTop, IPodColors.PlayGlyphBottom),
