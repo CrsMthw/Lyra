@@ -2,6 +2,14 @@ package com.crsmthw.lyra.ui.ipod.lcd
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.border
 import com.crsmthw.lyra.ui.ipod.nav.NowPlayingMode
 import com.crsmthw.lyra.ui.ipod.nav.LcdRepeat
 import com.crsmthw.lyra.ui.ipod.IPodDimens
@@ -202,18 +210,16 @@ internal fun LcdNowPlayingContent(
                         modifier = Modifier.fillMaxSize(),
                     )
                     NowPlayingMode.SHUFFLE -> NowPlayingOptionStrip(
-                        label = R.string.ipod_np_shuffle,
-                        value = if (nowPlaying.shuffleEnabled) R.string.ipod_value_on else R.string.ipod_value_off,
+                        glyph = OptionGlyph.SHUFFLE,
+                        options = listOf(R.string.ipod_value_off, R.string.ipod_value_on),
+                        selectedIndex = if (nowPlaying.shuffleEnabled) 1 else 0,
                         contentHeightPx = contentHeightPx,
                         modifier = Modifier.fillMaxSize(),
                     )
                     NowPlayingMode.REPEAT -> NowPlayingOptionStrip(
-                        label = R.string.ipod_np_repeat,
-                        value = when (nowPlaying.repeat) {
-                            LcdRepeat.OFF -> R.string.ipod_value_off
-                            LcdRepeat.ALL -> R.string.ipod_value_all
-                            LcdRepeat.ONE -> R.string.ipod_value_one
-                        },
+                        glyph = OptionGlyph.REPEAT,
+                        options = listOf(R.string.ipod_value_off, R.string.ipod_value_all, R.string.ipod_value_one),
+                        selectedIndex = nowPlaying.repeat.ordinal,
                         contentHeightPx = contentHeightPx,
                         modifier = Modifier.fillMaxSize(),
                     )
@@ -663,38 +669,136 @@ private fun DrawScope.drawSpeaker(loud: Boolean) {
     }
 }
 
-/** The shuffle / repeat bar: a bold label at the left, the current value in blue at the right. */
+/** Which glyph leads the segmented switch on the shuffle / repeat bar. */
+private enum class OptionGlyph { SHUFFLE, REPEAT }
+
+/**
+ * The shuffle / repeat bar as the Classic draws it: the mode's glyph, then a segmented switch —
+ * the selected segment darker with black bold text, the others lighter with blue text — centred.
+ */
 @Composable
 private fun NowPlayingOptionStrip(
-    @StringRes label: Int,
-    @StringRes value: Int,
+    glyph: OptionGlyph,
+    options: List<Int>,
+    selectedIndex: Int,
     contentHeightPx: Float,
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
+    val stripHeightPx = contentHeightPx * BOTTOM_STRIP_FRACTION
     val fontSize = with(density) { (contentHeightPx * TIME_FONT_FRACTION * 1.15f).toSp() }
+    val segmentHeight = with(density) { (stripHeightPx * 0.5f).toDp() }
+    val segmentMinWidth = with(density) { (stripHeightPx * 1.1f).toDp() }
+    val glyphSize = with(density) { (stripHeightPx * 0.42f).toDp() }
+    val corner = RoundedCornerShape(with(density) { (stripHeightPx * 0.06f).toDp() })
+
     Row(
-        modifier = modifier.padding(horizontal = with(density) { (contentHeightPx * 0.05f).toDp() }),
+        modifier = modifier,
+        horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            text = stringResource(label),
-            fontFamily = IPodFontFamily,
-            fontWeight = FontWeight.Bold,
-            fontSize = fontSize,
-            color = IPodColors.LcdText,
-            maxLines = 1,
-        )
-        Spacer(Modifier.weight(1f))
-        Text(
-            text = stringResource(value),
-            fontFamily = IPodFontFamily,
-            fontWeight = FontWeight.Bold,
-            fontSize = fontSize,
-            color = IPodColors.ProgressGlassLow,
-            maxLines = 1,
-        )
+        Canvas(Modifier.size(glyphSize)) {
+            when (glyph) {
+                OptionGlyph.SHUFFLE -> drawShuffleGlyph()
+                OptionGlyph.REPEAT -> drawRepeatGlyph()
+            }
+        }
+        Spacer(Modifier.width(with(density) { (stripHeightPx * 0.4f).toDp() }))
+        Row(
+            modifier = Modifier
+                .height(segmentHeight)
+                .clip(corner)
+                .border(1.dp, IPodColors.ProgressTrackEdge, corner),
+        ) {
+            options.forEachIndexed { index, label ->
+                val selected = index == selectedIndex
+                Box(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .widthIn(min = segmentMinWidth)
+                        .background(
+                            Brush.verticalGradient(
+                                colors = if (selected) {
+                                    listOf(IPodColors.LcdStatusGlossLow, IPodColors.LcdStatusGlossMid)
+                                } else {
+                                    listOf(IPodColors.LcdStatusGlossTop, IPodColors.LcdStatusGlossMid)
+                                },
+                            ),
+                        )
+                        .padding(horizontal = with(density) { (stripHeightPx * 0.3f).toDp() }),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = stringResource(label),
+                        fontFamily = IPodFontFamily,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = fontSize,
+                        color = if (selected) IPodColors.LcdText else IPodColors.ProgressGlassLow,
+                        maxLines = 1,
+                    )
+                }
+                if (index < options.lastIndex) {
+                    Box(
+                        Modifier
+                            .fillMaxHeight()
+                            .width(1.dp)
+                            .background(IPodColors.ProgressTrackEdge),
+                    )
+                }
+            }
+        }
     }
+}
+
+/** Two crossing arrows. */
+private fun DrawScope.drawShuffleGlyph() {
+    val w = size.width
+    val h = size.height
+    val color = IPodColors.LcdText
+    val stroke = Stroke(width = maxOf(1.5f, h * 0.13f), cap = StrokeCap.Round)
+    val down = Path().apply {
+        moveTo(w * 0.05f, h * 0.28f)
+        cubicTo(w * 0.40f, h * 0.28f, w * 0.60f, h * 0.72f, w * 0.85f, h * 0.72f)
+    }
+    val up = Path().apply {
+        moveTo(w * 0.05f, h * 0.72f)
+        cubicTo(w * 0.40f, h * 0.72f, w * 0.60f, h * 0.28f, w * 0.85f, h * 0.28f)
+    }
+    drawPath(down, color, style = stroke)
+    drawPath(up, color, style = stroke)
+    val head = h * 0.2f
+    for (y in floatArrayOf(h * 0.28f, h * 0.72f)) {
+        val arrow = Path().apply {
+            moveTo(w * 0.98f, y)
+            lineTo(w * 0.98f - head, y - head * 0.8f)
+            lineTo(w * 0.98f - head, y + head * 0.8f)
+            close()
+        }
+        drawPath(arrow, color)
+    }
+}
+
+/** Two curved arrows chasing each other. */
+private fun DrawScope.drawRepeatGlyph() {
+    val w = size.width
+    val h = size.height
+    val color = IPodColors.LcdText
+    val stroke = Stroke(width = maxOf(1.5f, h * 0.13f), cap = StrokeCap.Round)
+    val inset = h * 0.1f
+    val box = Rect(inset, inset, w - inset, h - inset)
+    // Top arc: from the left going clockwise over the top to the right.
+    drawArc(color, startAngle = 200f, sweepAngle = 140f, useCenter = false, topLeft = box.topLeft, size = box.size, style = stroke)
+    // Bottom arc: from the right going clockwise under to the left.
+    drawArc(color, startAngle = 20f, sweepAngle = 140f, useCenter = false, topLeft = box.topLeft, size = box.size, style = stroke)
+    val head = h * 0.22f
+    // Arrowhead at the end of the top arc (right side, pointing down).
+    val rx = box.center.x + box.width / 2f * kotlin.math.cos(Math.toRadians(340.0)).toFloat()
+    val ry = box.center.y + box.height / 2f * kotlin.math.sin(Math.toRadians(340.0)).toFloat()
+    drawPath(Path().apply { moveTo(rx, ry + head); lineTo(rx - head * 0.8f, ry - head * 0.2f); lineTo(rx + head * 0.8f, ry - head * 0.2f); close() }, color)
+    // Arrowhead at the end of the bottom arc (left side, pointing up).
+    val lx = box.center.x + box.width / 2f * kotlin.math.cos(Math.toRadians(160.0)).toFloat()
+    val ly = box.center.y + box.height / 2f * kotlin.math.sin(Math.toRadians(160.0)).toFloat()
+    drawPath(Path().apply { moveTo(lx, ly - head); lineTo(lx - head * 0.8f, ly + head * 0.2f); lineTo(lx + head * 0.8f, ly + head * 0.2f); close() }, color)
 }
 
 /**
