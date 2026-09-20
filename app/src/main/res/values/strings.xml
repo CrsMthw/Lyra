@@ -343,6 +343,7 @@
 
 
     <!-- iPod: ViewModel + data (lane: vm) -->
+    <string name="ipod_vm_load_error">Couldn\'t load</string>
     <!-- (end vm) -->
 
 
