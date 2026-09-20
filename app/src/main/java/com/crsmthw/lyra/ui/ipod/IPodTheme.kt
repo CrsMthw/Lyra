@@ -157,7 +157,7 @@ object IPodDimens {
     val BodyPadding      = 14.dp
     /** The LCD is 4:3, like the Classic's 320×240 panel. */
     const val LcdAspect = 4f / 3f
-    val LcdBezelWidth   = 10.dp
+    val LcdBezelWidth   = 7.dp
     val LcdCornerRadius = 6.dp
     /** Wheel diameter as a fraction of the body width. */
     const val WheelDiameterFraction = 0.78f
