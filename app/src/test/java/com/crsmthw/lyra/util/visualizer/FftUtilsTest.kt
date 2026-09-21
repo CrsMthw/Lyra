@@ -1,10 +1,6 @@
 package com.crsmthw.lyra.util.visualizer
 
-import kotlin.math.abs
-import kotlin.math.cos
-import kotlin.math.hypot
 import kotlin.math.ln
-import kotlin.math.sin
 import kotlin.math.sqrt
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -227,14 +223,27 @@ class FftUtilsTest {
     }
 
     @Test
-    fun `GravityModel snaps to zero below threshold`() {
+    fun `GravityModel snaps to zero when attack result is below 0_5`() {
+        // attack of 0.35 * target of 1 = 0.35 which is < 0.5 → snaps to 0
         val g = GravityModel(attack = 0.35f, release = 0.06f)
         g.update(1f)
-        g.tickDecay()  // height = 0.35
-        // Under 0.5 → snaps to 0
-        g.update(0f)
-        g.tickDecay()  // target=0, decaying from 0.35 → 0.35 + (0-0.35)*0.06 = 0.329 < 0.5 → 0
+        g.tickDecay()
         assertEquals(0f, g.height)
+    }
+
+    @Test
+    fun `GravityModel decay path snaps to zero when crossing threshold`() {
+        val g = GravityModel(attack = 0.35f, release = 0.06f)
+        // Rise to a comfortable height
+        g.update(100f)
+        repeat(30) { g.tickDecay() }
+        assertTrue(g.height > 50f)
+        // Now decay toward zero
+        g.update(0f)
+        var ticks = 0
+        while (g.height > 0f && ticks < 500) { g.tickDecay(); ticks++ }
+        assertEquals(0f, g.height, "Expected height to snap to 0 during decay")
+        assertTrue(ticks > 1, "Expected multiple ticks before snap")
     }
 
     @Test
@@ -383,19 +392,21 @@ class FftUtilsTest {
 
     @Test
     fun `getFftMagnitudeRange extracts the correct frequency band`() {
-        // Build fftBytes where bin k has magnitude k+1
-        val captureSize = 20  // 10 bins total (5 magnitudes after DC drop)
+        // Build fftBytes: bin k has real=k, imag=0, so magnitude[k-1] = k (after DC skip).
+        // captureSize=20 → 10 bins, 8 magnitudes after DC drop (indices 0..7).
+        val captureSize = 20
         val bytes = ByteArray(captureSize)
-        // Bin 0 (DC): skip
-        // Bins 1..9: set real = value, imag = 0
         for (k in 1 until captureSize / 2) {
             bytes[k * 2] = k.toByte()
             bytes[k * 2 + 1] = 0
         }
-        // At sampleRate=20, captureSize=20: each bin = 1 Hz
-        // startHz=2, endHz=4 → indices 2 and 3 in magnitude array (offset by DC drop)
+        // At sampleRate=20, captureSize=20: bin spacing = 1 Hz.
+        // hzToFftIndex(2, 20, 20) = (2*20/20) = 2; hzToFftIndex(4, 20, 20) = 4.
+        // Magnitudes array: [1, 2, 3, 4, 5, 6, 7, 8], copyOfRange(2, 4) = [3.0, 4.0]
         val range = getFftMagnitudeRange(bytes, startHz = 2, endHz = 4, sampleRateHz = 20)
-        assertTrue(range.isNotEmpty())
+        assertEquals(2, range.size)
+        assertEquals(3.0, range[0], 1e-9)
+        assertEquals(4.0, range[1], 1e-9)
     }
 
     // ── toCartesian ──────────────────────────────────────────────────────────
