@@ -41,21 +41,28 @@ import coil3.request.crossfade
 import kotlin.math.roundToInt
 
 /**
- * One SELECT on Cover Flow: the centre cover flies from its slot in the ribbon into Now Playing's
- * art slot — sliding left, growing, turning through Now Playing's tilt, its reflection morphing
- * from the ribbon's into Now Playing's — while the rest of Cover Flow fades out and Now Playing's
- * text fades in underneath (LcdScreen's CoverFlow → NowPlaying transition). Both real arts are
- * hidden for the duration; the overlay lands EXACTLY on Now Playing's measured art rect and is
- * removed in the same composition that shows the real art, so nothing pops.
+ * One flight between Cover Flow and Now Playing: forward (SELECT on a cover) or reverse
+ * (MENU from Now Playing back to the same song on the ribbon).
+ *
+ * Forward: the centre cover flies from its slot in the ribbon into Now Playing's art slot.
+ * Reverse: the art flies from Now Playing back into the ribbon's selected slot.
+ *
+ * Both share the same overlay mechanics — a Coil memory-cache bitmap, position/size/tilt/reflection
+ * lerped over [ART_FLIGHT_MILLIS], landing crossfade [ART_LANDING_FADE_MILLIS] — and the
+ * same two Animatables (progress, overlayAlpha), fresh per flight (keyed on [ArtFlight.id]).
  */
 internal class ArtFlight(
     val id: Int,
     val artUrl: String,
     /** The tile that is flying — hidden in the ribbon for the duration. */
     val coverIndex: Int,
-    /** The cover's pose at take-off: its unscaled art rect in ROOT coordinates, scale and tilt (mid-glide it is not at rest). */
+    /** The cover's pose at take-off (forward) or the Now Playing pose at take-off (reverse). */
     val from: CoverPose,
+    /** Forward = CoverFlow->NowPlaying; reverse = NowPlaying->CoverFlow. */
+    val direction: ArtFlightDirection,
 )
+
+internal enum class ArtFlightDirection { FORWARD, REVERSE }
 
 /** The flight's duration — also the fade of everything else on the two screens. Finite, never a spring. */
 internal const val ART_FLIGHT_MILLIS = 320
@@ -71,8 +78,12 @@ internal const val ART_LANDING_FADE_MILLIS = 120
 @Composable
 internal fun ArtFlightOverlay(
     flight: ArtFlight,
-    /** Now Playing's art column rect (art + reflection, untilted) in ROOT coordinates; null until measured. */
-    target: State<Rect?>,
+    /**
+     * The LANDING pose, live from the incoming screen: Now Playing's art rect (forward) or the
+     * Cover Flow tile's live pose (reverse). Null until the incoming child is measured — aim at
+     * the take-off until then.
+     */
+    target: State<CoverPose?>,
     /** The LCD content box's root position — the overlay is placed relative to it. */
     containerOrigin: State<Offset>,
     progress: Animatable<Float, AnimationVector1D>,
@@ -101,28 +112,53 @@ internal fun ArtFlightOverlay(
     }
     val p = progress.value
     val from = flight.from.artRect
-    // Until Now Playing has been measured (its first layout, one frame in), aim at the take-off.
+    // Until the INCOMING screen has been measured (its first layout, one frame in), aim at the take-off.
     val to = target.value
-    val toSide = to?.width ?: from.width
+    val toRect = to?.artRect ?: from
+    val toSide = toRect.width
+    val toScale = to?.scale ?: flight.from.scale
+    val toRotation = to?.rotationY ?: flight.from.rotationY
+    // Camera: forward goes Cover Flow → Now Playing; reverse goes the other way.
+    val (fromCamera, toCamera) = when (flight.direction) {
+        ArtFlightDirection.FORWARD -> COVER_CAMERA_DISTANCE to ART_CAMERA_DISTANCE
+        ArtFlightDirection.REVERSE -> ART_CAMERA_DISTANCE to COVER_CAMERA_DISTANCE
+    }
+    // Reflection: forward goes Cover Flow → Now Playing; reverse goes the other way.
+    val (fromReflFrac, toReflFrac) = when (flight.direction) {
+        ArtFlightDirection.FORWARD -> COVER_REFLECTION_HEIGHT to REFLECTION_HEIGHT_FRACTION
+        ArtFlightDirection.REVERSE -> REFLECTION_HEIGHT_FRACTION to COVER_REFLECTION_HEIGHT
+    }
+    val (fromReflAlpha, toReflAlpha) = when (flight.direction) {
+        ArtFlightDirection.FORWARD -> COVER_REFLECTION_ALPHA to REFLECTION_ALPHA
+        ArtFlightDirection.REVERSE -> REFLECTION_ALPHA to COVER_REFLECTION_ALPHA
+    }
+    val (fromMidAlpha, toMidAlpha) = when (flight.direction) {
+        ArtFlightDirection.FORWARD -> COVER_REFLECTION_MID_ALPHA to REFLECTION_MID_ALPHA
+        ArtFlightDirection.REVERSE -> REFLECTION_MID_ALPHA to COVER_REFLECTION_MID_ALPHA
+    }
+    val (fromFarAlpha, toFarAlpha) = when (flight.direction) {
+        ArtFlightDirection.FORWARD -> COVER_REFLECTION_FAR_ALPHA to REFLECTION_FAR_ALPHA
+        ArtFlightDirection.REVERSE -> REFLECTION_FAR_ALPHA to COVER_REFLECTION_FAR_ALPHA
+    }
     // Both ends scale and turn about the ART's centre (the tile's and Now Playing's transform
     // origin), so the flight lerps that centre and lays the box out around it.
-    val toCentreX = to?.let { it.left + it.width / 2f } ?: from.center.x
-    val toCentreY = to?.let { it.top + it.width / 2f } ?: from.center.y
+    val toCentreX = toRect.left + toRect.width / 2f
+    val toCentreY = toRect.top + toRect.width / 2f
 
     // Pose at this progress: position, size, tilt, reflection — every one a lerp between the
-    // selected cover as it is drawn right now and Now Playing's art.
+    // take-off and the landing.
     val side = lerp(from.width, toSide, p)
     val centreX = lerp(from.center.x, toCentreX, p) - containerOrigin.value.x
     val centreY = lerp(from.center.y, toCentreY, p) - containerOrigin.value.y
     val left = centreX - side / 2f
     val top = centreY - side / 2f
-    val extraScale = lerp(flight.from.scale, 1f, p)
-    val rotation = lerp(flight.from.rotationY, ART_ROTATION_Y, p)
-    val camera = lerp(COVER_CAMERA_DISTANCE, ART_CAMERA_DISTANCE, p)
-    val reflectionFraction = lerp(COVER_REFLECTION_HEIGHT, REFLECTION_HEIGHT_FRACTION, p)
-    val reflectionAlpha = lerp(COVER_REFLECTION_ALPHA, REFLECTION_ALPHA, p)
-    val midAlpha = lerp(COVER_REFLECTION_MID_ALPHA, REFLECTION_MID_ALPHA, p)
-    val farAlpha = lerp(COVER_REFLECTION_FAR_ALPHA, REFLECTION_FAR_ALPHA, p)
+    val extraScale = lerp(flight.from.scale, toScale, p)
+    val rotation = lerp(flight.from.rotationY, toRotation, p)
+    val camera = lerp(fromCamera, toCamera, p)
+    val reflectionFraction = lerp(fromReflFrac, toReflFrac, p)
+    val reflectionAlpha = lerp(fromReflAlpha, toReflAlpha, p)
+    val midAlpha = lerp(fromMidAlpha, toMidAlpha, p)
+    val farAlpha = lerp(fromFarAlpha, toFarAlpha, p)
     val reflectionPx = side * reflectionFraction
     val pivotY = (side / 2f) / (side + reflectionPx)
 

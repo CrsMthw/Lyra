@@ -89,8 +89,8 @@ private data class LcdContentKey(val depth: Int, val screen: IPodScreen)
 private class EntryHolder(var value: IPodStackEntry)
 
 /**
- * Plain (non-snapshot) bookkeeping for the Cover Flow → Now Playing flight, assigned during
- * composition / layout: the last content key (to detect the push), the centre cover's latest
+ * Plain (non-snapshot) bookkeeping for the Cover Flow ↔ Now Playing flight, assigned during
+ * composition / layout: the last content key (to detect the push/pop), the centre cover's latest
  * take-off rect, and the next flight id.
  */
 private class FlightBookkeeping {
@@ -99,6 +99,12 @@ private class FlightBookkeeping {
     var nextId = 0
     /** Mirrors `flight != null` so the detection block never READS the snapshot state it may write. */
     var active = false
+    /** Now Playing's art rect in root coordinates, reported by [LcdNowPlayingContent.onArtBounds]. */
+    var artRect: Rect? = null
+    /** The Cover Flow entry behind the Now Playing entry — for comparing the uri on a pop. */
+    var coverFlowSelectedUri: String? = null
+    /** True when the transitionSpec should use a crossfade for the current NowPlaying→CoverFlow pop. */
+    var useReverseCrossfade = false
 }
 
 // ── LcdScreen ───────────────────────────────────────────────────────────────
@@ -168,10 +174,11 @@ fun LcdScreen(
 
                 // Content area below the status bar.
                 val contentHeightDp = with(density) { contentHeight.toDp() }
-                // ── Cover Flow → Now Playing flight state (see LcdArtFlight.kt) ──
+                // ── Cover Flow ↔ Now Playing flight state (see LcdArtFlight.kt) ──
                 val bookkeeping = remember { FlightBookkeeping() }
                 var flight by remember { mutableStateOf<ArtFlight?>(null) }
-                val flightTarget = remember { mutableStateOf<Rect?>(null) }
+                /** The landing pose: Now Playing's art (forward) or a Cover Flow tile (reverse). */
+                val flightTarget = remember { mutableStateOf<CoverPose?>(null) }
                 val contentOrigin = remember { mutableStateOf(Offset.Zero) }
                 /** True once the cover has landed: the real art shows while the overlay fades out over it. */
                 val flightLanded = remember { mutableStateOf(false) }
@@ -188,41 +195,87 @@ fun LcdScreen(
                         screen = state.current.screen,
                     )
 
-                    // A SELECT on Cover Flow pushed Now Playing: start the flight from the centre
-                    // cover's last reported slot, carrying the picked song's art (the ViewModel put
-                    // it on nowPlaying optimistically before the push). Detected in composition so
-                    // the overlay and the two hidden arts appear in the same frame.
+                    // ── Flight detection (composition-phase, no snapshot reads that may write) ──
+                    //
+                    // Forward (SELECT on Cover Flow pushes Now Playing): the centre cover flies
+                    // into Now Playing's art slot.
+                    // Reverse (MENU from Now Playing pops to Cover Flow, same song still playing):
+                    // the art flies back into the ribbon's selected slot.
                     val prevKey = bookkeeping.lastKey
                     if (prevKey != null && prevKey != currentKey) {
                         val coverToNowPlaying = prevKey.screen is IPodScreen.CoverFlow &&
                             currentKey.screen is IPodScreen.NowPlaying &&
                             currentKey.depth == prevKey.depth + 1 &&
                             direction == LcdNavDirection.FORWARD
-                        if (coverToNowPlaying) {
-                            // The SELECTED cover — the detent's index, which the ribbon may still be
-                            // gliding toward — at the pose it is drawn in right now.
-                            val coverEntry = state.stack.getOrNull(prevKey.depth - 1)
-                            val coverIndex = coverEntry?.list?.selectedIndex
-                            val geometry = bookkeeping.geometry
-                            val artUrl = coverEntry?.list?.items?.getOrNull(coverIndex ?: -1)?.artUrl
-                                ?.takeIf { it.isNotBlank() }
-                                ?: state.nowPlaying?.artUrl?.takeIf { it.isNotBlank() }
-                            if (geometry != null && coverIndex != null && !artUrl.isNullOrBlank()) {
-                                flightTarget.value = null
-                                flightLanded.value = false
-                                flight = ArtFlight(
-                                    id = bookkeeping.nextId++,
-                                    artUrl = artUrl,
-                                    coverIndex = coverIndex,
-                                    from = geometry.poseOf(coverIndex),
-                                )
-                                bookkeeping.active = true
+                        val nowPlayingToCoverFlow = prevKey.screen is IPodScreen.NowPlaying &&
+                            currentKey.screen is IPodScreen.CoverFlow &&
+                            currentKey.depth == prevKey.depth - 1 &&
+                            direction == LcdNavDirection.BACK
+
+                        when {
+                            coverToNowPlaying -> {
+                                // The SELECTED cover — the detent's index, which the ribbon may still be
+                                // gliding toward — at the pose it is drawn in right now.
+                                val coverEntry = state.stack.getOrNull(prevKey.depth - 1)
+                                val coverIndex = coverEntry?.list?.selectedIndex
+                                val geometry = bookkeeping.geometry
+                                val artUrl = coverEntry?.list?.items?.getOrNull(coverIndex ?: -1)?.artUrl
+                                    ?.takeIf { it.isNotBlank() }
+                                    ?: state.nowPlaying?.artUrl?.takeIf { it.isNotBlank() }
+                                if (geometry != null && coverIndex != null && !artUrl.isNullOrBlank()) {
+                                    flightTarget.value = null
+                                    flightLanded.value = false
+                                    bookkeeping.useReverseCrossfade = false
+                                    flight = ArtFlight(
+                                        id = bookkeeping.nextId++,
+                                        artUrl = artUrl,
+                                        coverIndex = coverIndex,
+                                        from = geometry.poseOf(coverIndex),
+                                        direction = ArtFlightDirection.FORWARD,
+                                    )
+                                    bookkeeping.active = true
+                                    // Remember which song the Cover Flow has selected so the reverse
+                                    // flight can compare on a later pop.
+                                    bookkeeping.coverFlowSelectedUri =
+                                        coverEntry.list.items.getOrNull(coverIndex)?.id
+                                }
                             }
-                        } else if (bookkeeping.active && currentKey.screen !is IPodScreen.NowPlaying) {
-                            // Left Now Playing mid-flight (MENU during the 320 ms): drop the overlay.
-                            flight = null
-                            flightLanded.value = false
-                            bookkeeping.active = false
+                            nowPlayingToCoverFlow && !bookkeeping.active -> {
+                                // Reverse flight: only if the same song is still playing.
+                                val nowPlayingUri = state.nowPlaying?.artUrl?.takeIf { it.isNotBlank() }
+                                val currentEntry = state.current // the Cover Flow entry we're popping to
+                                val coverIndex = currentEntry.list.selectedIndex
+                                val coverItem = currentEntry.list.items.getOrNull(coverIndex)
+                                val sameUri = state.nowPlaying?.uri != null &&
+                                    state.nowPlaying.uri == bookkeeping.coverFlowSelectedUri
+                                val artRect = bookkeeping.artRect
+                                val artUrl = coverItem?.artUrl?.takeIf { it.isNotBlank() }
+                                    ?: nowPlayingUri
+                                if (sameUri && artRect != null && coverItem != null && !artUrl.isNullOrBlank()) {
+                                    flightTarget.value = null
+                                    flightLanded.value = false
+                                    bookkeeping.useReverseCrossfade = true
+                                    flight = ArtFlight(
+                                        id = bookkeeping.nextId++,
+                                        artUrl = artUrl,
+                                        coverIndex = coverIndex,
+                                        from = CoverPose(artRect, 1f, ART_ROTATION_Y),
+                                        direction = ArtFlightDirection.REVERSE,
+                                    )
+                                    bookkeeping.active = true
+                                } else {
+                                    // Song changed — ordinary slide.
+                                    bookkeeping.useReverseCrossfade = false
+                                }
+                            }
+                            bookkeeping.active && currentKey.screen !is IPodScreen.NowPlaying
+                                && currentKey.screen !is IPodScreen.CoverFlow -> {
+                                // Left both screens mid-flight (unexpected nav): drop the overlay.
+                                flight = null
+                                flightLanded.value = false
+                                bookkeeping.active = false
+                                bookkeeping.useReverseCrossfade = false
+                            }
                         }
                     }
                     bookkeeping.lastKey = currentKey
@@ -247,6 +300,7 @@ fun LcdScreen(
                             flight = null
                             flightLanded.value = false
                             bookkeeping.active = false
+                            bookkeeping.useReverseCrossfade = false
                         }
                     }
 
@@ -259,8 +313,15 @@ fun LcdScreen(
                             val coverToNowPlaying = initialState.screen is IPodScreen.CoverFlow &&
                                 targetState.screen is IPodScreen.NowPlaying &&
                                 direction == LcdNavDirection.FORWARD
+                            // Now Playing → Cover Flow (reverse flight): same crossfade, no slide —
+                            // gated on the flag the detection block set, so a song-changed pop still
+                            // slides normally.
+                            val nowPlayingToCoverFlow = initialState.screen is IPodScreen.NowPlaying &&
+                                targetState.screen is IPodScreen.CoverFlow &&
+                                direction == LcdNavDirection.BACK &&
+                                bookkeeping.useReverseCrossfade
                             when {
-                                coverToNowPlaying ->
+                                coverToNowPlaying || nowPlayingToCoverFlow ->
                                     fadeIn(tween(ART_FLIGHT_MILLIS)) togetherWith
                                         fadeOut(tween(ART_FLIGHT_MILLIS)) using
                                         null as SizeTransform?
@@ -295,19 +356,56 @@ fun LcdScreen(
                         if (liveEntry != null) holder.value = liveEntry
                         val entry = holder.value
 
+                        // Direction-aware hiding:
+                        // Forward: Now Playing's art hidden during the flight until landed; tile hidden.
+                        // Reverse: Now Playing's art hidden for the whole flight INCLUDING the landing
+                        //   fade (the element that appears at landing is the tile); tile hidden only
+                        //   until landed, then the overlay fades over the real tile.
+                        val currentFlight = flight
+                        val isForward = currentFlight?.direction == ArtFlightDirection.FORWARD
+                        val isReverse = currentFlight?.direction == ArtFlightDirection.REVERSE
+                        val hideNowPlayingArt = when {
+                            currentFlight == null -> false
+                            isForward -> !flightLanded.value
+                            // Reverse: hide art for the WHOLE flight + landing fade.
+                            isReverse -> true
+                            else -> false
+                        }
+                        val hideCoverFlowTile = when {
+                            currentFlight == null -> null
+                            isForward -> currentFlight.coverIndex
+                            // Reverse: hide the tile until landed, then the overlay fades over it.
+                            isReverse && !flightLanded.value -> currentFlight.coverIndex
+                            else -> null
+                        }
+
                         when (entry.screen) {
                             is IPodScreen.NowPlaying -> LcdNowPlayingContent(
                                 nowPlaying = state.nowPlaying,
                                 contentHeight = contentHeightDp,
-                                hideArt = flight != null && !flightLanded.value,
-                                onArtBounds = { flightTarget.value = it },
+                                hideArt = hideNowPlayingArt,
+                                onArtBounds = { rect ->
+                                    // Forward: this is the landing target.
+                                    if (isForward || currentFlight == null) {
+                                        flightTarget.value = CoverPose(rect, 1f, ART_ROTATION_Y)
+                                    }
+                                    // Always track for reverse take-off (non-snapshot bookkeeping).
+                                    bookkeeping.artRect = rect
+                                },
                             )
                             is IPodScreen.CoverFlow -> LcdCoverFlowContent(
                                 entry = entry,
                                 likedIndex = state.likedIndex,
                                 contentHeight = contentHeightDp,
-                                hiddenIndex = flight?.coverIndex,
-                                onGeometry = { bookkeeping.geometry = it },
+                                hiddenIndex = hideCoverFlowTile,
+                                onGeometry = { geo ->
+                                    bookkeeping.geometry = geo
+                                    // Reverse: the incoming Cover Flow reports its geometry; use the
+                                    // selected tile's live pose as the landing target.
+                                    if (isReverse) {
+                                        flightTarget.value = geo.poseOf(currentFlight!!.coverIndex)
+                                    }
+                                },
                             )
                             else -> LcdMenuList(
                                 entry = entry,
