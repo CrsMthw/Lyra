@@ -834,6 +834,8 @@ private const val SCROLLBAR_HIDE_DELAY_MS = 1_500L
 private const val SCROLLBAR_FADE_MILLIS = 350
 /** Thumb width as a fraction of the content height. */
 private const val SCROLLBAR_WIDTH_FRACTION = 0.016f
+/** The thumb's glide between positions — finite, retargeted per detent so a fast spin flows. */
+private const val SCROLLBAR_SLIDE_MILLIS = 160
 
 /**
  * A translucent black capsule at the right edge with no track (Cris, round D pass). It reads its
@@ -861,6 +863,18 @@ private fun LcdScrollbar(
         alpha.animateTo(0f, tween(SCROLLBAR_FADE_MILLIS))
     }
 
+    // The thumb GLIDES to each new window position instead of jumping a row at a time, as the
+    // Classic's does (Cris, round D pass). The value is read in the draw phase only.
+    val targetFraction = if (totalItems > visibleRows) {
+        firstVisibleIndex.toFloat() / (totalItems - visibleRows)
+    } else {
+        0f
+    }
+    val position = remember { Animatable(targetFraction) }
+    LaunchedEffect(targetFraction) {
+        position.animateTo(targetFraction, tween(SCROLLBAR_SLIDE_MILLIS, easing = FastOutSlowInEasing))
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -874,12 +888,7 @@ private fun LcdScrollbar(
                 .drawBehind {
                     val thumbFraction = (visibleRows.toFloat() / totalItems).coerceIn(0.05f, 1f)
                     val thumbHeight = size.height * thumbFraction
-                    val scrollFraction = if (totalItems > visibleRows) {
-                        firstVisibleIndex.toFloat() / (totalItems - visibleRows)
-                    } else {
-                        0f
-                    }
-                    val thumbTop = scrollFraction * (size.height - thumbHeight)
+                    val thumbTop = position.value.coerceIn(0f, 1f) * (size.height - thumbHeight)
                     drawRoundRect(
                         color = IPodColors.ScrollbarThumb,
                         topLeft = Offset(0f, thumbTop),
