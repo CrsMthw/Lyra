@@ -313,6 +313,42 @@ class PlayerStateManager(
         }
     }
 
+    /**
+     * Sets shuffle to [enabled] without toggling — the Classic's deliberate-selection path (shuffle OFF
+     * before playing the tapped song) and Shuffle Songs (shuffle ON). Mirrors [toggleShuffle]'s
+     * structure: optimistic lock + optimistic state + Web API, 404 → App Remote.
+     */
+    fun setShuffle(enabled: Boolean) {
+        lockShuffle()
+        _state.update { it.copy(shuffleEnabled = enabled) }
+        scope.launch {
+            repository.setShuffle(enabled).onFailure { e ->
+                if (e.message?.contains("404") == true) remoteManager.setShuffle(enabled)
+            }
+        }
+    }
+
+    /**
+     * Awaitable variant of [setShuffle] for callers that need to sequence the shuffle change BEFORE
+     * a play request (iLyra mode: shuffle OFF → play the tapped song, otherwise the uris body starts
+     * at a random entry). Returns the Web API result; a 404 is NOT swallowed — the caller owns the
+     * App Remote fallback and must apply shuffle there too.
+     */
+    suspend fun applyShuffle(enabled: Boolean): Result<Unit> {
+        lockShuffle()
+        _state.update { it.copy(shuffleEnabled = enabled) }
+        return repository.setShuffle(enabled)
+    }
+
+    /**
+     * Clears the optimistic shuffle lock so the next [fetchPlayerState] writes the server's truth.
+     * Used by the shuffle-re-assert path in [PlayerViewModel.shuffleContext]: the 1.5 s verification
+     * fetch must read the REAL server state, not the locked-true optimistic value.
+     */
+    fun clearShuffleLock() {
+        shuffleLockUntil = 0L
+    }
+
     fun cycleRepeat() {
         val next = when (_state.value.repeatState) {
             "context" -> "track"
@@ -324,6 +360,18 @@ class PlayerStateManager(
         val sdkMode = when (next) { "context" -> 1; "track" -> 2; else -> 0 }
         scope.launch {
             repository.setRepeat(next).onFailure { e ->
+                if (e.message?.contains("404") == true) remoteManager.setRepeat(sdkMode)
+            }
+        }
+    }
+
+    /** Sets repeat to an explicit state ("off" / "context" / "track") — the Classic's repeat bar. */
+    fun setRepeat(state: String) {
+        lockRepeat()
+        _state.update { it.copy(repeatState = state) }
+        val sdkMode = when (state) { "context" -> 1; "track" -> 2; else -> 0 }
+        scope.launch {
+            repository.setRepeat(state).onFailure { e ->
                 if (e.message?.contains("404") == true) remoteManager.setRepeat(sdkMode)
             }
         }

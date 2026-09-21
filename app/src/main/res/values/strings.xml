@@ -311,4 +311,78 @@
     <!-- Incoming Spotify links -->
     <string name="deeplink_resolving">Opening link…</string>
     <string name="deeplink_unsupported">Lyra can\'t open that Spotify link</string>
+
+    <!-- ═══════════════════ iLyra mode (easter egg) ═══════════════════ -->
+    <!-- iLyra: shared -->
+    <string name="ilyra_menu_title">iLyra</string>
+    <string name="ilyra_menu_cover_flow">Cover Flow</string>
+    <string name="ilyra_menu_music">Music</string>
+    <string name="ilyra_menu_albums">Albums</string>
+    <string name="ilyra_menu_artists">Artists</string>
+    <string name="ilyra_menu_playlists">Playlists</string>
+    <string name="ilyra_menu_podcasts">Podcasts</string>
+    <string name="ilyra_menu_shuffle_songs">Shuffle Songs</string>
+    <string name="ilyra_menu_now_playing">Now Playing</string>
+    <string name="ilyra_menu_settings">Settings</string>
+    <string name="ilyra_settings_click_sounds">Click Sounds</string>
+    <string name="ilyra_settings_mode">iLyra Mode</string>
+    <string name="ilyra_value_on">On</string>
+    <string name="ilyra_value_off">Off</string>
+    <string name="ilyra_list_empty">No %1$s</string>
+    <string name="ilyra_list_loading">Loading…</string>
+    <string name="ilyra_list_error">Couldn\'t load %1$s</string>
+    <string name="ilyra_settings_click_volume">Click Volume</string>
+    <string name="ilyra_settings_click_pitch">Click Pitch</string>
+    <string name="ilyra_value_percent">%1$d%%</string>
+    <string name="ilyra_value_low">Low</string>
+    <string name="ilyra_value_medium">Medium</string>
+    <string name="ilyra_value_high">High</string>
+    <string name="ilyra_now_playing_position">%1$d of %2$d</string>
+    <string name="ilyra_now_playing_remaining">-%1$s</string>
+    <string name="ilyra_settings_color">Color</string>
+    <string name="ilyra_value_silver">Silver</string>
+    <string name="ilyra_value_black">Black</string>
+    <string name="ilyra_np_shuffle">Shuffle</string>
+    <string name="ilyra_np_repeat">Repeat</string>
+    <string name="ilyra_value_all">All</string>
+    <string name="ilyra_value_one">One</string>
+    <string name="ilyra_options_title">Options</string>
+    <string name="ilyra_option_like">Add to Liked Songs</string>
+    <string name="ilyra_option_unlike">Remove from Liked Songs</string>
+    <string name="ilyra_option_add_to_playlist">Add to Playlist</string>
+    <string name="ilyra_option_go_to_album">Go to Album</string>
+    <string name="ilyra_option_go_to_artist">Go to Artist</string>
+    <string name="ilyra_option_sleep_timer">Sleep Timer</string>
+    <string name="ilyra_value_minutes_left">%1$d min left</string>
+    <!-- (end shared) -->
+
+
+    <!-- iLyra: ViewModel + data (lane: vm) -->
+    <string name="ilyra_vm_load_error">Couldn\'t load</string>
+    <!-- (end vm) -->
+
+
+    <!-- iLyra: shell + Settings row (lane: shell) -->
+    <string name="settings_ilyra">iLyra</string>
+    <string name="settings_ilyra_desc">Relive the click wheel</string>
+    <string name="settings_ilyra_unlocked">🎵 iLyra mode unlocked</string>
+    <string name="ilyra_exit_title">Exit iLyra mode?</string>
+    <string name="ilyra_exit_yes">Yes</string>
+    <string name="ilyra_exit_no">No</string>
+    <string name="ilyra_portrait_hint">iLyra mode works best in portrait</string>
+    <string name="about_credit_fonts">Liberation Sans font © Red Hat, Inc. — SIL Open Font License 1.1</string>
+    <!-- (end shell) -->
+
+
+    <!-- iLyra: click wheel (lane: wheel) -->
+    <string name="ilyra_cd_click_wheel">Click wheel</string>
+    <string name="ilyra_wheel_menu">MENU</string>
+    <!-- (end wheel) -->
+
+
+    <!-- iLyra: LCD + menus (lane: lcd) -->
+    <string name="ilyra_cd_lcd">iLyra screen</string>
+    <string name="ilyra_now_playing_empty">No Track Selected</string>
+    <string name="ilyra_coverflow_indexing">Indexing %1$d of %2$d…</string>
+    <!-- (end lcd) -->
 </resources>

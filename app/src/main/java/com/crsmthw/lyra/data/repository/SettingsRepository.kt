@@ -22,6 +22,12 @@ class SettingsRepository(private val dataStore: LyraDataStore) {
     val visualizerGainSync: Flow<Boolean>       = dataStore.visualizerGainSync
     val hapticsEnabled   : Flow<Boolean>        = dataStore.hapticsEnabled
     val forYouEnabled    : Flow<Boolean>        = dataStore.forYouEnabled
+    val ilyraUnlocked     : Flow<Boolean>        = dataStore.ilyraUnlocked
+    val ilyraEnabled      : Flow<Boolean>        = dataStore.ilyraEnabled
+    val ilyraClickSounds  : Flow<Boolean>        = dataStore.ilyraClickSounds
+    val ilyraClickVolume  : Flow<Int>            = dataStore.ilyraClickVolume
+    val ilyraClickPitch   : Flow<Int>            = dataStore.ilyraClickPitch
+    val ilyraBodyColor    : Flow<Int>            = dataStore.ilyraBodyColor
 
     suspend fun setThemeMode        (mode   : ThemeMode)      = dataStore.setThemeMode(mode)
     suspend fun setAmoledBlack      (enabled: Boolean)        = dataStore.setAmoledBlack(enabled)
@@ -38,4 +44,10 @@ class SettingsRepository(private val dataStore: LyraDataStore) {
     suspend fun setVisualizerGainSync(sync: Boolean)          = dataStore.setVisualizerGainSync(sync)
     suspend fun setHapticsEnabled   (enabled: Boolean)        = dataStore.setHapticsEnabled(enabled)
     suspend fun setForYouEnabled    (enabled: Boolean)        = dataStore.setForYouEnabled(enabled)
+    suspend fun setIlyraUnlocked     (unlocked: Boolean)       = dataStore.setIlyraUnlocked(unlocked)
+    suspend fun setIlyraEnabled      (enabled: Boolean)        = dataStore.setIlyraEnabled(enabled)
+    suspend fun setIlyraClickSounds  (enabled: Boolean)        = dataStore.setIlyraClickSounds(enabled)
+    suspend fun setIlyraClickVolume  (percent: Int)            = dataStore.setIlyraClickVolume(percent)
+    suspend fun setIlyraClickPitch   (ordinal: Int)            = dataStore.setIlyraClickPitch(ordinal)
+    suspend fun setIlyraBodyColor    (ordinal: Int)            = dataStore.setIlyraBodyColor(ordinal)
 }

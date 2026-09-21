@@ -320,6 +320,59 @@ class LibraryCache(context: Context) {
         }
     }
 
+    /**
+     * The result of [appendToLikedSongs]: the tracks that were genuinely new (not already held, by
+     * id, in list order) and the row count after the write.
+     */
+    data class LikedSongsAppend(val added: List<SpotifyTrack>, val rowCount: Int)
+
+    /**
+     * Atomically appends a fetched page to the Liked Songs list under ONE lock — the shared
+     * `LikedSongsIndexer`'s writer (2026-09-21). Reads the CURRENT list inside the lock, so a prepend
+     * (a like, the Classic's reconcile) landing between the caller's earlier read and this write is
+     * kept, not reverted — the `load()` … `saveTrackList(cached + page)` pair the foreground
+     * service used to do had exactly that window. De-duplicates by id (heals an overlap when the
+     * seed offset started below the true raw position). Purely additive: `snapshotId` and
+     * `likedSongCount` are left alone — a backfill has no authority over the total (it was already
+     * counted), and writing a stale total would revert a concurrent like's increment.
+     * Returns null when there is no liked list to append to.
+     */
+    fun appendToLikedSongs(tracks: List<SpotifyTrack>): LikedSongsAppend? {
+        synchronized(lock) {
+            val current  = loadLocked() ?: return null
+            val existing = current.trackLists[LIKED_SONGS_KEY] ?: return null
+            val held     = existing.tracks.mapTo(HashSet()) { it.id }
+            val added    = tracks.filter { it.id !in held }.distinctBy { it.id }
+            saveLocked(current.copy(
+                trackLists = current.trackLists + (LIKED_SONGS_KEY to
+                    CachedTrackList(existing.snapshotId, existing.tracks + added)),
+            ))
+            return LikedSongsAppend(added, existing.tracks.size + added.size)
+        }
+    }
+
+    /**
+     * Atomically prepends [tracks] (newest first) to the Liked Songs list under ONE lock — the Classic's
+     * reconcile writer (2026-09-21), the counterpart of [appendToLikedSongs]: a page the indexer
+     * appended between the caller's read and this write survives. De-duplicates by id, keeping the
+     * FIRST occurrence (so a re-like already held moves nowhere and the fresh copy is dropped).
+     * [total] is the server's count: it becomes the `snapshotId` AND `likedSongCount`, as the
+     * single-track [prependToLikedSongs] does. Returns the merged list as written.
+     */
+    fun prependToLikedSongs(tracks: List<SpotifyTrack>, total: Int): List<SpotifyTrack> {
+        synchronized(lock) {
+            val current  = loadLocked() ?: LibraryCacheData()
+            val existing = current.trackLists[LIKED_SONGS_KEY]?.tracks ?: emptyList()
+            val merged   = (tracks + existing).distinctBy { it.id }
+            saveLocked(current.copy(
+                likedSongCount = total,
+                trackLists     = current.trackLists + (LIKED_SONGS_KEY to
+                    CachedTrackList(total.toString(), merged)),
+            ))
+            return merged
+        }
+    }
+
     fun removeFromLikedSongs(trackId: String) {
         synchronized(lock) {
             val current   = loadLocked() ?: return
