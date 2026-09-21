@@ -458,7 +458,7 @@ private fun NowPlayingArt(
 }
 
 @Composable
-private fun ArtPlaceholder(modifier: Modifier, artSide: Dp) {
+internal fun ArtPlaceholder(modifier: Modifier, artSide: Dp) {
     val density = LocalDensity.current
     val glyphSizePx = with(density) { (artSide * NOTE_GLYPH_FRACTION).toPx() }
 
@@ -478,7 +478,7 @@ private fun ArtPlaceholder(modifier: Modifier, artSide: Dp) {
 /**
  * Draws a simple single eighth-note: a filled oval head, a vertical stem, and a flag.
  */
-private fun DrawScope.drawMusicNote(center: Offset, noteSize: Float, color: Color) {
+internal fun DrawScope.drawMusicNote(center: Offset, noteSize: Float, color: Color) {
     val headWidth = noteSize * 0.40f
     val headHeight = noteSize * 0.28f
     val stemHeight = noteSize * 0.70f

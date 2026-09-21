@@ -375,5 +375,6 @@
     <!-- iPod: LCD + menus (lane: lcd) -->
     <string name="ipod_cd_lcd">iPod screen</string>
     <string name="ipod_now_playing_empty">No Track Selected</string>
+    <string name="ipod_coverflow_indexing">Indexing %1$d of %2$d…</string>
     <!-- (end lcd) -->
 </resources>

@@ -58,6 +58,7 @@ import com.crsmthw.lyra.ui.ipod.nav.IPodStackEntry
 import com.crsmthw.lyra.ui.ipod.nav.IPodUiState
 import com.crsmthw.lyra.ui.ipod.nav.LcdItem
 import com.crsmthw.lyra.ui.ipod.nav.LcdLabel
+import com.crsmthw.lyra.ui.ipod.nav.LcdIndexStatus
 import com.crsmthw.lyra.ui.ipod.nav.LcdNavDirection
 
 // ── Transition key ──────────────────────────────────────────────────────────
@@ -193,6 +194,11 @@ fun LcdScreen(
                         when (entry.screen) {
                             is IPodScreen.NowPlaying -> LcdNowPlayingContent(
                                 nowPlaying = state.nowPlaying,
+                                contentHeight = contentHeightDp,
+                            )
+                            is IPodScreen.CoverFlow -> LcdCoverFlowContent(
+                                entry = entry,
+                                likedIndex = state.likedIndex,
                                 contentHeight = contentHeightDp,
                             )
                             else -> LcdMenuList(
