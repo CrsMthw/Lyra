@@ -385,4 +385,21 @@
     <string name="ilyra_now_playing_empty">No Track Selected</string>
     <string name="ilyra_coverflow_indexing">Indexing %1$d of %2$d…</string>
     <!-- (end lcd) -->
+
+
+    <!-- Playlist editing (lane: playlist-edit) -->
+    <string name="edit_playlist_details">Edit details</string>
+    <string name="edit_playlist_title">Edit playlist details</string>
+    <string name="edit_playlist_name_label">Name</string>
+    <string name="edit_playlist_description_label">Description (optional)</string>
+    <string name="edit_playlist_save">Save</string>
+    <string name="edit_playlist_error">Couldn\'t update playlist details</string>
+    <string name="reorder_songs">Reorder songs</string>
+    <string name="reorder_songs_title">Reorder songs</string>
+    <string name="reorder_done">Done</string>
+    <string name="reorder_loading">Loading all songs…</string>
+    <string name="reorder_error">Couldn\'t load all songs for reordering</string>
+    <string name="reorder_failed">Couldn\'t reorder songs</string>
+    <string name="cd_drag_handle">Drag to reorder</string>
+    <!-- (end playlist-edit) -->
 </resources>

@@ -461,3 +461,17 @@ data class RemoveItemsRequest(
 data class SnapshotIdResponse(
     @SerializedName("snapshot_id") val snapshotId: String? = null,
 )
+
+// ── Reorder playlist items request (PUT /playlists/{id}/items) ───────────────
+data class ReorderItemsRequest(
+    @SerializedName("range_start")   val rangeStart  : Int,
+    @SerializedName("insert_before") val insertBefore: Int,
+    @SerializedName("range_length")  val rangeLength : Int? = null,
+    @SerializedName("snapshot_id")   val snapshotId  : String? = null,
+)
+
+// ── Update playlist details request (PUT /playlists/{id}) ────────────────────
+data class UpdatePlaylistDetailsRequest(
+    @SerializedName("name")        val name       : String? = null,
+    @SerializedName("description") val description: String? = null,
+)

@@ -95,6 +95,19 @@ interface SpotifyApiService {
         @Body       body: RemoveItemsRequest,
     ): SnapshotIdResponse
 
+    @PUT("playlists/{id}/items")
+    suspend fun reorderPlaylistItems(
+        @Path("id") id  : String,
+        @Body       body: ReorderItemsRequest,
+    ): SnapshotIdResponse
+
+    // 200 with an empty body — no return type, same as unfollowPlaylist.
+    @PUT("playlists/{id}")
+    suspend fun updatePlaylistDetails(
+        @Path("id") id  : String,
+        @Body       body: UpdatePlaylistDetailsRequest,
+    )
+
     // ── Player ───────────────────────────────────────────────────────────────
     @GET("me/player")
     suspend fun getPlayerState(

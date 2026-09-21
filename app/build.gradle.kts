@@ -149,6 +149,9 @@ dependencies {
     // FFT interpolation for audio visualizer
     implementation(libs.commons.math3)
 
+    // Drag-and-drop reorder for LazyColumn (playlist reorder mode)
+    implementation(libs.reorderable)
+
     // ─── Spotify App Remote SDK ────────────────────────────────────────────
     implementation(files("libs/spotify-app-remote-release-0.8.0.aar"))
     // ───────────────────────────────────────────────────────────────────────

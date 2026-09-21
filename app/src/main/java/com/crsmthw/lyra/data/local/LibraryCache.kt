@@ -513,6 +513,53 @@ class LibraryCache(context: Context) {
         }
     }
 
+    /**
+     * Replaces an owned playlist's cached track order after a reorder session — the ONE-LOCK writer
+     * for the finished order. [snapshotId] is the latest known (from the last successful PUT), and
+     * [rawOffset] is the total raw slots (the sweep read the whole list). Does NOT emit
+     * [trackListChanges] (no rows were added or removed) or [playlistMutations] (the total is
+     * unchanged and de-duping pages by uri would collapse legitimate duplicates). Does NOT bump
+     * [revision] (the playlist set and metadata count are unchanged).
+     */
+    fun replacePlaylistTrackOrder(
+        playlistId : String,
+        tracks     : List<SpotifyTrack>,
+        snapshotId : String,
+        rawOffset  : Int,
+    ) {
+        synchronized(lock) {
+            val current = loadLocked() ?: return
+            saveLocked(current.copy(
+                trackLists = current.trackLists + (playlistId to CachedTrackList(snapshotId, tracks, rawOffset)),
+            ))
+        }
+    }
+
+    /**
+     * Updates an owned playlist's name and/or description in the cached playlists list — the
+     * ONE-LOCK writer for the "Edit details" dialog. Only the non-null arguments are applied.
+     * Bumps [revision] so [LibraryViewModel]'s browser list re-syncs from the cache.
+     */
+    fun updatePlaylistDetails(
+        playlistId : String,
+        name       : String? = null,
+        description: String? = null,
+    ) {
+        synchronized(lock) {
+            val current = loadLocked() ?: return
+            val updated = current.playlists.map {
+                if (it.id != playlistId) it
+                else it.copy(
+                    name        = name ?: it.name,
+                    description = description ?: it.description,
+                )
+            }
+            if (updated == current.playlists) return
+            saveLocked(current.copy(playlists = updated))
+            _revision.value++
+        }
+    }
+
     fun removePlaylist(playlistId: String) {
         synchronized(lock) {
             val current = loadLocked() ?: return

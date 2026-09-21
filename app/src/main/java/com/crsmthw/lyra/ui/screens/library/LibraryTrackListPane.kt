@@ -20,6 +20,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -47,11 +48,23 @@ import com.crsmthw.lyra.util.ListScrollHaptics
 import com.crsmthw.lyra.util.rememberArtBoundsTransform
 import com.crsmthw.lyra.util.confirm
 import com.crsmthw.lyra.util.press
+import com.crsmthw.lyra.util.reject
+import com.crsmthw.lyra.util.tick
+import com.crsmthw.lyra.util.threshold
 import com.crsmthw.lyra.util.screenTransitionSpec
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
 import java.io.File
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+
+/**
+ * Which "mode" the detail bar currently shows — normal (overflow menu), selection (delete), or
+ * reorder (done). The bar transition swaps its slot contents on this, ONE opaque bar (the M3
+ * contextual-action-bar pattern).
+ */
+private enum class DetailBarMode { Normal, Selection, Reorder }
 
 // ── Track-list pane ───────────────────────────────────────────────────────────
 // The playlist / Liked Songs detail: the single-pane detail pane AND the two-pane right pane are
@@ -91,11 +104,13 @@ internal fun RightPaneContent(
     // (or a pane rendering an older state during a swap) can't paint a selection UI.
     val canDelete    = playlist != null && playlist.owner?.id == state.user?.id
     val inSelection  = canDelete && state.selectionMode
+    val inReorder    = canDelete && state.reorderMode
     val nSelected    = state.selectedUris.size
     val haptics      = LocalHapticFeedback.current
     var showOverflowMenu  by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showRemoveConfirm by remember { mutableStateOf(false) }
+    var showEditDetails   by remember { mutableStateOf(false) }
     val mosaicFile   = playlist?.let { p ->
         if (p.id in state.playlistsWithMosaics) File(mosaicDir, "${p.id}.png") else null
     }
@@ -157,7 +172,7 @@ internal fun RightPaneContent(
             // Belt to the VM's braces: refreshCurrentTracks clears the selection anyway, for the
             // case where the mode is entered from the song menu while a refresh is already in
             // flight (nothing gates that on isRefreshing).
-            enabled      = !inSelection,
+            enabled      = !inSelection && !inReorder,
             modifier     = Modifier.fillMaxSize(),
             // Both indicators clear the app bar laid over this list: the PTR box still spans the
             // whole pane (the bar is an overlay, not a Column sibling), so an indicator that only
@@ -189,10 +204,12 @@ internal fun RightPaneContent(
             isLoadingMore  = state.isLoadingMoreTracks,
             canLoadMore    = canLoadMore,
             onLoadMore     = if (isLikedSongs) viewModel::loadMoreLikedSongs else viewModel::loadMorePlaylistTracks,
-            // In selection mode a tap is a check and playback is suspended; a long-press just
-            // toggles too, since the menu it would open is where the mode came from.
+            // In selection mode a tap is a check and playback is suspended; in reorder mode taps
+            // and long-presses are inert (the row is operated by its drag handle).
             onTrackClick   = { track ->
-                if (inSelection) {
+                if (inReorder) {
+                    // no-op: tap-to-play is suspended in reorder mode
+                } else if (inSelection) {
                     viewModel.toggleTrackSelection(track.uri)
                 } else if (playlist != null) {
                     val idx = state.currentTracks.indexOfFirst { it.uri == track.uri }.coerceAtLeast(0)
@@ -204,7 +221,9 @@ internal fun RightPaneContent(
                 }
             },
             onTrackLongClick = { track ->
-                if (inSelection) {
+                if (inReorder) {
+                    // no-op: long-press is suspended in reorder mode
+                } else if (inSelection) {
                     viewModel.toggleTrackSelection(track.uri)
                 } else if (!track.isEpisode) {
                     // A playlist CAN hold a podcast episode, and every row in TrackActionsSheet
@@ -219,6 +238,8 @@ internal fun RightPaneContent(
                 }
             },
             selectedUris   = if (inSelection) state.selectedUris else null,
+            reorderMode    = inReorder,
+            onReorderMove  = viewModel::reorderTrack,
             modifier       = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = 100.dp + navBarBottomDp),
             listState      = listState,
@@ -232,7 +253,7 @@ internal fun RightPaneContent(
                     trackCount   = trackCount,
                     onPlay       = { haptics.press(); viewModel.playPlaylist(playUri) },
                     onShuffle    = { haptics.press(); viewModel.shufflePlaylist(playUri) },
-                    selecting    = inSelection,
+                    selecting    = inSelection || inReorder,
                     playlistId   = playlist?.id,
                     sharedScope  = sharedScope,
                     animScope    = animScope,
@@ -329,35 +350,35 @@ internal fun RightPaneContent(
         // takes two deliberate actions inside 300 ms, neither of which can come from this bar (its
         // own ✕ / ⌫ are the controls the fade has just deadened): a row long-press or the ⋮ menu's
         // Select row on the way in, the selection `BackHandler` on the way out.
-        val barTransition = updateTransition(inSelection, label = "detail_bar")
+        val barMode = when {
+            inSelection -> DetailBarMode.Selection
+            inReorder   -> DetailBarMode.Reorder
+            else        -> DetailBarMode.Normal
+        }
+        val barTransition = updateTransition(barMode, label = "detail_bar")
         DetailTopBar(
             paneColor      = paneColor,
             navigationIcon = {
-                // SINGLE-PANE ONLY, and that is the fix rather than a cost: a nav slot that is
-                // EMPTY WHEN IDLE MUST STAY EMPTY. `TopAppBarLayout` insets the title by
-                // `max(TopAppBarTitleInset, navigationIcon.width)`, so in the two-pane RIGHT pane
-                // (`onBack == null`, no back icon, ever) a ✕ borrowed into this slot for selection
-                // mode took the slot 0 → 48dp, i.e. the title's inset 16 → 48dp at the start of the
-                // entry fade, snapping back at the SETTLE of the exit one — the playlist name
-                // sliding ~32dp sideways on every selection swap. Reserving 48dp in the idle branch
-                // is not the fix either: that permanently indents that pane's title. So in two-pane
-                // the ✕ leads the `actions` slot instead (see there) and this slot is composed away
-                // in BOTH branches, leaving the title's inset constant. Single-pane keeps the
-                // standard M3 contextual layout — back arrow ↔ ✕ here, ⌫ in the actions — because
-                // the back arrow already holds the slot at 48dp, so nothing can move.
+                // SINGLE-PANE ONLY — see the full note in the original selection-mode version.
                 if (onBack != null) {
-                    barTransition.Crossfade(animationSpec = screenTransitionSpec()) { selecting ->
-                        val live = selecting == barTransition.currentState
-                        if (selecting) {
-                            IconButton(
+                    barTransition.Crossfade(animationSpec = screenTransitionSpec()) { mode ->
+                        val live = mode == barTransition.currentState
+                        when (mode) {
+                            DetailBarMode.Selection -> IconButton(
                                 onClick = { haptics.press(); viewModel.exitSelectionMode() },
                                 enabled = live,
                             ) {
                                 Icon(Icons.Default.Close,
                                     contentDescription = stringResource(R.string.library_selection_cancel))
                             }
-                        } else {
-                            IconButton(
+                            DetailBarMode.Reorder -> IconButton(
+                                onClick = { haptics.press(); viewModel.exitReorderMode() },
+                                enabled = live,
+                            ) {
+                                Icon(Icons.Default.Close,
+                                    contentDescription = stringResource(R.string.library_selection_cancel))
+                            }
+                            DetailBarMode.Normal -> IconButton(
                                 onClick = { haptics.confirm(); onBack() },
                                 enabled = live,
                             ) {
@@ -369,85 +390,101 @@ internal fun RightPaneContent(
                 }
             },
             actions        = {
-                // The contextual ✕ (exit selection), TWO-PANE RIGHT PANE ONLY — the pane whose nav
-                // slot has to stay empty (see above). It is its OWN `Crossfade`, a sibling in this
-                // actions `Row`, and NOT a second child inside the ⌫ branch below; that is the
-                // durable half of this note. `Crossfade` renders its branches in a `Box`, i.e.
-                // TopStart-aligned, and `TopAppBarLayout` places the whole actions block flush to
-                // the bar's END. The nav and title slots are start-aligned, so their two branches
-                // coincide there and a width difference costs nothing — but in an END-aligned slot a
-                // two-child branch makes the Box 96dp for the length of the fade and leaves the
-                // one-child branch (⋮) sitting at its START: the title's 32dp snap traded for a
-                // 48dp jump of the ⋮ itself. As two slots in the Row the RIGHTMOST child's right
-                // edge is pinned instead — the block simply grows 48dp leftward while selecting, so
-                // ⌫ / ⋮ never move and the title only loses 48dp of room to ellipsize in.
+                // TWO-PANE RIGHT PANE ONLY: the contextual ✕ sits in the actions slot (see the
+                // original note about nav slot width stability).
                 if (onBack == null) {
-                    barTransition.Crossfade(animationSpec = screenTransitionSpec()) { selecting ->
-                        val live = selecting == barTransition.currentState
-                        if (selecting) {
-                            IconButton(
+                    barTransition.Crossfade(animationSpec = screenTransitionSpec()) { mode ->
+                        val live = mode == barTransition.currentState
+                        when (mode) {
+                            DetailBarMode.Selection -> IconButton(
                                 onClick = { haptics.press(); viewModel.exitSelectionMode() },
                                 enabled = live,
                             ) {
                                 Icon(Icons.Default.Close,
                                     contentDescription = stringResource(R.string.library_selection_cancel))
                             }
+                            DetailBarMode.Reorder -> IconButton(
+                                onClick = { haptics.press(); viewModel.exitReorderMode() },
+                                enabled = live,
+                            ) {
+                                Icon(Icons.Default.Close,
+                                    contentDescription = stringResource(R.string.library_selection_cancel))
+                            }
+                            DetailBarMode.Normal -> {}
                         }
                     }
                 }
-                barTransition.Crossfade(animationSpec = screenTransitionSpec()) { selecting ->
-                    val live = selecting == barTransition.currentState
-                    if (selecting) {
-                        // press() only — the confirm/reject buzz reports what the API actually did
-                        // and is fired once from LibraryScreen when `removeResult` lands.
-                        IconButton(
-                            onClick = {
-                                haptics.press()
-                                // A batch is confirmed first; a single checked row is one deliberate
-                                // tap and goes straight through, like the song menu's remove row.
-                                if (nSelected >= 2) showRemoveConfirm = true
-                                else viewModel.removeSelectedTracks()
-                            },
-                            enabled = live && nSelected > 0 && !state.isRemovingSelection,
-                        ) {
-                            Icon(Icons.Default.Delete,
-                                contentDescription = stringResource(R.string.library_selection_remove))
-                        }
-                    } else if (canDelete) {
-                        // The menu anchors to this Box, which is the ⋮ button's own slot in the
-                        // actions row.
-                        Box {
+                barTransition.Crossfade(animationSpec = screenTransitionSpec()) { mode ->
+                    val live = mode == barTransition.currentState
+                    when (mode) {
+                        DetailBarMode.Selection -> {
                             IconButton(
-                                onClick = { haptics.press(); showOverflowMenu = true },
+                                onClick = {
+                                    haptics.press()
+                                    if (nSelected >= 2) showRemoveConfirm = true
+                                    else viewModel.removeSelectedTracks()
+                                },
+                                enabled = live && nSelected > 0 && !state.isRemovingSelection,
+                            ) {
+                                Icon(Icons.Default.Delete,
+                                    contentDescription = stringResource(R.string.library_selection_remove))
+                            }
+                        }
+                        DetailBarMode.Reorder -> {
+                            IconButton(
+                                onClick = { haptics.confirm(); viewModel.exitReorderMode() },
                                 enabled = live,
                             ) {
-                                Icon(Icons.Default.MoreVert,
-                                    contentDescription = stringResource(R.string.more_options))
+                                Icon(Icons.Default.Check,
+                                    contentDescription = stringResource(R.string.reorder_done))
                             }
-                            DropdownMenu(
-                                expanded         = showOverflowMenu,
-                                onDismissRequest = { showOverflowMenu = false },
-                            ) {
-                                // Second door into selection mode — discoverable without a
-                                // long-press, and present for exactly the playlists the song
-                                // menu's "Select" row is (owned ones, since this whole action is
-                                // gated on ownership).
-                                DropdownMenuItem(
-                                    text        = { Text(stringResource(R.string.library_select_songs)) },
-                                    leadingIcon = { Icon(Icons.Default.Checklist, contentDescription = null) },
-                                    onClick     = {
-                                        haptics.press(); showOverflowMenu = false
-                                        viewModel.enterSelectionMode()
-                                    },
-                                )
-                                DropdownMenuItem(
-                                    text        = { Text(stringResource(R.string.delete_playlist)) },
-                                    leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
-                                    onClick     = {
-                                        haptics.press(); showOverflowMenu = false
-                                        showDeleteConfirm = true
-                                    },
-                                )
+                        }
+                        DetailBarMode.Normal -> if (canDelete) {
+                            Box {
+                                IconButton(
+                                    onClick = { haptics.press(); showOverflowMenu = true },
+                                    enabled = live,
+                                ) {
+                                    Icon(Icons.Default.MoreVert,
+                                        contentDescription = stringResource(R.string.more_options))
+                                }
+                                DropdownMenu(
+                                    expanded         = showOverflowMenu,
+                                    onDismissRequest = { showOverflowMenu = false },
+                                ) {
+                                    DropdownMenuItem(
+                                        text        = { Text(stringResource(R.string.edit_playlist_details)) },
+                                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                                        onClick     = {
+                                            haptics.press(); showOverflowMenu = false
+                                            showEditDetails = true
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text        = { Text(stringResource(R.string.library_select_songs)) },
+                                        leadingIcon = { Icon(Icons.Default.Checklist, contentDescription = null) },
+                                        onClick     = {
+                                            haptics.press(); showOverflowMenu = false
+                                            viewModel.enterSelectionMode()
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text        = { Text(stringResource(R.string.reorder_songs)) },
+                                        leadingIcon = { Icon(Icons.Default.DragHandle, contentDescription = null) },
+                                        onClick     = {
+                                            haptics.press(); showOverflowMenu = false
+                                            viewModel.enterReorderMode()
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text        = { Text(stringResource(R.string.delete_playlist)) },
+                                        leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
+                                        onClick     = {
+                                            haptics.press(); showOverflowMenu = false
+                                            showDeleteConfirm = true
+                                        },
+                                    )
+                                }
                             }
                         }
                     }
@@ -460,16 +497,19 @@ internal fun RightPaneContent(
             // mode regardless of the scroll position.
             heroTitle      = heroTitle,
             title          = { titleModifier ->
-                barTransition.Crossfade(animationSpec = screenTransitionSpec()) { selecting ->
-                    if (selecting) {
-                        Text(
+                barTransition.Crossfade(animationSpec = screenTransitionSpec()) { mode ->
+                    when (mode) {
+                        DetailBarMode.Selection -> Text(
                             text     = pluralStringResource(
                                 R.plurals.library_selected_count, nSelected, nSelected,
                             ),
                             maxLines = 1,
                         )
-                    } else {
-                        Text(
+                        DetailBarMode.Reorder -> Text(
+                            text     = stringResource(R.string.reorder_songs_title),
+                            maxLines = 1,
+                        )
+                        DetailBarMode.Normal -> Text(
                             text     = playlistName,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -531,6 +571,131 @@ internal fun RightPaneContent(
                     }
                 },
             )
+        }
+        // ── Edit playlist details dialog ────────────────────────────────────────────
+        if (showEditDetails && playlist != null) {
+            // Track whether a save was ever initiated so we can close on success. A simple
+            // "was updating → now idle, no error" transition means it worked.
+            var saveWasRequested by remember { mutableStateOf(false) }
+            if (state.isUpdatingDetails) saveWasRequested = true
+            if (saveWasRequested && !state.isUpdatingDetails && state.updateDetailsError == null) {
+                // Close the dialog after a successful save.
+                LaunchedEffect(Unit) { showEditDetails = false }
+            }
+            EditPlaylistDetailsDialog(
+                initialName        = playlist.name,
+                initialDescription = playlist.description.orEmpty(),
+                isUpdating         = state.isUpdatingDetails,
+                error              = state.updateDetailsError,
+                onDismiss          = {
+                    showEditDetails = false
+                    viewModel.clearUpdateDetailsError()
+                },
+                onSave             = { newName, newDesc ->
+                    val nameChanged = newName != playlist.name
+                    val descChanged = newDesc != (playlist.description ?: "")
+                    viewModel.updatePlaylistDetails(
+                        name        = if (nameChanged) newName else null,
+                        description = if (descChanged) newDesc else null,
+                    )
+                },
+            )
+        }
+        // ── Reorder result haptics (one-shot, same pattern as removeResult) ─────
+        state.reorderResult?.let { result ->
+            LaunchedEffect(result) {
+                when (result) {
+                    is ReorderResult.Success -> haptics.confirm()
+                    is ReorderResult.Failure -> haptics.reject()
+                }
+                viewModel.clearReorderResult()
+            }
+        }
+    }
+}
+
+// ── Edit playlist details dialog ─────────────────────────────────────────────
+// Same pattern as the create-playlist dialog in AddToPlaylistSheet: BasicAlertDialog with
+// decorFitsSystemWindows = false and imePadding() on the inner Surface.
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun EditPlaylistDetailsDialog(
+    initialName        : String,
+    initialDescription : String,
+    isUpdating         : Boolean,
+    error              : String?,
+    onDismiss          : () -> Unit,
+    onSave             : (name: String, description: String) -> Unit,
+) {
+    var name by remember { mutableStateOf(initialName) }
+    var desc by remember { mutableStateOf(initialDescription) }
+    val nameBlank  = name.isBlank()
+    val unchanged  = name == initialName && desc == initialDescription
+    val canSave    = !nameBlank && !unchanged && !isUpdating
+
+    BasicAlertDialog(
+        onDismissRequest = { if (!isUpdating) onDismiss() },
+        properties       = DialogProperties(decorFitsSystemWindows = false),
+    ) {
+        Surface(
+            shape          = AlertDialogDefaults.shape,
+            color          = AlertDialogDefaults.containerColor,
+            tonalElevation = AlertDialogDefaults.TonalElevation,
+            modifier       = Modifier.fillMaxWidth().imePadding(),
+        ) {
+            Column(modifier = Modifier.padding(24.dp)) {
+                Text(
+                    text  = stringResource(R.string.edit_playlist_title),
+                    style = MaterialTheme.typography.headlineSmall,
+                )
+                Spacer(Modifier.height(16.dp))
+                OutlinedTextField(
+                    value         = name,
+                    onValueChange = { name = it },
+                    label         = { Text(stringResource(R.string.edit_playlist_name_label)) },
+                    singleLine    = true,
+                    isError       = nameBlank,
+                    modifier      = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value         = desc,
+                    onValueChange = { desc = it },
+                    label         = { Text(stringResource(R.string.edit_playlist_description_label)) },
+                    minLines      = 2,
+                    maxLines      = 4,
+                    modifier      = Modifier.fillMaxWidth(),
+                )
+                if (error != null) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text  = error,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                if (isUpdating) {
+                    Spacer(Modifier.height(8.dp))
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
+                Spacer(Modifier.height(24.dp))
+                Row(
+                    horizontalArrangement = Arrangement.End,
+                    modifier              = Modifier.fillMaxWidth(),
+                ) {
+                    TextButton(onClick = onDismiss, enabled = !isUpdating) {
+                        Text(stringResource(R.string.action_cancel))
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(
+                        onClick = { onSave(name.trim(), desc.trim()) },
+                        enabled = canSave,
+                    ) {
+                        Text(stringResource(R.string.edit_playlist_save))
+                    }
+                }
+            }
         }
     }
 }
@@ -623,6 +788,8 @@ private fun TrackList(
     onTrackLongClick: ((com.crsmthw.lyra.data.remote.model.SpotifyTrack) -> Unit)? = null,
     // null = not in selection mode; otherwise the checked uris (drives each row's check overlay).
     selectedUris   : Set<String>? = null,
+    reorderMode    : Boolean = false,
+    onReorderMove  : (fromIndex: Int, toIndex: Int) -> Unit = { _, _ -> },
     contentPadding : PaddingValues = PaddingValues(bottom = 100.dp),
     listState      : androidx.compose.foundation.lazy.LazyListState = rememberLazyListState(),
     headerContent  : (@Composable () -> Unit)? = null,
@@ -643,23 +810,36 @@ private fun TrackList(
         if (reachedBottom && canLoadMore && !isLoadingMore) onLoadMore()
     }
 
-    // A row's key must NOT depend on how many unrelated rows precede it. With the index baked in,
-    // a multi-select removal above the viewport changed the first-visible row's key, LazyList's
-    // findIndexByKey missed (an exact map lookup — no partial matching on the id half) and kept the
-    // raw index, so the list jumped forward by the number of rows removed above it and every
-    // visible row's remembered state was thrown away. Keying on the uri plus a per-uri occurrence
-    // ordinal is stable instead: remove-by-uri drops EVERY occurrence of the uri it names, so when
-    // a uri goes all of its rows go together and no surviving uri's ordinal shifts. The ordinal is
-    // mandatory, not tidy — a bare uri would trip SaveableStateHolder's duplicate-key `require`
-    // whenever both copies of a twice-added track are composed at once. Precomputed once per list
-    // instance (never inside the key lambda, which the nearest-range map re-invokes per item), and
-    // carried alongside each row so the keys can't desync from the content.
-    val keyedTracks = remember(tracks) {
-        val seen = HashMap<String, Int>(tracks.size)
-        tracks.map { t ->
-            val n = seen.getOrDefault(t.uri, 0)
-            seen[t.uri] = n + 1
-            "${t.uri}#$n" to t
+    val haptics = LocalHapticFeedback.current
+
+    // In reorder mode, assign each row a synthetic stable id that never changes when rows are
+    // swapped — moving a duplicated track past the other would reassign which row is #0 under the
+    // standard uri#ordinal scheme, potentially dropping a drag. The id is "ro#<initialIndex>",
+    // stable for the life of the mode because it's computed once.
+    val keyedTracks = remember(tracks, reorderMode) {
+        if (reorderMode) {
+            tracks.mapIndexed { idx, t -> "ro#$idx" to t }
+        } else {
+            val seen = HashMap<String, Int>(tracks.size)
+            tracks.map { t ->
+                val n = seen.getOrDefault(t.uri, 0)
+                seen[t.uri] = n + 1
+                "${t.uri}#$n" to t
+            }
+        }
+    }
+
+    // The header item sits at index 0 in the LazyColumn; subtract it when translating LazyColumn
+    // indices to track-list indices for the reorder callback. Non-header items before the list
+    // (the empty-state placeholder) are never shown in reorder mode.
+    val headerCount = if (headerContent != null) 1 else 0
+
+    val reorderableState = rememberReorderableLazyListState(listState) { from, to ->
+        val fromIdx = from.index - headerCount
+        val toIdx   = to.index - headerCount
+        if (fromIdx >= 0 && toIdx >= 0 && fromIdx < tracks.size && toIdx < tracks.size) {
+            onReorderMove(fromIdx, toIdx)
+            haptics.tick()
         }
     }
 
@@ -674,23 +854,60 @@ private fun TrackList(
         if (tracks.isEmpty() && emptyContent != null) {
             item(key = "empty_state") { emptyContent() }
         }
-        items(keyedTracks, key = { it.first }) { (_, track) ->
-            TrackRow(
-                track       = track,
-                isPlaying   = currentTrackId == track.id && isPlaying,
-                onClick     = { onTrackClick(track) },
-                // A podcast episode gets NO long-press outside selection mode. The handler
-                // ignores one anyway (every row of TrackActionsSheet is track-only), but a
-                // present handler still fires TrackRow's long-press haptic — a buzz for a
-                // gesture that does nothing. `selectedUris != null` IS selection mode, where a
-                // long-press is just another way to check the row and works fine for an episode.
-                onLongClick = onTrackLongClick
-                    ?.takeIf { selectedUris != null || !track.isEpisode }
-                    ?.let { handler -> { handler(track) } },
-                selected    = selectedUris?.contains(track.uri),
-            )
+        items(keyedTracks, key = { it.first }) { (key, track) ->
+            if (reorderMode) {
+                ReorderableItem(
+                    state = reorderableState,
+                    key   = key,
+                ) { isDragging ->
+                    val elevation by androidx.compose.animation.core.animateDpAsState(
+                        targetValue = if (isDragging) 4.dp else 0.dp,
+                        label       = "drag_elevation",
+                    )
+                    Surface(
+                        tonalElevation = elevation,
+                        shadowElevation = elevation,
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier          = Modifier.fillMaxWidth(),
+                        ) {
+                            TrackRow(
+                                track     = track,
+                                isPlaying = currentTrackId == track.id && isPlaying,
+                                onClick   = {},
+                                modifier  = Modifier.weight(1f),
+                            )
+                            IconButton(
+                                onClick  = {},
+                                modifier = Modifier
+                                    .draggableHandle(
+                                        onDragStarted = { haptics.threshold() },
+                                        onDragStopped = { haptics.press() },
+                                    ),
+                            ) {
+                                Icon(
+                                    Icons.Default.DragHandle,
+                                    contentDescription = stringResource(R.string.cd_drag_handle),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+            } else {
+                TrackRow(
+                    track       = track,
+                    isPlaying   = currentTrackId == track.id && isPlaying,
+                    onClick     = { onTrackClick(track) },
+                    onLongClick = onTrackLongClick
+                        ?.takeIf { selectedUris != null || !track.isEpisode }
+                        ?.let { handler -> { handler(track) } },
+                    selected    = selectedUris?.contains(track.uri),
+                )
+            }
         }
-        if (isLoadingMore) {
+        if (isLoadingMore && !reorderMode) {
             item(key = "loading_more") {
                 Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
