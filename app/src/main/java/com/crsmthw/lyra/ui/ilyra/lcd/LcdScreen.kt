@@ -249,7 +249,8 @@ fun LcdScreen(
                                 val artRect = bookkeeping.artRect
                                 val artUrl = coverItem?.artUrl?.takeIf { it.isNotBlank() }
                                     ?: state.nowPlaying?.artUrl?.takeIf { it.isNotBlank() }
-                                if (sameSong && artRect != null && coverItem != null && !artUrl.isNullOrBlank()) {
+                                // `sameSong` already proves `coverItem != null` (its id matched a non-null uri).
+                                if (sameSong && artRect != null && !artUrl.isNullOrBlank()) {
                                     flightTarget.value = null
                                     flightLanded.value = false
                                     bookkeeping.useReverseCrossfade = true
@@ -400,7 +401,7 @@ fun LcdScreen(
                                     // Reverse: the incoming Cover Flow reports its geometry; use the
                                     // selected tile's live pose as the landing target.
                                     if (isReverse) {
-                                        flightTarget.value = geo.poseOf(currentFlight!!.coverIndex)
+                                        flightTarget.value = geo.poseOf(currentFlight.coverIndex)
                                     }
                                 },
                             )

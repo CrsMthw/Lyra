@@ -813,7 +813,6 @@ class ILyraViewModel(
             is ILyraScreen.ShowEpisodes -> activateEpisodeItem(top.screen, selected, top.list, items)
             is ILyraScreen.NowPlayingOptions -> activateNowPlayingOption(selected.id)
             is ILyraScreen.AddToPlaylist -> activateAddToPlaylistItem(top.screen, selected)
-            else -> {}
         }
     }
 
