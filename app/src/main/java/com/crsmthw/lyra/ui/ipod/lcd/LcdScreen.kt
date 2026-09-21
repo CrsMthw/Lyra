@@ -101,8 +101,6 @@ private class FlightBookkeeping {
     var active = false
     /** Now Playing's art rect in root coordinates, reported by [LcdNowPlayingContent.onArtBounds]. */
     var artRect: Rect? = null
-    /** The Cover Flow entry behind the Now Playing entry — for comparing the uri on a pop. */
-    var coverFlowSelectedUri: String? = null
     /** True when the transitionSpec should use a crossfade for the current NowPlaying→CoverFlow pop. */
     var useReverseCrossfade = false
 }
@@ -234,24 +232,22 @@ fun LcdScreen(
                                         direction = ArtFlightDirection.FORWARD,
                                     )
                                     bookkeeping.active = true
-                                    // Remember which song the Cover Flow has selected so the reverse
-                                    // flight can compare on a later pop.
-                                    bookkeeping.coverFlowSelectedUri =
-                                        coverEntry.list.items.getOrNull(coverIndex)?.id
                                 }
                             }
                             nowPlayingToCoverFlow && !bookkeeping.active -> {
                                 // Reverse flight: only if the same song is still playing.
-                                val nowPlayingUri = state.nowPlaying?.artUrl?.takeIf { it.isNotBlank() }
                                 val currentEntry = state.current // the Cover Flow entry we're popping to
                                 val coverIndex = currentEntry.list.selectedIndex
                                 val coverItem = currentEntry.list.items.getOrNull(coverIndex)
-                                val sameUri = state.nowPlaying?.uri != null &&
-                                    state.nowPlaying.uri == bookkeeping.coverFlowSelectedUri
+                                // Gate on the LIVE Cover Flow item, not the snapshotted uri from
+                                // the forward push: a reconcile prepend can shift the highlight, and
+                                // the landing is geo.poseOf(selectedIndex) — both must agree.
+                                val sameSong = state.nowPlaying?.uri != null &&
+                                    state.nowPlaying.uri == coverItem?.id
                                 val artRect = bookkeeping.artRect
                                 val artUrl = coverItem?.artUrl?.takeIf { it.isNotBlank() }
-                                    ?: nowPlayingUri
-                                if (sameUri && artRect != null && coverItem != null && !artUrl.isNullOrBlank()) {
+                                    ?: state.nowPlaying?.artUrl?.takeIf { it.isNotBlank() }
+                                if (sameSong && artRect != null && coverItem != null && !artUrl.isNullOrBlank()) {
                                     flightTarget.value = null
                                     flightLanded.value = false
                                     bookkeeping.useReverseCrossfade = true
@@ -268,9 +264,8 @@ fun LcdScreen(
                                     bookkeeping.useReverseCrossfade = false
                                 }
                             }
-                            bookkeeping.active && currentKey.screen !is IPodScreen.NowPlaying
-                                && currentKey.screen !is IPodScreen.CoverFlow -> {
-                                // Left both screens mid-flight (unexpected nav): drop the overlay.
+                            bookkeeping.active && currentKey.screen !is IPodScreen.NowPlaying -> {
+                                // Left Now Playing mid-flight (MENU during the 320 ms): drop the overlay.
                                 flight = null
                                 flightLanded.value = false
                                 bookkeeping.active = false

@@ -142,14 +142,20 @@ internal fun ArtFlightOverlay(
     }
     // Both ends scale and turn about the ART's centre (the tile's and Now Playing's transform
     // origin), so the flight lerps that centre and lays the box out around it.
+    // NB: artRect.height may be > artRect.width (art + reflection); the ART's centre is at width/2
+    // from the top, not height/2 — using center.y would place the take-off ~21% of the art side
+    // too low on a reverse flight. from.width == from.width for a square rect (forward), so this
+    // is bit-identical to from.center on the forward path.
+    val fromCentreX = from.left + from.width / 2f
+    val fromCentreY = from.top + from.width / 2f
     val toCentreX = toRect.left + toRect.width / 2f
     val toCentreY = toRect.top + toRect.width / 2f
 
     // Pose at this progress: position, size, tilt, reflection — every one a lerp between the
     // take-off and the landing.
     val side = lerp(from.width, toSide, p)
-    val centreX = lerp(from.center.x, toCentreX, p) - containerOrigin.value.x
-    val centreY = lerp(from.center.y, toCentreY, p) - containerOrigin.value.y
+    val centreX = lerp(fromCentreX, toCentreX, p) - containerOrigin.value.x
+    val centreY = lerp(fromCentreY, toCentreY, p) - containerOrigin.value.y
     val left = centreX - side / 2f
     val top = centreY - side / 2f
     val extraScale = lerp(flight.from.scale, toScale, p)
