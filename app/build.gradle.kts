@@ -3,6 +3,7 @@ import java.util.Properties
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    id("androidx.baselineprofile")
 }
 
 // ─── Release signing ─────────────────────────────────────────────────────────
@@ -80,6 +81,12 @@ android {
 
 kotlin { jvmToolchain(21) }
 
+baselineProfile {
+    // Never generate during a normal assembleRelease — Cris's build must not slow down or
+    // need the emulator. Run :app:generateBaselineProfile explicitly when regenerating.
+    automaticGenerationDuringBuild = false
+}
+
 // This project ships no tests (no src/test or src/androidTest). AGP still creates
 // unit-test + android-test components for every variant, and that test-component
 // wiring is what trips Gradle's "Project object as a dependency notation" deprecation
@@ -152,4 +159,8 @@ dependencies {
     // ─── Spotify App Remote SDK ────────────────────────────────────────────
     implementation(files("libs/spotify-app-remote-release-0.8.0.aar"))
     // ───────────────────────────────────────────────────────────────────────
+
+    // Baseline Profile — allows the profile to be consumed at install time
+    implementation(libs.androidx.profileinstaller)
+    "baselineProfile"(project(":baselineprofile"))
 }
