@@ -13,6 +13,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -69,6 +70,14 @@ class CoverArtPrefetcher(
     /** The worker job that manages the parallel worker coroutines. */
     private var workerJob: Job? = null
 
+    /**
+     * Bumped by [setUrls] after new work lands. A worker that finds nothing PENDING parks on this
+     * instead of exiting: an exiting worker races [setUrls] (the job still reads as active, the
+     * relaunch is skipped, and the new urls sit unprocessed until the NEXT setUrls). Parked
+     * workers cost nothing and die with the scope.
+     */
+    private val wake = MutableStateFlow(0)
+
     private var cancelled = false
 
     /**
@@ -90,6 +99,7 @@ class CoverArtPrefetcher(
         }
         updateProgress()
         ensureWorkerRunning()
+        wake.value++
     }
 
     /** Fetch nearest-first around this index of the last [setUrls] list. Cheap; called per detent. */
@@ -117,15 +127,22 @@ class CoverArtPrefetcher(
     }
 
     /**
-     * Launches [MAX_CONCURRENT] parallel workers. Each worker loops: claim the nearest PENDING url
-     * (atomically marking it IN_FLIGHT so no other worker picks it), probe the disk cache, fetch on
-     * a miss, then mark READY or FAILED. When no PENDING url remains all workers exit.
+     * Launches [MAX_CONCURRENT] parallel workers, once. Each worker loops: claim the nearest PENDING
+     * url (atomically marking it IN_FLIGHT so no other worker picks it), probe the disk cache, fetch
+     * on a miss, then mark READY or FAILED. With nothing PENDING a worker PARKS on [wake] until
+     * [setUrls] adds work — it never exits (see [wake]).
      */
     private suspend fun processUrls() {
         val workers = (0 until MAX_CONCURRENT).map {
             scope.launch {
+                var seen = wake.value
                 while (true) {
-                    val url = claimNextPending() ?: break
+                    val url = claimNextPending()
+                    if (url == null) {
+                        wake.first { it != seen }
+                        seen = wake.value
+                        continue
+                    }
                     processUrl(url)
                 }
             }

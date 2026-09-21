@@ -50,6 +50,8 @@ import com.crsmthw.lyra.ui.ipod.nav.IPodStackEntry
 import com.crsmthw.lyra.ui.ipod.nav.LcdIndexStatus
 import com.crsmthw.lyra.ui.ipod.nav.LcdItem
 import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.sign
 
 // ── Tunables ────────────────────────────────────────────────────────────────
 // All meant for the device pass. Listed individually in the structured report.
@@ -162,7 +164,13 @@ private fun CoverFlowRow(
         val tileSidePx = contentHeightPx * COVER_TILE_FRACTION
         val reflectionHeightPx = tileSidePx * COVER_REFLECTION_HEIGHT
         val totalTileHeightPx = tileSidePx + reflectionHeightPx
-        val centreGapPx = tileSidePx * COVER_CENTRE_GAP
+        // Where the FIRST neighbour's centre sits: past the centre cover's half-width, the gap, and
+        // the neighbour's own projected half-width (scaled, turned through COVER_SIDE_ANGLE). A
+        // bare gap put the first two neighbours underneath the centre cover.
+        val firstNeighbourOffsetPx = tileSidePx * (
+            0.5f + COVER_CENTRE_GAP +
+                0.5f * COVER_SIDE_SCALE * cos(Math.toRadians(COVER_SIDE_ANGLE.toDouble())).toFloat()
+            )
         val sideStepPx = tileSidePx * COVER_SIDE_STEP
         val tileSideDp = with(density) { tileSidePx.toDp() }
         val reflectionHeightDp = with(density) { reflectionHeightPx.toDp() }
@@ -203,7 +211,7 @@ private fun CoverFlowRow(
                             reflectionHeightPx = reflectionHeightPx,
                             reflectionHeightDp = reflectionHeightDp,
                             contentWidthPx = contentWidthPx,
-                            centreGapPx = centreGapPx,
+                            firstNeighbourOffsetPx = firstNeighbourOffsetPx,
                             sideStepPx = sideStepPx,
                             coverVerticalOffsetPx = coverVerticalCentrePx,
                             position = position,
@@ -244,7 +252,7 @@ private fun CoverFlowTile(
     reflectionHeightPx: Float,
     reflectionHeightDp: Dp,
     contentWidthPx: Float,
-    centreGapPx: Float,
+    firstNeighbourOffsetPx: Float,
     sideStepPx: Float,
     coverVerticalOffsetPx: Float,
     position: Animatable<Float, *>,
@@ -288,11 +296,15 @@ private fun CoverFlowTile(
                 scaleX = scale
                 scaleY = scale
 
-                // Translation: centre gap for the immediate neighbours, then packed side steps.
-                // translationX centres the tile horizontally and offsets by the pose function.
+                // Translation: the pose offset is where this tile's CENTRE sits relative to the
+                // centre cover's centre. Within the first step it is interpolated linearly with |d|
+                // (as the angle and scale are) so a glide never pops; from the first neighbour on,
+                // every cover steps COVER_SIDE_STEP outward — the Classic's tightly packed rolodex.
                 // translationY centres the tile vertically in the weighted Box above the text.
-                val tx = c * centreGapPx + (d - c) * sideStepPx
-                translationX = contentWidthPx / 2f - tileSidePx / 2f + tx
+                val a = abs(d)
+                val mag = if (a <= 1f) a * firstNeighbourOffsetPx
+                          else firstNeighbourOffsetPx + (a - 1f) * sideStepPx
+                translationX = contentWidthPx / 2f - tileSidePx / 2f + sign(d) * mag
                 translationY = coverVerticalOffsetPx
             },
     ) {

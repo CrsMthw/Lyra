@@ -99,10 +99,15 @@ class LikedSongsIndexer(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var loopJob: Job? = null
 
-    /** Starts the loop if at least one demand is active and it is not already running. */
+    /**
+     * Starts the loop the first time a demand is raised. The loop then lives for the process: with
+     * no demand held it PARKS on the demand flow instead of exiting, so a demand raised in the
+     * instant an exiting loop was winding down can never be missed (a run-while-demanded loop has
+     * exactly that race: `loopJob` still active → the launch is skipped → the loop then dies with
+     * the new demand held and nobody paging).
+     */
     @Synchronized
     private fun ensureLoopStarted() {
-        if (!demands.value.any) return
         if (loopJob?.isActive == true) return
         loopJob = scope.launch { pagingLoop() }
     }
@@ -114,21 +119,37 @@ class LikedSongsIndexer(
         // -1 = seed from the cache's filtered size on the first run.
         var rawOffset = -1
         var prevSize = -1  // last seen cache size, to detect an external reset (shrink)
-
-        _state.value = _state.value.copy(running = true)
+        // The last tick's verdict. Once complete the loop only re-checks the cache for a grown
+        // total, at the BACKGROUND interval whatever the demand — a fast demand over a complete
+        // index would otherwise re-parse the whole cache file every 2 s for nothing.
+        var complete = false
 
         try {
-            while (demands.value.any) {
+            while (true) {
+                if (!demands.value.any) {
+                    // Nobody wants pages: park (never exit — see ensureLoopStarted).
+                    _state.value = _state.value.copy(running = false)
+                    demands.first { it.any }
+                    // The world may have changed while parked (a Library replace, new likes):
+                    // the first tick after a park runs at the demand's own cadence.
+                    complete = false
+                }
+                _state.value = _state.value.copy(running = true)
+
                 // Wait THEN fetch (a fresh fast demand gets its first page ~2 s later).
-                val interval = if (demands.value.fast) FAST_INTERVAL_MS else BACKGROUND_INTERVAL_MS
                 val snapshot = demands.value
+                val interval = when {
+                    complete -> BACKGROUND_INTERVAL_MS
+                    snapshot.fast -> FAST_INTERVAL_MS
+                    else -> BACKGROUND_INTERVAL_MS
+                }
                 withTimeoutOrNull(interval) {
                     // Wake early if either demand changes (e.g. the iPod turned on mid-background-sleep).
                     demands.first { it != snapshot }
                 }
 
-                // Re-check: demands could have gone inactive during the wait.
-                if (!demands.value.any) break
+                // Demands may have gone inactive during the wait: park at the top of the loop.
+                if (!demands.value.any) continue
 
                 // Rate-limit gate: skip this tick entirely.
                 if (playerStateManager.isRateLimited()) continue
@@ -211,6 +232,7 @@ class LikedSongsIndexer(
                         },
                     )
                 }
+                complete = _state.value.complete
             }
         } finally {
             _state.value = _state.value.copy(running = false)
