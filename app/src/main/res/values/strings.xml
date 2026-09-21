@@ -346,6 +346,12 @@
     <string name="ipod_np_repeat">Repeat</string>
     <string name="ipod_value_all">All</string>
     <string name="ipod_value_one">One</string>
+    <string name="ipod_options_title">Options</string>
+    <string name="ipod_option_like">Add to Liked Songs</string>
+    <string name="ipod_option_unlike">Remove from Liked Songs</string>
+    <string name="ipod_option_add_to_playlist">Add to Playlist</string>
+    <string name="ipod_option_go_to_album">Go to Album</string>
+    <string name="ipod_option_go_to_artist">Go to Artist</string>
     <!-- (end shared) -->
 
 

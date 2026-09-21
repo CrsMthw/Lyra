@@ -321,6 +321,9 @@ class IPodViewModel(
                                 scrubProgressMs = if (sameTrack) old.scrubProgressMs else null,
                                 mode = mode,
                                 volumePercent = if (mode == NowPlayingMode.VOLUME) readVolumePercent() else (old?.volumePercent ?: 0),
+                                // The like state is reported by IPodRoot, not by the player mirror:
+                                // keep it for the same track, forget it with the track.
+                                isLiked = if (sameTrack) old.isLiked else null,
                             )
                         } else {
                             null
@@ -434,6 +437,17 @@ class IPodViewModel(
         }
     }
 
+    /**
+     * IPodRoot mirrors PlayerViewModel's `isLiked` here (server-checked on every track change, and
+     * flipped optimistically by the like paths). The options menu labels its like row from it.
+     */
+    fun onPlayerLikedChanged(liked: Boolean) {
+        _uiState.update { state ->
+            val np = state.nowPlaying ?: return@update state
+            if (np.isEpisode || np.isLiked == liked) state else state.copy(nowPlaying = np.copy(isLiked = liked))
+        }
+    }
+
     override fun onCleared() {
         likedSongsIndexer.setFastDemand(false)
         prefetcher.cancel()
@@ -450,6 +464,8 @@ class IPodViewModel(
     fun onWheelEvent(event: WheelEvent): Boolean = when (event) {
         is WheelEvent.Scroll -> handleScroll(event.steps)
         is WheelEvent.Press -> { handlePress(event.button); true }
+        // Checkpoint D — the options menu, handled by the vm lane (contract stub so the round compiles).
+        is WheelEvent.LongPress -> true
     }
 
     /** @return true when the highlight or the scrub position actually changed. */

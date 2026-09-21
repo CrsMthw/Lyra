@@ -168,6 +168,9 @@ fun IPodRoot(container: AppContainer, modifier: Modifier = Modifier) {
                 is IPodEffect.SeekTo -> playerVm.seekTo(effect.fraction)
                 is IPodEffect.SetShuffle -> container.playerStateManager.setShuffle(effect.enabled)
                 is IPodEffect.SetRepeat -> container.playerStateManager.setRepeat(effect.state)
+                // Checkpoint D — routed by the shell lane (contract stubs so the round compiles).
+                is IPodEffect.SetLiked -> Unit
+                is IPodEffect.AddToPlaylist -> Unit
             }
         }
     }

@@ -41,4 +41,18 @@ sealed interface IPodEffect {
 
     /** → PlayerViewModel.seekTo(fraction) — committed once per scrub, never per detent. */
     data class SeekTo(val fraction: Float) : IPodEffect
+
+    /**
+     * → the app's ONE like path for [uri] (save / remove on the server + the liked-songs cache
+     * patch, as PlayerViewModel.toggleLike does). [liked] is the TARGET state. Checkpoint D: the
+     * options menu's "Add to / Remove from Liked Songs" row. Never for an episode.
+     */
+    data class SetLiked(val uri: String, val liked: Boolean) : IPodEffect
+
+    /**
+     * → the app's add-to-playlist path (POST playlists/{id}/items + the cached track-list patch +
+     * the server-count reconcile that every in-app mutation triggers). Checkpoint D: the options
+     * menu's "Add to Playlist" → owned-playlist row. Never for an episode.
+     */
+    data class AddToPlaylist(val playlistId: String, val trackUri: String) : IPodEffect
 }

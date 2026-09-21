@@ -30,6 +30,10 @@ sealed interface IPodScreen {
     data object Podcasts : IPodScreen
     data class ShowEpisodes(val showId: String) : IPodScreen
     data object NowPlaying : IPodScreen
+    /** Hold the centre button over Now Playing: the Classic's options menu for the playing song (D). */
+    data object NowPlayingOptions : IPodScreen
+    /** The owned playlists to add [trackUri] to, from the options menu (D). */
+    data class AddToPlaylist(val trackUri: String) : IPodScreen
     data object Settings : IPodScreen
 }
 
@@ -136,6 +140,17 @@ data class LcdNowPlaying(
     val volumePercent: Int = 0,
     val shuffleEnabled: Boolean = false,
     val repeat: LcdRepeat = LcdRepeat.OFF,
+    /**
+     * Whether the playing track is in Liked Songs — PlayerViewModel's server-checked `isLiked`,
+     * mirrored in by IPodRoot through `IPodViewModel.onPlayerLikedChanged`; null until known, and
+     * always null for an episode. Carried across the 1 Hz tick for the same uri only. (D)
+     */
+    val isLiked: Boolean? = null,
+    /** The playing track's album / first artist ids, for the options menu's Go to Album / Artist. (D) */
+    val albumId: String? = null,
+    val artistId: String? = null,
+    /** A podcast episode: no like, no add-to-playlist, no album / artist. (D) */
+    val isEpisode: Boolean = false,
 )
 
 /**
