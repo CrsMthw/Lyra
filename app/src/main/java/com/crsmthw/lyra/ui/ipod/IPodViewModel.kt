@@ -10,6 +10,7 @@ import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.local.LibraryCache
 import com.crsmthw.lyra.data.local.LikedSongsIndexer
 import com.crsmthw.lyra.data.player.PlayerStateManager
+import com.crsmthw.lyra.data.remote.model.SpotifyPlaylist
 import com.crsmthw.lyra.data.remote.model.SpotifyTrack
 import com.crsmthw.lyra.data.repository.SettingsRepository
 import com.crsmthw.lyra.data.repository.SpotifyRepository
@@ -276,6 +277,7 @@ class IPodViewModel(
                     val sel = lastSelection
                     val posInList = sel?.positionOf(track.uri)
                     val listSize = if (posInList != null) sel.sourceUris.size else null
+                    val episode = track.isEpisode
                     LcdNowPlaying(
                         uri = track.uri,
                         title = track.name,
@@ -293,6 +295,9 @@ class IPodViewModel(
                             "track" -> LcdRepeat.ONE
                             else -> LcdRepeat.OFF
                         },
+                        albumId = if (episode) null else track.album?.id,
+                        artistId = if (episode) null else track.artists?.firstOrNull()?.id,
+                        isEpisode = episode,
                     )
                 }
                 .distinctUntilChanged()
@@ -343,6 +348,25 @@ class IPodViewModel(
                         scrubJob?.cancel()
                         scrubJob = null
                     }
+                }
+        }
+
+        // ── Checkpoint D: options menu live-rebuild ─────────────────────────────
+        // When NowPlayingOptions is showing, a like landing (isLiked flip) or a track change (uri)
+        // must rebuild the menu rows in place with the highlight preserved by id.
+        viewModelScope.launch {
+            _uiState
+                .map { state ->
+                    val np = state.nowPlaying
+                    val onOptions = state.current.screen is IPodScreen.NowPlayingOptions
+                    if (!onOptions || np == null) null else (np.uri to np.isLiked)
+                }
+                .distinctUntilChanged()
+                .collect { key ->
+                    if (key == null) return@collect
+                    val np = _uiState.value.nowPlaying ?: return@collect
+                    val rows = buildNowPlayingOptions(np)
+                    retopItemsPreservingHighlight(IPodScreen.NowPlayingOptions, rows)
                 }
         }
 
@@ -464,8 +488,17 @@ class IPodViewModel(
     fun onWheelEvent(event: WheelEvent): Boolean = when (event) {
         is WheelEvent.Scroll -> handleScroll(event.steps)
         is WheelEvent.Press -> { handlePress(event.button); true }
-        // Checkpoint D — the options menu, handled by the vm lane (contract stub so the round compiles).
-        is WheelEvent.LongPress -> true
+        is WheelEvent.LongPress -> {
+            if (event.button == WheelButton.SELECT) {
+                val top = _uiState.value.current
+                if (top.screen is IPodScreen.NowPlaying) {
+                    commitPendingScrubNow()
+                    pushNowPlayingOptions()
+                }
+            }
+            // A long press is a button — always counts as handled (click sounds fire in the wheel).
+            true
+        }
     }
 
     /** @return true when the highlight or the scrub position actually changed. */
@@ -761,6 +794,8 @@ class IPodViewModel(
             is IPodScreen.PlaylistTracks -> activatePlaylistTrackItem(top.screen, selected, top.list.selectedIndex, items)
             is IPodScreen.Podcasts -> activateShowItem(selected)
             is IPodScreen.ShowEpisodes -> activateEpisodeItem(top.screen, selected, top.list, items)
+            is IPodScreen.NowPlayingOptions -> activateNowPlayingOption(selected.id)
+            is IPodScreen.AddToPlaylist -> activateAddToPlaylistItem(top.screen, selected)
             else -> {}
         }
     }
@@ -873,6 +908,7 @@ class IPodViewModel(
         scrubJob = null
         _uiState.update { state ->
             val old = state.nowPlaying
+            val episode = track?.isEpisode == true
             val np = LcdNowPlaying(
                 uri = item.id,
                 title = track?.name ?: (item.title as? LcdLabel.Text)?.value.orEmpty(),
@@ -889,6 +925,9 @@ class IPodViewModel(
                 // A deliberate selection turns shuffle OFF (PlayLikedSong shuffle = false).
                 shuffleEnabled = false,
                 repeat = old?.repeat ?: LcdRepeat.OFF,
+                albumId = if (episode) null else track?.album?.id,
+                artistId = if (episode) null else track?.artists?.firstOrNull()?.id,
+                isEpisode = episode,
             )
             val next = state.copy(nowPlaying = np)
             if (!lastHadNowPlaying) {
@@ -1092,15 +1131,14 @@ class IPodViewModel(
             }
             library.ownedPlaylists(userId).fold(
                 onSuccess = { result ->
-                    val items = result.playlists.map { playlist ->
-                        LcdItem(
-                            id = playlist.id,
-                            title = LcdLabel.Text(playlist.name),
-                            subtitle = LcdLabel.Plural(R.plurals.library_track_count, playlist.trackCount),
-                            hasSubmenu = true,
-                        )
-                    }
+                    val items = playlistRows(result.playlists)
                     replaceTopItems(IPodScreen.Playlists, items)
+                    // Cache returned a possibly-truncated prefix — sweep for the full set.
+                    if (result.fromCache) {
+                        val swept = library.sweepOwnedPlaylists(userId) ?: return@launch
+                        val sweptItems = playlistRows(swept.playlists)
+                        retopItemsPreservingHighlight(IPodScreen.Playlists, sweptItems)
+                    }
                 },
                 onFailure = {
                     setTopError(IPodScreen.Playlists, LcdLabel.Res(R.string.ipod_vm_load_error))
@@ -1108,6 +1146,17 @@ class IPodViewModel(
             )
         }
     }
+
+    /** Build LCD rows from playlist models. [hasSubmenu] draws the › chevron (Playlists yes, Add to Playlist no). */
+    private fun playlistRows(playlists: List<SpotifyPlaylist>, hasSubmenu: Boolean = true): List<LcdItem> =
+        playlists.map { playlist ->
+            LcdItem(
+                id = playlist.id,
+                title = LcdLabel.Text(playlist.name),
+                subtitle = LcdLabel.Plural(R.plurals.library_track_count, playlist.trackCount),
+                hasSubmenu = hasSubmenu,
+            )
+        }
 
     private fun activatePlaylistItem(item: LcdItem) {
         val playlistId = item.id
@@ -1341,6 +1390,169 @@ class IPodViewModel(
                     LcdLabel.Res(R.string.ipod_menu_now_playing),
                 )
             }
+        }
+    }
+
+    // ── Now Playing Options (long-press centre on Now Playing) ─────────────────
+
+    /**
+     * Builds the options menu rows from the current [LcdNowPlaying]. Rows are conditional:
+     * - like/unlike: hidden for episodes or when [LcdNowPlaying.isLiked] is null (unknown).
+     * - add to playlist: hidden for episodes.
+     * - go to album: hidden when albumId is null.
+     * - go to artist: hidden when artistId is null.
+     * An episode with nothing applicable results in an empty list ("No Options" on the LCD).
+     */
+    private fun buildNowPlayingOptions(np: LcdNowPlaying?): List<LcdItem> {
+        if (np == null) return emptyList()
+        return buildList {
+            // Like / Unlike — hidden for episodes or unknown liked state.
+            if (!np.isEpisode && np.isLiked != null) {
+                add(
+                    LcdItem(
+                        id = "like",
+                        title = LcdLabel.Res(
+                            if (np.isLiked) R.string.ipod_option_unlike else R.string.ipod_option_like,
+                        ),
+                    ),
+                )
+            }
+            // Add to Playlist — hidden for episodes.
+            if (!np.isEpisode) {
+                add(
+                    LcdItem(
+                        id = "addtoplaylist",
+                        title = LcdLabel.Res(R.string.ipod_option_add_to_playlist),
+                        hasSubmenu = true,
+                    ),
+                )
+            }
+            // Go to Album.
+            if (np.albumId != null) {
+                add(
+                    LcdItem(
+                        id = "album",
+                        title = LcdLabel.Res(R.string.ipod_option_go_to_album),
+                        hasSubmenu = true,
+                    ),
+                )
+            }
+            // Go to Artist.
+            if (np.artistId != null) {
+                add(
+                    LcdItem(
+                        id = "artist",
+                        title = LcdLabel.Res(R.string.ipod_option_go_to_artist),
+                        hasSubmenu = true,
+                    ),
+                )
+            }
+        }
+    }
+
+    private fun pushNowPlayingOptions() {
+        val np = _uiState.value.nowPlaying ?: return
+        push(
+            screen = IPodScreen.NowPlayingOptions,
+            title = LcdLabel.Res(R.string.ipod_options_title),
+            items = buildNowPlayingOptions(np),
+        )
+    }
+
+    /**
+     * SELECT on an options-menu row. Like flips optimistically and pops; add-to-playlist pushes the
+     * playlist picker; album/artist push the corresponding browse screen.
+     */
+    private fun activateNowPlayingOption(id: String) {
+        val np = _uiState.value.nowPlaying ?: return
+        when (id) {
+            "like" -> {
+                val liked = np.isLiked ?: return
+                val targetLiked = !liked
+                // Flip isLiked optimistically so the options row label updates on the next rebuild.
+                _uiState.update { state ->
+                    val cur = state.nowPlaying ?: return@update state
+                    state.copy(nowPlaying = cur.copy(isLiked = targetLiked))
+                }
+                viewModelScope.launch {
+                    _effects.send(IPodEffect.SetLiked(np.uri, targetLiked))
+                }
+                // Pop back to Now Playing — the Classic's add/remove returns immediately.
+                popOnce()
+            }
+            "addtoplaylist" -> {
+                pushAddToPlaylist(np.uri)
+            }
+            "album" -> {
+                val albumId = np.albumId ?: return
+                activateAlbumItem(LcdItem(id = albumId, title = LcdLabel.Text(np.album), hasSubmenu = true))
+            }
+            "artist" -> {
+                val artistId = np.artistId ?: return
+                activateArtistItem(LcdItem(id = artistId, title = LcdLabel.Text(np.artist), hasSubmenu = true))
+            }
+        }
+    }
+
+    // ── Add to Playlist (from Now Playing Options) ───────────────────────────
+
+    private fun pushAddToPlaylist(trackUri: String) {
+        val screen = IPodScreen.AddToPlaylist(trackUri)
+        push(
+            screen = screen,
+            title = LcdLabel.Res(R.string.ipod_option_add_to_playlist),
+            loading = true,
+        )
+        viewModelScope.launch {
+            val userId = cachedUserId ?: library.resolveUserId().also { cachedUserId = it }
+            if (userId == null) {
+                setTopError(screen, LcdLabel.Res(R.string.ipod_vm_load_error))
+                return@launch
+            }
+            library.ownedPlaylists(userId).fold(
+                onSuccess = { result ->
+                    val items = playlistRows(result.playlists, hasSubmenu = false)
+                    replaceTopItems(screen, items)
+                    // Cache returned a possibly-truncated prefix — sweep for the full set.
+                    if (result.fromCache) {
+                        val swept = library.sweepOwnedPlaylists(userId) ?: return@launch
+                        val sweptItems = playlistRows(swept.playlists, hasSubmenu = false)
+                        retopItemsPreservingHighlight(screen, sweptItems)
+                    }
+                },
+                onFailure = {
+                    setTopError(screen, LcdLabel.Res(R.string.ipod_vm_load_error))
+                },
+            )
+        }
+    }
+
+    /**
+     * SELECT on a playlist in the Add to Playlist screen: send the effect and pop TWICE
+     * (back past NowPlayingOptions to Now Playing).
+     */
+    private fun activateAddToPlaylistItem(screen: IPodScreen.AddToPlaylist, item: LcdItem) {
+        viewModelScope.launch {
+            _effects.send(IPodEffect.AddToPlaylist(playlistId = item.id, trackUri = screen.trackUri))
+        }
+        // Pop twice atomically: AddToPlaylist → NowPlayingOptions → Now Playing.
+        _uiState.update { state ->
+            if (state.stack.size <= 2) return@update state
+            state.copy(
+                stack = state.stack.dropLast(2),
+                direction = LcdNavDirection.BACK,
+            )
+        }
+    }
+
+    /** Pop one entry off the stack (like MENU but without the Now Playing scrub/mode logic). */
+    private fun popOnce() {
+        _uiState.update { state ->
+            if (state.stack.size <= 1) return@update state
+            state.copy(
+                stack = state.stack.dropLast(1),
+                direction = LcdNavDirection.BACK,
+            )
         }
     }
 
