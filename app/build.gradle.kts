@@ -3,6 +3,7 @@ import java.util.Properties
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    id("androidx.baselineprofile")
 }
 
 // ─── Release signing ─────────────────────────────────────────────────────────
@@ -80,6 +81,15 @@ android {
 
 kotlin { jvmToolchain(21) }
 
+baselineProfile {
+    // Never generate during a normal assembleRelease — Cris's build must not slow down or
+    // need the emulator. Run :app:generateBaselineProfile explicitly when regenerating.
+    automaticGenerationDuringBuild = false
+    // Merge into src/main so the profile applies to all build types and avoids creating a
+    // src/release source set that silently scopes future additions to release-only.
+    mergeIntoMain = true
+}
+
 // Host tests (JVM unit tests) are enabled; device tests (androidTest) stay disabled.
 // The device-test component wiring is what trips Gradle's "Project object as a dependency
 // notation" deprecation (from AGP's own VariantDependenciesBuilder, not our code).
@@ -155,4 +165,7 @@ dependencies {
     testImplementation(libs.kotlin.test.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     // ───────────────────────────────────────────────────────────────────────
+    // Baseline Profile — allows the profile to be consumed at install time
+    implementation(libs.androidx.profileinstaller)
+    "baselineProfile"(project(":baselineprofile"))
 }
