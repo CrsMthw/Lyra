@@ -10,6 +10,7 @@ import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.local.LibraryCache
 import com.crsmthw.lyra.data.local.LikedSongsIndexer
 import com.crsmthw.lyra.data.player.PlayerStateManager
+import com.crsmthw.lyra.data.remote.model.SpotifyPlaylist
 import com.crsmthw.lyra.data.remote.model.SpotifyTrack
 import com.crsmthw.lyra.data.repository.SettingsRepository
 import com.crsmthw.lyra.data.repository.SpotifyRepository
@@ -488,10 +489,12 @@ class IPodViewModel(
         is WheelEvent.Scroll -> handleScroll(event.steps)
         is WheelEvent.Press -> { handlePress(event.button); true }
         is WheelEvent.LongPress -> {
-            val top = _uiState.value.current
-            if (top.screen is IPodScreen.NowPlaying) {
-                commitPendingScrubNow()
-                pushNowPlayingOptions()
+            if (event.button == WheelButton.SELECT) {
+                val top = _uiState.value.current
+                if (top.screen is IPodScreen.NowPlaying) {
+                    commitPendingScrubNow()
+                    pushNowPlayingOptions()
+                }
             }
             // A long press is a button — always counts as handled (click sounds fire in the wheel).
             true
@@ -1128,15 +1131,14 @@ class IPodViewModel(
             }
             library.ownedPlaylists(userId).fold(
                 onSuccess = { result ->
-                    val items = result.playlists.map { playlist ->
-                        LcdItem(
-                            id = playlist.id,
-                            title = LcdLabel.Text(playlist.name),
-                            subtitle = LcdLabel.Plural(R.plurals.library_track_count, playlist.trackCount),
-                            hasSubmenu = true,
-                        )
-                    }
+                    val items = playlistRows(result.playlists)
                     replaceTopItems(IPodScreen.Playlists, items)
+                    // Cache returned a possibly-truncated prefix — sweep for the full set.
+                    if (result.fromCache) {
+                        val swept = library.sweepOwnedPlaylists(userId) ?: return@launch
+                        val sweptItems = playlistRows(swept.playlists)
+                        retopItemsPreservingHighlight(IPodScreen.Playlists, sweptItems)
+                    }
                 },
                 onFailure = {
                     setTopError(IPodScreen.Playlists, LcdLabel.Res(R.string.ipod_vm_load_error))
@@ -1144,6 +1146,17 @@ class IPodViewModel(
             )
         }
     }
+
+    /** Build LCD rows from playlist models. [hasSubmenu] draws the › chevron (Playlists yes, Add to Playlist no). */
+    private fun playlistRows(playlists: List<SpotifyPlaylist>, hasSubmenu: Boolean = true): List<LcdItem> =
+        playlists.map { playlist ->
+            LcdItem(
+                id = playlist.id,
+                title = LcdLabel.Text(playlist.name),
+                subtitle = LcdLabel.Plural(R.plurals.library_track_count, playlist.trackCount),
+                hasSubmenu = hasSubmenu,
+            )
+        }
 
     private fun activatePlaylistItem(item: LcdItem) {
         val playlistId = item.id
@@ -1484,36 +1497,31 @@ class IPodViewModel(
     // ── Add to Playlist (from Now Playing Options) ───────────────────────────
 
     private fun pushAddToPlaylist(trackUri: String) {
+        val screen = IPodScreen.AddToPlaylist(trackUri)
         push(
-            screen = IPodScreen.AddToPlaylist(trackUri),
+            screen = screen,
             title = LcdLabel.Res(R.string.ipod_option_add_to_playlist),
             loading = true,
         )
         viewModelScope.launch {
             val userId = cachedUserId ?: library.resolveUserId().also { cachedUserId = it }
             if (userId == null) {
-                setTopError(
-                    IPodScreen.AddToPlaylist(trackUri),
-                    LcdLabel.Res(R.string.ipod_vm_load_error),
-                )
+                setTopError(screen, LcdLabel.Res(R.string.ipod_vm_load_error))
                 return@launch
             }
             library.ownedPlaylists(userId).fold(
                 onSuccess = { result ->
-                    val items = result.playlists.map { playlist ->
-                        LcdItem(
-                            id = playlist.id,
-                            title = LcdLabel.Text(playlist.name),
-                            subtitle = LcdLabel.Plural(R.plurals.library_track_count, playlist.trackCount),
-                        )
+                    val items = playlistRows(result.playlists, hasSubmenu = false)
+                    replaceTopItems(screen, items)
+                    // Cache returned a possibly-truncated prefix — sweep for the full set.
+                    if (result.fromCache) {
+                        val swept = library.sweepOwnedPlaylists(userId) ?: return@launch
+                        val sweptItems = playlistRows(swept.playlists, hasSubmenu = false)
+                        retopItemsPreservingHighlight(screen, sweptItems)
                     }
-                    replaceTopItems(IPodScreen.AddToPlaylist(trackUri), items)
                 },
                 onFailure = {
-                    setTopError(
-                        IPodScreen.AddToPlaylist(trackUri),
-                        LcdLabel.Res(R.string.ipod_vm_load_error),
-                    )
+                    setTopError(screen, LcdLabel.Res(R.string.ipod_vm_load_error))
                 },
             )
         }

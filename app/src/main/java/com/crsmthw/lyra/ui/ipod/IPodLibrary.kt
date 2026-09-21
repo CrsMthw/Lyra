@@ -210,6 +210,8 @@ class IPodLibrary(
 
     data class PlaylistListResult(
         val playlists: List<SpotifyPlaylist>,
+        /** True when this result came from the library cache — the caller then sweeps. */
+        val fromCache: Boolean = false,
     )
 
     /**
@@ -217,13 +219,17 @@ class IPodLibrary(
      * `getAllUserPlaylists()` so users with more than 50 playlists see every owned one.
      * The sweep is NOT persisted — the cache holds ALL playlists (owned + followed) for the Library,
      * and overwriting it with owned-only would silently drop followed playlists from the Library screen.
+     *
+     * When the cache holds a non-empty owned prefix it is returned immediately with [fromCache] = true;
+     * the caller shows it at once and then calls [sweepOwnedPlaylists] to replace it with the full
+     * set (cache-then-reconcile, matching the `playlistTracks` / `reconcilePlaylist` pattern).
      */
     suspend fun ownedPlaylists(userId: String): Result<PlaylistListResult> {
         val cache = loadCache()
         val cached = cache?.playlists
         if (!cached.isNullOrEmpty()) {
             val owned = cached.filter { it.owner?.id == userId }
-            if (owned.isNotEmpty()) return Result.success(PlaylistListResult(owned))
+            if (owned.isNotEmpty()) return Result.success(PlaylistListResult(owned, fromCache = true))
         }
 
         checkRateLimit().onFailure { return Result.failure(it) }
@@ -235,6 +241,19 @@ class IPodLibrary(
                     playlists = sweep.items.filter { it.owner?.id == userId },
                 )
             }
+    }
+
+    /**
+     * Runs the paged `getAllUserPlaylists()` sweep and returns the owned subset, or null when the
+     * network is unavailable or rate-limited. Called after [ownedPlaylists] returned [fromCache] = true.
+     */
+    suspend fun sweepOwnedPlaylists(userId: String): PlaylistListResult? {
+        if (checkRateLimit().isFailure) return null
+        val sweep = repository.getAllUserPlaylists()
+            .onFailure { noteIfRateLimited(it) }
+            .getOrNull() ?: return null
+        val owned = sweep.items.filter { it.owner?.id == userId }
+        return PlaylistListResult(owned)
     }
 
     // ── Playlist tracks ──────────────────────────────────────────────────────
