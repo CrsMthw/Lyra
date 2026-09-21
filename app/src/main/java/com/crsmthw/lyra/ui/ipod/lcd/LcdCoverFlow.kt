@@ -82,8 +82,6 @@ private const val COVER_TITLE_FRACTION = 0.055f
 private const val COVER_SUBTITLE_FRACTION = 0.045f
 /** Position/indexing text as a fraction of the content height. */
 private const val COVER_POSITION_FRACTION = 0.038f
-/** Music-note glyph size as a fraction of the tile side. */
-private const val COVER_NOTE_GLYPH_FRACTION = 0.35f
 /** Corner radius of the cover edge, as fraction of tile side. */
 private const val COVER_EDGE_CORNER_FRACTION = 0.02f
 /** Crossfade duration on cover art images. */
@@ -170,68 +168,66 @@ private fun CoverFlowRow(
         val reflectionHeightDp = with(density) { reflectionHeightPx.toDp() }
         val totalTileHeightDp = with(density) { totalTileHeightPx.toDp() }
 
-        // The covers row sits vertically centred with some room below for text.
-        val textBlockHeightPx = contentHeightPx * (COVER_TITLE_FRACTION + COVER_SUBTITLE_FRACTION +
-            COVER_POSITION_FRACTION + COVER_TEXT_TOP_GAP * 3)
-        val coverRowTopPx = ((contentHeightPx - totalTileHeightPx - textBlockHeightPx) / 2f)
-            .coerceAtLeast(0f)
-        val coverRowTopDp = with(density) { coverRowTopPx.toDp() }
-
         // Window of tiles: composition-phase, changes only per detent (not per animation frame).
         val centreIndex = selectedIndex.coerceIn(items.indices)
         val windowStart = (centreIndex - COVERS_PER_SIDE).coerceAtLeast(0)
         val windowEnd = (centreIndex + COVERS_PER_SIDE).coerceAtMost(items.lastIndex)
 
-        // Covers: all composed in stable index order, z-order via Modifier.zIndex.
-        // zIndex is based on selectedIndex (per-detent), not the animated position, so it
-        // does not recompose per frame.
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(coverRowTopDp + totalTileHeightDp),
-        ) {
-            for (i in windowStart..windowEnd) {
-                val item = items.getOrNull(i) ?: continue
-                val zOrder = -(abs(i - centreIndex).toFloat())
-                androidx.compose.runtime.key(item.id) {
-                    CoverFlowTile(
-                        item = item,
-                        index = i,
-                        zOrder = zOrder,
-                        tileSidePx = tileSidePx,
-                        tileSideDp = tileSideDp,
-                        reflectionHeightPx = reflectionHeightPx,
-                        reflectionHeightDp = reflectionHeightDp,
-                        contentWidthPx = contentWidthPx,
-                        centreGapPx = centreGapPx,
-                        sideStepPx = sideStepPx,
-                        coverRowTopPx = coverRowTopPx,
-                        position = position,
-                    )
-                }
-            }
-        }
-
-        // Text block below the covers.
-        val textTopDp = coverRowTopDp + totalTileHeightDp +
-            contentHeight * COVER_TEXT_TOP_GAP
-
-        // The highlighted item for the text labels -- use the detent's selectedIndex, not the
-        // animated position, so labels swap at the detent with no mid-glide flicker.
-        val highlightedItem = items.getOrNull(centreIndex)
-        if (highlightedItem != null) {
-            CoverFlowText(
-                item = highlightedItem,
-                itemIndex = centreIndex,
-                itemCount = items.size,
-                likedIndex = likedIndex,
-                contentHeightPx = contentHeightPx,
-                contentWidthPx = contentWidthPx,
+        // Layout: a Column with the covers box taking remaining space and the text at the bottom.
+        // The covers sit vertically centred inside their box via translationY in the graphicsLayer;
+        // the text sits at the bottom by layout, so no speculative height calculation is needed.
+        Column(Modifier.fillMaxSize()) {
+            // Covers box: takes all remaining vertical space above the text. Tiles position
+            // themselves via graphicsLayer translationX/Y, centred vertically and horizontally.
+            BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .align(Alignment.TopCenter)
-                    .graphicsLayer { translationY = with(density) { textTopDp.toPx() } },
-            )
+                    .weight(1f),
+            ) {
+                // The Box takes the remaining height above the text. Tiles position via
+                // graphicsLayer translationX/Y to centre horizontally and vertically.
+                val boxHeightPx = constraints.maxHeight.toFloat()
+                val coverVerticalCentrePx = ((boxHeightPx - totalTileHeightPx) / 2f)
+                    .coerceAtLeast(0f)
+
+                for (i in windowStart..windowEnd) {
+                    val item = items.getOrNull(i) ?: continue
+                    val zOrder = -(abs(i - centreIndex).toFloat())
+                    androidx.compose.runtime.key(item.id) {
+                        CoverFlowTile(
+                            item = item,
+                            index = i,
+                            zOrder = zOrder,
+                            tileSidePx = tileSidePx,
+                            tileSideDp = tileSideDp,
+                            reflectionHeightPx = reflectionHeightPx,
+                            reflectionHeightDp = reflectionHeightDp,
+                            contentWidthPx = contentWidthPx,
+                            centreGapPx = centreGapPx,
+                            sideStepPx = sideStepPx,
+                            coverVerticalOffsetPx = coverVerticalCentrePx,
+                            position = position,
+                        )
+                    }
+                }
+            }
+
+            // Text block below the covers, at the bottom of the content area.
+            // The highlighted item for the text labels -- use the detent's selectedIndex, not the
+            // animated position, so labels swap at the detent with no mid-glide flicker.
+            val highlightedItem = items.getOrNull(centreIndex)
+            if (highlightedItem != null) {
+                Spacer(Modifier.height(contentHeight * COVER_TEXT_TOP_GAP))
+                CoverFlowText(
+                    item = highlightedItem,
+                    itemIndex = centreIndex,
+                    itemCount = items.size,
+                    likedIndex = likedIndex,
+                    contentHeightPx = contentHeightPx,
+                    contentWidthPx = contentWidthPx,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
     }
 }
@@ -250,7 +246,7 @@ private fun CoverFlowTile(
     contentWidthPx: Float,
     centreGapPx: Float,
     sideStepPx: Float,
-    coverRowTopPx: Float,
+    coverVerticalOffsetPx: Float,
     position: Animatable<Float, *>,
 ) {
     val context = LocalContext.current
@@ -293,9 +289,11 @@ private fun CoverFlowTile(
                 scaleY = scale
 
                 // Translation: centre gap for the immediate neighbours, then packed side steps.
+                // translationX centres the tile horizontally and offsets by the pose function.
+                // translationY centres the tile vertically in the weighted Box above the text.
                 val tx = c * centreGapPx + (d - c) * sideStepPx
                 translationX = contentWidthPx / 2f - tileSidePx / 2f + tx
-                translationY = coverRowTopPx
+                translationY = coverVerticalOffsetPx
             },
     ) {
         // Art square with hairline edge.
