@@ -173,10 +173,8 @@ fun LcdScreen(
                 var flight by remember { mutableStateOf<ArtFlight?>(null) }
                 val flightTarget = remember { mutableStateOf<Rect?>(null) }
                 val contentOrigin = remember { mutableStateOf(Offset.Zero) }
-                val flightProgress = remember { Animatable(0f) }
                 /** True once the cover has landed: the real art shows while the overlay fades out over it. */
                 val flightLanded = remember { mutableStateOf(false) }
-                val overlayAlpha = remember { Animatable(1f) }
                 Box(
                     Modifier
                         .padding(top = with(density) { statusBarHeight.toDp() })
@@ -229,10 +227,17 @@ fun LcdScreen(
                     }
                     bookkeeping.lastKey = currentKey
 
+                    // FRESH animation values per flight, created in the composition that starts it.
+                    // They used to be remembered once and reset inside the LaunchedEffect below — which
+                    // runs AFTER the first frame is drawn — so every flight after the first drew its
+                    // first frame with the previous flight's end state: progress 1, overlay alpha 0,
+                    // and the tile already hidden. Cris's recording showed it: one pure-white frame
+                    // where the cover should be, on every press but the first.
+                    val flightProgress = remember(flight?.id) { Animatable(0f) }
+                    val overlayAlpha = remember(flight?.id) { Animatable(1f) }
+
                     LaunchedEffect(flight?.id) {
                         val f = flight ?: return@LaunchedEffect
-                        flightProgress.snapTo(0f)
-                        overlayAlpha.snapTo(1f)
                         flightProgress.animateTo(1f, tween(ART_FLIGHT_MILLIS, easing = FastOutSlowInEasing))
                         // Landed: show the real art and fade the overlay out over it (same rect,
                         // tilt and mask — only the decode's sharpness differs).
