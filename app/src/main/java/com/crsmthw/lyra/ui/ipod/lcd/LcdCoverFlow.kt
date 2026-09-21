@@ -544,6 +544,7 @@ private fun CoverFlowText(
             Text(
                 text = subtitleText,
                 fontFamily = IPodFontFamily,
+                fontWeight = FontWeight.Bold,
                 fontSize = subtitleFontSize,
                 color = IPodColors.LcdTextSecondary,
                 maxLines = 1,
@@ -572,6 +573,7 @@ private fun CoverFlowPosition(
     Text(
         text = stringResource(R.string.ipod_now_playing_position, itemIndex + 1, itemCount),
         fontFamily = IPodFontFamily,
+        fontWeight = FontWeight.Bold,
         fontSize = positionFontSize,
         color = IPodColors.LcdTextSecondary,
         maxLines = 1,
@@ -596,6 +598,7 @@ private fun CoverFlowIndexingLine(
             likedIndex.total,
         ),
         fontFamily = IPodFontFamily,
+        fontWeight = FontWeight.Bold,
         fontSize = fontSize,
         color = IPodColors.LcdTextSecondary,
         maxLines = 1,

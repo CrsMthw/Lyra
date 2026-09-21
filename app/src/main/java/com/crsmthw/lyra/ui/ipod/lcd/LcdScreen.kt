@@ -665,6 +665,7 @@ internal fun LcdCentredMessage(text: String, contentHeight: Dp) {
         androidx.compose.material3.Text(
             text = text,
             fontFamily = IPodFontFamily,
+            fontWeight = FontWeight.Bold,
             fontSize = fontSize,
             color = IPodColors.LcdTextSecondary,
             textAlign = TextAlign.Center,
@@ -773,7 +774,7 @@ private fun LcdRow(
                 androidx.compose.material3.Text(
                     text = item.title.resolve(),
                     fontFamily = IPodFontFamily,
-                    fontWeight = FontWeight.Normal,
+                    fontWeight = FontWeight.Bold,
                     fontSize = titleFontSize,
                     color = textColor,
                     maxLines = 1,
@@ -783,7 +784,7 @@ private fun LcdRow(
                     androidx.compose.material3.Text(
                         text = item.subtitle.resolve(),
                         fontFamily = IPodFontFamily,
-                        fontWeight = FontWeight.Normal,
+                        fontWeight = FontWeight.Bold,
                         fontSize = subtitleFontSize,
                         color = secondaryColor,
                         maxLines = 1,
@@ -797,6 +798,7 @@ private fun LcdRow(
                 androidx.compose.material3.Text(
                     text = item.value.resolve(),
                     fontFamily = IPodFontFamily,
+                    fontWeight = FontWeight.Bold,
                     fontSize = valueFontSize,
                     color = secondaryColor,
                     maxLines = 1,

@@ -329,6 +329,7 @@ private fun NowPlayingUpperRegion(
             Text(
                 text = artist,
                 fontFamily = IPodFontFamily,
+                fontWeight = FontWeight.Bold,
                 fontSize = artistFontSize,
                 color = secondary,
                 maxLines = 1,
@@ -345,6 +346,7 @@ private fun NowPlayingUpperRegion(
             Text(
                 text = album,
                 fontFamily = IPodFontFamily,
+                fontWeight = FontWeight.Bold,
                 fontSize = albumFontSize,
                 color = secondary,
                 maxLines = 1,
@@ -362,6 +364,7 @@ private fun NowPlayingUpperRegion(
                         listSize,
                     ),
                     fontFamily = IPodFontFamily,
+                    fontWeight = FontWeight.Bold,
                     fontSize = positionFontSize,
                     color = secondary,
                     maxLines = 1,
