@@ -1,5 +1,6 @@
 package com.crsmthw.lyra.ui.ipod.wheel
 
+import android.os.SystemClock
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -39,6 +40,7 @@ import com.crsmthw.lyra.ui.ipod.LocalIPodBodyPalette
 import com.crsmthw.lyra.ui.ipod.IPodDimens
 import com.crsmthw.lyra.ui.ipod.IPodFontFamily
 import com.crsmthw.lyra.util.confirm
+import com.crsmthw.lyra.util.longPress
 import com.crsmthw.lyra.util.press
 import com.crsmthw.lyra.util.scrollTick
 import kotlin.math.abs
@@ -69,6 +71,13 @@ private const val TAP_MAX_MS = 350L
 /** Maximum angular travel (degrees) from down to up for a tap classification. */
 private const val TAP_MAX_TRAVEL_DEG = 6f
 
+/**
+ * Milliseconds a centre-button press must be held (with no travel and without leaving the centre)
+ * before a [WheelEvent.LongPress] fires while the finger is still down. The release that follows
+ * emits NO [WheelEvent.Press]. Ring sectors (MENU/PREV/NEXT/PLAY) do NOT long-press this round.
+ */
+private const val LONG_PRESS_MS = 550L
+
 /** Minimum milliseconds between consecutive tick feedback events (haptic + sound). */
 private const val MIN_TICK_INTERVAL_MS = 25L
 
@@ -97,9 +106,13 @@ private const val INNER_SHADOW_WIDTH_DP = 3f
  * The click wheel: drawn in Compose (ring, four labels, centre button) and driven by a rotary
  * pointer gesture around the ring's centre. A drag around the ring emits [WheelEvent.Scroll]
  * per detent (clockwise = positive), with detents shrinking as angular velocity rises; a tap on
- * the ring emits the button under it; a tap in the centre emits SELECT. The wheel fires its own
- * feedback from the gesture lambdas: `scrollTick()` + [ClickSounds.tick] per detent, `press()`
- * for MENU/PREVIOUS/NEXT/PLAY_PAUSE, `confirm()` + [ClickSounds.select] for SELECT.
+ * the ring emits the button under it; a tap in the centre emits SELECT. A HOLD on the centre
+ * (>= [LONG_PRESS_MS] with no radial travel past the centre circle) emits
+ * [WheelEvent.LongPress] once while the finger is still down — the release that follows emits
+ * nothing. Ring sectors (MENU/PREVIOUS/NEXT/PLAY_PAUSE) do NOT long-press this round. The wheel
+ * fires its own feedback from the gesture lambdas: `scrollTick()` + [ClickSounds.tick] per
+ * detent, `press()` for MENU/PREVIOUS/NEXT/PLAY_PAUSE, `confirm()` + [ClickSounds.select] for
+ * SELECT, `longPress()` + [ClickSounds.select] for LongPress.
  *
  * The composable is square; its size is decided by the caller (IPodRoot).
  */
@@ -447,10 +460,44 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.wheelGes
         var smoothedVelocity = 0f      // EMA of |angular velocity| in deg/s
         var lastTickTimeMs = 0L        // for the tick feedback floor
 
+        // Long-press state: armed for centre presses only while enabled, permanently
+        // disarmed if the finger leaves the centre (even if it comes back — no re-arm).
+        var longPressArmed = isCenter && isEnabled
+        var longPressFired = false
+
         try {
             // Track the pointer through move/up
             while (true) {
-                val event = awaitPointerEvent()
+                // For a centre long press we wrap the await in a timeout so a still finger
+                // fires on time.  The timeout uses the AwaitPointerEventScope MEMBER
+                // withTimeoutOrNull — NOT kotlinx.coroutines.withTimeoutOrNull, which would
+                // cancel the enclosing coroutine instead of just the await.  When the timeout
+                // expires with no event the member throws PointerEventTimeoutCancellationException,
+                // which withTimeoutOrNull swallows and returns null.
+                val remainingMs = if (longPressArmed && !longPressFired)
+                    (LONG_PRESS_MS - (android.os.SystemClock.uptimeMillis() - downTimeMs))
+                        .coerceAtLeast(0L)
+                else
+                    Long.MAX_VALUE  // effectively infinite — no timeout overhead on the ring path
+
+                val event = if (remainingMs < Long.MAX_VALUE) {
+                    withTimeoutOrNull(remainingMs) { awaitPointerEvent() }
+                } else {
+                    awaitPointerEvent()
+                }
+
+                if (event == null) {
+                    // ── Timeout: long press fired while finger is still down ──
+                    longPressFired = true
+                    longPressArmed = false
+                    haptics.longPress()
+                    soundsState.value?.select()
+                    onEventState.value(WheelEvent.LongPress(WheelButton.SELECT))
+                    // Continue the loop: subsequent events are consumed, and the
+                    // release will emit nothing (longPressFired suppresses Press).
+                    continue
+                }
+
                 var foundRelease = false
                 for (change in event.changes) {
                     if (change.id != trackId) {
@@ -470,6 +517,9 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.wheelGes
                     if (!change.pressed) {
                         // ── Pointer released ────────────────────────────
                         foundRelease = true
+
+                        // After a long press the release is silent — no Press emitted.
+                        if (longPressFired) break
 
                         if (!hasScrolled) {
                             // Tap classification
@@ -495,7 +545,16 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.wheelGes
                     // A gesture that started in the centre never scrolls.  The pressed-centre
                     // visual stays while the finger wanders onto the ring — accepted, same as
                     // holding the physical centre button.
-                    if (isCenter) continue
+                    if (isCenter) {
+                        // If the finger leaves the centre circle, permanently disarm the
+                        // long-press — even if it comes back.  The radial guard is the
+                        // cancel; angular travel is inert for the centre because angle is
+                        // numerically unstable a few px from the origin.
+                        if (dist >= centreRadius) {
+                            longPressArmed = false
+                        }
+                        continue
+                    }
 
                     val nowMs = change.uptimeMillis
 
