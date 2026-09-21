@@ -85,6 +85,9 @@ baselineProfile {
     // Never generate during a normal assembleRelease — Cris's build must not slow down or
     // need the emulator. Run :app:generateBaselineProfile explicitly when regenerating.
     automaticGenerationDuringBuild = false
+    // Merge into src/main so the profile applies to all build types and avoids creating a
+    // src/release source set that silently scopes future additions to release-only.
+    mergeIntoMain = true
 }
 
 // This project ships no tests (no src/test or src/androidTest). AGP still creates
