@@ -72,6 +72,9 @@ private const val PAGE_TRIGGER_ROWS = 8
  */
 private const val OPTIMISTIC_TRACK_MS = 10_000L
 
+/** The sleep timer's steps, as the player's own dialog offers them (0 = off); the options row cycles them. */
+private val SLEEP_TIMER_STEPS = listOf(0, 5, 15, 30, 45, 60)
+
 /**
  * The iPod's brain: owns the LCD back stack and each entry's list, turns [WheelEvent]s into
  * navigation (MENU pops, SELECT pushes/activates, Scroll moves the highlight — or scrubs on Now
@@ -199,6 +202,13 @@ class IPodViewModel(
     private var optimisticUri: String? = null
     private var optimisticUntilMs = 0L
 
+    /** The SpotifyTrack behind the last mirror emission (the player's current track). */
+    private var lastPlayerTrack: SpotifyTrack? = null
+
+    /** The full track for a uri when the iPod knows it: a liked-list pick, else the mirrored current track. */
+    private fun knownTrack(uri: String): SpotifyTrack? =
+        likedTrackByUri[uri] ?: lastPlayerTrack?.takeIf { it.uri == uri }
+
     // ── Art prefetcher (Checkpoint C) ────────────────────────────────────────
 
     private val prefetcher = CoverArtPrefetcher(imageLoader, appContext, viewModelScope)
@@ -278,6 +288,9 @@ class IPodViewModel(
                     val posInList = sel?.positionOf(track.uri)
                     val listSize = if (posInList != null) sel.sourceUris.size else null
                     val episode = track.isEpisode
+                    // The full track behind the mirror — the like / add-to-playlist effects carry
+                    // it so the shell's cache patches never depend on the player having caught up.
+                    lastPlayerTrack = track
                     LcdNowPlaying(
                         uri = track.uri,
                         title = track.name,
@@ -298,6 +311,8 @@ class IPodViewModel(
                         albumId = if (episode) null else track.album?.id,
                         artistId = if (episode) null else track.artists?.firstOrNull()?.id,
                         isEpisode = episode,
+                        sleepTimerTotalMinutes = ps.sleepTimerTotalMinutes,
+                        sleepTimerMinutes = ps.sleepTimerMinutes,
                     )
                 }
                 .distinctUntilChanged()
@@ -359,7 +374,8 @@ class IPodViewModel(
                 .map { state ->
                     val np = state.nowPlaying
                     val onOptions = state.current.screen is IPodScreen.NowPlayingOptions
-                    if (!onOptions || np == null) null else (np.uri to np.isLiked)
+                    if (!onOptions || np == null) null
+                    else listOf(np.uri, np.isLiked, np.sleepTimerTotalMinutes, np.sleepTimerMinutes)
                 }
                 .distinctUntilChanged()
                 .collect { key ->
@@ -928,6 +944,9 @@ class IPodViewModel(
                 albumId = if (episode) null else track?.album?.id,
                 artistId = if (episode) null else track?.artists?.firstOrNull()?.id,
                 isEpisode = episode,
+                // The timer outlives the track.
+                sleepTimerTotalMinutes = old?.sleepTimerTotalMinutes ?: 0,
+                sleepTimerMinutes = old?.sleepTimerMinutes ?: 0,
             )
             val next = state.copy(nowPlaying = np)
             if (!lastHadNowPlaying) {
@@ -1148,8 +1167,12 @@ class IPodViewModel(
     }
 
     /** Build LCD rows from playlist models. [hasSubmenu] draws the › chevron (Playlists yes, Add to Playlist no). */
+    /** Each owned playlist's count as its row last showed it — the add-to-playlist effect carries it. */
+    private val ownedPlaylistCounts = HashMap<String, Int>()
+
     private fun playlistRows(playlists: List<SpotifyPlaylist>, hasSubmenu: Boolean = true): List<LcdItem> =
         playlists.map { playlist ->
+            ownedPlaylistCounts[playlist.id] = playlist.trackCount
             LcdItem(
                 id = playlist.id,
                 title = LcdLabel.Text(playlist.name),
@@ -1447,6 +1470,18 @@ class IPodViewModel(
                     ),
                 )
             }
+            // Sleep Timer — always; SELECT cycles Lyra's steps, the value shows what is left.
+            add(
+                LcdItem(
+                    id = "sleeptimer",
+                    title = LcdLabel.Res(R.string.ipod_option_sleep_timer),
+                    value = if (np.sleepTimerTotalMinutes > 0) {
+                        LcdLabel.ResArgs(R.string.ipod_value_minutes_left, listOf(np.sleepTimerMinutes))
+                    } else {
+                        LcdLabel.Res(R.string.ipod_value_off)
+                    },
+                ),
+            )
         }
     }
 
@@ -1474,11 +1509,23 @@ class IPodViewModel(
                     val cur = state.nowPlaying ?: return@update state
                     state.copy(nowPlaying = cur.copy(isLiked = targetLiked))
                 }
+                val track = knownTrack(np.uri)
                 viewModelScope.launch {
-                    _effects.send(IPodEffect.SetLiked(np.uri, targetLiked))
+                    _effects.send(IPodEffect.SetLiked(np.uri, targetLiked, track))
                 }
                 // Pop back to Now Playing — the Classic's add/remove returns immediately.
                 popOnce()
+            }
+            "sleeptimer" -> {
+                // Next step after the current SETTING (not the remaining minutes); wraps to Off.
+                val idx = SLEEP_TIMER_STEPS.indexOf(np.sleepTimerTotalMinutes)
+                val next = SLEEP_TIMER_STEPS[(idx + 1) % SLEEP_TIMER_STEPS.size]
+                // Optimistic: the row's value follows the wheel at once; the mirror confirms.
+                _uiState.update { state ->
+                    val cur = state.nowPlaying ?: return@update state
+                    state.copy(nowPlaying = cur.copy(sleepTimerTotalMinutes = next, sleepTimerMinutes = next))
+                }
+                viewModelScope.launch { _effects.send(IPodEffect.SetSleepTimer(next)) }
             }
             "addtoplaylist" -> {
                 pushAddToPlaylist(np.uri)
@@ -1532,8 +1579,17 @@ class IPodViewModel(
      * (back past NowPlayingOptions to Now Playing).
      */
     private fun activateAddToPlaylistItem(screen: IPodScreen.AddToPlaylist, item: LcdItem) {
+        val count = ownedPlaylistCounts[item.id]
+        val track = knownTrack(screen.trackUri)
         viewModelScope.launch {
-            _effects.send(IPodEffect.AddToPlaylist(playlistId = item.id, trackUri = screen.trackUri))
+            _effects.send(
+                IPodEffect.AddToPlaylist(
+                    playlistId = item.id,
+                    trackUri = screen.trackUri,
+                    trackCount = count,
+                    track = track,
+                ),
+            )
         }
         // Pop twice atomically: AddToPlaylist → NowPlayingOptions → Now Playing.
         _uiState.update { state ->

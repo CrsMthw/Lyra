@@ -168,9 +168,9 @@ fun IPodRoot(container: AppContainer, modifier: Modifier = Modifier) {
                 is IPodEffect.SeekTo -> playerVm.seekTo(effect.fraction)
                 is IPodEffect.SetShuffle -> container.playerStateManager.setShuffle(effect.enabled)
                 is IPodEffect.SetRepeat -> container.playerStateManager.setRepeat(effect.state)
-                is IPodEffect.SetLiked -> playerVm.setLiked(effect.uri, effect.liked)
+                is IPodEffect.SetLiked -> playerVm.setLiked(effect.uri, effect.liked, effect.track)
                 is IPodEffect.AddToPlaylist -> playerVm.addToPlaylist(
-                    effect.playlistId, effect.trackUri,
+                    effect.playlistId, effect.trackUri, effect.trackCount, effect.track,
                 )
                 is IPodEffect.SetSleepTimer -> playerVm.setSleepTimer(effect.minutes)
             }

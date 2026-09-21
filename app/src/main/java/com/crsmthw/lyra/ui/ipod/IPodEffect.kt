@@ -1,5 +1,7 @@
 package com.crsmthw.lyra.ui.ipod
 
+import com.crsmthw.lyra.data.remote.model.SpotifyTrack
+
 /**
  * What the iPod asks the rest of Lyra to do. `IPodViewModel` emits these; `IPodRoot` collects
  * them and routes each to the Activity-scoped `PlayerViewModel`, so the iPod never duplicates
@@ -47,14 +49,30 @@ sealed interface IPodEffect {
      * patch, as PlayerViewModel.toggleLike does). [liked] is the TARGET state. Checkpoint D: the
      * options menu's "Add to / Remove from Liked Songs" row. Never for an episode.
      */
-    data class SetLiked(val uri: String, val liked: Boolean) : IPodEffect
+    data class SetLiked(
+        val uri: String,
+        val liked: Boolean,
+        /**
+         * The track itself when the iPod has it (a liked-list pick, or the mirrored current track),
+         * so the liked-songs cache patch can run even while the player's own currentTrack has not
+         * caught up with the picked song (the optimistic window). Null → the shell resolves it.
+         */
+        val track: SpotifyTrack? = null,
+    ) : IPodEffect
 
     /**
      * → the app's add-to-playlist path (POST playlists/{id}/items + the cached track-list patch +
      * the server-count reconcile that every in-app mutation triggers). Checkpoint D: the options
      * menu's "Add to Playlist" → owned-playlist row. Never for an episode.
      */
-    data class AddToPlaylist(val playlistId: String, val trackUri: String) : IPodEffect
+    data class AddToPlaylist(
+        val playlistId: String,
+        val trackUri: String,
+        /** The playlist's count as its row showed it — the cached-list append's completeness guard needs it. */
+        val trackCount: Int? = null,
+        /** The track itself when the iPod has it (see [SetLiked.track]) — the cached row append needs the full object. */
+        val track: SpotifyTrack? = null,
+    ) : IPodEffect
 
     /**
      * → PlayerViewModel.setSleepTimer(minutes) — the options menu's Sleep Timer row, which cycles

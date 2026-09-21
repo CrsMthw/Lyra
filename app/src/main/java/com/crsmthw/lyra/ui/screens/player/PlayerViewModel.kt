@@ -389,7 +389,7 @@ class PlayerViewModel(
      * behaviour: optimistic UI update (only when [uri] IS the current track), server call, cache
      * patch. Never for an episode uri.
      */
-    fun setLiked(uri: String, liked: Boolean) {
+    fun setLiked(uri: String, liked: Boolean, track: SpotifyTrack? = null) {
         if (uri.startsWith("spotify:episode:")) return
         val trackId = uri.substringAfterLast(':')
         // Optimistic UI flip — only when the uri matches what the player is showing.
@@ -397,11 +397,14 @@ class PlayerViewModel(
         if (currentTrack != null) {
             _uiState.update { it.copy(isLiked = liked) }
         }
+        // The full track for the liked-songs cache patch: the caller's (the iPod has it for a
+        // liked-list pick even while our currentTrack lags behind), else ours when it matches.
+        val fullTrack = track?.takeIf { it.uri == uri } ?: currentTrack
         viewModelScope.launch {
             if (liked) {
                 repository.saveTrack(trackId)
-                if (currentTrack != null) {
-                    withContext(Dispatchers.IO) { libraryCache.prependToLikedSongs(currentTrack) }
+                if (fullTrack != null) {
+                    withContext(Dispatchers.IO) { libraryCache.prependToLikedSongs(fullTrack) }
                 }
             } else {
                 repository.removeTrack(trackId)
@@ -417,17 +420,21 @@ class PlayerViewModel(
      * [LibraryCache.appendToPlaylistTrackList] checks), mutation announcement for the Library's
      * count reconcile. Never for an episode uri. Failures are logged, not surfaced.
      */
-    fun addToPlaylist(playlistId: String, trackUri: String) {
+    fun addToPlaylist(playlistId: String, trackUri: String, trackCount: Int? = null, track: SpotifyTrack? = null) {
         if (trackUri.startsWith("spotify:episode:")) return
-        val fullTrack = _uiState.value.currentTrack?.takeIf { it.uri == trackUri }
+        val fullTrack = track?.takeIf { it.uri == trackUri }
+            ?: _uiState.value.currentTrack?.takeIf { it.uri == trackUri }
         viewModelScope.launch {
             repository.addTrackToPlaylist(playlistId, trackUri).fold(
                 onSuccess = {
                     withContext(Dispatchers.IO) {
                         if (fullTrack != null) {
-                            val knownTotal = libraryCache.load()?.playlists
-                                ?.firstOrNull { it.id == playlistId }?.trackCount
-                                ?: Int.MAX_VALUE  // unknown → treat cache as a prefix, announce only
+                            // The count the caller's row showed, else the cached metadata's; unknown
+                            // → treat the cache as a prefix and only announce the mutation.
+                            val knownTotal = trackCount
+                                ?: libraryCache.load()?.playlists
+                                    ?.firstOrNull { it.id == playlistId }?.trackCount
+                                ?: Int.MAX_VALUE
                             libraryCache.appendToPlaylistTrackList(
                                 playlistId, knownTotal, fullTrack,
                             )
