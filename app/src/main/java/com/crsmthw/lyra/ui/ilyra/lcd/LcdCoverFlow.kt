@@ -1,4 +1,4 @@
-package com.crsmthw.lyra.ui.ipod.lcd
+package com.crsmthw.lyra.ui.ilyra.lcd
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
@@ -52,11 +52,11 @@ import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.crossfade
 import com.crsmthw.lyra.R
-import com.crsmthw.lyra.ui.ipod.IPodColors
-import com.crsmthw.lyra.ui.ipod.IPodFontFamily
-import com.crsmthw.lyra.ui.ipod.nav.IPodStackEntry
-import com.crsmthw.lyra.ui.ipod.nav.LcdIndexStatus
-import com.crsmthw.lyra.ui.ipod.nav.LcdItem
+import com.crsmthw.lyra.ui.ilyra.ILyraColors
+import com.crsmthw.lyra.ui.ilyra.ILyraFontFamily
+import com.crsmthw.lyra.ui.ilyra.nav.ILyraStackEntry
+import com.crsmthw.lyra.ui.ilyra.nav.LcdIndexStatus
+import com.crsmthw.lyra.ui.ilyra.nav.LcdItem
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlin.math.cos
@@ -123,9 +123,9 @@ private const val COVER_TEXT_TOP_GAP = 0.02f
 // ── Entry point ─────────────────────────────────────────────────────────────
 
 /**
- * The iPod Classic's Cover Flow: a 3D ribbon of album covers along X on the LCD's white
- * background. Driven entirely by the entry's [LcdListState][com.crsmthw.lyra.ui.ipod.nav.LcdListState]:
- * [selectedIndex][com.crsmthw.lyra.ui.ipod.nav.LcdListState.selectedIndex] is the centre cover,
+ * The Classic's Cover Flow: a 3D ribbon of album covers along X on the LCD's white
+ * background. Driven entirely by the entry's [LcdListState][com.crsmthw.lyra.ui.ilyra.nav.LcdListState]:
+ * [selectedIndex][com.crsmthw.lyra.ui.ilyra.nav.LcdListState.selectedIndex] is the centre cover,
  * items carry [LcdItem.artUrl] for the tile and title/subtitle for the text below.
  *
  * No touch handling (rule: the wheel is the only input). No haptics or sounds (fired by the
@@ -181,7 +181,7 @@ internal fun tilePose(d: Float, firstNeighbourOffsetPx: Float, sideStepPx: Float
 
 @Composable
 internal fun LcdCoverFlowContent(
-    entry: IPodStackEntry,
+    entry: ILyraStackEntry,
     likedIndex: LcdIndexStatus?,
     contentHeight: Dp,
     /** The tile that is FLYING into Now Playing (LcdScreen's overlay draws it; this slot stays empty). */
@@ -195,15 +195,15 @@ internal fun LcdCoverFlowContent(
 
     when {
         list.isLoading -> LcdCentredMessage(
-            text = stringResource(R.string.ipod_list_loading),
+            text = stringResource(R.string.ilyra_list_loading),
             contentHeight = contentHeight,
         )
         list.error != null -> LcdCentredMessage(
-            text = stringResource(R.string.ipod_list_error, title.resolve()),
+            text = stringResource(R.string.ilyra_list_error, title.resolve()),
             contentHeight = contentHeight,
         )
         items.isEmpty() -> LcdCentredMessage(
-            text = stringResource(R.string.ipod_list_empty, title.resolve()),
+            text = stringResource(R.string.ilyra_list_empty, title.resolve()),
             contentHeight = contentHeight,
         )
         else -> CoverFlowRow(
@@ -440,7 +440,7 @@ private fun CoverFlowTile(
                 .size(tileSideDp)
                 .border(
                     width = 0.5.dp,
-                    color = IPodColors.CoverEdge,
+                    color = ILyraColors.CoverEdge,
                     shape = RoundedCornerShape(edgeCornerDp),
                 ),
             contentAlignment = Alignment.Center,
@@ -526,10 +526,10 @@ private fun CoverFlowText(
         // Title (bold, centred, single-line ellipsised).
         Text(
             text = item.title.resolve(),
-            fontFamily = IPodFontFamily,
+            fontFamily = ILyraFontFamily,
             fontWeight = FontWeight.Bold,
             fontSize = titleFontSize,
-            color = IPodColors.LcdText,
+            color = ILyraColors.LcdText,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
@@ -543,10 +543,10 @@ private fun CoverFlowText(
         if (subtitleText.isNotEmpty()) {
             Text(
                 text = subtitleText,
-                fontFamily = IPodFontFamily,
+                fontFamily = ILyraFontFamily,
                 fontWeight = FontWeight.Bold,
                 fontSize = subtitleFontSize,
-                color = IPodColors.LcdTextSecondary,
+                color = ILyraColors.LcdTextSecondary,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center,
@@ -571,11 +571,11 @@ private fun CoverFlowPosition(
     val positionFontSize = with(density) { (contentHeightPx * COVER_POSITION_FRACTION).toSp() }
     val sidePad = with(density) { (contentWidthPx * 0.08f).toDp() }
     Text(
-        text = stringResource(R.string.ipod_now_playing_position, itemIndex + 1, itemCount),
-        fontFamily = IPodFontFamily,
+        text = stringResource(R.string.ilyra_now_playing_position, itemIndex + 1, itemCount),
+        fontFamily = ILyraFontFamily,
         fontWeight = FontWeight.Bold,
         fontSize = positionFontSize,
-        color = IPodColors.LcdTextSecondary,
+        color = ILyraColors.LcdTextSecondary,
         maxLines = 1,
         textAlign = TextAlign.Center,
         modifier = modifier.padding(horizontal = sidePad),
@@ -593,14 +593,14 @@ private fun CoverFlowIndexingLine(
     val fontSize = with(density) { (contentHeightPx * COVER_POSITION_FRACTION).toSp() }
     Text(
         text = stringResource(
-            R.string.ipod_coverflow_indexing,
+            R.string.ilyra_coverflow_indexing,
             likedIndex.indexed,
             likedIndex.total,
         ),
-        fontFamily = IPodFontFamily,
+        fontFamily = ILyraFontFamily,
         fontWeight = FontWeight.Bold,
         fontSize = fontSize,
-        color = IPodColors.LcdTextSecondary,
+        color = ILyraColors.LcdTextSecondary,
         maxLines = 1,
         textAlign = TextAlign.Center,
         modifier = modifier.wrapContentHeight(Alignment.CenterVertically),

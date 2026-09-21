@@ -1,4 +1,4 @@
-package com.crsmthw.lyra.ui.ipod.lcd
+package com.crsmthw.lyra.ui.ilyra.lcd
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
@@ -10,9 +10,9 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.border
-import com.crsmthw.lyra.ui.ipod.nav.NowPlayingMode
-import com.crsmthw.lyra.ui.ipod.nav.LcdRepeat
-import com.crsmthw.lyra.ui.ipod.IPodDimens
+import com.crsmthw.lyra.ui.ilyra.nav.NowPlayingMode
+import com.crsmthw.lyra.ui.ilyra.nav.LcdRepeat
+import com.crsmthw.lyra.ui.ilyra.ILyraDimens
 import androidx.compose.foundation.Canvas
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.togetherWith
@@ -70,9 +70,9 @@ import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.crossfade
 import com.crsmthw.lyra.R
-import com.crsmthw.lyra.ui.ipod.IPodColors
-import com.crsmthw.lyra.ui.ipod.IPodFontFamily
-import com.crsmthw.lyra.ui.ipod.nav.LcdNowPlaying
+import com.crsmthw.lyra.ui.ilyra.ILyraColors
+import com.crsmthw.lyra.ui.ilyra.ILyraFontFamily
+import com.crsmthw.lyra.ui.ilyra.nav.LcdNowPlaying
 import com.crsmthw.lyra.util.toTimeString
 
 // ── Tunables ────────────────────────────────────────────────────────────────
@@ -146,7 +146,7 @@ private const val NOTE_GLYPH_FRACTION = 0.35f
 // ── Entry point ─────────────────────────────────────────────────────────────
 
 /**
- * The real Now Playing screen, matching the 6th-gen iPod Classic layout:
+ * The real Now Playing screen, matching the 6th-gen Classic layout:
  * - Left: album art with perspective tilt and a fading reflection beneath it.
  * - Right: title (bold, marquee), artist (marquee), album (ellipsised), "N of M".
  * - Bottom strip: elapsed time, progress bar (two-tone blue fill + marker), remaining time.
@@ -166,7 +166,7 @@ internal fun LcdNowPlayingContent(
 ) {
     if (nowPlaying == null) {
         LcdCentredMessage(
-            text = stringResource(R.string.ipod_now_playing_empty),
+            text = stringResource(R.string.ilyra_now_playing_empty),
             contentHeight = contentHeight,
         )
         return
@@ -204,8 +204,8 @@ internal fun LcdNowPlayingContent(
             AnimatedContent(
                 targetState = nowPlaying.mode,
                 transitionSpec = {
-                    slideInHorizontally(tween(IPodDimens.LcdSlideMillis)) { it } togetherWith
-                        slideOutHorizontally(tween(IPodDimens.LcdSlideMillis)) { -it }
+                    slideInHorizontally(tween(ILyraDimens.LcdSlideMillis)) { it } togetherWith
+                        slideOutHorizontally(tween(ILyraDimens.LcdSlideMillis)) { -it }
                 },
                 label = "now_playing_bar",
                 modifier = Modifier
@@ -228,14 +228,14 @@ internal fun LcdNowPlayingContent(
                     )
                     NowPlayingMode.SHUFFLE -> NowPlayingOptionStrip(
                         glyph = OptionGlyph.SHUFFLE,
-                        options = listOf(R.string.ipod_value_off, R.string.ipod_value_on),
+                        options = listOf(R.string.ilyra_value_off, R.string.ilyra_value_on),
                         selectedIndex = if (nowPlaying.shuffleEnabled) 1 else 0,
                         contentHeightPx = contentHeightPx,
                         modifier = Modifier.fillMaxSize(),
                     )
                     NowPlayingMode.REPEAT -> NowPlayingOptionStrip(
                         glyph = OptionGlyph.REPEAT,
-                        options = listOf(R.string.ipod_value_off, R.string.ipod_value_all, R.string.ipod_value_one),
+                        options = listOf(R.string.ilyra_value_off, R.string.ilyra_value_all, R.string.ilyra_value_one),
                         selectedIndex = nowPlaying.repeat.ordinal,
                         contentHeightPx = contentHeightPx,
                         modifier = Modifier.fillMaxSize(),
@@ -301,7 +301,7 @@ private fun NowPlayingUpperRegion(
         // (the Classic's title sits ~12 % of the art height down from it).
         // Artist / album / position are dark grey on the Classic, not light; lines sit a clear
         // half-line apart.
-        val secondary = IPodColors.LcdText.copy(alpha = 0.72f)
+        val secondary = ILyraColors.LcdText.copy(alpha = 0.72f)
         val lineGap = artSide * 0.055f
         Column(
             modifier = Modifier
@@ -311,10 +311,10 @@ private fun NowPlayingUpperRegion(
             // Title (bold, marquee when overflowing).
             Text(
                 text = title,
-                fontFamily = IPodFontFamily,
+                fontFamily = ILyraFontFamily,
                 fontWeight = FontWeight.Bold,
                 fontSize = titleFontSize,
-                color = IPodColors.LcdText,
+                color = ILyraColors.LcdText,
                 maxLines = 1,
                 softWrap = false,
                 overflow = TextOverflow.Clip,
@@ -328,7 +328,7 @@ private fun NowPlayingUpperRegion(
             // Artist (marquee when overflowing).
             Text(
                 text = artist,
-                fontFamily = IPodFontFamily,
+                fontFamily = ILyraFontFamily,
                 fontWeight = FontWeight.Bold,
                 fontSize = artistFontSize,
                 color = secondary,
@@ -345,7 +345,7 @@ private fun NowPlayingUpperRegion(
             // Album (ellipsised, no marquee).
             Text(
                 text = album,
-                fontFamily = IPodFontFamily,
+                fontFamily = ILyraFontFamily,
                 fontWeight = FontWeight.Bold,
                 fontSize = albumFontSize,
                 color = secondary,
@@ -359,11 +359,11 @@ private fun NowPlayingUpperRegion(
                 Spacer(Modifier.height(lineGap))
                 Text(
                     text = stringResource(
-                        R.string.ipod_now_playing_position,
+                        R.string.ilyra_now_playing_position,
                         positionInList,
                         listSize,
                     ),
-                    fontFamily = IPodFontFamily,
+                    fontFamily = ILyraFontFamily,
                     fontWeight = FontWeight.Bold,
                     fontSize = positionFontSize,
                     color = secondary,
@@ -492,12 +492,12 @@ internal fun ArtPlaceholder(modifier: Modifier, artSide: Dp) {
 
     Box(
         modifier = modifier
-            .background(IPodColors.ArtPlaceholder)
+            .background(ILyraColors.ArtPlaceholder)
             .drawBehind {
                 drawMusicNote(
                     center = Offset(size.width / 2f, size.height / 2f),
                     noteSize = glyphSizePx,
-                    color = IPodColors.ArtPlaceholderIcon,
+                    color = ILyraColors.ArtPlaceholderIcon,
                 )
             },
     )
@@ -575,7 +575,7 @@ private fun NowPlayingProgressStrip(
 
     val elapsedText = progressMs.coerceAtLeast(0L).toTimeString()
     val remainingMs = (durationMs - progressMs).coerceAtLeast(0L)
-    val remainingText = stringResource(R.string.ipod_now_playing_remaining, remainingMs.toTimeString())
+    val remainingText = stringResource(R.string.ilyra_now_playing_remaining, remainingMs.toTimeString())
 
     val fraction = if (durationMs > 0) {
         (progressMs.toFloat() / durationMs).coerceIn(0f, 1f)
@@ -595,10 +595,10 @@ private fun NowPlayingProgressStrip(
             // Elapsed time.
             Text(
                 text = elapsedText,
-                fontFamily = IPodFontFamily,
+                fontFamily = ILyraFontFamily,
                 fontWeight = FontWeight.Bold,
                 fontSize = timeFontSize,
-                color = IPodColors.LcdText,
+                color = ILyraColors.LcdText,
                 maxLines = 1,
             )
 
@@ -627,10 +627,10 @@ private fun NowPlayingProgressStrip(
             // Remaining time.
             Text(
                 text = remainingText,
-                fontFamily = IPodFontFamily,
+                fontFamily = ILyraFontFamily,
                 fontWeight = FontWeight.Bold,
                 fontSize = timeFontSize,
-                color = IPodColors.LcdText,
+                color = ILyraColors.LcdText,
                 maxLines = 1,
             )
         }
@@ -677,7 +677,7 @@ private fun NowPlayingVolumeStrip(
 private fun DrawScope.drawSpeaker(loud: Boolean) {
     val w = size.width
     val h = size.height
-    val color = IPodColors.LcdText
+    val color = ILyraColors.LcdText
     val body = Path().apply {
         moveTo(w * 0.05f, h * 0.36f)
         lineTo(w * 0.30f, h * 0.36f)
@@ -742,7 +742,7 @@ private fun NowPlayingOptionStrip(
             modifier = Modifier
                 .height(segmentHeight)
                 .clip(corner)
-                .border(1.dp, IPodColors.ProgressTrackEdge, corner),
+                .border(1.dp, ILyraColors.ProgressTrackEdge, corner),
         ) {
             options.forEachIndexed { index, label ->
                 val selected = index == selectedIndex
@@ -753,9 +753,9 @@ private fun NowPlayingOptionStrip(
                         .background(
                             Brush.verticalGradient(
                                 colors = if (selected) {
-                                    listOf(IPodColors.LcdStatusGlossTop, IPodColors.LcdStatusGlossMid)
+                                    listOf(ILyraColors.LcdStatusGlossTop, ILyraColors.LcdStatusGlossMid)
                                 } else {
-                                    listOf(IPodColors.LcdStatusGlossLow, IPodColors.LcdStatusGlossMid)
+                                    listOf(ILyraColors.LcdStatusGlossLow, ILyraColors.LcdStatusGlossMid)
                                 },
                             ),
                         )
@@ -764,10 +764,10 @@ private fun NowPlayingOptionStrip(
                 ) {
                     Text(
                         text = stringResource(label),
-                        fontFamily = IPodFontFamily,
+                        fontFamily = ILyraFontFamily,
                         fontWeight = FontWeight.Bold,
                         fontSize = fontSize,
-                        color = if (selected) IPodColors.ProgressGlassLow else IPodColors.LcdText,
+                        color = if (selected) ILyraColors.ProgressGlassLow else ILyraColors.LcdText,
                         maxLines = 1,
                     )
                 }
@@ -776,7 +776,7 @@ private fun NowPlayingOptionStrip(
                         Modifier
                             .fillMaxHeight()
                             .width(1.dp)
-                            .background(IPodColors.ProgressTrackEdge),
+                            .background(ILyraColors.ProgressTrackEdge),
                     )
                 }
             }
@@ -788,7 +788,7 @@ private fun NowPlayingOptionStrip(
 private fun DrawScope.drawShuffleGlyph() {
     val w = size.width
     val h = size.height
-    val color = IPodColors.LcdText
+    val color = ILyraColors.LcdText
     val stroke = Stroke(width = maxOf(1.5f, h * 0.13f), cap = StrokeCap.Round)
     val down = Path().apply {
         moveTo(w * 0.05f, h * 0.28f)
@@ -816,7 +816,7 @@ private fun DrawScope.drawShuffleGlyph() {
 private fun DrawScope.drawRepeatGlyph() {
     val w = size.width
     val h = size.height
-    val color = IPodColors.LcdText
+    val color = ILyraColors.LcdText
     val stroke = Stroke(width = maxOf(1.5f, h * 0.13f), cap = StrokeCap.Round)
     val inset = h * 0.1f
     val box = Rect(inset, inset, w - inset, h - inset)
@@ -857,15 +857,15 @@ private fun DrawScope.drawProgressBar(
         addRoundRect(RoundRect(Rect(0f, barTop, fillWidth, barBottom), corner))
     }
     val channelBrush = Brush.verticalGradient(
-        colors = listOf(IPodColors.ProgressTrackTop, IPodColors.ProgressTrackBottom),
+        colors = listOf(ILyraColors.ProgressTrackTop, ILyraColors.ProgressTrackBottom),
         startY = barTop,
         endY = barBottom,
     )
     val glassBrush = Brush.verticalGradient(
-        0f to IPodColors.ProgressGlassTop,
-        0.45f to IPodColors.ProgressGlassMid,
-        0.5f to IPodColors.ProgressGlassLow,
-        1f to IPodColors.ProgressGlassBottom,
+        0f to ILyraColors.ProgressGlassTop,
+        0.45f to ILyraColors.ProgressGlassMid,
+        0.5f to ILyraColors.ProgressGlassLow,
+        1f to ILyraColors.ProgressGlassBottom,
         startY = barTop,
         endY = barBottom,
     )
@@ -874,7 +874,7 @@ private fun DrawScope.drawProgressBar(
     fun DrawScope.drawBar(alpha: Float) {
         drawRoundRect(brush = channelBrush, topLeft = track.topLeft, size = track.size, cornerRadius = corner, alpha = alpha)
         drawRoundRect(
-            color = IPodColors.ProgressTrackEdge,
+            color = ILyraColors.ProgressTrackEdge,
             topLeft = track.topLeft,
             size = track.size,
             cornerRadius = corner,
@@ -886,8 +886,8 @@ private fun DrawScope.drawProgressBar(
                 drawRect(brush = glassBrush, topLeft = Offset(0f, barTop), size = Size(fillWidth, barHeight), alpha = alpha)
                 drawRect(
                     brush = Brush.verticalGradient(
-                        0f to IPodColors.HighlightText.copy(alpha = 0.6f),
-                        1f to IPodColors.HighlightText.copy(alpha = 0f),
+                        0f to ILyraColors.HighlightText.copy(alpha = 0.6f),
+                        1f to ILyraColors.HighlightText.copy(alpha = 0f),
                         startY = barTop,
                         endY = barTop + barHeight * 0.48f,
                     ),
@@ -936,6 +936,6 @@ private fun DrawScope.drawProgressBar(
             lineTo(cx - markerRadius, cy)
             close()
         }
-        drawPath(diamond, IPodColors.LcdText, style = Fill)
+        drawPath(diamond, ILyraColors.LcdText, style = Fill)
     }
 }

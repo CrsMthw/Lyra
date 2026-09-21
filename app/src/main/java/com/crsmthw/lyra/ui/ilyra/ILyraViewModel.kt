@@ -1,4 +1,4 @@
-package com.crsmthw.lyra.ui.ipod
+package com.crsmthw.lyra.ui.ilyra
 
 import android.content.Context
 import android.media.AudioManager
@@ -15,23 +15,23 @@ import com.crsmthw.lyra.data.remote.model.SpotifyTrack
 import com.crsmthw.lyra.data.repository.SettingsRepository
 import com.crsmthw.lyra.data.repository.SpotifyRepository
 import com.crsmthw.lyra.di.AppContainer
-import com.crsmthw.lyra.ui.ipod.nav.IPodScreen
-import com.crsmthw.lyra.ui.ipod.nav.IPodStackEntry
-import com.crsmthw.lyra.ui.ipod.nav.IPodUiState
-import com.crsmthw.lyra.ui.ipod.nav.LCD_ROWS_SINGLE_LINE
-import com.crsmthw.lyra.ui.ipod.nav.LCD_ROWS_TWO_LINE
-import com.crsmthw.lyra.ui.ipod.nav.LcdIndexStatus
-import com.crsmthw.lyra.ui.ipod.nav.LcdItem
-import com.crsmthw.lyra.ui.ipod.nav.LcdLabel
-import com.crsmthw.lyra.ui.ipod.nav.LcdListState
-import com.crsmthw.lyra.ui.ipod.nav.LcdNavDirection
-import com.crsmthw.lyra.ui.ipod.nav.LcdNowPlaying
-import com.crsmthw.lyra.ui.ipod.nav.LcdRepeat
-import com.crsmthw.lyra.ui.ipod.nav.NowPlayingMode
-import com.crsmthw.lyra.ui.ipod.wheel.ClickPitch
-import com.crsmthw.lyra.ui.ipod.wheel.ClickSoundsConfig
-import com.crsmthw.lyra.ui.ipod.wheel.WheelButton
-import com.crsmthw.lyra.ui.ipod.wheel.WheelEvent
+import com.crsmthw.lyra.ui.ilyra.nav.ILyraScreen
+import com.crsmthw.lyra.ui.ilyra.nav.ILyraStackEntry
+import com.crsmthw.lyra.ui.ilyra.nav.ILyraUiState
+import com.crsmthw.lyra.ui.ilyra.nav.LCD_ROWS_SINGLE_LINE
+import com.crsmthw.lyra.ui.ilyra.nav.LCD_ROWS_TWO_LINE
+import com.crsmthw.lyra.ui.ilyra.nav.LcdIndexStatus
+import com.crsmthw.lyra.ui.ilyra.nav.LcdItem
+import com.crsmthw.lyra.ui.ilyra.nav.LcdLabel
+import com.crsmthw.lyra.ui.ilyra.nav.LcdListState
+import com.crsmthw.lyra.ui.ilyra.nav.LcdNavDirection
+import com.crsmthw.lyra.ui.ilyra.nav.LcdNowPlaying
+import com.crsmthw.lyra.ui.ilyra.nav.LcdRepeat
+import com.crsmthw.lyra.ui.ilyra.nav.NowPlayingMode
+import com.crsmthw.lyra.ui.ilyra.wheel.ClickPitch
+import com.crsmthw.lyra.ui.ilyra.wheel.ClickSoundsConfig
+import com.crsmthw.lyra.ui.ilyra.wheel.WheelButton
+import com.crsmthw.lyra.ui.ilyra.wheel.WheelEvent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
@@ -76,10 +76,10 @@ private const val OPTIMISTIC_TRACK_MS = 10_000L
 private val SLEEP_TIMER_STEPS = listOf(0, 5, 15, 30, 45, 60)
 
 /**
- * The iPod's brain: owns the LCD back stack and each entry's list, turns [WheelEvent]s into
+ * The Classic's brain: owns the LCD back stack and each entry's list, turns [WheelEvent]s into
  * navigation (MENU pops, SELECT pushes/activates, Scroll moves the highlight — or scrubs on Now
- * Playing) and into [IPodEffect]s for anything that touches playback. Mirrors
- * `PlayerStateManager.state` into [IPodUiState.nowPlaying] and the iPod's own settings from
+ * Playing) and into [ILyraEffect]s for anything that touches playback. Mirrors
+ * `PlayerStateManager.state` into [ILyraUiState.nowPlaying] and the Classic's own settings from
  * [SettingsRepository]. The transport buttons (PREVIOUS / NEXT / PLAY_PAUSE) are global: they
  * emit their effect whatever screen is showing.
  *
@@ -100,8 +100,8 @@ private val SLEEP_TIMER_STEPS = listOf(0, 5, 15, 30, 45, 60)
  *
  * ### Recomposition
  *
- * The 1 Hz progress tick updates only [IPodUiState.nowPlaying]. The [stack] list instance and
- * every [IPodStackEntry] / [LcdListState] inside it are preserved across that update (the `copy`
+ * The 1 Hz progress tick updates only [ILyraUiState.nowPlaying]. The [stack] list instance and
+ * every [ILyraStackEntry] / [LcdListState] inside it are preserved across that update (the `copy`
  * touches only `nowPlaying`), so composables that read only the stack or its entries skip
  * automatically. Scrub-in-progress fields are carried forward from the previous `nowPlaying`
  * during the tick, so the scrub position is never stomped by the player mirror.
@@ -118,7 +118,7 @@ private val SLEEP_TIMER_STEPS = listOf(0, 5, 15, 30, 45, 60)
  * - **Reconcile write**: Music/CoverFlow reconcile uses the atomic [LibraryCache.prependToLikedSongs]
  *   so an indexer append landing between the read and the write is not reverted.
  */
-class IPodViewModel(
+class ILyraViewModel(
     private val settingsRepository: SettingsRepository,
     private val libraryCache: LibraryCache,
     private val repository: SpotifyRepository,
@@ -130,24 +130,24 @@ class IPodViewModel(
     private val appContext: Context,
 ) : ViewModel() {
 
-    private val library = IPodLibrary(libraryCache, repository, playerStateManager)
+    private val library = ILyraLibrary(libraryCache, repository, playerStateManager)
 
     private val _uiState = MutableStateFlow(
-        IPodUiState(
+        ILyraUiState(
             stack = listOf(
-                IPodStackEntry(
-                    screen = IPodScreen.MainMenu,
-                    title = LcdLabel.Res(R.string.ipod_menu_title),
+                ILyraStackEntry(
+                    screen = ILyraScreen.MainMenu,
+                    title = LcdLabel.Res(R.string.ilyra_menu_title),
                     list = LcdListState(items = buildMainMenu(hasNowPlaying = false)),
                 ),
             ),
         ),
     )
-    val uiState: StateFlow<IPodUiState> = _uiState.asStateFlow()
+    val uiState: StateFlow<ILyraUiState> = _uiState.asStateFlow()
 
-    private val _effects = Channel<IPodEffect>(Channel.BUFFERED)
-    /** One-shot requests for IPodRoot to route to the player. */
-    val effects: Flow<IPodEffect> = _effects.receiveAsFlow()
+    private val _effects = Channel<ILyraEffect>(Channel.BUFFERED)
+    /** One-shot requests for ILyraRoot to route to the player. */
+    val effects: Flow<ILyraEffect> = _effects.receiveAsFlow()
 
     /**
      * Tracks whether the main menu currently includes the "Now Playing" row. Rebuilt ONLY when
@@ -155,7 +155,7 @@ class IPodViewModel(
      */
     private var lastHadNowPlaying = false
 
-    /** The signed-in user's id, resolved once per iPod session for the Liked Songs collection URI. */
+    /** The signed-in user's id, resolved once per iLyra session for the Liked Songs collection URI. */
     private var cachedUserId: String? = null
 
     /**
@@ -178,7 +178,7 @@ class IPodViewModel(
 
     /**
      * The server-computed next offset for each paged screen, keyed by a string that uniquely
-     * identifies the screen instance. Written from `IPodLibrary`'s `nextOffset` on every
+     * identifies the screen instance. Written from `ILyraLibrary`'s `nextOffset` on every
      * successful page; read by [maybeTriggerPaging]. Never derived from `items.size` — the
      * rendered list is filtered (nulls, isPlayable, de-dup) so its length != the API offset.
      */
@@ -205,7 +205,7 @@ class IPodViewModel(
     /** The SpotifyTrack behind the last mirror emission (the player's current track). */
     private var lastPlayerTrack: SpotifyTrack? = null
 
-    /** The full track for a uri when the iPod knows it: a liked-list pick, else the mirrored current track. */
+    /** The full track for a uri when the iLyra knows it: a liked-list pick, else the mirrored current track. */
     private fun knownTrack(uri: String): SpotifyTrack? =
         likedTrackByUri[uri] ?: lastPlayerTrack?.takeIf { it.uri == uri }
 
@@ -250,9 +250,9 @@ class IPodViewModel(
         // Mirror all three clicker settings (enabled, volume, pitch) into the UI state.
         viewModelScope.launch {
             combine(
-                settingsRepository.ipodClickSounds,
-                settingsRepository.ipodClickVolume,
-                settingsRepository.ipodClickPitch,
+                settingsRepository.ilyraClickSounds,
+                settingsRepository.ilyraClickVolume,
+                settingsRepository.ilyraClickPitch,
             ) { enabled, volume, pitchOrdinal ->
                 ClickSoundsConfig(
                     enabled = enabled,
@@ -268,8 +268,8 @@ class IPodViewModel(
 
         // Mirror the body colour (Settings → Color) into the UI state.
         viewModelScope.launch {
-            settingsRepository.ipodBodyColor.collect { ordinal ->
-                val color = IPodBodyColor.entries.getOrElse(ordinal) { IPodBodyColor.SILVER }
+            settingsRepository.ilyraBodyColor.collect { ordinal ->
+                val color = ILyraBodyColor.entries.getOrElse(ordinal) { ILyraBodyColor.SILVER }
                 _uiState.update { state -> refreshSettingsRows(state.copy(bodyColor = color)) }
             }
         }
@@ -341,7 +341,7 @@ class IPodViewModel(
                                 scrubProgressMs = if (sameTrack) old.scrubProgressMs else null,
                                 mode = mode,
                                 volumePercent = if (mode == NowPlayingMode.VOLUME) readVolumePercent() else (old?.volumePercent ?: 0),
-                                // The like state is reported by IPodRoot, not by the player mirror:
+                                // The like state is reported by ILyraRoot, not by the player mirror:
                                 // keep it for the same track, forget it with the track.
                                 isLiked = if (sameTrack) old.isLiked else null,
                             )
@@ -373,7 +373,7 @@ class IPodViewModel(
             _uiState
                 .map { state ->
                     val np = state.nowPlaying
-                    val onOptions = state.current.screen is IPodScreen.NowPlayingOptions
+                    val onOptions = state.current.screen is ILyraScreen.NowPlayingOptions
                     if (!onOptions || np == null) null
                     else listOf(np.uri, np.isLiked, np.sleepTimerTotalMinutes, np.sleepTimerMinutes)
                 }
@@ -382,13 +382,13 @@ class IPodViewModel(
                     if (key == null) return@collect
                     val np = _uiState.value.nowPlaying ?: return@collect
                     val rows = buildNowPlayingOptions(np)
-                    retopItemsPreservingHighlight(IPodScreen.NowPlayingOptions, rows)
+                    retopItemsPreservingHighlight(ILyraScreen.NowPlayingOptions, rows)
                 }
         }
 
         // ── Checkpoint C: indexer + prefetch bootstrap ──────────────────────────
 
-        // Activate the fast-cadence demand for the whole iPod session.
+        // Activate the fast-cadence demand for the whole iLyra session.
         likedSongsIndexer.setFastDemand(true)
 
         // Seed the prefetcher from the cache on first entry (before the appended collector is live,
@@ -437,8 +437,8 @@ class IPodViewModel(
                     grownItems = null   // reset per CAS attempt
                     var changed = false
                     val updatedStack = state.stack.map { entry ->
-                        val isLikedScreen = entry.screen is IPodScreen.Music ||
-                            entry.screen is IPodScreen.CoverFlow
+                        val isLikedScreen = entry.screen is ILyraScreen.Music ||
+                            entry.screen is ILyraScreen.CoverFlow
                         if (!isLikedScreen) return@map entry
                         // Skip entries still loading (no items yet) — their cache read will
                         // include these rows when it lands.
@@ -469,7 +469,7 @@ class IPodViewModel(
                     // Re-focus: the items grew but selectedIndex did not move; use the current top
                     // only if it is Cover Flow (Music ignores focus).
                     val top = _uiState.value.current
-                    if (top.screen is IPodScreen.CoverFlow) {
+                    if (top.screen is ILyraScreen.CoverFlow) {
                         updatePrefetchFocus(top.list.selectedIndex)
                     }
                 }
@@ -478,7 +478,7 @@ class IPodViewModel(
     }
 
     /**
-     * IPodRoot mirrors PlayerViewModel's `isLiked` here (server-checked on every track change, and
+     * ILyraRoot mirrors PlayerViewModel's `isLiked` here (server-checked on every track change, and
      * flipped optimistically by the like paths). The options menu labels its like row from it.
      */
     fun onPlayerLikedChanged(liked: Boolean) {
@@ -508,7 +508,7 @@ class IPodViewModel(
             // True only when the hold DID something — the wheel clicks and buzzes on true alone,
             // so a hold over a list is silent (Cris, round D pass).
             val top = _uiState.value.current
-            if (event.button == WheelButton.SELECT && top.screen is IPodScreen.NowPlaying) {
+            if (event.button == WheelButton.SELECT && top.screen is ILyraScreen.NowPlaying) {
                 commitPendingScrubNow()
                 pushNowPlayingOptions()
                 true
@@ -522,12 +522,12 @@ class IPodViewModel(
     private fun handleScroll(steps: Int): Boolean {
         var shouldPage = false
         var moved = false
-        var pendingEffect: IPodEffect? = null
+        var pendingEffect: ILyraEffect? = null
         _uiState.update { state ->
             moved = false   // reset per attempt: the CAS lambda can re-run under contention
             pendingEffect = null
             val top = state.current
-            if (top.screen is IPodScreen.NowPlaying) {
+            if (top.screen is ILyraScreen.NowPlaying) {
                 // The wheel drives whatever bar is showing: position, media volume, shuffle, repeat.
                 val np = state.nowPlaying ?: return@update state
                 val next = when (np.mode) {
@@ -538,7 +538,7 @@ class IPodViewModel(
                         if (target == np.shuffleEnabled) {
                             state
                         } else {
-                            pendingEffect = IPodEffect.SetShuffle(target)
+                            pendingEffect = ILyraEffect.SetShuffle(target)
                             state.copy(nowPlaying = np.copy(shuffleEnabled = target))
                         }
                     }
@@ -549,7 +549,7 @@ class IPodViewModel(
                         if (target == np.repeat) {
                             state
                         } else {
-                            pendingEffect = IPodEffect.SetRepeat(target.spotifyState())
+                            pendingEffect = ILyraEffect.SetRepeat(target.spotifyState())
                             state.copy(nowPlaying = np.copy(repeat = target))
                         }
                     }
@@ -591,13 +591,13 @@ class IPodViewModel(
         // The scrub debounce belongs to the Now Playing screen only — a detent on any list
         // must never re-arm (or keep deferring) a seek.
         val currentTop = _uiState.value.current
-        if (currentTop.screen is IPodScreen.NowPlaying) {
+        if (currentTop.screen is ILyraScreen.NowPlaying) {
             launchScrubCommitIfNeeded()
             armModeIdleReset()   // a turn on the volume / shuffle / repeat bar keeps it up
         }
 
         // Cover Flow: update prefetch focus to the new highlight after the state update.
-        if (currentTop.screen is IPodScreen.CoverFlow && moved) {
+        if (currentTop.screen is ILyraScreen.CoverFlow && moved) {
             updatePrefetchFocus(currentTop.list.selectedIndex)
         }
 
@@ -622,7 +622,7 @@ class IPodViewModel(
      * One wheel detent on the volume bar = one Android media-volume step. Returns the same state at
      * the ends so the wheel stays silent there. (The set is idempotent, so a CAS re-run is harmless.)
      */
-    private fun computeVolume(state: IPodUiState, steps: Int): IPodUiState {
+    private fun computeVolume(state: ILyraUiState, steps: Int): ILyraUiState {
         val am = audioManager ?: return state
         val np = state.nowPlaying ?: return state
         val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
@@ -672,7 +672,7 @@ class IPodViewModel(
      * The actual commit job is launched AFTER `_uiState.update` returns, via
      * [launchScrubCommitIfNeeded].
      */
-    private fun computeScrub(state: IPodUiState, steps: Int): IPodUiState {
+    private fun computeScrub(state: ILyraUiState, steps: Int): ILyraUiState {
         val np = state.nowPlaying ?: return state
         val duration = np.durationMs
         if (duration <= 0) return state
@@ -718,7 +718,7 @@ class IPodViewModel(
             clearScrub()
             return
         }
-        _effects.send(IPodEffect.SeekTo(scrubMs.toFloat() / np.durationMs.toFloat()))
+        _effects.send(ILyraEffect.SeekTo(scrubMs.toFloat() / np.durationMs.toFloat()))
         delay(SCRUB_RELEASE_MS)
         _uiState.update { s ->
             val cur = s.nowPlaying ?: return@update s
@@ -744,24 +744,24 @@ class IPodViewModel(
             WheelButton.SELECT -> handleSelect()
             WheelButton.PLAY_PAUSE -> {
                 commitPendingScrubNow()
-                viewModelScope.launch { _effects.send(IPodEffect.PlayPause) }
+                viewModelScope.launch { _effects.send(ILyraEffect.PlayPause) }
             }
             WheelButton.NEXT -> {
                 clearScrub()
                 optimisticUri = null   // the mirror decides what plays next
-                viewModelScope.launch { _effects.send(IPodEffect.Next) }
+                viewModelScope.launch { _effects.send(ILyraEffect.Next) }
             }
             WheelButton.PREVIOUS -> {
                 clearScrub()
                 optimisticUri = null
-                viewModelScope.launch { _effects.send(IPodEffect.Previous) }
+                viewModelScope.launch { _effects.send(ILyraEffect.Previous) }
             }
         }
     }
 
     private fun handleMenu() {
         val leavingNowPlaying = _uiState.value.let {
-            it.stack.size > 1 && it.current.screen is IPodScreen.NowPlaying
+            it.stack.size > 1 && it.current.screen is ILyraScreen.NowPlaying
         }
         _uiState.update { state ->
             if (state.stack.size <= 1) return@update state // root — do nothing
@@ -771,7 +771,7 @@ class IPodViewModel(
                 direction = LcdNavDirection.BACK,
                 // Leaving Now Playing puts the bar back to the scrubber (the Classic does the same
                 // after a moment), so the next visit starts where the wheel is expected to scrub.
-                nowPlaying = if (state.current.screen is IPodScreen.NowPlaying) {
+                nowPlaying = if (state.current.screen is ILyraScreen.NowPlaying) {
                     state.nowPlaying?.copy(mode = NowPlayingMode.SCRUB)
                 } else {
                     state.nowPlaying
@@ -790,7 +790,7 @@ class IPodViewModel(
     private fun handleSelect() {
         val state = _uiState.value
         val top = state.current
-        if (top.screen is IPodScreen.NowPlaying) {
+        if (top.screen is ILyraScreen.NowPlaying) {
             cycleNowPlayingMode()
             return
         }
@@ -799,20 +799,20 @@ class IPodViewModel(
         val selected = items.getOrNull(top.list.selectedIndex) ?: return
 
         when (top.screen) {
-            is IPodScreen.MainMenu -> activateMainMenuItem(selected.id)
-            is IPodScreen.Music -> activateMusicItem(selected, top.list.selectedIndex, items)
-            is IPodScreen.CoverFlow -> activateMusicItem(selected, top.list.selectedIndex, items)
-            is IPodScreen.Settings -> activateSettingsItem(selected.id)
-            is IPodScreen.Albums -> activateAlbumItem(selected)
-            is IPodScreen.AlbumTracks -> activateAlbumTrackItem(top.screen, selected, top.list.selectedIndex, items)
-            is IPodScreen.Artists -> activateArtistItem(selected)
-            is IPodScreen.ArtistAlbums -> activateArtistAlbumItem(selected)
-            is IPodScreen.Playlists -> activatePlaylistItem(selected)
-            is IPodScreen.PlaylistTracks -> activatePlaylistTrackItem(top.screen, selected, top.list.selectedIndex, items)
-            is IPodScreen.Podcasts -> activateShowItem(selected)
-            is IPodScreen.ShowEpisodes -> activateEpisodeItem(top.screen, selected, top.list, items)
-            is IPodScreen.NowPlayingOptions -> activateNowPlayingOption(selected.id)
-            is IPodScreen.AddToPlaylist -> activateAddToPlaylistItem(top.screen, selected)
+            is ILyraScreen.MainMenu -> activateMainMenuItem(selected.id)
+            is ILyraScreen.Music -> activateMusicItem(selected, top.list.selectedIndex, items)
+            is ILyraScreen.CoverFlow -> activateMusicItem(selected, top.list.selectedIndex, items)
+            is ILyraScreen.Settings -> activateSettingsItem(selected.id)
+            is ILyraScreen.Albums -> activateAlbumItem(selected)
+            is ILyraScreen.AlbumTracks -> activateAlbumTrackItem(top.screen, selected, top.list.selectedIndex, items)
+            is ILyraScreen.Artists -> activateArtistItem(selected)
+            is ILyraScreen.ArtistAlbums -> activateArtistAlbumItem(selected)
+            is ILyraScreen.Playlists -> activatePlaylistItem(selected)
+            is ILyraScreen.PlaylistTracks -> activatePlaylistTrackItem(top.screen, selected, top.list.selectedIndex, items)
+            is ILyraScreen.Podcasts -> activateShowItem(selected)
+            is ILyraScreen.ShowEpisodes -> activateEpisodeItem(top.screen, selected, top.list, items)
+            is ILyraScreen.NowPlayingOptions -> activateNowPlayingOption(selected.id)
+            is ILyraScreen.AddToPlaylist -> activateAddToPlaylistItem(top.screen, selected)
             else -> {}
         }
     }
@@ -829,8 +829,8 @@ class IPodViewModel(
             "podcasts" -> pushPodcasts()
             "shuffle" -> handleShuffleSongs()
             "nowplaying" -> push(
-                IPodScreen.NowPlaying,
-                LcdLabel.Res(R.string.ipod_menu_now_playing),
+                ILyraScreen.NowPlaying,
+                LcdLabel.Res(R.string.ilyra_menu_now_playing),
             )
             "settings" -> pushSettings()
         }
@@ -842,7 +842,7 @@ class IPodViewModel(
      * Shared loader for Music and Cover Flow. Both show the liked songs list — Cover Flow adds
      * [artUrl] per row. Push, load from the cache, replace the top, then reconcile the server.
      */
-    private fun pushLikedList(screen: IPodScreen, title: LcdLabel) {
+    private fun pushLikedList(screen: ILyraScreen, title: LcdLabel) {
         push(screen = screen, title = title, loading = true)
         viewModelScope.launch {
             val cached = withContext(Dispatchers.IO) {
@@ -855,7 +855,7 @@ class IPodViewModel(
             // liked-song urls so a reconcile's newly-prepended songs reach the prefetcher even
             // while the user is in Music. Focus is Cover-Flow-only (Music ignores it).
             updatePrefetchUrls(rows)
-            if (screen is IPodScreen.CoverFlow) {
+            if (screen is ILyraScreen.CoverFlow) {
                 updatePrefetchFocus(0)
             }
 
@@ -868,9 +868,9 @@ class IPodViewModel(
             updatePrefetchUrls(reconciled)
             // Re-focus after reconcile: retopItemsPreservingHighlight may have shifted the
             // highlight index when songs were prepended.
-            if (screen is IPodScreen.CoverFlow) {
+            if (screen is ILyraScreen.CoverFlow) {
                 val top = _uiState.value.current
-                if (top.screen is IPodScreen.CoverFlow) {
+                if (top.screen is ILyraScreen.CoverFlow) {
                     updatePrefetchFocus(top.list.selectedIndex)
                 }
             }
@@ -878,11 +878,11 @@ class IPodViewModel(
     }
 
     private fun pushMusic() {
-        pushLikedList(IPodScreen.Music, LcdLabel.Res(R.string.ipod_menu_music))
+        pushLikedList(ILyraScreen.Music, LcdLabel.Res(R.string.ilyra_menu_music))
     }
 
     private fun pushCoverFlow() {
-        pushLikedList(IPodScreen.CoverFlow, LcdLabel.Res(R.string.ipod_menu_cover_flow))
+        pushLikedList(ILyraScreen.CoverFlow, LcdLabel.Res(R.string.ilyra_menu_cover_flow))
     }
 
     /** One row per song (distinct by uri), remembering each track for the optimistic Now Playing. */
@@ -906,19 +906,19 @@ class IPodViewModel(
         // start over).
         val current = _uiState.value.nowPlaying
         if (current != null && current.uri == item.id) {
-            if (!current.isPlaying) viewModelScope.launch { _effects.send(IPodEffect.PlayPause) }
-            push(IPodScreen.NowPlaying, LcdLabel.Res(R.string.ipod_menu_now_playing))
+            if (!current.isPlaying) viewModelScope.launch { _effects.send(ILyraEffect.PlayPause) }
+            push(ILyraScreen.NowPlaying, LcdLabel.Res(R.string.ilyra_menu_now_playing))
             return
         }
         // Now Playing shows THIS song from its first frame (the LCD's Cover Flow → Now Playing
         // flight lands on its art); the mirror takes over once the poll reports it.
         showOptimisticNowPlaying(item)
         viewModelScope.launch {
-            _effects.send(IPodEffect.PlayLikedSong(item.id, shuffle = false))
+            _effects.send(ILyraEffect.PlayLikedSong(item.id, shuffle = false))
         }
         push(
-            IPodScreen.NowPlaying,
-            LcdLabel.Res(R.string.ipod_menu_now_playing),
+            ILyraScreen.NowPlaying,
+            LcdLabel.Res(R.string.ilyra_menu_now_playing),
         )
     }
 
@@ -972,8 +972,8 @@ class IPodViewModel(
 
     private fun pushAlbums() {
         push(
-            screen = IPodScreen.Albums,
-            title = LcdLabel.Res(R.string.ipod_menu_albums),
+            screen = ILyraScreen.Albums,
+            title = LcdLabel.Res(R.string.ilyra_menu_albums),
             loading = true,
         )
         viewModelScope.launch {
@@ -993,10 +993,10 @@ class IPodViewModel(
                             hasSubmenu = true,
                         )
                     }
-                    replaceTopItems(IPodScreen.Albums, items)
+                    replaceTopItems(ILyraScreen.Albums, items)
                 },
                 onFailure = {
-                    setTopError(IPodScreen.Albums, LcdLabel.Res(R.string.ipod_vm_load_error))
+                    setTopError(ILyraScreen.Albums, LcdLabel.Res(R.string.ilyra_vm_load_error))
                 },
             )
         }
@@ -1006,7 +1006,7 @@ class IPodViewModel(
         val albumId = item.id
         val albumUri = "spotify:album:$albumId"
         push(
-            screen = IPodScreen.AlbumTracks(albumId, albumUri),
+            screen = ILyraScreen.AlbumTracks(albumId, albumUri),
             title = item.title,
             loading = true,
         )
@@ -1020,12 +1020,12 @@ class IPodViewModel(
                             subtitle = LcdLabel.Text(track.allArtists),
                         )
                     }
-                    replaceTopItems(IPodScreen.AlbumTracks(albumId, albumUri), items)
+                    replaceTopItems(ILyraScreen.AlbumTracks(albumId, albumUri), items)
                 },
                 onFailure = {
                     setTopError(
-                        IPodScreen.AlbumTracks(albumId, albumUri),
-                        LcdLabel.Res(R.string.ipod_vm_load_error),
+                        ILyraScreen.AlbumTracks(albumId, albumUri),
+                        LcdLabel.Res(R.string.ilyra_vm_load_error),
                     )
                 },
             )
@@ -1033,7 +1033,7 @@ class IPodViewModel(
     }
 
     private fun activateAlbumTrackItem(
-        screen: IPodScreen.AlbumTracks,
+        screen: ILyraScreen.AlbumTracks,
         item: LcdItem,
         index: Int,
         items: List<LcdItem>,
@@ -1041,7 +1041,7 @@ class IPodViewModel(
         rememberSelection(item.id, index, items.map { it.id })
         viewModelScope.launch {
             _effects.send(
-                IPodEffect.PlayTrack(
+                ILyraEffect.PlayTrack(
                     uri = item.id,
                     contextUri = screen.albumUri,
                     // No index: it would be this FILTERED list's position, and the App Remote
@@ -1053,8 +1053,8 @@ class IPodViewModel(
             )
         }
         push(
-            IPodScreen.NowPlaying,
-            LcdLabel.Res(R.string.ipod_menu_now_playing),
+            ILyraScreen.NowPlaying,
+            LcdLabel.Res(R.string.ilyra_menu_now_playing),
         )
     }
 
@@ -1062,8 +1062,8 @@ class IPodViewModel(
 
     private fun pushArtists() {
         push(
-            screen = IPodScreen.Artists,
-            title = LcdLabel.Res(R.string.ipod_menu_artists),
+            screen = ILyraScreen.Artists,
+            title = LcdLabel.Res(R.string.ilyra_menu_artists),
             loading = true,
         )
         viewModelScope.launch {
@@ -1079,10 +1079,10 @@ class IPodViewModel(
                             hasSubmenu = true,
                         )
                     }
-                    replaceTopItems(IPodScreen.Artists, items)
+                    replaceTopItems(ILyraScreen.Artists, items)
                 },
                 onFailure = {
-                    setTopError(IPodScreen.Artists, LcdLabel.Res(R.string.ipod_vm_load_error))
+                    setTopError(ILyraScreen.Artists, LcdLabel.Res(R.string.ilyra_vm_load_error))
                 },
             )
         }
@@ -1091,7 +1091,7 @@ class IPodViewModel(
     private fun activateArtistItem(item: LcdItem) {
         val artistId = item.id
         push(
-            screen = IPodScreen.ArtistAlbums(artistId),
+            screen = ILyraScreen.ArtistAlbums(artistId),
             title = item.title,
             loading = true,
         )
@@ -1120,7 +1120,7 @@ class IPodViewModel(
                         )
                     }
                     appendOrReplaceTopItems(
-                        IPodScreen.ArtistAlbums(artistId),
+                        ILyraScreen.ArtistAlbums(artistId),
                         newItems,
                         result.hasMore,
                         isFirstPage = offset == 0,
@@ -1129,8 +1129,8 @@ class IPodViewModel(
                 onFailure = {
                     if (offset == 0) {
                         setTopError(
-                            IPodScreen.ArtistAlbums(artistId),
-                            LcdLabel.Res(R.string.ipod_vm_load_error),
+                            ILyraScreen.ArtistAlbums(artistId),
+                            LcdLabel.Res(R.string.ilyra_vm_load_error),
                         )
                     }
                 },
@@ -1148,31 +1148,31 @@ class IPodViewModel(
 
     private fun pushPlaylists() {
         push(
-            screen = IPodScreen.Playlists,
-            title = LcdLabel.Res(R.string.ipod_menu_playlists),
+            screen = ILyraScreen.Playlists,
+            title = LcdLabel.Res(R.string.ilyra_menu_playlists),
             loading = true,
         )
         viewModelScope.launch {
             val userId = cachedUserId ?: library.resolveUserId().also { cachedUserId = it }
             if (userId == null) {
-                setTopError(IPodScreen.Playlists, LcdLabel.Res(R.string.ipod_vm_load_error))
+                setTopError(ILyraScreen.Playlists, LcdLabel.Res(R.string.ilyra_vm_load_error))
                 return@launch
             }
             library.ownedPlaylists(userId).fold(
                 onSuccess = { result ->
                     val items = playlistRows(result.playlists)
-                    replaceTopItems(IPodScreen.Playlists, items)
+                    replaceTopItems(ILyraScreen.Playlists, items)
                     // Cache returned a possibly-truncated prefix — sweep for the full set.
                     if (result.fromCache) {
                         val swept = library.sweepOwnedPlaylists(userId) ?: return@launch
                         // A mid-sweep failure means the cached rows on screen are the better data.
                         if (!swept.complete) return@launch
                         val sweptItems = playlistRows(swept.playlists)
-                        retopItemsPreservingHighlight(IPodScreen.Playlists, sweptItems)
+                        retopItemsPreservingHighlight(ILyraScreen.Playlists, sweptItems)
                     }
                 },
                 onFailure = {
-                    setTopError(IPodScreen.Playlists, LcdLabel.Res(R.string.ipod_vm_load_error))
+                    setTopError(ILyraScreen.Playlists, LcdLabel.Res(R.string.ilyra_vm_load_error))
                 },
             )
         }
@@ -1197,7 +1197,7 @@ class IPodViewModel(
         val playlistId = item.id
         val playlistUri = "spotify:playlist:$playlistId"
         push(
-            screen = IPodScreen.PlaylistTracks(playlistId, playlistUri),
+            screen = ILyraScreen.PlaylistTracks(playlistId, playlistUri),
             title = item.title,
             loading = true,
         )
@@ -1218,7 +1218,7 @@ class IPodViewModel(
                     val occurrences = HashMap<String, Int>()
                     if (offset != 0) {
                         val top = _uiState.value.current
-                        if (top.screen == IPodScreen.PlaylistTracks(playlistId, playlistUri)) {
+                        if (top.screen == ILyraScreen.PlaylistTracks(playlistId, playlistUri)) {
                             for (row in top.list.items) {
                                 val u = row.id.substringBefore('#')
                                 occurrences[u] = (occurrences[u] ?: 0) + 1
@@ -1235,7 +1235,7 @@ class IPodViewModel(
                         )
                     }
                     appendOrReplaceTopItems(
-                        IPodScreen.PlaylistTracks(playlistId, playlistUri),
+                        ILyraScreen.PlaylistTracks(playlistId, playlistUri),
                         newItems,
                         result.hasMore,
                         isFirstPage = offset == 0,
@@ -1248,8 +1248,8 @@ class IPodViewModel(
                 onFailure = {
                     if (offset == 0) {
                         setTopError(
-                            IPodScreen.PlaylistTracks(playlistId, playlistUri),
-                            LcdLabel.Res(R.string.ipod_vm_load_error),
+                            ILyraScreen.PlaylistTracks(playlistId, playlistUri),
+                            LcdLabel.Res(R.string.ilyra_vm_load_error),
                         )
                     }
                 },
@@ -1259,7 +1259,7 @@ class IPodViewModel(
     }
 
     private fun activatePlaylistTrackItem(
-        screen: IPodScreen.PlaylistTracks,
+        screen: ILyraScreen.PlaylistTracks,
         item: LcdItem,
         index: Int,
         items: List<LcdItem>,
@@ -1268,7 +1268,7 @@ class IPodViewModel(
         rememberSelection(trackUri, index, items.map { it.id.substringBefore('#') })
         viewModelScope.launch {
             _effects.send(
-                IPodEffect.PlayTrack(
+                ILyraEffect.PlayTrack(
                     uri = trackUri,
                     contextUri = screen.playlistUri,
                     // No index — see activateAlbumTrackItem: a filtered-list position must never
@@ -1279,8 +1279,8 @@ class IPodViewModel(
             )
         }
         push(
-            IPodScreen.NowPlaying,
-            LcdLabel.Res(R.string.ipod_menu_now_playing),
+            ILyraScreen.NowPlaying,
+            LcdLabel.Res(R.string.ilyra_menu_now_playing),
         )
     }
 
@@ -1288,8 +1288,8 @@ class IPodViewModel(
 
     private fun pushPodcasts() {
         push(
-            screen = IPodScreen.Podcasts,
-            title = LcdLabel.Res(R.string.ipod_menu_podcasts),
+            screen = ILyraScreen.Podcasts,
+            title = LcdLabel.Res(R.string.ilyra_menu_podcasts),
             loading = true,
         )
         viewModelScope.launch {
@@ -1308,10 +1308,10 @@ class IPodViewModel(
                             hasSubmenu = true,
                         )
                     }
-                    replaceTopItems(IPodScreen.Podcasts, items)
+                    replaceTopItems(ILyraScreen.Podcasts, items)
                 },
                 onFailure = {
-                    setTopError(IPodScreen.Podcasts, LcdLabel.Res(R.string.ipod_vm_load_error))
+                    setTopError(ILyraScreen.Podcasts, LcdLabel.Res(R.string.ilyra_vm_load_error))
                 },
             )
         }
@@ -1320,7 +1320,7 @@ class IPodViewModel(
     private fun activateShowItem(item: LcdItem) {
         val showId = item.id
         push(
-            screen = IPodScreen.ShowEpisodes(showId),
+            screen = ILyraScreen.ShowEpisodes(showId),
             title = item.title,
             loading = true,
         )
@@ -1343,7 +1343,7 @@ class IPodViewModel(
                         )
                     }
                     appendOrReplaceTopItems(
-                        IPodScreen.ShowEpisodes(showId),
+                        ILyraScreen.ShowEpisodes(showId),
                         newItems,
                         result.hasMore,
                         isFirstPage = offset == 0,
@@ -1354,8 +1354,8 @@ class IPodViewModel(
                 onFailure = {
                     if (offset == 0) {
                         setTopError(
-                            IPodScreen.ShowEpisodes(showId),
-                            LcdLabel.Res(R.string.ipod_vm_load_error),
+                            ILyraScreen.ShowEpisodes(showId),
+                            LcdLabel.Res(R.string.ilyra_vm_load_error),
                         )
                     }
                 },
@@ -1365,9 +1365,9 @@ class IPodViewModel(
     }
 
     /** Episode data stashed for queue building and resume point access. */
-    private val episodeDataByShow = mutableMapOf<String, MutableList<IPodLibrary.EpisodeItem>>()
+    private val episodeDataByShow = mutableMapOf<String, MutableList<ILyraLibrary.EpisodeItem>>()
 
-    private fun stashEpisodeData(showId: String, episodes: List<IPodLibrary.EpisodeItem>, isFirstPage: Boolean) {
+    private fun stashEpisodeData(showId: String, episodes: List<ILyraLibrary.EpisodeItem>, isFirstPage: Boolean) {
         if (isFirstPage) {
             episodeDataByShow[showId] = episodes.toMutableList()
         } else {
@@ -1378,7 +1378,7 @@ class IPodViewModel(
     }
 
     private fun activateEpisodeItem(
-        screen: IPodScreen.ShowEpisodes,
+        screen: ILyraScreen.ShowEpisodes,
         item: LcdItem,
         listState: LcdListState,
         items: List<LcdItem>,
@@ -1394,7 +1394,7 @@ class IPodViewModel(
 
         viewModelScope.launch {
             _effects.send(
-                IPodEffect.PlayTrack(
+                ILyraEffect.PlayTrack(
                     uri = uri,
                     uris = queue,
                     startPositionMs = episode?.resumePositionMs,
@@ -1403,8 +1403,8 @@ class IPodViewModel(
             )
         }
         push(
-            IPodScreen.NowPlaying,
-            LcdLabel.Res(R.string.ipod_menu_now_playing),
+            ILyraScreen.NowPlaying,
+            LcdLabel.Res(R.string.ilyra_menu_now_playing),
         )
     }
 
@@ -1415,14 +1415,14 @@ class IPodViewModel(
         viewModelScope.launch {
             val userId = cachedUserId ?: library.resolveUserId().also { cachedUserId = it }
             if (userId != null) {
-                _effects.send(IPodEffect.ShuffleContext("spotify:user:$userId:collection"))
+                _effects.send(ILyraEffect.ShuffleContext("spotify:user:$userId:collection"))
             }
             // The wheel has already clicked, so the LCD must move either way: with no user id
             // Now Playing shows its empty state rather than the menu sitting inert.
-            if (_uiState.value.current.screen !is IPodScreen.NowPlaying) {
+            if (_uiState.value.current.screen !is ILyraScreen.NowPlaying) {
                 push(
-                    IPodScreen.NowPlaying,
-                    LcdLabel.Res(R.string.ipod_menu_now_playing),
+                    ILyraScreen.NowPlaying,
+                    LcdLabel.Res(R.string.ilyra_menu_now_playing),
                 )
             }
         }
@@ -1447,7 +1447,7 @@ class IPodViewModel(
                     LcdItem(
                         id = "like",
                         title = LcdLabel.Res(
-                            if (np.isLiked) R.string.ipod_option_unlike else R.string.ipod_option_like,
+                            if (np.isLiked) R.string.ilyra_option_unlike else R.string.ilyra_option_like,
                         ),
                     ),
                 )
@@ -1457,7 +1457,7 @@ class IPodViewModel(
                 add(
                     LcdItem(
                         id = "addtoplaylist",
-                        title = LcdLabel.Res(R.string.ipod_option_add_to_playlist),
+                        title = LcdLabel.Res(R.string.ilyra_option_add_to_playlist),
                         hasSubmenu = true,
                     ),
                 )
@@ -1467,7 +1467,7 @@ class IPodViewModel(
                 add(
                     LcdItem(
                         id = "album",
-                        title = LcdLabel.Res(R.string.ipod_option_go_to_album),
+                        title = LcdLabel.Res(R.string.ilyra_option_go_to_album),
                         hasSubmenu = true,
                     ),
                 )
@@ -1477,7 +1477,7 @@ class IPodViewModel(
                 add(
                     LcdItem(
                         id = "artist",
-                        title = LcdLabel.Res(R.string.ipod_option_go_to_artist),
+                        title = LcdLabel.Res(R.string.ilyra_option_go_to_artist),
                         hasSubmenu = true,
                     ),
                 )
@@ -1486,11 +1486,11 @@ class IPodViewModel(
             add(
                 LcdItem(
                     id = "sleeptimer",
-                    title = LcdLabel.Res(R.string.ipod_option_sleep_timer),
+                    title = LcdLabel.Res(R.string.ilyra_option_sleep_timer),
                     value = if (np.sleepTimerTotalMinutes > 0) {
-                        LcdLabel.ResArgs(R.string.ipod_value_minutes_left, listOf(np.sleepTimerMinutes))
+                        LcdLabel.ResArgs(R.string.ilyra_value_minutes_left, listOf(np.sleepTimerMinutes))
                     } else {
-                        LcdLabel.Res(R.string.ipod_value_off)
+                        LcdLabel.Res(R.string.ilyra_value_off)
                     },
                 ),
             )
@@ -1500,8 +1500,8 @@ class IPodViewModel(
     private fun pushNowPlayingOptions() {
         val np = _uiState.value.nowPlaying ?: return
         push(
-            screen = IPodScreen.NowPlayingOptions,
-            title = LcdLabel.Res(R.string.ipod_options_title),
+            screen = ILyraScreen.NowPlayingOptions,
+            title = LcdLabel.Res(R.string.ilyra_options_title),
             items = buildNowPlayingOptions(np),
         )
     }
@@ -1523,7 +1523,7 @@ class IPodViewModel(
                 }
                 val track = knownTrack(np.uri)
                 viewModelScope.launch {
-                    _effects.send(IPodEffect.SetLiked(np.uri, targetLiked, track))
+                    _effects.send(ILyraEffect.SetLiked(np.uri, targetLiked, track))
                 }
                 // Pop back to Now Playing — the Classic's add/remove returns immediately.
                 popOnce()
@@ -1537,7 +1537,7 @@ class IPodViewModel(
                     val cur = state.nowPlaying ?: return@update state
                     state.copy(nowPlaying = cur.copy(sleepTimerTotalMinutes = next, sleepTimerMinutes = next))
                 }
-                viewModelScope.launch { _effects.send(IPodEffect.SetSleepTimer(next)) }
+                viewModelScope.launch { _effects.send(ILyraEffect.SetSleepTimer(next)) }
             }
             "addtoplaylist" -> {
                 pushAddToPlaylist(np.uri)
@@ -1556,16 +1556,16 @@ class IPodViewModel(
     // ── Add to Playlist (from Now Playing Options) ───────────────────────────
 
     private fun pushAddToPlaylist(trackUri: String) {
-        val screen = IPodScreen.AddToPlaylist(trackUri)
+        val screen = ILyraScreen.AddToPlaylist(trackUri)
         push(
             screen = screen,
-            title = LcdLabel.Res(R.string.ipod_option_add_to_playlist),
+            title = LcdLabel.Res(R.string.ilyra_option_add_to_playlist),
             loading = true,
         )
         viewModelScope.launch {
             val userId = cachedUserId ?: library.resolveUserId().also { cachedUserId = it }
             if (userId == null) {
-                setTopError(screen, LcdLabel.Res(R.string.ipod_vm_load_error))
+                setTopError(screen, LcdLabel.Res(R.string.ilyra_vm_load_error))
                 return@launch
             }
             library.ownedPlaylists(userId).fold(
@@ -1582,7 +1582,7 @@ class IPodViewModel(
                     }
                 },
                 onFailure = {
-                    setTopError(screen, LcdLabel.Res(R.string.ipod_vm_load_error))
+                    setTopError(screen, LcdLabel.Res(R.string.ilyra_vm_load_error))
                 },
             )
         }
@@ -1592,12 +1592,12 @@ class IPodViewModel(
      * SELECT on a playlist in the Add to Playlist screen: send the effect and pop TWICE
      * (back past NowPlayingOptions to Now Playing).
      */
-    private fun activateAddToPlaylistItem(screen: IPodScreen.AddToPlaylist, item: LcdItem) {
+    private fun activateAddToPlaylistItem(screen: ILyraScreen.AddToPlaylist, item: LcdItem) {
         val count = ownedPlaylistCounts[item.id]
         val track = knownTrack(screen.trackUri)
         viewModelScope.launch {
             _effects.send(
-                IPodEffect.AddToPlaylist(
+                ILyraEffect.AddToPlaylist(
                     playlistId = item.id,
                     trackUri = screen.trackUri,
                     trackCount = count,
@@ -1631,16 +1631,16 @@ class IPodViewModel(
     private fun pushSettings() {
         val config = _uiState.value.clickSounds
         push(
-            screen = IPodScreen.Settings,
-            title = LcdLabel.Res(R.string.ipod_menu_settings),
+            screen = ILyraScreen.Settings,
+            title = LcdLabel.Res(R.string.ilyra_menu_settings),
             items = buildSettingsItems(config, _uiState.value.bodyColor),
         )
     }
 
     /** If the Settings screen is on top, rebuild its rows from [state]'s current values. */
-    private fun refreshSettingsRows(state: IPodUiState): IPodUiState {
+    private fun refreshSettingsRows(state: ILyraUiState): ILyraUiState {
         val top = state.stack.lastOrNull() ?: return state
-        if (top.screen !is IPodScreen.Settings) return state
+        if (top.screen !is ILyraScreen.Settings) return state
         val updatedEntry = top.copy(
             list = top.list.copy(items = buildSettingsItems(state.clickSounds, state.bodyColor)),
         )
@@ -1651,7 +1651,7 @@ class IPodViewModel(
         when (id) {
             "clicksounds" -> {
                 val current = _uiState.value.clickSounds.enabled
-                viewModelScope.launch { settingsRepository.setIpodClickSounds(!current) }
+                viewModelScope.launch { settingsRepository.setIlyraClickSounds(!current) }
             }
             "clickvolume" -> {
                 val current = _uiState.value.clickSounds.volumePercent
@@ -1661,20 +1661,20 @@ class IPodViewModel(
                     current < 100 -> 100
                     else -> 25
                 }
-                viewModelScope.launch { settingsRepository.setIpodClickVolume(next) }
+                viewModelScope.launch { settingsRepository.setIlyraClickVolume(next) }
             }
             "clickpitch" -> {
                 val current = _uiState.value.clickSounds.pitch
                 val nextOrdinal = (current.ordinal + 1) % ClickPitch.entries.size
-                viewModelScope.launch { settingsRepository.setIpodClickPitch(nextOrdinal) }
+                viewModelScope.launch { settingsRepository.setIlyraClickPitch(nextOrdinal) }
             }
             "bodycolor" -> {
                 val current = _uiState.value.bodyColor
-                val nextOrdinal = (current.ordinal + 1) % IPodBodyColor.entries.size
-                viewModelScope.launch { settingsRepository.setIpodBodyColor(nextOrdinal) }
+                val nextOrdinal = (current.ordinal + 1) % ILyraBodyColor.entries.size
+                viewModelScope.launch { settingsRepository.setIlyraBodyColor(nextOrdinal) }
             }
-            "ipodmode" -> {
-                viewModelScope.launch { settingsRepository.setIpodEnabled(false) }
+            "ilyramode" -> {
+                viewModelScope.launch { settingsRepository.setIlyraEnabled(false) }
             }
         }
     }
@@ -1682,7 +1682,7 @@ class IPodViewModel(
     // ── Paging ────────────────────────────────────────────────────────────────
 
     /** Pure check: returns true if the top screen should fetch more. Called inside update. */
-    private fun shouldTriggerPaging(state: IPodUiState): Boolean {
+    private fun shouldTriggerPaging(state: ILyraUiState): Boolean {
         val top = state.current
         if (!top.list.hasMore) return false
         val remaining = top.list.items.size - top.list.selectedIndex - 1
@@ -1693,17 +1693,17 @@ class IPodViewModel(
     private fun triggerPaging() {
         val top = _uiState.value.current
         when (val screen = top.screen) {
-            is IPodScreen.ArtistAlbums -> {
+            is ILyraScreen.ArtistAlbums -> {
                 val key = pagingKey(screen)
                 val offset = nextOffsetByKey[key] ?: return
                 loadArtistAlbums(screen.artistId, offset)
             }
-            is IPodScreen.PlaylistTracks -> {
+            is ILyraScreen.PlaylistTracks -> {
                 val key = pagingKey(screen)
                 val offset = nextOffsetByKey[key] ?: return
                 loadPlaylistTracks(screen.playlistId, screen.playlistUri, offset)
             }
-            is IPodScreen.ShowEpisodes -> {
+            is ILyraScreen.ShowEpisodes -> {
                 val key = pagingKey(screen)
                 val offset = nextOffsetByKey[key] ?: return
                 loadShowEpisodes(screen.showId, offset)
@@ -1713,10 +1713,10 @@ class IPodViewModel(
     }
 
     /** Unique key for paging state tracking. */
-    private fun pagingKey(screen: IPodScreen): String = when (screen) {
-        is IPodScreen.ArtistAlbums -> "artist_albums_${screen.artistId}"
-        is IPodScreen.PlaylistTracks -> "playlist_tracks_${screen.playlistId}"
-        is IPodScreen.ShowEpisodes -> "show_episodes_${screen.showId}"
+    private fun pagingKey(screen: ILyraScreen): String = when (screen) {
+        is ILyraScreen.ArtistAlbums -> "artist_albums_${screen.artistId}"
+        is ILyraScreen.PlaylistTracks -> "playlist_tracks_${screen.playlistId}"
+        is ILyraScreen.ShowEpisodes -> "show_episodes_${screen.showId}"
         else -> ""
     }
 
@@ -1748,7 +1748,7 @@ class IPodViewModel(
      * double-SELECT (the Classic ignores it).
      */
     private fun push(
-        screen: IPodScreen,
+        screen: ILyraScreen,
         title: LcdLabel,
         items: List<LcdItem> = emptyList(),
         loading: Boolean = false,
@@ -1756,7 +1756,7 @@ class IPodViewModel(
         _uiState.update { state ->
             if (state.current.screen == screen) return@update state
             val visibleRows = computeVisibleRows(items)
-            val entry = IPodStackEntry(
+            val entry = ILyraStackEntry(
                 screen = screen,
                 title = title,
                 list = LcdListState(
@@ -1777,7 +1777,7 @@ class IPodViewModel(
      * the window. Used when a screen's data arrives asynchronously.
      */
     private fun replaceTopItems(
-        expectedScreen: IPodScreen,
+        expectedScreen: ILyraScreen,
         items: List<LcdItem>,
         hasMore: Boolean = false,
     ) {
@@ -1804,7 +1804,7 @@ class IPodViewModel(
      * Never moves the selection or window — only items and hasMore change.
      */
     private fun appendOrReplaceTopItems(
-        expectedScreen: IPodScreen,
+        expectedScreen: ILyraScreen,
         newItems: List<LcdItem>,
         hasMore: Boolean,
         isFirstPage: Boolean,
@@ -1849,7 +1849,7 @@ class IPodViewModel(
                     subtitle = LcdLabel.Text(track.allArtists),
                 )
             }
-            retopItemsPreservingHighlight(IPodScreen.PlaylistTracks(playlistId, playlistUri), rows, hasMore = fresh.hasMore)
+            retopItemsPreservingHighlight(ILyraScreen.PlaylistTracks(playlistId, playlistUri), rows, hasMore = fresh.hasMore)
         }
     }
 
@@ -1857,7 +1857,7 @@ class IPodViewModel(
      * Replace the top entry's rows while keeping the highlight on the same row id and the window
      * moving with it — a reconcile that prepends new songs must not yank the list under the user.
      */
-    private fun retopItemsPreservingHighlight(expectedScreen: IPodScreen, items: List<LcdItem>, hasMore: Boolean? = null) {
+    private fun retopItemsPreservingHighlight(expectedScreen: ILyraScreen, items: List<LcdItem>, hasMore: Boolean? = null) {
         updateTopEntry(expectedScreen) { entry ->
             val visibleRows = computeVisibleRows(items)
             val oldSelectedId = entry.list.items.getOrNull(entry.list.selectedIndex)?.id
@@ -1881,7 +1881,7 @@ class IPodViewModel(
     }
 
     /** Set an error on the top entry. */
-    private fun setTopError(expectedScreen: IPodScreen, error: LcdLabel) {
+    private fun setTopError(expectedScreen: ILyraScreen, error: LcdLabel) {
         updateTopEntry(expectedScreen) { entry ->
             entry.copy(list = entry.list.copy(isLoading = false, error = error))
         }
@@ -1892,8 +1892,8 @@ class IPodViewModel(
      * where the user has already backed out by the time the async load finishes.
      */
     private fun updateTopEntry(
-        expectedScreen: IPodScreen,
-        transform: (IPodStackEntry) -> IPodStackEntry,
+        expectedScreen: ILyraScreen,
+        transform: (ILyraStackEntry) -> ILyraStackEntry,
     ) {
         _uiState.update { state ->
             val top = state.stack.lastOrNull() ?: return@update state
@@ -1906,9 +1906,9 @@ class IPodViewModel(
      * Rebuild the main menu when the now-playing presence flips, preserving the highlight on the
      * same item id. Only called from the player-state collector when [hasNowPlaying] changes.
      */
-    private fun rebuildMainMenuIfOnTop(state: IPodUiState, hasNowPlaying: Boolean): IPodUiState {
+    private fun rebuildMainMenuIfOnTop(state: ILyraUiState, hasNowPlaying: Boolean): ILyraUiState {
         val bottomEntry = state.stack.firstOrNull() ?: return state
-        if (bottomEntry.screen !is IPodScreen.MainMenu) return state
+        if (bottomEntry.screen !is ILyraScreen.MainMenu) return state
         val oldItems = bottomEntry.list.items
         val oldSelectedId = oldItems.getOrNull(bottomEntry.list.selectedIndex)?.id
         val newItems = buildMainMenu(hasNowPlaying)
@@ -1946,67 +1946,67 @@ class IPodViewModel(
 
     companion object {
         fun buildMainMenu(hasNowPlaying: Boolean): List<LcdItem> = buildList {
-            add(LcdItem(id = "coverflow", title = LcdLabel.Res(R.string.ipod_menu_cover_flow), hasSubmenu = true))
-            add(LcdItem(id = "music", title = LcdLabel.Res(R.string.ipod_menu_music), hasSubmenu = true))
-            add(LcdItem(id = "albums", title = LcdLabel.Res(R.string.ipod_menu_albums), hasSubmenu = true))
-            add(LcdItem(id = "artists", title = LcdLabel.Res(R.string.ipod_menu_artists), hasSubmenu = true))
-            add(LcdItem(id = "playlists", title = LcdLabel.Res(R.string.ipod_menu_playlists), hasSubmenu = true))
-            add(LcdItem(id = "podcasts", title = LcdLabel.Res(R.string.ipod_menu_podcasts), hasSubmenu = true))
-            add(LcdItem(id = "shuffle", title = LcdLabel.Res(R.string.ipod_menu_shuffle_songs)))
+            add(LcdItem(id = "coverflow", title = LcdLabel.Res(R.string.ilyra_menu_cover_flow), hasSubmenu = true))
+            add(LcdItem(id = "music", title = LcdLabel.Res(R.string.ilyra_menu_music), hasSubmenu = true))
+            add(LcdItem(id = "albums", title = LcdLabel.Res(R.string.ilyra_menu_albums), hasSubmenu = true))
+            add(LcdItem(id = "artists", title = LcdLabel.Res(R.string.ilyra_menu_artists), hasSubmenu = true))
+            add(LcdItem(id = "playlists", title = LcdLabel.Res(R.string.ilyra_menu_playlists), hasSubmenu = true))
+            add(LcdItem(id = "podcasts", title = LcdLabel.Res(R.string.ilyra_menu_podcasts), hasSubmenu = true))
+            add(LcdItem(id = "shuffle", title = LcdLabel.Res(R.string.ilyra_menu_shuffle_songs)))
             if (hasNowPlaying) {
-                add(LcdItem(id = "nowplaying", title = LcdLabel.Res(R.string.ipod_menu_now_playing), hasSubmenu = true))
+                add(LcdItem(id = "nowplaying", title = LcdLabel.Res(R.string.ilyra_menu_now_playing), hasSubmenu = true))
             }
-            add(LcdItem(id = "settings", title = LcdLabel.Res(R.string.ipod_menu_settings), hasSubmenu = true))
+            add(LcdItem(id = "settings", title = LcdLabel.Res(R.string.ilyra_menu_settings), hasSubmenu = true))
         }
 
-        fun buildSettingsItems(config: ClickSoundsConfig, bodyColor: IPodBodyColor): List<LcdItem> = listOf(
+        fun buildSettingsItems(config: ClickSoundsConfig, bodyColor: ILyraBodyColor): List<LcdItem> = listOf(
             LcdItem(
                 id = "clicksounds",
-                title = LcdLabel.Res(R.string.ipod_settings_click_sounds),
-                value = LcdLabel.Res(if (config.enabled) R.string.ipod_value_on else R.string.ipod_value_off),
+                title = LcdLabel.Res(R.string.ilyra_settings_click_sounds),
+                value = LcdLabel.Res(if (config.enabled) R.string.ilyra_value_on else R.string.ilyra_value_off),
             ),
             LcdItem(
                 id = "clickvolume",
-                title = LcdLabel.Res(R.string.ipod_settings_click_volume),
-                value = LcdLabel.ResArgs(R.string.ipod_value_percent, listOf(config.volumePercent)),
+                title = LcdLabel.Res(R.string.ilyra_settings_click_volume),
+                value = LcdLabel.ResArgs(R.string.ilyra_value_percent, listOf(config.volumePercent)),
             ),
             LcdItem(
                 id = "clickpitch",
-                title = LcdLabel.Res(R.string.ipod_settings_click_pitch),
+                title = LcdLabel.Res(R.string.ilyra_settings_click_pitch),
                 value = LcdLabel.Res(
                     when (config.pitch) {
-                        ClickPitch.LOW -> R.string.ipod_value_low
-                        ClickPitch.MEDIUM -> R.string.ipod_value_medium
-                        ClickPitch.HIGH -> R.string.ipod_value_high
+                        ClickPitch.LOW -> R.string.ilyra_value_low
+                        ClickPitch.MEDIUM -> R.string.ilyra_value_medium
+                        ClickPitch.HIGH -> R.string.ilyra_value_high
                     },
                 ),
             ),
             LcdItem(
                 id = "bodycolor",
-                title = LcdLabel.Res(R.string.ipod_settings_color),
+                title = LcdLabel.Res(R.string.ilyra_settings_color),
                 value = LcdLabel.Res(
                     when (bodyColor) {
-                        IPodBodyColor.SILVER -> R.string.ipod_value_silver
-                        IPodBodyColor.BLACK -> R.string.ipod_value_black
+                        ILyraBodyColor.SILVER -> R.string.ilyra_value_silver
+                        ILyraBodyColor.BLACK -> R.string.ilyra_value_black
                     },
                 ),
             ),
             LcdItem(
-                id = "ipodmode",
-                title = LcdLabel.Res(R.string.ipod_settings_mode),
-                value = LcdLabel.Res(R.string.ipod_value_on),
+                id = "ilyramode",
+                title = LcdLabel.Res(R.string.ilyra_settings_mode),
+                value = LcdLabel.Res(R.string.ilyra_value_on),
             ),
         )
     }
 }
 
-class IPodViewModelFactory(
+class ILyraViewModelFactory(
     private val container: AppContainer,
     private val appContext: Context,
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T =
-        IPodViewModel(
+        ILyraViewModel(
             settingsRepository = container.settingsRepository,
             libraryCache       = container.libraryCache,
             repository         = container.spotifyRepository,

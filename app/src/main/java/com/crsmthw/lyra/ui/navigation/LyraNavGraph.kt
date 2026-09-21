@@ -157,9 +157,9 @@ fun LyraNavGraph(
     val deepLinksEnabled = startDestination == Screen.Library.route
     //
     // The intent is CONSUMED (handed back to MainActivity to null out) whatever happens to it:
-    // this graph is disposed and re-created every time iPod mode is toggled, and a second copy
-    // would otherwise replay a link the first already opened — and MainActivity's iPod auto-exit
-    // would re-fire on the stale intent the moment iPod mode was switched back on (2026-09-20).
+    // this graph is disposed and re-created every time iLyra mode is toggled, and a second copy
+    // would otherwise replay a link the first already opened — and MainActivity's iLyra auto-exit
+    // would re-fire on the stale intent the moment iLyra mode was switched back on (2026-09-20).
     LaunchedEffect(pendingDeepLinkIntent) {
         val intent = pendingDeepLinkIntent ?: return@LaunchedEffect
         try {

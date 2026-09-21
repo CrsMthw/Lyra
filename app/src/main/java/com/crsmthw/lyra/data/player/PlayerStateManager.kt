@@ -314,7 +314,7 @@ class PlayerStateManager(
     }
 
     /**
-     * Sets shuffle to [enabled] without toggling — the iPod's deliberate-selection path (shuffle OFF
+     * Sets shuffle to [enabled] without toggling — the Classic's deliberate-selection path (shuffle OFF
      * before playing the tapped song) and Shuffle Songs (shuffle ON). Mirrors [toggleShuffle]'s
      * structure: optimistic lock + optimistic state + Web API, 404 → App Remote.
      */
@@ -330,7 +330,7 @@ class PlayerStateManager(
 
     /**
      * Awaitable variant of [setShuffle] for callers that need to sequence the shuffle change BEFORE
-     * a play request (iPod mode: shuffle OFF → play the tapped song, otherwise the uris body starts
+     * a play request (iLyra mode: shuffle OFF → play the tapped song, otherwise the uris body starts
      * at a random entry). Returns the Web API result; a 404 is NOT swallowed — the caller owns the
      * App Remote fallback and must apply shuffle there too.
      */
@@ -365,7 +365,7 @@ class PlayerStateManager(
         }
     }
 
-    /** Sets repeat to an explicit state ("off" / "context" / "track") — the iPod's repeat bar. */
+    /** Sets repeat to an explicit state ("off" / "context" / "track") — the Classic's repeat bar. */
     fun setRepeat(state: String) {
         lockRepeat()
         _state.update { it.copy(repeatState = state) }

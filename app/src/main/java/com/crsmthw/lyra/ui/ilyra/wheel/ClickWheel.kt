@@ -1,4 +1,4 @@
-package com.crsmthw.lyra.ui.ipod.wheel
+package com.crsmthw.lyra.ui.ilyra.wheel
 
 import android.os.SystemClock
 import androidx.compose.foundation.Canvas
@@ -35,10 +35,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.crsmthw.lyra.R
 import androidx.compose.ui.graphics.Color
-import com.crsmthw.lyra.ui.ipod.IPodBodyPalette
-import com.crsmthw.lyra.ui.ipod.LocalIPodBodyPalette
-import com.crsmthw.lyra.ui.ipod.IPodDimens
-import com.crsmthw.lyra.ui.ipod.IPodFontFamily
+import com.crsmthw.lyra.ui.ilyra.ILyraBodyPalette
+import com.crsmthw.lyra.ui.ilyra.LocalILyraBodyPalette
+import com.crsmthw.lyra.ui.ilyra.ILyraDimens
+import com.crsmthw.lyra.ui.ilyra.ILyraFontFamily
 import com.crsmthw.lyra.util.confirm
 import com.crsmthw.lyra.util.longPress
 import com.crsmthw.lyra.util.press
@@ -115,7 +115,7 @@ private const val INNER_SHADOW_WIDTH_DP = 3f
  * SELECT, `longPress()` + [ClickSounds.select] for a LongPress the ViewModel acted on (a hold that
  * changes nothing is silent).
  *
- * The composable is square; its size is decided by the caller (IPodRoot).
+ * The composable is square; its size is decided by the caller (ILyraRoot).
  */
 @Composable
 fun ClickWheel(
@@ -131,9 +131,9 @@ fun ClickWheel(
     val enabledState = rememberUpdatedState(enabled)
 
     val haptics = LocalHapticFeedback.current
-    val palette = LocalIPodBodyPalette.current
-    val cd = stringResource(R.string.ipod_cd_click_wheel)
-    val menuLabel = stringResource(R.string.ipod_wheel_menu)
+    val palette = LocalILyraBodyPalette.current
+    val cd = stringResource(R.string.ilyra_cd_click_wheel)
+    val menuLabel = stringResource(R.string.ilyra_wheel_menu)
 
     // Which sector is pressed: null = nothing, -1 = centre, 0-3 = MENU/NEXT/PLAY_PAUSE/PREVIOUS.
     val pressedSector = remember { mutableStateOf<Int?>(null) }
@@ -175,7 +175,7 @@ fun ClickWheel(
 // ── Drawing ──────────────────────────────────────────────────────────────
 
 private fun DrawScope.drawWheel(
-    palette: IPodBodyPalette,
+    palette: ILyraBodyPalette,
     menuLabel: String,
     textMeasurer: TextMeasurer,
     wheelEdgeStrokePx: Float,
@@ -190,7 +190,7 @@ private fun DrawScope.drawWheel(
     val centre = Offset(cx, cy)
     // CenterButtonFraction is diameter/diameter (0.38), so multiply by radius directly to get the
     // centre button's radius.  Round A halved again and shipped a button at half the correct size.
-    val centreRadius = radius * IPodDimens.CenterButtonFraction
+    val centreRadius = radius * ILyraDimens.CenterButtonFraction
 
     // ── 1. Wheel ring: radial gradient top -> bottom ───────────────────
     drawCircle(
@@ -245,7 +245,7 @@ private fun DrawScope.drawWheel(
 
     // MENU text at 12 o'clock — size is pixel-proportional to the wheel diameter.
     val menuStyle = TextStyle(
-        fontFamily = IPodFontFamily,
+        fontFamily = ILyraFontFamily,
         fontWeight = FontWeight.Bold,
         fontSize = (diameter * 0.038f / spDivisor).sp,
         color = palette.wheelLabel,
@@ -430,7 +430,7 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.wheelGes
         val cx = w / 2f
         val cy = h / 2f
         // CenterButtonFraction is diameter/diameter (0.38); multiply by radius for the button radius.
-        val centreRadius = radius * IPodDimens.CenterButtonFraction
+        val centreRadius = radius * ILyraDimens.CenterButtonFraction
         val isEnabled = enabledState.value
 
         val downPos = down.position

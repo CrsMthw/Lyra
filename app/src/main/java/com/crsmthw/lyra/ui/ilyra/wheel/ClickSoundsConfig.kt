@@ -1,4 +1,4 @@
-package com.crsmthw.lyra.ui.ipod.wheel
+package com.crsmthw.lyra.ui.ilyra.wheel
 
 import androidx.compose.runtime.Immutable
 
@@ -6,9 +6,9 @@ import androidx.compose.runtime.Immutable
 enum class ClickPitch(val rate: Float) { LOW(0.75f), MEDIUM(1.0f), HIGH(1.3f) }
 
 /**
- * Everything the iPod's Settings menu can say about the clicker. Mirrored from DataStore
- * (`ipod_click_sounds` / `ipod_click_volume` / `ipod_click_pitch`) into [IPodUiState.clickSounds]
- * and pushed into [ClickSounds.configure] by IPodRoot the moment it changes.
+ * Everything the Classic's Settings menu can say about the clicker. Mirrored from DataStore
+ * (`ilyra_click_sounds` / `ilyra_click_volume` / `ilyra_click_pitch`) into [ILyraUiState.clickSounds]
+ * and pushed into [ClickSounds.configure] by ILyraRoot the moment it changes.
  */
 @Immutable
 data class ClickSoundsConfig(

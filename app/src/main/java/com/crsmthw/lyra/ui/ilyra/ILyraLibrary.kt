@@ -1,4 +1,4 @@
-package com.crsmthw.lyra.ui.ipod
+package com.crsmthw.lyra.ui.ilyra
 
 import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.local.CachedTrackList
@@ -15,19 +15,19 @@ import com.crsmthw.lyra.data.remote.model.SpotifyShow
 import com.crsmthw.lyra.data.remote.model.SpotifyTrack
 import com.crsmthw.lyra.data.remote.model.SpotifyUser
 import com.crsmthw.lyra.data.repository.SpotifyRepository
-import com.crsmthw.lyra.ui.ipod.nav.LcdLabel
+import com.crsmthw.lyra.ui.ilyra.nav.LcdLabel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * Browse-data facade for the iPod. Cache-first, one read per screen entry, every network call
+ * Browse-data facade for the iLyra. Cache-first, one read per screen entry, every network call
  * behind `isRateLimited()` / `noteRateLimited()`. Offsets advance by `rawCount`, list elements
  * are null-safe.
  *
- * This is a plain class, not a ViewModel — it is scoped to `IPodViewModel`'s lifetime and shares
+ * This is a plain class, not a ViewModel — it is scoped to `ILyraViewModel`'s lifetime and shares
  * the same coroutine scope through the caller.
  */
-class IPodLibrary(
+class ILyraLibrary(
     private val libraryCache: LibraryCache,
     private val repository: SpotifyRepository,
     private val playerStateManager: PlayerStateManager,

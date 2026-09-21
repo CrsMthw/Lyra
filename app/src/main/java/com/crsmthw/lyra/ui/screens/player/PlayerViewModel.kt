@@ -384,7 +384,7 @@ class PlayerViewModel(
     }
 
     /**
-     * Sets the like state for a track identified by [uri] to the TARGET [liked]. Used by the iPod's
+     * Sets the like state for a track identified by [uri] to the TARGET [liked]. Used by the Classic's
      * options menu, where the track may or may not be the current one. Mirrors [toggleLike]'s
      * behaviour: optimistic UI update (only when [uri] IS the current track), server call, cache
      * patch. Never for an episode uri.
@@ -397,7 +397,7 @@ class PlayerViewModel(
         if (currentTrack != null) {
             _uiState.update { it.copy(isLiked = liked) }
         }
-        // The full track for the liked-songs cache patch: the caller's (the iPod has it for a
+        // The full track for the liked-songs cache patch: the caller's (the iLyra has it for a
         // liked-list pick even while our currentTrack lags behind), else ours when it matches.
         val fullTrack = track?.takeIf { it.uri == uri } ?: currentTrack
         viewModelScope.launch {
@@ -414,7 +414,7 @@ class PlayerViewModel(
     }
 
     /**
-     * Adds a track to a playlist by uri. Used by the iPod's add-to-playlist screen. Mirrors
+     * Adds a track to a playlist by uri. Used by the Classic's add-to-playlist screen. Mirrors
      * [TrackActionsController.togglePlaylistTrack]'s ADD branch: server POST, cache row append
      * (when the full track is known and the cache holds the complete list — the guard inside
      * [LibraryCache.appendToPlaylistTrackList] checks), mutation announcement for the Library's
@@ -564,9 +564,9 @@ class PlayerViewModel(
      */
     /**
      * @param shuffle When non-null and different from the current shuffle state, the shuffle mode is
-     *   changed BEFORE the play request. iPod mode passes `false` for a deliberate song selection
+     *   changed BEFORE the play request. iLyra mode passes `false` for a deliberate song selection
      *   (with shuffle on, a uris body starts at a random entry — the "tapped one song, got another"
-     *   bug) and `null` for non-iPod callers that leave the device state alone.
+     *   bug) and `null` for non-iLyra callers that leave the device state alone.
      */
     fun playTrack(
         uri            : String,
@@ -590,7 +590,7 @@ class PlayerViewModel(
         }
         viewModelScope.launch {
             // ── Shuffle pre-set ──────────────────────────────────────────────
-            // When the caller says "turn shuffle OFF before playing" (iPod deliberate selection) or
+            // When the caller says "turn shuffle OFF before playing" (iLyra deliberate selection) or
             // ON, apply it before the play request so the uris body starts at the tapped entry
             // instead of a random one. Always sends the PUT when shuffle is non-null: the mirror
             // may be stale (cold start, Spotify closed → shuffleEnabled defaults false while the

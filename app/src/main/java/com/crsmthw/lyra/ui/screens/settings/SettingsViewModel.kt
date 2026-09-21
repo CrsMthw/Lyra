@@ -64,10 +64,10 @@ class SettingsViewModel(
     val forYouEnabled: StateFlow<Boolean> = settingsRepo.forYouEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
-    val ipodUnlocked: StateFlow<Boolean> = settingsRepo.ipodUnlocked
+    val ilyraUnlocked: StateFlow<Boolean> = settingsRepo.ilyraUnlocked
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
-    val ipodEnabled: StateFlow<Boolean> = settingsRepo.ipodEnabled
+    val ilyraEnabled: StateFlow<Boolean> = settingsRepo.ilyraEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     private val _imageCacheBytes   = MutableStateFlow(0L)
@@ -92,8 +92,8 @@ class SettingsViewModel(
     fun setVisualizerGainSync(sync: Boolean)    { viewModelScope.launch { settingsRepo.setVisualizerGainSync(sync) } }
     fun setHapticsEnabled  (enabled: Boolean)   { viewModelScope.launch { settingsRepo.setHapticsEnabled(enabled)      } }
     fun setForYouEnabled   (enabled: Boolean)   { viewModelScope.launch { settingsRepo.setForYouEnabled(enabled)       } }
-    fun unlockIpod()                             { viewModelScope.launch { settingsRepo.setIpodUnlocked(true)           } }
-    fun setIpodEnabled     (enabled: Boolean)   { viewModelScope.launch { settingsRepo.setIpodEnabled(enabled)         } }
+    fun unlockIlyra()                             { viewModelScope.launch { settingsRepo.setIlyraUnlocked(true)           } }
+    fun setIlyraEnabled     (enabled: Boolean)   { viewModelScope.launch { settingsRepo.setIlyraEnabled(enabled)         } }
 
     /** Reset every visualizer setting to its default (surfaces=Both, 24 bands, gain 0, synced, mean). */
     fun resetVisualizerSettings() {

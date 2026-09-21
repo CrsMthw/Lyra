@@ -1,4 +1,4 @@
-package com.crsmthw.lyra.ui.ipod
+package com.crsmthw.lyra.ui.ilyra
 
 import android.content.Context
 import android.util.Log
@@ -36,7 +36,7 @@ import kotlinx.coroutines.withContext
  * So the disk cache key is the URL string itself (round-tripped through `toUri().toString()`, which
  * is identity for an HTTPS URL). The probe uses the URL string directly.
  *
- * Scoped to the iPod session: the ViewModel constructs it with `viewModelScope` and it dies with it.
+ * Scoped to the iLyra session: the ViewModel constructs it with `viewModelScope` and it dies with it.
  *
  * CONTRACT (frozen for the round): the public surface below. The data lane fills in the body.
  */

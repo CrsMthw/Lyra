@@ -1,9 +1,9 @@
-package com.crsmthw.lyra.ui.ipod.lcd
+package com.crsmthw.lyra.ui.ilyra.lcd
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import com.crsmthw.lyra.ui.ipod.nav.LcdLabel
+import com.crsmthw.lyra.ui.ilyra.nav.LcdLabel
 
 /** Resolve an [LcdLabel] at draw time. */
 @Composable

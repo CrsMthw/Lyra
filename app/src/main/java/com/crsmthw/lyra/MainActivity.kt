@@ -21,7 +21,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
-import com.crsmthw.lyra.ui.ipod.IPodRoot
+import com.crsmthw.lyra.ui.ilyra.ILyraRoot
 import com.crsmthw.lyra.ui.navigation.LyraNavGraph
 import com.crsmthw.lyra.ui.theme.LyraTheme
 import com.crsmthw.lyra.ui.theme.ThemeMode
@@ -69,31 +69,31 @@ class MainActivity : ComponentActivity() {
             val hapticsEnabled by container.dataStore.hapticsEnabled.collectAsState(initial = true)
             LaunchedEffect(hapticsEnabled) { HapticsConfig.enabled = hapticsEnabled }
 
-            // ── iPod flag: read before the first frame ────────────────────────
+            // ── iLyra flag: read before the first frame ────────────────────────
             // `Boolean?` — null means DataStore has not emitted yet; the splash stays on screen
             // until it does (or the safety timeout fires, so a stuck DataStore never holds the
             // splash forever). The three-way branch below avoids composing LyraNavGraph while
             // the flag is still null, which would create and immediately tear down the
             // NavController, LibraryViewModel.init, PlayerPanelHost, and the deep-link funnel.
-            val ipodEnabled by container.dataStore.ipodEnabled.collectAsState(initial = null)
-            var ipodFlagLoaded by remember { mutableStateOf(false) }
+            val ilyraEnabled by container.dataStore.ilyraEnabled.collectAsState(initial = null)
+            var ilyraFlagLoaded by remember { mutableStateOf(false) }
             var flagTimedOut by remember { mutableStateOf(false) }
-            LaunchedEffect(ipodEnabled) {
-                if (ipodEnabled != null) ipodFlagLoaded = true
+            LaunchedEffect(ilyraEnabled) {
+                if (ilyraEnabled != null) ilyraFlagLoaded = true
             }
             LaunchedEffect(Unit) {
                 delay(1_500L)
                 flagTimedOut = true
             }
-            splash.setKeepOnScreenCondition { !ipodFlagLoaded && !flagTimedOut }
+            splash.setKeepOnScreenCondition { !ilyraFlagLoaded && !flagTimedOut }
 
-            // Deep link while in iPod mode: auto-exit so the normal funnel handles it. Safe to key
+            // Deep link while in iLyra mode: auto-exit so the normal funnel handles it. Safe to key
             // on both because LyraNavGraph nulls the intent once it has acted on it
-            // (onDeepLinkConsumed) — so re-enabling iPod mode later cannot re-fire on a stale link.
-            LaunchedEffect(pendingDeepLinkIntent, ipodEnabled) {
+            // (onDeepLinkConsumed) — so re-enabling iLyra mode later cannot re-fire on a stale link.
+            LaunchedEffect(pendingDeepLinkIntent, ilyraEnabled) {
                 val intent = pendingDeepLinkIntent ?: return@LaunchedEffect
-                if (ipodEnabled == true && intent.action == Intent.ACTION_VIEW && intent.data != null) {
-                    container.settingsRepository.setIpodEnabled(false)
+                if (ilyraEnabled == true && intent.action == Intent.ACTION_VIEW && intent.data != null) {
+                    container.settingsRepository.setIlyraEnabled(false)
                 }
             }
 
@@ -106,9 +106,9 @@ class MainActivity : ComponentActivity() {
 
             // Re-apply edge-to-edge style whenever dark/light flips so status
             // bar and nav bar icon colors follow the in-app theme, not the system theme.
-            // Skipped while iPod mode is active: it is its own immersive world and the
+            // Skipped while iLyra mode is active: it is its own immersive world and the
             // light/dark icon colours are irrelevant with system bars hidden.
-            if (ipodEnabled != true) {
+            if (ilyraEnabled != true) {
                 SideEffect {
                     val barStyle = if (isDark)
                         SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
@@ -128,9 +128,9 @@ class MainActivity : ComponentActivity() {
             ) {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     when {
-                        ipodEnabled == true && container.authManager.isAuthenticated() ->
-                            IPodRoot(container)
-                        ipodEnabled != null || flagTimedOut ->
+                        ilyraEnabled == true && container.authManager.isAuthenticated() ->
+                            ILyraRoot(container)
+                        ilyraEnabled != null || flagTimedOut ->
                             LyraNavGraph(
                                 container             = container,
                                 pendingDeepLinkIntent = pendingDeepLinkIntent,

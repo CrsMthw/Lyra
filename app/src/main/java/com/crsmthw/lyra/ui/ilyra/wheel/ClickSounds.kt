@@ -1,4 +1,4 @@
-package com.crsmthw.lyra.ui.ipod.wheel
+package com.crsmthw.lyra.ui.ilyra.wheel
 
 import android.content.Context
 import android.media.AudioAttributes
@@ -9,9 +9,9 @@ import kotlin.math.pow
 /**
  * The Classic's clicker: a very short tick per wheel detent and a slightly different click for
  * the centre button. Backed by a SoundPool over tiny bundled samples; [enabled] mirrors the
- * iPod's own "Click Sounds" setting (independent of the Lyra haptics toggle).
+ * Classic's own "Click Sounds" setting (independent of the Lyra haptics toggle).
  *
- * Lifecycle: created once by IPodRoot, [release]d when the iPod leaves composition.
+ * Lifecycle: created once by ILyraRoot, [release]d when the iLyra leaves composition.
  *
  * Thread-safe: [tick] and [select] can be called from a gesture-thread callback; every field
  * they read is @Volatile.
@@ -59,8 +59,8 @@ class ClickSounds(context: Context) {
             if (sampleId == pendingTickId) tickId = sampleId
             if (sampleId == pendingSelectId) selectId = sampleId
         }
-        pendingTickId = pool.load(context, R.raw.ipod_click, 1)
-        pendingSelectId = pool.load(context, R.raw.ipod_select, 1)
+        pendingTickId = pool.load(context, R.raw.ilyra_click, 1)
+        pendingSelectId = pool.load(context, R.raw.ilyra_select, 1)
     }
 
     /** Play the detent tick. Silent if [enabled] is false or the sample is not yet loaded. */
@@ -82,7 +82,7 @@ class ClickSounds(context: Context) {
     }
 
     /**
-     * Apply the iPod's clicker settings: enabled, volume and pitch. All three fields are
+     * Apply the Classic's clicker settings: enabled, volume and pitch. All three fields are
      * @Volatile so the gesture thread sees the new values on its next tick without any lock.
      */
     fun configure(config: ClickSoundsConfig) {

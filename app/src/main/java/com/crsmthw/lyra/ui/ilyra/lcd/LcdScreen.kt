@@ -1,4 +1,4 @@
-package com.crsmthw.lyra.ui.ipod.lcd
+package com.crsmthw.lyra.ui.ilyra.lcd
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.EnterTransition
@@ -63,16 +63,16 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.crsmthw.lyra.R
 import kotlinx.coroutines.delay
-import com.crsmthw.lyra.ui.ipod.IPodColors
-import com.crsmthw.lyra.ui.ipod.IPodDimens
-import com.crsmthw.lyra.ui.ipod.IPodFontFamily
-import com.crsmthw.lyra.ui.ipod.nav.IPodScreen
-import com.crsmthw.lyra.ui.ipod.nav.IPodStackEntry
-import com.crsmthw.lyra.ui.ipod.nav.IPodUiState
-import com.crsmthw.lyra.ui.ipod.nav.LcdItem
-import com.crsmthw.lyra.ui.ipod.nav.LcdLabel
-import com.crsmthw.lyra.ui.ipod.nav.LcdIndexStatus
-import com.crsmthw.lyra.ui.ipod.nav.LcdNavDirection
+import com.crsmthw.lyra.ui.ilyra.ILyraColors
+import com.crsmthw.lyra.ui.ilyra.ILyraDimens
+import com.crsmthw.lyra.ui.ilyra.ILyraFontFamily
+import com.crsmthw.lyra.ui.ilyra.nav.ILyraScreen
+import com.crsmthw.lyra.ui.ilyra.nav.ILyraStackEntry
+import com.crsmthw.lyra.ui.ilyra.nav.ILyraUiState
+import com.crsmthw.lyra.ui.ilyra.nav.LcdItem
+import com.crsmthw.lyra.ui.ilyra.nav.LcdLabel
+import com.crsmthw.lyra.ui.ilyra.nav.LcdIndexStatus
+import com.crsmthw.lyra.ui.ilyra.nav.LcdNavDirection
 
 // ── Transition key ──────────────────────────────────────────────────────────
 
@@ -81,14 +81,14 @@ import com.crsmthw.lyra.ui.ipod.nav.LcdNavDirection
  * the screen object, NOT on the entry itself -- so a list update or a progress tick does not
  * restart the slide animation.
  */
-private data class LcdContentKey(val depth: Int, val screen: IPodScreen)
+private data class LcdContentKey(val depth: Int, val screen: ILyraScreen)
 
 /**
- * Holds the last resolved [IPodStackEntry] for a given content key during a transition. Assigned
+ * Holds the last resolved [ILyraStackEntry] for a given content key during a transition. Assigned
  * during composition (not from an effect) so the outgoing child sees its own entry, not the
  * incoming screen's.
  */
-private class EntryHolder(var value: IPodStackEntry)
+private class EntryHolder(var value: ILyraStackEntry)
 
 /**
  * Plain (non-snapshot) bookkeeping for the Cover Flow ↔ Now Playing flight, assigned during
@@ -110,27 +110,27 @@ private class FlightBookkeeping {
 // ── LcdScreen ───────────────────────────────────────────────────────────────
 
 /**
- * The iPod's LCD: bezel + status bar (title, play/pause glyph, battery) + the current stack
+ * The Classic's LCD: bezel + status bar (title, play/pause glyph, battery) + the current stack
  * entry, which slides in from the right on a push and out to the left on a pop
- * ([IPodUiState.direction]). Lists are display-only -- no touch scrolling, the highlight is
+ * ([ILyraUiState.direction]). Lists are display-only -- no touch scrolling, the highlight is
  * moved by the wheel -- and an empty list reads "No <Title>" as the Classic does.
  *
- * The caller (IPodRoot) sizes it 4:3 INCLUDING the bezel.
+ * The caller (ILyraRoot) sizes it 4:3 INCLUDING the bezel.
  */
 @Composable
 fun LcdScreen(
-    state: IPodUiState,
+    state: ILyraUiState,
     battery: BatteryState,
     modifier: Modifier = Modifier,
 ) {
-    val accessibilityDesc = stringResource(R.string.ipod_cd_lcd)
+    val accessibilityDesc = stringResource(R.string.ilyra_cd_lcd)
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(IPodDimens.LcdCornerRadius))
+            .clip(RoundedCornerShape(ILyraDimens.LcdCornerRadius))
             .border(
-                width = IPodDimens.LcdBezelWidth,
-                color = IPodColors.LcdBezel,
-                shape = RoundedCornerShape(IPodDimens.LcdCornerRadius),
+                width = ILyraDimens.LcdBezelWidth,
+                color = ILyraColors.LcdBezel,
+                shape = RoundedCornerShape(ILyraDimens.LcdCornerRadius),
             )
             .semantics { contentDescription = accessibilityDesc },
     ) {
@@ -139,17 +139,17 @@ fun LcdScreen(
             Modifier
                 .fillMaxWidth()
                 .height(1.dp)
-                .background(IPodColors.LcdBezelHighlight),
+                .background(ILyraColors.LcdBezelHighlight),
         )
 
         // The inner LCD panel.
-        val bezel = IPodDimens.LcdBezelWidth
+        val bezel = ILyraDimens.LcdBezelWidth
         Box(
             Modifier
                 .padding(bezel)
                 .fillMaxSize()
-                .clip(RoundedCornerShape(IPodDimens.LcdCornerRadius / 2))
-                .background(IPodColors.LcdBackground),
+                .clip(RoundedCornerShape(ILyraDimens.LcdCornerRadius / 2))
+                .background(ILyraColors.LcdBackground),
         ) {
             BoxWithConstraints(Modifier.fillMaxSize()) {
                 val panelHeight = constraints.maxHeight
@@ -203,12 +203,12 @@ fun LcdScreen(
                     // the art flies back into the ribbon's selected slot.
                     val prevKey = bookkeeping.lastKey
                     if (prevKey != null && prevKey != currentKey) {
-                        val coverToNowPlaying = prevKey.screen is IPodScreen.CoverFlow &&
-                            currentKey.screen is IPodScreen.NowPlaying &&
+                        val coverToNowPlaying = prevKey.screen is ILyraScreen.CoverFlow &&
+                            currentKey.screen is ILyraScreen.NowPlaying &&
                             currentKey.depth == prevKey.depth + 1 &&
                             direction == LcdNavDirection.FORWARD
-                        val nowPlayingToCoverFlow = prevKey.screen is IPodScreen.NowPlaying &&
-                            currentKey.screen is IPodScreen.CoverFlow &&
+                        val nowPlayingToCoverFlow = prevKey.screen is ILyraScreen.NowPlaying &&
+                            currentKey.screen is ILyraScreen.CoverFlow &&
                             currentKey.depth == prevKey.depth - 1 &&
                             direction == LcdNavDirection.BACK
 
@@ -266,7 +266,7 @@ fun LcdScreen(
                                     bookkeeping.useReverseCrossfade = false
                                 }
                             }
-                            bookkeeping.active && currentKey.screen !is IPodScreen.NowPlaying -> {
+                            bookkeeping.active && currentKey.screen !is ILyraScreen.NowPlaying -> {
                                 // Left Now Playing mid-flight (MENU during the 320 ms): drop the overlay.
                                 flight = null
                                 flightLanded.value = false
@@ -304,17 +304,17 @@ fun LcdScreen(
                     AnimatedContent(
                         targetState = currentKey,
                         transitionSpec = {
-                            val millis = IPodDimens.LcdSlideMillis
+                            val millis = ILyraDimens.LcdSlideMillis
                             // Cover Flow → Now Playing: no slide — the cover flies (the overlay) and
                             // everything else crossfades under it, over the flight's duration.
-                            val coverToNowPlaying = initialState.screen is IPodScreen.CoverFlow &&
-                                targetState.screen is IPodScreen.NowPlaying &&
+                            val coverToNowPlaying = initialState.screen is ILyraScreen.CoverFlow &&
+                                targetState.screen is ILyraScreen.NowPlaying &&
                                 direction == LcdNavDirection.FORWARD
                             // Now Playing → Cover Flow (reverse flight): same crossfade, no slide —
                             // gated on the flag the detection block set, so a song-changed pop still
                             // slides normally.
-                            val nowPlayingToCoverFlow = initialState.screen is IPodScreen.NowPlaying &&
-                                targetState.screen is IPodScreen.CoverFlow &&
+                            val nowPlayingToCoverFlow = initialState.screen is ILyraScreen.NowPlaying &&
+                                targetState.screen is ILyraScreen.CoverFlow &&
                                 direction == LcdNavDirection.BACK &&
                                 bookkeeping.useReverseCrossfade
                             when {
@@ -342,7 +342,7 @@ fun LcdScreen(
                         contentKey = { it },
                         modifier = Modifier
                             .fillMaxSize()
-                            .clip(RoundedCornerShape(bottomStart = IPodDimens.LcdCornerRadius / 2, bottomEnd = IPodDimens.LcdCornerRadius / 2)),
+                            .clip(RoundedCornerShape(bottomStart = ILyraDimens.LcdCornerRadius / 2, bottomEnd = ILyraDimens.LcdCornerRadius / 2)),
                         label = "lcd_content",
                     ) { animatingKey ->
                         // Resolve the entry for THIS child's key, holding the last valid one
@@ -377,7 +377,7 @@ fun LcdScreen(
                         }
 
                         when (entry.screen) {
-                            is IPodScreen.NowPlaying -> LcdNowPlayingContent(
+                            is ILyraScreen.NowPlaying -> LcdNowPlayingContent(
                                 nowPlaying = state.nowPlaying,
                                 contentHeight = contentHeightDp,
                                 hideArt = hideNowPlayingArt,
@@ -390,7 +390,7 @@ fun LcdScreen(
                                     bookkeeping.artRect = rect
                                 },
                             )
-                            is IPodScreen.CoverFlow -> LcdCoverFlowContent(
+                            is ILyraScreen.CoverFlow -> LcdCoverFlowContent(
                                 entry = entry,
                                 likedIndex = state.likedIndex,
                                 contentHeight = contentHeightDp,
@@ -451,24 +451,24 @@ private fun LcdStatusBar(
     // Pre-compute text sizes from the panel height so the LCD scales.
     val titleFontSize = with(density) { (heightPx * 0.55f).toSp() }
     val titleStyle = TextStyle(
-        fontFamily = IPodFontFamily,
+        fontFamily = ILyraFontFamily,
         fontWeight = FontWeight.Bold,
         fontSize = titleFontSize,
-        color = IPodColors.LcdText,
+        color = ILyraColors.LcdText,
     )
 
     Canvas(modifier = modifier) {
         // Glossy background: white at the top through a pale mid to grey — the Classic's aqua bar.
         drawRect(
             brush = Brush.verticalGradient(
-                0f to IPodColors.LcdStatusGlossTop,
-                0.5f to IPodColors.LcdStatusGlossMid,
-                1f to IPodColors.LcdStatusGlossLow,
+                0f to ILyraColors.LcdStatusGlossTop,
+                0.5f to ILyraColors.LcdStatusGlossMid,
+                1f to ILyraColors.LcdStatusGlossLow,
             ),
         )
         // 1px divider line at the bottom.
         drawLine(
-            color = IPodColors.LcdStatusLine,
+            color = ILyraColors.LcdStatusLine,
             start = Offset(0f, size.height - 1f),
             end = Offset(size.width, size.height - 1f),
             strokeWidth = 1f,
@@ -506,7 +506,7 @@ private fun LcdStatusBar(
             val glyphLeft = heightPx * 0.35f
             val glyphTop = (size.height - 1f - glyphSize) / 2f
             val glyphBrush = Brush.verticalGradient(
-                colors = listOf(IPodColors.PlayGlyphTop, IPodColors.PlayGlyphBottom),
+                colors = listOf(ILyraColors.PlayGlyphTop, ILyraColors.PlayGlyphBottom),
                 startY = glyphTop,
                 endY = glyphTop + glyphSize,
             )
@@ -553,7 +553,7 @@ private fun DrawScope.drawBattery(
 
     // Body outline.
     drawRoundRect(
-        color = IPodColors.BatteryOutline,
+        color = ILyraColors.BatteryOutline,
         topLeft = Offset(bodyLeft, bodyTop),
         size = Size(bodyWidth, bodyHeight),
         cornerRadius = CornerRadius(height * 0.12f),
@@ -562,7 +562,7 @@ private fun DrawScope.drawBattery(
 
     // Nub.
     drawRoundRect(
-        color = IPodColors.BatteryOutline,
+        color = ILyraColors.BatteryOutline,
         topLeft = Offset(bodyLeft + bodyWidth, centerY - nubHeight / 2f),
         size = Size(nubWidth, nubHeight),
         cornerRadius = CornerRadius(nubWidth * 0.3f),
@@ -579,10 +579,10 @@ private fun DrawScope.drawBattery(
         // Green whether charging or not — the Classic's charging battery is the same green fill
         // with a bolt across it, not a different colour (the blue fill hid the white bolt) — and
         // RED under BATTERY_LOW_PERCENT while not charging, as the Classic's ("less than 20 percent
-        // of your iPod's power left", iPod: The Missing Manual).
+        // of your Classic's power left", the Classic's manual).
         val low = !battery.isCharging && battery.percent < BATTERY_LOW_PERCENT
-        val top = if (low) IPodColors.BatteryRedTop else IPodColors.BatteryGreenTop
-        val bottom = if (low) IPodColors.BatteryRedBottom else IPodColors.BatteryGreenBottom
+        val top = if (low) ILyraColors.BatteryRedTop else ILyraColors.BatteryGreenTop
+        val bottom = if (low) ILyraColors.BatteryRedBottom else ILyraColors.BatteryGreenBottom
         drawRoundRect(
             brush = Brush.verticalGradient(
                 colors = listOf(top, bottom),
@@ -595,8 +595,8 @@ private fun DrawScope.drawBattery(
         )
         drawRoundRect(
             brush = Brush.verticalGradient(
-                0f to IPodColors.HighlightText.copy(alpha = 0.55f),
-                1f to IPodColors.HighlightText.copy(alpha = 0f),
+                0f to ILyraColors.HighlightText.copy(alpha = 0.55f),
+                1f to ILyraColors.HighlightText.copy(alpha = 0f),
                 startY = fillTop,
                 endY = fillTop + fillHeight * 0.5f,
             ),
@@ -622,8 +622,8 @@ private fun DrawScope.drawBattery(
             lineTo(boltCx - boltWidth * 0.05f, boltCy - boltHeight * 0.05f)
             close()
         }
-        drawPath(path, IPodColors.BatteryBoltHalo, style = androidx.compose.ui.graphics.drawscope.Stroke(width = height * 0.14f))
-        drawPath(path, IPodColors.BatteryBolt, style = Fill)
+        drawPath(path, ILyraColors.BatteryBoltHalo, style = androidx.compose.ui.graphics.drawscope.Stroke(width = height * 0.14f))
+        drawPath(path, ILyraColors.BatteryBolt, style = Fill)
     }
 }
 
@@ -631,7 +631,7 @@ private fun DrawScope.drawBattery(
 
 @Composable
 internal fun LcdMenuList(
-    entry: IPodStackEntry,
+    entry: ILyraStackEntry,
     contentHeight: Dp,
 ) {
     val list = entry.list
@@ -640,15 +640,15 @@ internal fun LcdMenuList(
 
     when {
         list.isLoading -> LcdCentredMessage(
-            text = stringResource(R.string.ipod_list_loading),
+            text = stringResource(R.string.ilyra_list_loading),
             contentHeight = contentHeight,
         )
         list.error != null -> LcdCentredMessage(
-            text = stringResource(R.string.ipod_list_error, title.resolve()),
+            text = stringResource(R.string.ilyra_list_error, title.resolve()),
             contentHeight = contentHeight,
         )
         items.isEmpty() -> LcdCentredMessage(
-            text = stringResource(R.string.ipod_list_empty, title.resolve()),
+            text = stringResource(R.string.ilyra_list_empty, title.resolve()),
             contentHeight = contentHeight,
         )
         else -> LcdItemList(
@@ -671,10 +671,10 @@ internal fun LcdCentredMessage(text: String, contentHeight: Dp) {
     ) {
         androidx.compose.material3.Text(
             text = text,
-            fontFamily = IPodFontFamily,
+            fontFamily = ILyraFontFamily,
             fontWeight = FontWeight.Bold,
             fontSize = fontSize,
-            color = IPodColors.LcdTextSecondary,
+            color = ILyraColors.LcdTextSecondary,
             textAlign = TextAlign.Center,
         )
     }
@@ -746,14 +746,14 @@ private fun LcdRow(
     val chevronFontSize = with(density) { (contentHeightPx * 0.04f).toSp() }
     val valueFontSize = with(density) { (contentHeightPx * 0.042f).toSp() }
 
-    val textColor = if (isHighlighted) IPodColors.HighlightText else IPodColors.LcdText
-    val secondaryColor = if (isHighlighted) IPodColors.HighlightText.copy(alpha = 0.8f) else IPodColors.LcdTextSecondary
-    val chevronColor = if (isHighlighted) IPodColors.HighlightText else IPodColors.Chevron
+    val textColor = if (isHighlighted) ILyraColors.HighlightText else ILyraColors.LcdText
+    val secondaryColor = if (isHighlighted) ILyraColors.HighlightText.copy(alpha = 0.8f) else ILyraColors.LcdTextSecondary
+    val chevronColor = if (isHighlighted) ILyraColors.HighlightText else ILyraColors.Chevron
 
     val bgModifier = if (isHighlighted) {
         Modifier.background(
             Brush.verticalGradient(
-                colors = listOf(IPodColors.HighlightTop, IPodColors.HighlightBottom),
+                colors = listOf(ILyraColors.HighlightTop, ILyraColors.HighlightBottom),
             ),
         )
     } else {
@@ -780,7 +780,7 @@ private fun LcdRow(
             ) {
                 androidx.compose.material3.Text(
                     text = item.title.resolve(),
-                    fontFamily = IPodFontFamily,
+                    fontFamily = ILyraFontFamily,
                     fontWeight = FontWeight.Bold,
                     fontSize = titleFontSize,
                     color = textColor,
@@ -790,7 +790,7 @@ private fun LcdRow(
                 if (item.subtitle != null) {
                     androidx.compose.material3.Text(
                         text = item.subtitle.resolve(),
-                        fontFamily = IPodFontFamily,
+                        fontFamily = ILyraFontFamily,
                         fontWeight = FontWeight.Bold,
                         fontSize = subtitleFontSize,
                         color = secondaryColor,
@@ -804,7 +804,7 @@ private fun LcdRow(
             if (item.value != null) {
                 androidx.compose.material3.Text(
                     text = item.value.resolve(),
-                    fontFamily = IPodFontFamily,
+                    fontFamily = ILyraFontFamily,
                     fontWeight = FontWeight.Bold,
                     fontSize = valueFontSize,
                     color = secondaryColor,
@@ -815,7 +815,7 @@ private fun LcdRow(
                 Spacer(Modifier.width(4.dp))
                 androidx.compose.material3.Text(
                     text = "›", // single right-pointing angle quotation mark
-                    fontFamily = IPodFontFamily,
+                    fontFamily = ILyraFontFamily,
                     fontWeight = FontWeight.Bold,
                     fontSize = chevronFontSize,
                     color = chevronColor,
@@ -829,7 +829,7 @@ private fun LcdRow(
                 Modifier
                     .fillMaxWidth()
                     .height(0.5.dp)
-                    .background(IPodColors.LcdDivider),
+                    .background(ILyraColors.LcdDivider),
             )
         }
     }
@@ -899,7 +899,7 @@ private fun LcdScrollbar(
                     val thumbHeight = size.height * thumbFraction
                     val thumbTop = position.value.coerceIn(0f, 1f) * (size.height - thumbHeight)
                     drawRoundRect(
-                        color = IPodColors.ScrollbarThumb,
+                        color = ILyraColors.ScrollbarThumb,
                         topLeft = Offset(0f, thumbTop),
                         size = Size(size.width, thumbHeight),
                         cornerRadius = CornerRadius(size.width / 2f),

@@ -85,31 +85,31 @@ class LyraDataStore(private val context: Context) {
         prefs[Keys.FOR_YOU_ENABLED] ?: false
     }
 
-    // ── iPod mode (easter egg) ───────────────────────────────────────────────
-    // `ipodUnlocked` is set once by the 5-tap on the Settings version line and never cleared;
-    // it only gates whether the "iPod" row is visible. `ipodEnabled` swaps the whole UI for the
-    // iPod Classic recreation (MainActivity branches on it, before the first frame). Click
-    // sounds are the iPod's own setting, independent of the Lyra haptics toggle.
-    val ipodUnlocked: Flow<Boolean> = context.dataStore.data.map { prefs ->
-        prefs[Keys.IPOD_UNLOCKED] ?: false
+    // ── iLyra mode (easter egg) ───────────────────────────────────────────────
+    // `ilyraUnlocked` is set once by the 5-tap on the Settings version line and never cleared;
+    // it only gates whether the "iLyra" row is visible. `ilyraEnabled` swaps the whole UI for the
+    // Classic recreation (MainActivity branches on it, before the first frame). Click
+    // sounds are the Classic's own setting, independent of the Lyra haptics toggle.
+    val ilyraUnlocked: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[Keys.ILYRA_UNLOCKED] ?: false
     }
-    val ipodEnabled: Flow<Boolean> = context.dataStore.data.map { prefs ->
-        prefs[Keys.IPOD_ENABLED] ?: false
+    val ilyraEnabled: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[Keys.ILYRA_ENABLED] ?: false
     }
-    val ipodClickSounds: Flow<Boolean> = context.dataStore.data.map { prefs ->
-        prefs[Keys.IPOD_CLICK_SOUNDS] ?: true
+    val ilyraClickSounds: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[Keys.ILYRA_CLICK_SOUNDS] ?: true
     }
     /** 0..100, default 50 — the first clicker was too loud on the Fold. */
-    val ipodClickVolume: Flow<Int> = context.dataStore.data.map { prefs ->
-        prefs[Keys.IPOD_CLICK_VOLUME] ?: 50
+    val ilyraClickVolume: Flow<Int> = context.dataStore.data.map { prefs ->
+        prefs[Keys.ILYRA_CLICK_VOLUME] ?: 50
     }
     /** ClickPitch ordinal: 0 low, 1 medium (default), 2 high. */
-    val ipodClickPitch: Flow<Int> = context.dataStore.data.map { prefs ->
-        prefs[Keys.IPOD_CLICK_PITCH] ?: 1
+    val ilyraClickPitch: Flow<Int> = context.dataStore.data.map { prefs ->
+        prefs[Keys.ILYRA_CLICK_PITCH] ?: 1
     }
-    /** IPodBodyColor ordinal: 0 silver (default), 1 black. */
-    val ipodBodyColor: Flow<Int> = context.dataStore.data.map { prefs ->
-        prefs[Keys.IPOD_BODY_COLOR] ?: 0
+    /** ILyraBodyColor ordinal: 0 silver (default), 1 black. */
+    val ilyraBodyColor: Flow<Int> = context.dataStore.data.map { prefs ->
+        prefs[Keys.ILYRA_BODY_COLOR] ?: 0
     }
 
     // ── Writes ──────────────────────────────────────────────────────────────
@@ -170,28 +170,28 @@ class LyraDataStore(private val context: Context) {
         context.dataStore.edit { it[Keys.FOR_YOU_ENABLED] = enabled }
     }
 
-    suspend fun setIpodUnlocked(unlocked: Boolean) {
-        context.dataStore.edit { it[Keys.IPOD_UNLOCKED] = unlocked }
+    suspend fun setIlyraUnlocked(unlocked: Boolean) {
+        context.dataStore.edit { it[Keys.ILYRA_UNLOCKED] = unlocked }
     }
 
-    suspend fun setIpodEnabled(enabled: Boolean) {
-        context.dataStore.edit { it[Keys.IPOD_ENABLED] = enabled }
+    suspend fun setIlyraEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.ILYRA_ENABLED] = enabled }
     }
 
-    suspend fun setIpodClickSounds(enabled: Boolean) {
-        context.dataStore.edit { it[Keys.IPOD_CLICK_SOUNDS] = enabled }
+    suspend fun setIlyraClickSounds(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.ILYRA_CLICK_SOUNDS] = enabled }
     }
 
-    suspend fun setIpodClickVolume(percent: Int) {
-        context.dataStore.edit { it[Keys.IPOD_CLICK_VOLUME] = percent.coerceIn(0, 100) }
+    suspend fun setIlyraClickVolume(percent: Int) {
+        context.dataStore.edit { it[Keys.ILYRA_CLICK_VOLUME] = percent.coerceIn(0, 100) }
     }
 
-    suspend fun setIpodClickPitch(ordinal: Int) {
-        context.dataStore.edit { it[Keys.IPOD_CLICK_PITCH] = ordinal }
+    suspend fun setIlyraClickPitch(ordinal: Int) {
+        context.dataStore.edit { it[Keys.ILYRA_CLICK_PITCH] = ordinal }
     }
 
-    suspend fun setIpodBodyColor(ordinal: Int) {
-        context.dataStore.edit { it[Keys.IPOD_BODY_COLOR] = ordinal }
+    suspend fun setIlyraBodyColor(ordinal: Int) {
+        context.dataStore.edit { it[Keys.ILYRA_BODY_COLOR] = ordinal }
     }
 
     // ── Keys ────────────────────────────────────────────────────────────────
@@ -212,11 +212,11 @@ class LyraDataStore(private val context: Context) {
         val VISUALIZER_GAIN_SYNC = booleanPreferencesKey("visualizer_gain_sync")
         val HAPTICS_ENABLED     = booleanPreferencesKey("haptics_enabled")
         val FOR_YOU_ENABLED     = booleanPreferencesKey("for_you_enabled")
-        val IPOD_UNLOCKED       = booleanPreferencesKey("ipod_unlocked")
-        val IPOD_ENABLED        = booleanPreferencesKey("ipod_enabled")
-        val IPOD_CLICK_SOUNDS   = booleanPreferencesKey("ipod_click_sounds")
-        val IPOD_CLICK_VOLUME   = intPreferencesKey("ipod_click_volume")
-        val IPOD_CLICK_PITCH    = intPreferencesKey("ipod_click_pitch")
-        val IPOD_BODY_COLOR     = intPreferencesKey("ipod_body_color")
+        val ILYRA_UNLOCKED       = booleanPreferencesKey("ilyra_unlocked")
+        val ILYRA_ENABLED        = booleanPreferencesKey("ilyra_enabled")
+        val ILYRA_CLICK_SOUNDS   = booleanPreferencesKey("ilyra_click_sounds")
+        val ILYRA_CLICK_VOLUME   = intPreferencesKey("ilyra_click_volume")
+        val ILYRA_CLICK_PITCH    = intPreferencesKey("ilyra_click_pitch")
+        val ILYRA_BODY_COLOR     = intPreferencesKey("ilyra_body_color")
     }
 }

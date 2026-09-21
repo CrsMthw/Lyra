@@ -1,4 +1,4 @@
-package com.crsmthw.lyra.ui.ipod.wheel
+package com.crsmthw.lyra.ui.ilyra.wheel
 
 /** The five physical controls of the Classic's click wheel. */
 enum class WheelButton { MENU, SELECT, PREVIOUS, NEXT, PLAY_PAUSE }

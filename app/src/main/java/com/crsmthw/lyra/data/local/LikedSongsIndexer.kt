@@ -33,24 +33,24 @@ data class LikedSongsIndexState(
 
 /**
  * THE liked-songs indexer — one app-scoped instance in `AppContainer`, shared by the foreground
- * service and the iPod (Checkpoint C, 2026-09-21). It owns the paging loop that used to live in
+ * service and the iLyra (Checkpoint C, 2026-09-21). It owns the paging loop that used to live in
  * `LyraForegroundService.startLikedSongsFetcher()`: one `me/tracks` page per tick, the RAW offset
  * advanced by `rawCount` (never by a filtered size), re-seeded from the cache when the cache shrinks
  * under it, `isRateLimited()`-gated before every call and `noteRateLimited()` on a 429, each page
  * appended atomically through [LibraryCache.appendToLikedSongs].
  *
  * Two DEMANDS drive it. The service holds the background demand while it runs (one page every
- * [BACKGROUND_INTERVAL_MS], as before). The iPod holds the fast demand for its session (one page
+ * [BACKGROUND_INTERVAL_MS], as before). The iLyra holds the fast demand for its session (one page
  * every [FAST_INTERVAL_MS]) so Cover Flow's list fills in minutes rather than hours. The loop runs
  * while either demand is held; the interval is the fast one whenever the fast demand is held. Once
  * complete it idles at the background interval, re-checking the cache for a grown total.
  *
- * **Prepend interplay (inherited from the old loop).** A like or the iPod's reconcile PREPENDS rows,
+ * **Prepend interplay (inherited from the old loop).** A like or the Classic's reconcile PREPENDS rows,
  * so the cache grows and `rawOffset` lags by that many; the next page re-reads those rows from the
  * API, the atomic [LibraryCache.appendToLikedSongs] drops them as already held (de-duped by id),
  * and `rawOffset += rawCount` lands exactly on the true position — a one-page self-heal, not a bug.
  *
- * **Thread safety.** Demands may be flipped from the main thread (the iPod's composable lifecycle,
+ * **Thread safety.** Demands may be flipped from the main thread (the Classic's composable lifecycle,
  * the foreground service's `onCreate`/`onDestroy`) while the loop runs on [Dispatchers.Default].
  * The two demand flags live in a [MutableStateFlow] so flips are atomic and the loop can wait on a
  * change via [MutableStateFlow.first].
@@ -88,7 +88,7 @@ class LikedSongsIndexer(
         ensureLoopStarted()
     }
 
-    /** The iPod's demand: page at the fast cadence while iPod mode is on. */
+    /** The Classic's demand: page at the fast cadence while iLyra mode is on. */
     fun setFastDemand(active: Boolean) {
         demands.value = demands.value.copy(fast = active)
         ensureLoopStarted()
@@ -146,7 +146,7 @@ class LikedSongsIndexer(
                     else -> BACKGROUND_INTERVAL_MS
                 }
                 withTimeoutOrNull(interval) {
-                    // Wake early if either demand changes (e.g. the iPod turned on mid-background-sleep).
+                    // Wake early if either demand changes (e.g. the iLyra turned on mid-background-sleep).
                     demands.first { it != snapshot }
                 }
 
@@ -160,7 +160,7 @@ class LikedSongsIndexer(
                     val cached = libraryCache.loadTrackList(LibraryCache.LIKED_SONGS_KEY)
                     if (cached == null) {
                         // No liked list in the cache (the Library never opened Liked Songs).
-                        // Do nothing this tick; state.total stays null so the iPod knows not to show
+                        // Do nothing this tick; state.total stays null so the iLyra knows not to show
                         // an index status. The indexer NEVER creates the list.
                         _state.value = _state.value.copy(cached = null, total = null, complete = false)
                         return@withContext

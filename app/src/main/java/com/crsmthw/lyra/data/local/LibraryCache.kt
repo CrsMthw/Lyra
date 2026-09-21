@@ -329,7 +329,7 @@ class LibraryCache(context: Context) {
     /**
      * Atomically appends a fetched page to the Liked Songs list under ONE lock — the shared
      * `LikedSongsIndexer`'s writer (2026-09-21). Reads the CURRENT list inside the lock, so a prepend
-     * (a like, the iPod's reconcile) landing between the caller's earlier read and this write is
+     * (a like, the Classic's reconcile) landing between the caller's earlier read and this write is
      * kept, not reverted — the `load()` … `saveTrackList(cached + page)` pair the foreground
      * service used to do had exactly that window. De-duplicates by id (heals an overlap when the
      * seed offset started below the true raw position). Purely additive: `snapshotId` and
@@ -352,7 +352,7 @@ class LibraryCache(context: Context) {
     }
 
     /**
-     * Atomically prepends [tracks] (newest first) to the Liked Songs list under ONE lock — the iPod's
+     * Atomically prepends [tracks] (newest first) to the Liked Songs list under ONE lock — the Classic's
      * reconcile writer (2026-09-21), the counterpart of [appendToLikedSongs]: a page the indexer
      * appended between the caller's read and this write survives. De-duplicates by id, keeping the
      * FIRST occurrence (so a re-like already held moves nowhere and the fresh copy is dropped).

@@ -1,40 +1,40 @@
-package com.crsmthw.lyra.ui.ipod.nav
+package com.crsmthw.lyra.ui.ilyra.nav
 
 import androidx.annotation.PluralsRes
 import androidx.annotation.StringRes
 import androidx.compose.runtime.Immutable
-import com.crsmthw.lyra.ui.ipod.IPodBodyColor
-import com.crsmthw.lyra.ui.ipod.wheel.ClickSoundsConfig
+import com.crsmthw.lyra.ui.ilyra.ILyraBodyColor
+import com.crsmthw.lyra.ui.ilyra.wheel.ClickSoundsConfig
 
 /**
- * Every screen the iPod's LCD can show. The back stack is a list of [IPodStackEntry]; MENU pops,
+ * Every screen the Classic's LCD can show. The back stack is a list of [ILyraStackEntry]; MENU pops,
  * SELECT pushes. Checkpoint A wires MainMenu, Music, Settings and a placeholder NowPlaying; the
  * remaining browse screens exist so the menu can push them (an empty list renders as "No <Title>")
  * and Checkpoint B fills them with data.
  */
-sealed interface IPodScreen {
-    data object MainMenu : IPodScreen
-    data object CoverFlow : IPodScreen
+sealed interface ILyraScreen {
+    data object MainMenu : ILyraScreen
+    data object CoverFlow : ILyraScreen
     /** Liked songs. */
-    data object Music : IPodScreen
+    data object Music : ILyraScreen
     /** Saved albums. */
-    data object Albums : IPodScreen
-    data class AlbumTracks(val albumId: String, val albumUri: String) : IPodScreen
+    data object Albums : ILyraScreen
+    data class AlbumTracks(val albumId: String, val albumUri: String) : ILyraScreen
     /** Followed artists. */
-    data object Artists : IPodScreen
-    data class ArtistAlbums(val artistId: String) : IPodScreen
+    data object Artists : ILyraScreen
+    data class ArtistAlbums(val artistId: String) : ILyraScreen
     /** Playlists the user owns. */
-    data object Playlists : IPodScreen
-    data class PlaylistTracks(val playlistId: String, val playlistUri: String) : IPodScreen
+    data object Playlists : ILyraScreen
+    data class PlaylistTracks(val playlistId: String, val playlistUri: String) : ILyraScreen
     /** Followed shows. */
-    data object Podcasts : IPodScreen
-    data class ShowEpisodes(val showId: String) : IPodScreen
-    data object NowPlaying : IPodScreen
+    data object Podcasts : ILyraScreen
+    data class ShowEpisodes(val showId: String) : ILyraScreen
+    data object NowPlaying : ILyraScreen
     /** Hold the centre button over Now Playing: the Classic's options menu for the playing song (D). */
-    data object NowPlayingOptions : IPodScreen
+    data object NowPlayingOptions : ILyraScreen
     /** The owned playlists to add [trackUri] to, from the options menu (D). */
-    data class AddToPlaylist(val trackUri: String) : IPodScreen
-    data object Settings : IPodScreen
+    data class AddToPlaylist(val trackUri: String) : ILyraScreen
+    data object Settings : ILyraScreen
 }
 
 /*
@@ -101,9 +101,9 @@ data class LcdListState(
 )
 
 @Immutable
-data class IPodStackEntry(
-    val screen: IPodScreen,
-    /** The status-bar title while this entry is on top ("iPod", "Music", "Now Playing"…). */
+data class ILyraStackEntry(
+    val screen: ILyraScreen,
+    /** The status-bar title while this entry is on top ("iLyra", "Music", "Now Playing"…). */
     val title: LcdLabel,
     val list: LcdListState = LcdListState(),
 )
@@ -142,7 +142,7 @@ data class LcdNowPlaying(
     val repeat: LcdRepeat = LcdRepeat.OFF,
     /**
      * Whether the playing track is in Liked Songs — PlayerViewModel's server-checked `isLiked`,
-     * mirrored in by IPodRoot through `IPodViewModel.onPlayerLikedChanged`; null until known, and
+     * mirrored in by ILyraRoot through `ILyraViewModel.onPlayerLikedChanged`; null until known, and
      * always null for an episode. Carried across the 1 Hz tick for the same uri only. (D)
      */
     val isLiked: Boolean? = null,
@@ -170,16 +170,16 @@ data class LcdNowPlaying(
 data class LcdIndexStatus(val indexed: Int, val total: Int)
 
 @Immutable
-data class IPodUiState(
+data class ILyraUiState(
     /** Never empty; the last entry is showing. */
-    val stack: List<IPodStackEntry>,
+    val stack: List<ILyraStackEntry>,
     val direction: LcdNavDirection = LcdNavDirection.NONE,
     val nowPlaying: LcdNowPlaying? = null,
     val clickSounds: ClickSoundsConfig = ClickSoundsConfig(),
-    /** Silver or black body — the iPod's own Settings → Color. */
-    val bodyColor: IPodBodyColor = IPodBodyColor.SILVER,
+    /** Silver or black body — the Classic's own Settings → Color. */
+    val bodyColor: ILyraBodyColor = ILyraBodyColor.SILVER,
     /** Non-null while the liked-songs index is still filling — see [LcdIndexStatus]. */
     val likedIndex: LcdIndexStatus? = null,
 ) {
-    val current: IPodStackEntry get() = stack.last()
+    val current: ILyraStackEntry get() = stack.last()
 }

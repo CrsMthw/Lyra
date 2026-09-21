@@ -1,4 +1,4 @@
-package com.crsmthw.lyra.ui.ipod.lcd
+package com.crsmthw.lyra.ui.ilyra.lcd
 
 import android.content.BroadcastReceiver
 import android.content.Context

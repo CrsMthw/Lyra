@@ -1,14 +1,14 @@
-package com.crsmthw.lyra.ui.ipod
+package com.crsmthw.lyra.ui.ilyra
 
 import com.crsmthw.lyra.data.remote.model.SpotifyTrack
 
 /**
- * What the iPod asks the rest of Lyra to do. `IPodViewModel` emits these; `IPodRoot` collects
- * them and routes each to the Activity-scoped `PlayerViewModel`, so the iPod never duplicates
+ * What the iLyra asks the rest of Lyra to do. `ILyraViewModel` emits these; `ILyraRoot` collects
+ * them and routes each to the Activity-scoped `PlayerViewModel`, so the iLyra never duplicates
  * `playTrack`'s 404 / App Remote / restore-loop policy. Everything else (menu navigation, the
- * iPod's own settings) stays inside the ViewModel.
+ * Classic's own settings) stays inside the ViewModel.
  */
-sealed interface IPodEffect {
+sealed interface ILyraEffect {
     /**
      * → PlayerViewModel.playTrack(uri, contextUri, uris, index, startPositionMs, shuffle).
      * [shuffle] = false means "the user picked THIS song, so turn shuffle off first" — with shuffle
@@ -23,26 +23,26 @@ sealed interface IPodEffect {
         val index: Int? = null,
         val startPositionMs: Long? = null,
         val shuffle: Boolean? = false,
-    ) : IPodEffect
+    ) : ILyraEffect
 
     /** → PlayerViewModel.playFromLikedSongs(uri, shuffle) — the cached-uris path Liked Songs uses. */
-    data class PlayLikedSong(val uri: String, val shuffle: Boolean? = false) : IPodEffect
+    data class PlayLikedSong(val uri: String, val shuffle: Boolean? = false) : ILyraEffect
 
     /** → PlayerViewModel.shuffleContext(contextUri) — shuffle on, then play the context. */
-    data class ShuffleContext(val contextUri: String) : IPodEffect
+    data class ShuffleContext(val contextUri: String) : ILyraEffect
 
-    data object PlayPause : IPodEffect
-    data object Next : IPodEffect
-    data object Previous : IPodEffect
+    data object PlayPause : ILyraEffect
+    data object Next : ILyraEffect
+    data object Previous : ILyraEffect
 
     /** → PlayerStateManager.setShuffle — the Now Playing shuffle bar (clockwise = on). */
-    data class SetShuffle(val enabled: Boolean) : IPodEffect
+    data class SetShuffle(val enabled: Boolean) : ILyraEffect
 
     /** → PlayerStateManager.setRepeat("off" / "context" / "track") — the Now Playing repeat bar. */
-    data class SetRepeat(val state: String) : IPodEffect
+    data class SetRepeat(val state: String) : ILyraEffect
 
     /** → PlayerViewModel.seekTo(fraction) — committed once per scrub, never per detent. */
-    data class SeekTo(val fraction: Float) : IPodEffect
+    data class SeekTo(val fraction: Float) : ILyraEffect
 
     /**
      * → the app's ONE like path for [uri] (save / remove on the server + the liked-songs cache
@@ -53,12 +53,12 @@ sealed interface IPodEffect {
         val uri: String,
         val liked: Boolean,
         /**
-         * The track itself when the iPod has it (a liked-list pick, or the mirrored current track),
+         * The track itself when the iLyra has it (a liked-list pick, or the mirrored current track),
          * so the liked-songs cache patch can run even while the player's own currentTrack has not
          * caught up with the picked song (the optimistic window). Null → the shell resolves it.
          */
         val track: SpotifyTrack? = null,
-    ) : IPodEffect
+    ) : ILyraEffect
 
     /**
      * → the app's add-to-playlist path (POST playlists/{id}/items + the cached track-list patch +
@@ -70,13 +70,13 @@ sealed interface IPodEffect {
         val trackUri: String,
         /** The playlist's count as its row showed it — the cached-list append's completeness guard needs it. */
         val trackCount: Int? = null,
-        /** The track itself when the iPod has it (see [SetLiked.track]) — the cached row append needs the full object. */
+        /** The track itself when the iLyra has it (see [SetLiked.track]) — the cached row append needs the full object. */
         val track: SpotifyTrack? = null,
-    ) : IPodEffect
+    ) : ILyraEffect
 
     /**
      * → PlayerViewModel.setSleepTimer(minutes) — the options menu's Sleep Timer row, which cycles
      * Lyra's own steps (Off · 5 · 15 · 30 · 45 · 60, as the player's dialog offers). 0 = off. (D)
      */
-    data class SetSleepTimer(val minutes: Int) : IPodEffect
+    data class SetSleepTimer(val minutes: Int) : ILyraEffect
 }

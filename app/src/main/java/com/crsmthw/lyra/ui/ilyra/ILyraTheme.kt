@@ -1,4 +1,4 @@
-package com.crsmthw.lyra.ui.ipod
+package com.crsmthw.lyra.ui.ilyra
 
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -11,21 +11,21 @@ import com.crsmthw.lyra.R
 
 /**
  * Liberation Sans (Red Hat, SIL Open Font License 1.1) — the Helvetica-metric face standing in
- * for the Helvetica the 6th-generation iPod Classic drew its LCD with. Licence text ships in
+ * for the Helvetica the 6th-generation Classic drew its LCD with. Licence text ships in
  * `assets/fonts/LICENSE-LiberationFonts.txt`; the About credits card names it. Apply it on the
- * iPod's own `Text`s only — `LyraTypography` stays on the platform font.
+ * Classic's own `Text`s only — `LyraTypography` stays on the platform font.
  */
-val IPodFontFamily = FontFamily(
+val ILyraFontFamily = FontFamily(
     Font(R.font.liberation_sans_regular, FontWeight.Normal),
     Font(R.font.liberation_sans_bold,    FontWeight.Bold),
 )
 
 /**
- * The iPod is its own world: it ignores `MaterialTheme.colorScheme` and Lyra's light/dark theme
+ * The iLyra is its own world: it ignores `MaterialTheme.colorScheme` and Lyra's light/dark theme
  * entirely, so every colour lives here. Silver Classic body, white 320×240-style LCD with the
  * blue selection bar. Keep additions in this object rather than inline in a composable.
  */
-object IPodColors {
+object ILyraColors {
     // ── Body (silver Classic) ─────────────────────────────────────────────
     val BodyTop        = Color(0xFFE2E4E7)
     val BodyBottom     = Color(0xFFB8BCC1)
@@ -96,11 +96,11 @@ object IPodColors {
 }
 
 /** The 6th-gen Classic came in silver and black. The LCD is identical; body and wheel differ. */
-enum class IPodBodyColor { SILVER, BLACK }
+enum class ILyraBodyColor { SILVER, BLACK }
 
-/** Everything that changes between the two bodies. Provided by IPodRoot as [LocalIPodBodyPalette]. */
+/** Everything that changes between the two bodies. Provided by ILyraRoot as [LocalILyraBodyPalette]. */
 @Immutable
-data class IPodBodyPalette(
+data class ILyraBodyPalette(
     val bodyTop: Color,
     val bodyBottom: Color,
     val bodyEdge: Color,
@@ -116,23 +116,23 @@ data class IPodBodyPalette(
     val hintText: Color,
 )
 
-val SilverBody = IPodBodyPalette(
-    bodyTop      = IPodColors.BodyTop,
-    bodyBottom   = IPodColors.BodyBottom,
-    bodyEdge     = IPodColors.BodyEdge,
-    wheelTop     = IPodColors.WheelTop,
-    wheelBottom  = IPodColors.WheelBottom,
-    wheelEdge    = IPodColors.WheelEdge,
-    wheelLabel   = IPodColors.WheelLabel,
-    wheelPressed = IPodColors.WheelPressed,
-    centerTop    = IPodColors.CenterTop,
-    centerBottom = IPodColors.CenterBottom,
-    centerEdge   = IPodColors.CenterEdge,
-    hintText     = IPodColors.LandscapeHintText,
+val SilverBody = ILyraBodyPalette(
+    bodyTop      = ILyraColors.BodyTop,
+    bodyBottom   = ILyraColors.BodyBottom,
+    bodyEdge     = ILyraColors.BodyEdge,
+    wheelTop     = ILyraColors.WheelTop,
+    wheelBottom  = ILyraColors.WheelBottom,
+    wheelEdge    = ILyraColors.WheelEdge,
+    wheelLabel   = ILyraColors.WheelLabel,
+    wheelPressed = ILyraColors.WheelPressed,
+    centerTop    = ILyraColors.CenterTop,
+    centerBottom = ILyraColors.CenterBottom,
+    centerEdge   = ILyraColors.CenterEdge,
+    hintText     = ILyraColors.LandscapeHintText,
 )
 
 /** Anodised charcoal body, a near-black wheel with a faint lighter rim, white labels. */
-val BlackBody = IPodBodyPalette(
+val BlackBody = ILyraBodyPalette(
     bodyTop      = Color(0xFF383A3F),
     bodyBottom   = Color(0xFF1B1C20),
     bodyEdge     = Color(0xFF0A0B0D),
@@ -147,15 +147,15 @@ val BlackBody = IPodBodyPalette(
     hintText     = Color(0xFFA9ACB1),
 )
 
-fun IPodBodyColor.palette(): IPodBodyPalette = when (this) {
-    IPodBodyColor.SILVER -> SilverBody
-    IPodBodyColor.BLACK  -> BlackBody
+fun ILyraBodyColor.palette(): ILyraBodyPalette = when (this) {
+    ILyraBodyColor.SILVER -> SilverBody
+    ILyraBodyColor.BLACK  -> BlackBody
 }
 
-val LocalIPodBodyPalette = staticCompositionLocalOf { SilverBody }
+val LocalILyraBodyPalette = staticCompositionLocalOf { SilverBody }
 
-/** Proportions of the Classic, expressed so the body can fill any window (see IPodRoot). */
-object IPodDimens {
+/** Proportions of the Classic, expressed so the body can fill any window (see ILyraRoot). */
+object ILyraDimens {
     /** Widest the body may be relative to its height. A narrower window fills its own width. */
     const val BodyMaxAspect = 0.62f
     val BodyCornerRadius = 28.dp

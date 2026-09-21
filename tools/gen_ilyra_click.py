@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Synthesize the iPod Classic click-wheel samples: ipod_click.wav and ipod_select.wav.
+Synthesize the Classic click-wheel samples: ilyra_click.wav and ilyra_select.wav.
 
 Both are 16-bit mono 44.1 kHz.  The Classic's clicker was a piezo disc driven by a sharp pulse
 through the metal case — a very short, dry, bright tick with most energy around 1.5-3.5 kHz,
@@ -13,7 +13,7 @@ Noise amplitude reduced (click 0.25→0.15, select 0.30→0.18) to tame brightne
 
 Deterministic: numpy RNG seeded at 0, no scipy.
 
-Output: app/src/main/res/raw/ipod_click.wav, app/src/main/res/raw/ipod_select.wav
+Output: app/src/main/res/raw/ilyra_click.wav, app/src/main/res/raw/ilyra_select.wav
 """
 
 import os
@@ -87,7 +87,7 @@ def main() -> None:
     raw_dir = os.path.join(script_dir, "..", "app", "src", "main", "res", "raw")
     os.makedirs(raw_dir, exist_ok=True)
 
-    # ── ipod_click.wav — the detent tick (~15 ms) ──────────────────────
+    # ── ilyra_click.wav — the detent tick (~15 ms) ──────────────────────
     # Three decaying sinusoids in the 1.6-3.6 kHz range (was 2.8-6.5 kHz).
     # Reduced noise amplitude (0.25→0.15) to tame metallic brightness.
     click = _make_click(
@@ -100,10 +100,10 @@ def main() -> None:
         fade_out_ms=1.0,
         seed=0,
     )
-    click_path = os.path.join(raw_dir, "ipod_click.wav")
+    click_path = os.path.join(raw_dir, "ilyra_click.wav")
     write_wav(click_path, click)
 
-    # ── ipod_select.wav — the centre-button click (~28 ms) ────────────
+    # ── ilyra_select.wav — the centre-button click (~28 ms) ────────────
     # Same family, slightly lower fundamental, longer body.
     # Reduced noise amplitude (0.30→0.18) to tame brightness.
     select = _make_click(
@@ -116,11 +116,11 @@ def main() -> None:
         fade_out_ms=1.0,
         seed=0,
     )
-    select_path = os.path.join(raw_dir, "ipod_select.wav")
+    select_path = os.path.join(raw_dir, "ilyra_select.wav")
     write_wav(select_path, select)
 
     # ── Verify ─────────────────────────────────────────────────────────
-    for name, path in [("ipod_click.wav", click_path), ("ipod_select.wav", select_path)]:
+    for name, path in [("ilyra_click.wav", click_path), ("ilyra_select.wav", select_path)]:
         with wave.open(path, "rb") as wf:
             ch = wf.getnchannels()
             sw = wf.getsampwidth()

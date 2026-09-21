@@ -22,12 +22,12 @@ class SettingsRepository(private val dataStore: LyraDataStore) {
     val visualizerGainSync: Flow<Boolean>       = dataStore.visualizerGainSync
     val hapticsEnabled   : Flow<Boolean>        = dataStore.hapticsEnabled
     val forYouEnabled    : Flow<Boolean>        = dataStore.forYouEnabled
-    val ipodUnlocked     : Flow<Boolean>        = dataStore.ipodUnlocked
-    val ipodEnabled      : Flow<Boolean>        = dataStore.ipodEnabled
-    val ipodClickSounds  : Flow<Boolean>        = dataStore.ipodClickSounds
-    val ipodClickVolume  : Flow<Int>            = dataStore.ipodClickVolume
-    val ipodClickPitch   : Flow<Int>            = dataStore.ipodClickPitch
-    val ipodBodyColor    : Flow<Int>            = dataStore.ipodBodyColor
+    val ilyraUnlocked     : Flow<Boolean>        = dataStore.ilyraUnlocked
+    val ilyraEnabled      : Flow<Boolean>        = dataStore.ilyraEnabled
+    val ilyraClickSounds  : Flow<Boolean>        = dataStore.ilyraClickSounds
+    val ilyraClickVolume  : Flow<Int>            = dataStore.ilyraClickVolume
+    val ilyraClickPitch   : Flow<Int>            = dataStore.ilyraClickPitch
+    val ilyraBodyColor    : Flow<Int>            = dataStore.ilyraBodyColor
 
     suspend fun setThemeMode        (mode   : ThemeMode)      = dataStore.setThemeMode(mode)
     suspend fun setAmoledBlack      (enabled: Boolean)        = dataStore.setAmoledBlack(enabled)
@@ -44,10 +44,10 @@ class SettingsRepository(private val dataStore: LyraDataStore) {
     suspend fun setVisualizerGainSync(sync: Boolean)          = dataStore.setVisualizerGainSync(sync)
     suspend fun setHapticsEnabled   (enabled: Boolean)        = dataStore.setHapticsEnabled(enabled)
     suspend fun setForYouEnabled    (enabled: Boolean)        = dataStore.setForYouEnabled(enabled)
-    suspend fun setIpodUnlocked     (unlocked: Boolean)       = dataStore.setIpodUnlocked(unlocked)
-    suspend fun setIpodEnabled      (enabled: Boolean)        = dataStore.setIpodEnabled(enabled)
-    suspend fun setIpodClickSounds  (enabled: Boolean)        = dataStore.setIpodClickSounds(enabled)
-    suspend fun setIpodClickVolume  (percent: Int)            = dataStore.setIpodClickVolume(percent)
-    suspend fun setIpodClickPitch   (ordinal: Int)            = dataStore.setIpodClickPitch(ordinal)
-    suspend fun setIpodBodyColor    (ordinal: Int)            = dataStore.setIpodBodyColor(ordinal)
+    suspend fun setIlyraUnlocked     (unlocked: Boolean)       = dataStore.setIlyraUnlocked(unlocked)
+    suspend fun setIlyraEnabled      (enabled: Boolean)        = dataStore.setIlyraEnabled(enabled)
+    suspend fun setIlyraClickSounds  (enabled: Boolean)        = dataStore.setIlyraClickSounds(enabled)
+    suspend fun setIlyraClickVolume  (percent: Int)            = dataStore.setIlyraClickVolume(percent)
+    suspend fun setIlyraClickPitch   (ordinal: Int)            = dataStore.setIlyraClickPitch(ordinal)
+    suspend fun setIlyraBodyColor    (ordinal: Int)            = dataStore.setIlyraBodyColor(ordinal)
 }

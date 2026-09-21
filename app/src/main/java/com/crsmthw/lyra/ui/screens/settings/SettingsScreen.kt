@@ -97,8 +97,8 @@ fun SettingsScreen(
     val visualizerGainSync  by viewModel.visualizerGainSync.collectAsStateWithLifecycle()
     val hapticsEnabled      by viewModel.hapticsEnabled.collectAsStateWithLifecycle()
     val forYouEnabled       by viewModel.forYouEnabled.collectAsStateWithLifecycle()
-    val ipodUnlocked        by viewModel.ipodUnlocked.collectAsStateWithLifecycle()
-    val ipodEnabled         by viewModel.ipodEnabled.collectAsStateWithLifecycle()
+    val ilyraUnlocked        by viewModel.ilyraUnlocked.collectAsStateWithLifecycle()
+    val ilyraEnabled         by viewModel.ilyraEnabled.collectAsStateWithLifecycle()
     val haptics              = LocalHapticFeedback.current
     val imageCacheBytes        by viewModel.imageCacheBytes.collectAsStateWithLifecycle()
     val libraryCacheBytes      by viewModel.libraryCacheBytes.collectAsStateWithLifecycle()
@@ -326,18 +326,18 @@ fun SettingsScreen(
                     }
                 }
 
-                // iPod mode — appears after unlocking via 5-tap on the version line
+                // iLyra mode — appears after unlocking via 5-tap on the version line
                 AnimatedVisibility(
-                    visible = ipodUnlocked,
+                    visible = ilyraUnlocked,
                     enter   = fadeIn(screenTransitionSpec()) + expandVertically(screenTransitionSpec<IntSize>()),
                     exit    = shrinkVertically(screenTransitionSpec<IntSize>()) + fadeOut(screenTransitionSpec()),
                 ) {
                     SettingsToggleItem(
                         icon            = Icons.Default.Album,
-                        title           = stringResource(R.string.settings_ipod),
-                        subtitle        = stringResource(R.string.settings_ipod_desc),
-                        checked         = ipodEnabled,
-                        onCheckedChange = viewModel::setIpodEnabled,
+                        title           = stringResource(R.string.settings_ilyra),
+                        subtitle        = stringResource(R.string.settings_ilyra_desc),
+                        checked         = ilyraEnabled,
+                        onCheckedChange = viewModel::setIlyraEnabled,
                     )
                 }
 
@@ -414,10 +414,10 @@ fun SettingsScreen(
 
                 // ── About ─────────────────────────────────────────────────────────────
                 AboutSection(
-                    ipodUnlocked = ipodUnlocked,
-                    onIpodUnlocked = {
+                    ilyraUnlocked = ilyraUnlocked,
+                    onIlyraUnlocked = {
                         haptics.confirm()
-                        viewModel.unlockIpod()
+                        viewModel.unlockIlyra()
                     },
                 )
 
@@ -845,8 +845,8 @@ private fun GainSliderRow(prefix: String?, offset: Int, onOffset: (Int) -> Unit)
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun AboutSection(
-    ipodUnlocked: Boolean,
-    onIpodUnlocked: () -> Unit,
+    ilyraUnlocked: Boolean,
+    onIlyraUnlocked: () -> Unit,
 ) {
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
@@ -890,7 +890,7 @@ private fun AboutSection(
             textAlign = TextAlign.Center,
         )
 
-        // iPod mode unlock: 5 taps within 2 s each on the version line. Once unlocked, taps
+        // iLyra mode unlock: 5 taps within 2 s each on the version line. Once unlocked, taps
         // are inert (no haptic) — the toggle in the Lyra section is the activation path.
         var tapCount by remember { mutableIntStateOf(0) }
         var lastTapMs by remember { mutableLongStateOf(0L) }
@@ -903,14 +903,14 @@ private fun AboutSection(
                 interactionSource = remember { MutableInteractionSource() },
                 indication        = null,
                 onClick           = {
-                    if (ipodUnlocked) return@combinedClickable
+                    if (ilyraUnlocked) return@combinedClickable
                     val now = System.currentTimeMillis()
                     tapCount = if (now - lastTapMs <= 2_000L) tapCount + 1 else 1
                     lastTapMs = now
                     if (tapCount >= 5) {
                         tapCount = 0
-                        onIpodUnlocked()
-                        Toast.makeText(context, context.getString(R.string.settings_ipod_unlocked), Toast.LENGTH_SHORT).show()
+                        onIlyraUnlocked()
+                        Toast.makeText(context, context.getString(R.string.settings_ilyra_unlocked), Toast.LENGTH_SHORT).show()
                     }
                 },
             ),

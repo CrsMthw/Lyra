@@ -103,14 +103,14 @@ class AppContainer(context: Context) {
     // request carried the user's access token to the CDN, could block on a token refresh inside
     // TokenManager's synchronized block, and shared the API client's dispatcher and connection
     // pool with the player poll. A dedicated client keeps the token where it belongs and isolates
-    // a burst of art fetches (the iPod CoverFlow prefetch) from API latency (2026-09-20).
+    // a burst of art fetches (the iLyra CoverFlow prefetch) from API latency (2026-09-20).
     private val imageOkHttpClient = OkHttpClient.Builder()
         .connectTimeout(15.seconds)
         .readTimeout   (15.seconds)
         .build()
 
     // ── Image loader (permanent disk cache in filesDir) ──────────────────────
-    // 500 MB (Cris, 2026-09-21; was 150): the iPod's Cover Flow prefetch warms every liked song's
+    // 500 MB (Cris, 2026-09-21; was 150): the Classic's Cover Flow prefetch warms every liked song's
     // 640px cover — on the order of 2000 distinct covers, 100+ MB — and at 150 MB that set would
     // have churned the cache and evicted the rest of the app's art to fit.
     val imageLoader: ImageLoader = ImageLoader.Builder(context)
@@ -142,7 +142,7 @@ class AppContainer(context: Context) {
     // ── App-scoped player state ───────────────────────────────────────────────
     val playerStateManager = PlayerStateManager(context, spotifyRepository, remoteManager)
 
-    // ── Liked-songs indexer (shared by the foreground service and the iPod) ──
+    // ── Liked-songs indexer (shared by the foreground service and the iLyra) ──
     val likedSongsIndexer = LikedSongsIndexer(libraryCache, spotifyRepository, playerStateManager)
 
     // ── Audio visualizer ─────────────────────────────────────────────────────
