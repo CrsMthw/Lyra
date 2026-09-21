@@ -584,7 +584,12 @@ class LibraryViewModel(
                 onFailure = { },
             )
 
-            val playlistsResult = repository.getUserPlaylists()
+            // Paged sweep of me/playlists — rows and count from the SAME sweep result.
+            // First-page failure keeps today's behaviour; a later-page failure returns a prefix
+            // with complete = false: show it only into an EMPTY list, never over a cached full one,
+            // and never persist it (saveLibraryMeta would overwrite the full cached list).
+            val playlistsResult = repository.getAllUserPlaylists()
+            var playlistsComplete = true
             if (playlistsResult.isFailure) {
                 val e = playlistsResult.exceptionOrNull()
                 if (!e.isTransientNetworkError()) {
@@ -597,13 +602,19 @@ class LibraryViewModel(
                 }
                 return@launch
             }
-            // ONE local, so the rendered rows and the count come from the SAME response — `items`
-            // is the filtered page, `total` is every playlist the endpoint knows about.
-            val playlistsPage = playlistsResult.getOrThrow()
-            _uiState.update { it.copy(
-                playlists     = playlistsPage.items,
-                playlistCount = playlistsPage.total,
-            ) }
+            val sweep = playlistsResult.getOrThrow()
+            playlistsComplete = sweep.complete
+            _uiState.update { s ->
+                if (sweep.complete || (sweep.items.isNotEmpty() && s.playlists.isEmpty()))
+                    s.copy(
+                        playlists     = sweep.items,
+                        playlistCount = sweep.total,
+                        refreshError  = if (!sweep.complete) "Some playlists could not be loaded" else s.refreshError,
+                    )
+                else if (!sweep.complete)
+                    s.copy(refreshError = "Some playlists could not be loaded")
+                else s
+            }
 
             repository.getLikedSongs(limit = 1).fold(
                 onSuccess = { resp -> _uiState.update { it.copy(likedSongCount = resp.total) } },
@@ -617,12 +628,16 @@ class LibraryViewModel(
             // Persist refreshed data. ONE patching write, never a read-then-replace: the track
             // lists, the For-you band and the collection lists are left on disk untouched, so a
             // page append or a surgical add/remove landing mid-refresh can't be reverted under us.
-            val s = _uiState.value
-            withContext(Dispatchers.IO) {
-                cache.saveLibraryMeta(s.playlists, s.likedSongCount, s.user)
+            // Skip on an incomplete sweep — never persist a prefix over a full cached list.
+            if (playlistsComplete) {
+                val s = _uiState.value
+                withContext(Dispatchers.IO) {
+                    cache.saveLibraryMeta(s.playlists, s.likedSongCount, s.user)
+                }
             }
             // Generate mosaics for any new playlists that now have cached track lists
-            generateMissingMosaicsAsync(s.playlists, cache.load()?.trackLists ?: emptyMap())
+            val ms = _uiState.value
+            generateMissingMosaicsAsync(ms.playlists, cache.load()?.trackLists ?: emptyMap())
         }
     }
 
@@ -892,7 +907,9 @@ class LibraryViewModel(
                 onFailure = { },
             )
 
-            val playlistsResult = repository.getUserPlaylists()
+            // Same paged sweep as loadLibrary — see the notes there.
+            val playlistsResult = repository.getAllUserPlaylists()
+            var playlistsComplete = true
             if (playlistsResult.isFailure) {
                 val e = playlistsResult.exceptionOrNull()
                 if (!e.isTransientNetworkError()) {
@@ -901,12 +918,19 @@ class LibraryViewModel(
                 _uiState.update { it.copy(isLibraryRefreshing = false) }
                 return@launch
             }
-            // Same one-local rule as loadLibrary — rows and count from one response.
-            val playlistsPage = playlistsResult.getOrThrow()
-            _uiState.update { it.copy(
-                playlists     = playlistsPage.items,
-                playlistCount = playlistsPage.total,
-            ) }
+            val sweep = playlistsResult.getOrThrow()
+            playlistsComplete = sweep.complete
+            _uiState.update { s ->
+                if (sweep.complete || (sweep.items.isNotEmpty() && s.playlists.isEmpty()))
+                    s.copy(
+                        playlists     = sweep.items,
+                        playlistCount = sweep.total,
+                        refreshError  = if (!sweep.complete) "Some playlists could not be loaded" else s.refreshError,
+                    )
+                else if (!sweep.complete)
+                    s.copy(refreshError = "Some playlists could not be loaded")
+                else s
+            }
 
             repository.getLikedSongs(limit = 1).fold(
                 onSuccess = { resp -> _uiState.update { it.copy(likedSongCount = resp.total) } },
@@ -924,11 +948,15 @@ class LibraryViewModel(
             if (_uiState.value.libraryFilter != LibraryFilter.PLAYLISTS) loadCollections()
 
             // Same patching write as loadLibrary — see the note there.
-            val s = _uiState.value
-            withContext(Dispatchers.IO) {
-                cache.saveLibraryMeta(s.playlists, s.likedSongCount, s.user)
+            // Skip on an incomplete sweep — never persist a prefix over a full cached list.
+            if (playlistsComplete) {
+                val s = _uiState.value
+                withContext(Dispatchers.IO) {
+                    cache.saveLibraryMeta(s.playlists, s.likedSongCount, s.user)
+                }
             }
-            generateMissingMosaicsAsync(s.playlists, cache.load()?.trackLists ?: emptyMap())
+            val ms = _uiState.value
+            generateMissingMosaicsAsync(ms.playlists, cache.load()?.trackLists ?: emptyMap())
         }
     }
 
