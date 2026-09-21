@@ -30,6 +30,7 @@ baselineprofile      = "1.5.0"
 profileinstaller     = "1.4.1"
 uiautomator          = "2.4.0"
 testExtJunit         = "1.3.0"
+reorderable          = "3.1.0"
 
 [libraries]
 androidx-core-ktx                    = { group = "androidx.core",              name = "core-ktx",                    version.ref = "coreKtx" }
@@ -71,6 +72,7 @@ androidx-benchmark-macro-junit4 = { group = "androidx.benchmark", name = "benchm
 androidx-profileinstaller       = { group = "androidx.profileinstaller", name = "profileinstaller", version.ref = "profileinstaller" }
 androidx-uiautomator            = { group = "androidx.test.uiautomator", name = "uiautomator", version.ref = "uiautomator" }
 androidx-test-ext-junit         = { group = "androidx.test.ext", name = "junit", version.ref = "testExtJunit" }
+reorderable                          = { group = "sh.calvin.reorderable",      name = "reorderable",                 version.ref = "reorderable" }
 
 [plugins]
 android-application = { id = "com.android.application",             version.ref = "agp" }

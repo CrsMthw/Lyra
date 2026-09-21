@@ -71,6 +71,7 @@ internal fun TwoPaneLayout(
     // is up, and registration order can't guarantee that (see LocalPopOutPanelOpen's KDoc).
     val panelOpen = LocalPopOutPanelOpen.current
     BackHandler(enabled = state.selectionMode && !panelOpen) { viewModel.exitSelectionMode() }
+    BackHandler(enabled = state.reorderMode && !panelOpen) { viewModel.exitReorderMode() }
 
     // Auto-select Liked Songs on first load so right pane is never blank
     LaunchedEffect(state.isLoading) {

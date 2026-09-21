@@ -192,8 +192,9 @@ internal fun SinglePaneLayout(
     // with TwoPaneLayout (see LocalPopOutPanelOpen's KDoc).
     val panelOpen = LocalPopOutPanelOpen.current
     BackHandler(enabled = state.selectionMode && !panelOpen) { viewModel.exitSelectionMode() }
+    BackHandler(enabled = state.reorderMode && !panelOpen) { viewModel.exitReorderMode() }
 
-    PredictiveBackHandler(enabled = isShowingDetail && !state.selectionMode) { events ->
+    PredictiveBackHandler(enabled = isShowingDetail && !state.selectionMode && !state.reorderMode) { events ->
         backProgress = 0f
         backPhase    = BackPhase.Seeking   // set BEFORE collecting, so the first progress frame
         try {                              // can't race an animateTo against the seek

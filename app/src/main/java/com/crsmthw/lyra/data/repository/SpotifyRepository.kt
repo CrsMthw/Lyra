@@ -224,6 +224,31 @@ class SpotifyRepository(
         api.unfollowPlaylist(playlistId)
     }
 
+    /**
+     * Reorders a single item in a playlist: moves the item at [rangeStart] to [insertBefore].
+     * Returns the new snapshot id on success. [snapshotId] should be the latest known.
+     */
+    suspend fun reorderPlaylistItems(
+        playlistId  : String,
+        rangeStart  : Int,
+        insertBefore: Int,
+        snapshotId  : String? = null,
+    ): Result<SnapshotIdResponse> = safeCall {
+        api.reorderPlaylistItems(playlistId, ReorderItemsRequest(rangeStart, insertBefore, snapshotId = snapshotId))
+    }
+
+    /**
+     * Updates an owned playlist's name and/or description. Only the fields that are non-null are
+     * sent (Gson omits nulls by default). 200 with an empty body on success.
+     */
+    suspend fun updatePlaylistDetails(
+        playlistId : String,
+        name       : String? = null,
+        description: String? = null,
+    ): Result<Unit> = safeCall {
+        api.updatePlaylistDetails(playlistId, UpdatePlaylistDetailsRequest(name, description))
+    }
+
     suspend fun removeTrackFromPlaylist(playlistId: String, trackUri: String): Result<Unit> = safeCall {
         api.removeItemsFromPlaylist(playlistId, RemoveItemsRequest(listOf(RemoveItemEntry(trackUri))))
     }

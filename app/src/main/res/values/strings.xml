@@ -395,4 +395,19 @@
     <string name="library_rate_limit_reopen">Wait, then reopen.</string>
     <string name="library_partial_load_error">Some playlists could not be loaded</string>
     <!-- (end hygiene) -->
+    <!-- Playlist editing (lane: playlist-edit) -->
+    <string name="edit_playlist_details">Edit details</string>
+    <string name="edit_playlist_title">Edit playlist details</string>
+    <string name="edit_playlist_name_label">Name</string>
+    <string name="edit_playlist_description_label">Description (optional)</string>
+    <string name="edit_playlist_save">Save</string>
+    <string name="edit_playlist_error">Couldn\'t update playlist details</string>
+    <string name="reorder_songs">Reorder songs</string>
+    <string name="reorder_songs_title">Reorder songs</string>
+    <string name="reorder_done">Done</string>
+    <string name="reorder_loading">Loading all songs…</string>
+    <string name="reorder_error">Couldn\'t load all songs for reordering</string>
+    <string name="reorder_failed">Couldn\'t reorder songs</string>
+    <string name="cd_drag_handle">Drag to reorder</string>
+    <!-- (end playlist-edit) -->
 </resources>

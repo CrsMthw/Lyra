@@ -7,6 +7,7 @@ import com.crsmthw.lyra.data.local.CachedTrackList
 import com.crsmthw.lyra.data.local.ForYouCacheData
 import com.crsmthw.lyra.data.local.JumpBackInItem
 import com.crsmthw.lyra.data.local.LibraryCache
+import com.crsmthw.lyra.data.local.ReorderCalculator
 import com.crsmthw.lyra.data.player.PlayerStateManager
 import com.crsmthw.lyra.data.remote.SpotifyRemoteManager
 import com.crsmthw.lyra.data.remote.model.*
@@ -84,6 +85,13 @@ data class LibraryUiState(
     val selectedUris          : Set<String>            = emptySet(),
     val isRemovingSelection   : Boolean                = false,  // the batch DELETE is in flight
     val removeResult          : RemoveSelectionResult? = null,   // one-shot; the screen consumes it
+    // ── Reorder mode (owned playlists only) ──
+    val reorderMode           : Boolean                = false,
+    val isLoadingReorder      : Boolean                = false,  // full list fetch for reorder
+    val reorderResult         : ReorderResult?         = null,   // one-shot; the screen consumes it
+    // ── Edit details ──
+    val isUpdatingDetails     : Boolean                = false,
+    val updateDetailsError    : String?                = null,
 )
 
 /**
@@ -95,6 +103,15 @@ data class LibraryUiState(
 sealed interface RemoveSelectionResult {
     data object Success : RemoveSelectionResult
     data class  Failure(val message: String?) : RemoveSelectionResult
+}
+
+/**
+ * Outcome of a single reorder PUT, consumed once by `LibraryScreen` — it fires the confirm/reject
+ * haptic. Same one-shot pattern as [RemoveSelectionResult].
+ */
+sealed interface ReorderResult {
+    data object Success : ReorderResult
+    data class  Failure(val message: String?) : ReorderResult
 }
 
 /**
@@ -116,17 +133,22 @@ val LibraryUiState.detailKey: String?
     get() = if (isShowingDetail) (currentPlaylist?.id ?: "liked") else null
 
 /**
- * Drops any in-progress multi-select. The mode belongs to ONE open playlist, so every pane change
- * has to clear it — opening another playlist or Liked Songs, backing out to the browser, or the
- * playlist being deleted underneath it. Also a pull-to-refresh, which isn't a pane change but
- * replaces the track list wholesale back to page 0: a selection that survived it could point at
- * rows no longer on screen, and the button it feeds is a DELETE. Applied on top of the replacing
- * `copy(...)` so the clear lands in the SAME emission as the change (never as an extra one
- * mid-transition).
+ * Drops any in-progress multi-select AND any in-progress reorder. Both modes belong to ONE open
+ * playlist, so every pane change has to clear them — opening another playlist or Liked Songs,
+ * backing out to the browser, or the playlist being deleted underneath it. Also a pull-to-refresh,
+ * which isn't a pane change but replaces the track list wholesale back to page 0: a selection that
+ * survived it could point at rows no longer on screen, and the button it feeds is a DELETE.
+ * Applied on top of the replacing `copy(...)` so the clear lands in the SAME emission as the change
+ * (never as an extra one mid-transition).
  */
-private fun LibraryUiState.selectionCleared() =
-    if (!selectionMode && selectedUris.isEmpty()) this
-    else copy(selectionMode = false, selectedUris = emptySet())
+private fun LibraryUiState.modesCleared() =
+    if (!selectionMode && selectedUris.isEmpty() && !reorderMode && !isLoadingReorder) this
+    else copy(
+        selectionMode    = false,
+        selectedUris     = emptySet(),
+        reorderMode      = false,
+        isLoadingReorder = false,
+    )
 
 /**
  * Commits rows that are gone from the open playlist server-side: drops them from [currentTracks],
@@ -222,7 +244,7 @@ class LibraryViewModel(
 
     /** Leaves selection mode without removing anything (Cancel, or the back gesture). */
     fun exitSelectionMode() {
-        _uiState.update { it.selectionCleared() }
+        _uiState.update { it.modesCleared() }
     }
 
     /**
@@ -251,7 +273,7 @@ class LibraryViewModel(
                     _uiState.update { st ->
                         if (st.currentPlaylist?.id != playlist.id)
                             return@update st.copy(isRemovingSelection = false)
-                        st.tracksRemoved(uris, RemoveSelectionResult.Success).selectionCleared()
+                        st.tracksRemoved(uris, RemoveSelectionResult.Success).modesCleared()
                     }
                 },
                 onFailure = { e ->
@@ -283,6 +305,220 @@ class LibraryViewModel(
         _uiState.update { if (it.removeResult == null) it else it.copy(removeResult = null) }
     }
 
+    // ── Reorder mode (owned playlists) ──────────────────────────────────────────────────────────
+    // One mode at a time: entering reorder exits selection and vice versa. The calculator holds the
+    // raw list and translates row-index moves into the API's positions.
+
+    /**
+     * The [ReorderCalculator] for the current reorder session, built by [enterReorderMode]'s
+     * full-list sweep. Null when not reordering. Accessed only from the main thread.
+     */
+    private var reorderCalc: ReorderCalculator? = null
+
+    /**
+     * The latest server-confirmed snapshot id for the current reorder session. Each successful
+     * PUT advances it; the initial value comes from the first page's response.
+     */
+    private var reorderSnapshotId: String? = null
+
+    /**
+     * The last server-confirmed order of visible tracks, for reverting on failure.
+     */
+    private var reorderConfirmedTracks: List<SpotifyTrack>? = null
+
+    /** Serialises reorder PUTs — one at a time, queued in order. */
+    private var reorderJob: Job? = null
+
+    /** Enters reorder mode for the open playlist. Fetches the FULL list from the API. */
+    fun enterReorderMode() {
+        val s = _uiState.value
+        val playlist = s.currentPlaylist ?: return
+        if (s.reorderMode || s.isLoadingReorder) return
+        // Mutually exclusive with selection mode.
+        _uiState.update { it.copy(
+            selectionMode    = false,
+            selectedUris     = emptySet(),
+            isLoadingReorder = true,
+            reorderResult    = null,
+        ) }
+        reorderJob?.cancel()
+        reorderJob = null
+        reorderCalc = null
+        reorderSnapshotId = null
+        reorderConfirmedTracks = null
+        viewModelScope.launch {
+            val rawPages = mutableListOf<List<PlaylistTrack?>>()
+            var offset = 0
+            var latestSnapshotId: String? = null
+            while (true) {
+                val resp = repository.getPlaylistTracks(playlist.id, limit = 50, offset = offset)
+                    .getOrNull()
+                if (resp == null || _uiState.value.currentPlaylist?.id != playlist.id) {
+                    // Fetch failed or a different playlist was opened — abort.
+                    _uiState.update { it.copy(isLoadingReorder = false, refreshError = resp?.let { null } ?: _uiState.value.refreshError) }
+                    if (resp == null) _uiState.update { it.copy(refreshError = "Couldn't load all songs for reordering") }
+                    return@launch
+                }
+                if (latestSnapshotId == null) latestSnapshotId = resp.rawItems?.firstOrNull()?.let { playlist.snapshotId }
+                rawPages += resp.rawItems.orEmpty()
+                offset += resp.rawCount
+                if (resp.rawCount == 0 || resp.next == null) break
+            }
+            if (_uiState.value.currentPlaylist?.id != playlist.id) return@launch
+            val calc = ReorderCalculator.fromRawPages(rawPages)
+            reorderCalc = calc
+            reorderSnapshotId = playlist.snapshotId
+            reorderConfirmedTracks = calc.confirmedTracks()
+            _uiState.update { it.copy(
+                isLoadingReorder     = false,
+                reorderMode          = true,
+                currentTracks        = calc.confirmedTracks(),
+                playlistTracksOffset = calc.totalRawSlots,
+                playlistTracksTotal  = calc.totalRawSlots,
+            ) }
+        }
+    }
+
+    /** Exits reorder mode and persists the confirmed order to the cache. */
+    fun exitReorderMode() {
+        val calc   = reorderCalc ?: run {
+            _uiState.update { it.copy(reorderMode = false, isLoadingReorder = false) }
+            return
+        }
+        val s = _uiState.value
+        val playlist = s.currentPlaylist
+        reorderJob?.cancel()
+        reorderJob = null
+        reorderCalc = null
+        val tracks   = reorderConfirmedTracks ?: calc.confirmedTracks()
+        val snapshot = reorderSnapshotId
+        reorderSnapshotId = null
+        reorderConfirmedTracks = null
+        _uiState.update { it.copy(
+            reorderMode  = false,
+            currentTracks = tracks,
+        ) }
+        // Persist the confirmed order to the cache.
+        if (playlist != null && snapshot != null) {
+            viewModelScope.launch(Dispatchers.IO) {
+                cache.replacePlaylistTrackOrder(playlist.id, tracks, snapshot, calc.totalRawSlots)
+            }
+        }
+    }
+
+    /**
+     * Called by the drag-and-drop callback when a row is moved. Applies the move to the UI
+     * immediately (optimistic) and queues the API PUT. Moves are serialised: one in flight at a
+     * time, each using the snapshot_id the previous one returned. On ANY failure the list reverts
+     * to the last server-confirmed order and the mode is exited.
+     */
+    fun reorderTrack(fromIndex: Int, toIndex: Int) {
+        val calc = reorderCalc ?: return
+        val params = calc.applyMove(fromIndex, toIndex) ?: return
+        // Optimistic UI update.
+        _uiState.update { it.copy(currentTracks = calc.visibleTracks.toList()) }
+        // Queue the PUT.
+        val prevJob = reorderJob
+        val playlist = _uiState.value.currentPlaylist ?: return
+        reorderJob = viewModelScope.launch {
+            prevJob?.join()  // serialise
+            if (!_uiState.value.reorderMode) return@launch  // mode was exited while waiting
+            val snapshot = reorderSnapshotId
+            repository.reorderPlaylistItems(
+                playlistId   = playlist.id,
+                rangeStart   = params.rangeStart,
+                insertBefore = params.insertBefore,
+                snapshotId   = snapshot,
+            ).fold(
+                onSuccess = { resp ->
+                    resp.snapshotId?.let { reorderSnapshotId = it }
+                    reorderConfirmedTracks = calc.confirmedTracks()
+                    _uiState.update { it.copy(reorderResult = ReorderResult.Success) }
+                },
+                onFailure = { e ->
+                    // Revert to the last server-confirmed order and exit the mode.
+                    val confirmed = reorderConfirmedTracks
+                    reorderCalc = null
+                    reorderJob?.cancel()
+                    reorderJob = null
+                    _uiState.update { st ->
+                        st.copy(
+                            reorderMode   = false,
+                            currentTracks = confirmed ?: st.currentTracks,
+                            reorderResult = ReorderResult.Failure(e.message),
+                        )
+                    }
+                    // Persist the reverted order.
+                    val snap = reorderSnapshotId
+                    reorderSnapshotId = null
+                    reorderConfirmedTracks = null
+                    if (confirmed != null && snap != null) {
+                        withContext(Dispatchers.IO) {
+                            cache.replacePlaylistTrackOrder(playlist.id, confirmed, snap, calc.totalRawSlots)
+                        }
+                    }
+                },
+            )
+        }
+    }
+
+    /** Consumes [LibraryUiState.reorderResult] once the screen has reported it. */
+    fun clearReorderResult() {
+        _uiState.update { if (it.reorderResult == null) it else it.copy(reorderResult = null) }
+    }
+
+    // ── Edit playlist details ───────────────────────────────────────────────────────────────────
+
+    /**
+     * Updates the open playlist's name and/or description. On success: patches the hero title,
+     * the browser card, and the cache in one pass. On failure: keeps the dialog open with an error.
+     */
+    fun updatePlaylistDetails(name: String?, description: String?) {
+        val playlist = _uiState.value.currentPlaylist ?: return
+        if (_uiState.value.isUpdatingDetails) return
+        _uiState.update { it.copy(isUpdatingDetails = true, updateDetailsError = null) }
+        viewModelScope.launch {
+            repository.updatePlaylistDetails(
+                playlistId  = playlist.id,
+                name        = name,
+                description = description,
+            ).fold(
+                onSuccess = {
+                    val newName = name ?: playlist.name
+                    val newDesc = description ?: playlist.description
+                    // ONE state update writing all sinks.
+                    _uiState.update { s ->
+                        val updatedPlaylist = s.currentPlaylist?.copy(
+                            name        = newName,
+                            description = newDesc,
+                        )
+                        s.copy(
+                            isUpdatingDetails = false,
+                            currentPlaylist   = updatedPlaylist ?: s.currentPlaylist,
+                            playlists         = s.playlists.map {
+                                if (it.id == playlist.id) it.copy(name = newName, description = newDesc) else it
+                            },
+                        )
+                    }
+                    // Update the cache.
+                    withContext(Dispatchers.IO) {
+                        cache.updatePlaylistDetails(playlist.id, name, description)
+                    }
+                },
+                onFailure = { e ->
+                    _uiState.update { it.copy(
+                        isUpdatingDetails  = false,
+                        updateDetailsError = e.message,
+                    ) }
+                },
+            )
+        }
+    }
+
+    fun clearUpdateDetailsError() {
+        _uiState.update { if (it.updateDetailsError == null) it else it.copy(updateDetailsError = null) }
+    }
+
     /**
      * Deletes an owned playlist (Spotify unfollow). On success removes it from the in-memory list
      * and cache, and closes the detail view if it was the one open. Caller guards that the playlist
@@ -305,7 +541,7 @@ class LibraryViewModel(
                             currentTracks   = if (wasOpen) emptyList() else s.currentTracks,
                             refreshError    = null,
                             refreshPartial  = false,
-                        ).let { if (wasOpen) it.selectionCleared() else it }
+                        ).let { if (wasOpen) it.modesCleared() else it }
                     }
                 },
                 onFailure = { e -> _uiState.update { it.copy(refreshError = e.message) } },
@@ -468,6 +704,16 @@ class LibraryViewModel(
         viewModelScope.launch {
             cache.trackListChanges.collect { change ->
                 if (_uiState.value.currentPlaylist?.id != change.playlistId) return@collect
+                // An external mutation while reordering: the raw-position map is stale, so exit
+                // the mode cleanly (same reasoning as pull-to-refresh for selection mode).
+                if (_uiState.value.reorderMode || _uiState.value.isLoadingReorder) {
+                    reorderCalc = null
+                    reorderJob?.cancel()
+                    reorderJob = null
+                    reorderSnapshotId = null
+                    reorderConfirmedTracks = null
+                    _uiState.update { it.copy(reorderMode = false, isLoadingReorder = false) }
+                }
                 _uiState.update { s ->
                     if (s.currentPlaylist?.id != change.playlistId) return@update s
                     // Move the counters by the rows that ACTUALLY left or joined THIS list — the
@@ -1015,7 +1261,7 @@ class LibraryViewModel(
                     playlistTracksOffset = cached.rawOffset ?: cached.tracks.size,
                     playlistTracksTotal  = maxOf(playlist.trackCount, cached.tracks.size),
                     error                = null,
-                ).selectionCleared() }
+                ).modesCleared() }
                 // Legacy entry, written before the cache recorded a raw offset: the boundary above is
                 // the old guess, so the next page needs the one-page de-dupe and re-anchor — see
                 // [untrustedOffsetFor].
@@ -1045,7 +1291,7 @@ class LibraryViewModel(
                 playlistTracksOffset = 0,
                 playlistTracksTotal  = playlist.trackCount,   // metadata total; refined from the response
                 error                = null,
-            ).selectionCleared() }
+            ).modesCleared() }
             repository.getPlaylistTracks(playlist.id).fold(
                 onSuccess = { resp ->
                     if (_uiState.value.currentPlaylist?.id != playlist.id) return@fold
@@ -1092,7 +1338,7 @@ class LibraryViewModel(
             likedSongsOffset    = 0,
             likedSongsTotal     = 0,
             error               = null,
-        ).selectionCleared() }
+        ).modesCleared() }
     }
 
     fun playPlaylist(uri: String) {
@@ -1149,7 +1395,7 @@ class LibraryViewModel(
                     likedSongsTotal     = cachedCount,
                     isLoadingMoreTracks = false,
                     error               = null,
-                ).selectionCleared() }
+                ).modesCleared() }
                 if (cachedTracks.size != cached.tracks.size) {
                     withContext(Dispatchers.IO) {
                         cache.saveTrackList(LibraryCache.LIKED_SONGS_KEY, cachedCount.toString(), cachedTracks)
@@ -1203,7 +1449,7 @@ class LibraryViewModel(
                 likedSongsTotal     = 0,
                 isLoadingMoreTracks = false,
                 error               = null,
-            ).selectionCleared() }
+            ).modesCleared() }
             fetchAndReplaceLikedSongs()
         }
     }
@@ -1374,7 +1620,7 @@ class LibraryViewModel(
                 repository.getPlaylistTracks(playlist.id).fold(
                     onSuccess = { resp ->
                         val tracks = (resp.items ?: emptyList()).mapNotNull { it.resolvedTrack }.filter { it.isPlayable != false }
-                        // selectionCleared() in the same emission: this replaces the list wholesale
+                        // modesCleared() in the same emission: this replaces the list wholesale
                         // back to page 0, so a selection made past page 0 would survive with no
                         // checked row on screen while the pill still counted it — and the button it
                         // feeds is a DELETE. The gesture is gated out of selection mode in
@@ -1385,7 +1631,7 @@ class LibraryViewModel(
                             currentTracks        = tracks,
                             playlistTracksOffset = resp.rawCount,   // reset paging to page 0
                             playlistTracksTotal  = resp.total,
-                        ).selectionCleared() }
+                        ).modesCleared() }
                         // Page 0 is fresh from the server, so the post-mutation stale-page window is
                         // over for this playlist — stop de-duping its pages (see dedupePagesFor).
                         dedupePagesFor -= playlist.id
