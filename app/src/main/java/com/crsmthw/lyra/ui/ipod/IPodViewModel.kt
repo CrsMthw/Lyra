@@ -1155,6 +1155,8 @@ class IPodViewModel(
                     // Cache returned a possibly-truncated prefix — sweep for the full set.
                     if (result.fromCache) {
                         val swept = library.sweepOwnedPlaylists(userId) ?: return@launch
+                        // A mid-sweep failure means the cached rows on screen are the better data.
+                        if (!swept.complete) return@launch
                         val sweptItems = playlistRows(swept.playlists)
                         retopItemsPreservingHighlight(IPodScreen.Playlists, sweptItems)
                     }
@@ -1563,6 +1565,8 @@ class IPodViewModel(
                     // Cache returned a possibly-truncated prefix — sweep for the full set.
                     if (result.fromCache) {
                         val swept = library.sweepOwnedPlaylists(userId) ?: return@launch
+                        // A mid-sweep failure means the cached rows on screen are the better data.
+                        if (!swept.complete) return@launch
                         val sweptItems = playlistRows(swept.playlists, hasSubmenu = false)
                         retopItemsPreservingHighlight(screen, sweptItems)
                     }

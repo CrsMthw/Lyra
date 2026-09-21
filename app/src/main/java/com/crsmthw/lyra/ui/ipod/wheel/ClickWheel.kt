@@ -475,7 +475,7 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.wheelGes
                 // expires with no event the member throws PointerEventTimeoutCancellationException,
                 // which withTimeoutOrNull swallows and returns null.
                 val remainingMs = if (longPressArmed && !longPressFired)
-                    (LONG_PRESS_MS - (android.os.SystemClock.uptimeMillis() - downTimeMs))
+                    (LONG_PRESS_MS - (SystemClock.uptimeMillis() - downTimeMs))
                         .coerceAtLeast(0L)
                 else
                     Long.MAX_VALUE  // effectively infinite — no timeout overhead on the ring path

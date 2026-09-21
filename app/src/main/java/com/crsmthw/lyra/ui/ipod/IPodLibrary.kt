@@ -212,6 +212,8 @@ class IPodLibrary(
         val playlists: List<SpotifyPlaylist>,
         /** True when this result came from the library cache — the caller then sweeps. */
         val fromCache: Boolean = false,
+        /** False when a mid-sweep failure truncated the list. Cache results are always complete. */
+        val complete: Boolean = true,
     )
 
     /**
@@ -236,9 +238,11 @@ class IPodLibrary(
 
         return repository.getAllUserPlaylists()
             .onFailure { noteIfRateLimited(it) }
+            .onSuccess { noteIfRateLimited(it.error) }
             .map { sweep ->
                 PlaylistListResult(
                     playlists = sweep.items.filter { it.owner?.id == userId },
+                    complete = sweep.complete,
                 )
             }
     }
@@ -246,14 +250,17 @@ class IPodLibrary(
     /**
      * Runs the paged `getAllUserPlaylists()` sweep and returns the owned subset, or null when the
      * network is unavailable or rate-limited. Called after [ownedPlaylists] returned [fromCache] = true.
+     * A mid-sweep failure returns the prefix with [PlaylistListResult.complete] = false — the caller
+     * decides whether to replace the already-showing cached list.
      */
     suspend fun sweepOwnedPlaylists(userId: String): PlaylistListResult? {
         if (checkRateLimit().isFailure) return null
         val sweep = repository.getAllUserPlaylists()
             .onFailure { noteIfRateLimited(it) }
             .getOrNull() ?: return null
+        noteIfRateLimited(sweep.error)
         val owned = sweep.items.filter { it.owner?.id == userId }
-        return PlaylistListResult(owned)
+        return PlaylistListResult(owned, complete = sweep.complete)
     }
 
     // ── Playlist tracks ──────────────────────────────────────────────────────
