@@ -213,10 +213,18 @@ internal fun PullThresholdHaptics(state: PullToRefreshState) {
 // ── Refresh-error dialog ──────────────────────────────────────────────────────
 
 @Composable
-internal fun RefreshErrorDialog(error: String, onDismiss: () -> Unit) {
-    val isRateLimit   = error.contains("429")
-    val retryAfterSec = if (isRateLimit)
-        Regex("Retry-After=(\\d+)").find(error)?.groupValues?.get(1)?.toLongOrNull() else null
+internal fun RefreshErrorDialog(
+    error          : String?,
+    isPartialSweep : Boolean = false,
+    onDismiss      : () -> Unit,
+) {
+    val displayError = error ?: if (isPartialSweep) stringResource(R.string.library_partial_load_error) else ""
+    val isRateLimit   = error?.contains("429") == true
+    val retryAfterSec = run {
+        val e = error ?: return@run null
+        if (!isRateLimit) return@run null
+        Regex("Retry-After=(\\d+)").find(e)?.groupValues?.get(1)?.toLongOrNull()
+    }
     val retryDisplay  = when {
         retryAfterSec == null -> null
         retryAfterSec >= 3600 -> "${retryAfterSec / 3600}h ${(retryAfterSec % 3600) / 60}m"
@@ -226,13 +234,14 @@ internal fun RefreshErrorDialog(error: String, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         icon  = { Icon(Icons.Default.Warning, null, tint = MaterialTheme.colorScheme.error) },
-        title = { Text(if (isRateLimit) "Rate Limited" else "Refresh Error") },
+        title = { Text(stringResource(if (isRateLimit) R.string.library_rate_limited_title else R.string.library_refresh_error_title)) },
         text  = {
             Text(if (isRateLimit) buildString {
-                append("Spotify is rate limiting requests.")
+                append(stringResource(R.string.library_rate_limit_body))
                 if (retryDisplay != null) append("\n\nRetry-After: $retryDisplay")
-                append("\n\nCached data is shown. Wait, then retry.")
-            } else error)
+                append("\n\n")
+                append(stringResource(R.string.library_rate_limit_wait))
+            } else displayError)
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_ok)) } },
     )

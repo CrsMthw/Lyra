@@ -385,4 +385,14 @@
     <string name="ilyra_now_playing_empty">No Track Selected</string>
     <string name="ilyra_coverflow_indexing">Indexing %1$d of %2$d…</string>
     <!-- (end lcd) -->
+
+
+    <!-- Library: refresh / rate-limit errors (lane: hygiene) -->
+    <string name="library_rate_limited_title">Rate Limited</string>
+    <string name="library_refresh_error_title">Refresh Error</string>
+    <string name="library_rate_limit_body">Spotify is rate limiting requests.</string>
+    <string name="library_rate_limit_wait">Cached data is shown. Wait, then retry.</string>
+    <string name="library_rate_limit_reopen">Wait, then reopen.</string>
+    <string name="library_partial_load_error">Some playlists could not be loaded</string>
+    <!-- (end hygiene) -->
 </resources>

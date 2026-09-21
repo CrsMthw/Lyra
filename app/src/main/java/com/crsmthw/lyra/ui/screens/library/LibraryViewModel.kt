@@ -76,6 +76,7 @@ data class LibraryUiState(
     val playlistTracksTotal   : Int                    = 0,
     val error                 : String?                = null,  // blocking — shown when no cache
     val refreshError          : String?                = null,  // non-blocking — shown as icon when cache is visible
+    val refreshPartial        : Boolean                = false, // sweep incomplete — UI resolves fallback from string resource
     val user                  : SpotifyUser?           = null,
     val playlistsWithMosaics  : Set<String>            = emptySet(),
     // ── Multi-select removal (owned playlists only) ──
@@ -303,6 +304,7 @@ class LibraryViewModel(
                             currentPlaylist = if (wasOpen) null else s.currentPlaylist,
                             currentTracks   = if (wasOpen) emptyList() else s.currentTracks,
                             refreshError    = null,
+                            refreshPartial  = false,
                         ).let { if (wasOpen) it.selectionCleared() else it }
                     }
                 },
@@ -555,7 +557,7 @@ class LibraryViewModel(
 
     fun loadLibrary() {
         viewModelScope.launch {
-            _uiState.update { it.copy(error = null, refreshError = null) }
+            _uiState.update { it.copy(error = null, refreshError = null, refreshPartial = false) }
 
             // Show cached data immediately so the screen is never blank
             val cached = withContext(Dispatchers.IO) { cache.load() }
@@ -607,12 +609,13 @@ class LibraryViewModel(
             _uiState.update { s ->
                 if (sweep.complete || (sweep.items.isNotEmpty() && s.playlists.isEmpty()))
                     s.copy(
-                        playlists     = sweep.items,
-                        playlistCount = sweep.total,
-                        refreshError  = if (!sweep.complete) sweep.error?.message ?: "Some playlists could not be loaded" else s.refreshError,
+                        playlists      = sweep.items,
+                        playlistCount  = sweep.total,
+                        refreshError   = if (!sweep.complete) sweep.error?.message else s.refreshError,
+                        refreshPartial = if (!sweep.complete) true else s.refreshPartial,
                     )
                 else if (!sweep.complete)
-                    s.copy(refreshError = sweep.error?.message ?: "Some playlists could not be loaded")
+                    s.copy(refreshError = sweep.error?.message, refreshPartial = true)
                 else s
             }
 
@@ -900,7 +903,7 @@ class LibraryViewModel(
 
     fun refreshLibrary() {
         if (_uiState.value.isLibraryRefreshing) return
-        _uiState.update { it.copy(isLibraryRefreshing = true, refreshError = null) }
+        _uiState.update { it.copy(isLibraryRefreshing = true, refreshError = null, refreshPartial = false) }
         viewModelScope.launch {
             repository.getCurrentUser().fold(
                 onSuccess = { user -> _uiState.update { it.copy(user = user) } },
@@ -923,12 +926,13 @@ class LibraryViewModel(
             _uiState.update { s ->
                 if (sweep.complete || (sweep.items.isNotEmpty() && s.playlists.isEmpty()))
                     s.copy(
-                        playlists     = sweep.items,
-                        playlistCount = sweep.total,
-                        refreshError  = if (!sweep.complete) sweep.error?.message ?: "Some playlists could not be loaded" else s.refreshError,
+                        playlists      = sweep.items,
+                        playlistCount  = sweep.total,
+                        refreshError   = if (!sweep.complete) sweep.error?.message else s.refreshError,
+                        refreshPartial = if (!sweep.complete) true else s.refreshPartial,
                     )
                 else if (!sweep.complete)
-                    s.copy(refreshError = sweep.error?.message ?: "Some playlists could not be loaded")
+                    s.copy(refreshError = sweep.error?.message, refreshPartial = true)
                 else s
             }
 

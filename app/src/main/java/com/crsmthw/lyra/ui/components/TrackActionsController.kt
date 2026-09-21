@@ -167,13 +167,13 @@ class TrackActionsController(
         _state.update { it.copy(showPlaylistPicker = true) }
         _pickerState.value = PlaylistPickerState(isLoading = true)
         scope.launch {
-            val userId = libraryCache.load()?.user?.id
+            val cacheData = libraryCache.load()
+            val userId = cacheData?.user?.id
                 ?: repository.getCurrentUser().getOrNull()?.id
-            val playlists = libraryCache.load()?.playlists?.takeIf { it.isNotEmpty() }
+            val playlists = cacheData?.playlists?.takeIf { it.isNotEmpty() }
                 ?: repository.getAllUserPlaylists().getOrNull()?.items
                 ?: emptyList()
             val owned = if (userId != null) playlists.filter { it.owner?.id == userId } else playlists
-            val cacheData = libraryCache.load()
             val containing = owned.filter { playlist ->
                 cacheData?.trackLists?.get(playlist.id)?.tracks?.any { it.id == t.id } == true
             }.map { it.id }.toSet()
