@@ -213,8 +213,10 @@ class IPodLibrary(
     )
 
     /**
-     * Returns playlists the user owns. Cache-first (filtered by owner), then `getUserPlaylists`.
-     * The iPod inherits the 50-cap from the current Lyra playlists page.
+     * Returns playlists the user owns. Cache-first (filtered by owner), then the PAGED sweep
+     * `getAllUserPlaylists()` so users with more than 50 playlists see every owned one.
+     * The sweep is NOT persisted — the cache holds ALL playlists (owned + followed) for the Library,
+     * and overwriting it with owned-only would silently drop followed playlists from the Library screen.
      */
     suspend fun ownedPlaylists(userId: String): Result<PlaylistListResult> {
         val cache = loadCache()
@@ -226,11 +228,11 @@ class IPodLibrary(
 
         checkRateLimit().onFailure { return Result.failure(it) }
 
-        return repository.getUserPlaylists()
+        return repository.getAllUserPlaylists()
             .onFailure { noteIfRateLimited(it) }
-            .map { response ->
+            .map { sweep ->
                 PlaylistListResult(
-                    playlists = response.items.filter { it.owner?.id == userId },
+                    playlists = sweep.items.filter { it.owner?.id == userId },
                 )
             }
     }
