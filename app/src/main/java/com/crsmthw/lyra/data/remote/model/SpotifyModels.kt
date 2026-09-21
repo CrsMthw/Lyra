@@ -315,6 +315,8 @@ data class UserPlaylistsSweep(
     val total   : Int,
     /** False when a later page failed and [items] is only a prefix. */
     val complete: Boolean,
+    /** The failure that cut the sweep short (a 429 carries its Retry-After in the message); null when complete. */
+    val error   : Throwable? = null,
 )
 
 data class PlaylistTracksResponse(

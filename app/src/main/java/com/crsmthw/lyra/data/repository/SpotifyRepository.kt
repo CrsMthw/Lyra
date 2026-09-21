@@ -56,7 +56,8 @@ class SpotifyRepository(
         var first = true
         while (true) {
             val page = getUserPlaylists(limit = 50, offset = offset).getOrElse { e ->
-                return if (first) Result.failure(e) else Result.success(UserPlaylistsSweep(items, total, complete = false))
+                return if (first) Result.failure(e)
+                else Result.success(UserPlaylistsSweep(items, total, complete = false, error = e))
             }
             if (first) { total = page.total; first = false }
             items += page.items
