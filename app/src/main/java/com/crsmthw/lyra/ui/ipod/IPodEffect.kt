@@ -55,4 +55,10 @@ sealed interface IPodEffect {
      * menu's "Add to Playlist" → owned-playlist row. Never for an episode.
      */
     data class AddToPlaylist(val playlistId: String, val trackUri: String) : IPodEffect
+
+    /**
+     * → PlayerViewModel.setSleepTimer(minutes) — the options menu's Sleep Timer row, which cycles
+     * Lyra's own steps (Off · 5 · 15 · 30 · 45 · 60, as the player's dialog offers). 0 = off. (D)
+     */
+    data class SetSleepTimer(val minutes: Int) : IPodEffect
 }

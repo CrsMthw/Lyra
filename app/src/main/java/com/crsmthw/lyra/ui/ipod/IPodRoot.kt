@@ -171,6 +171,7 @@ fun IPodRoot(container: AppContainer, modifier: Modifier = Modifier) {
                 // Checkpoint D — routed by the shell lane (contract stubs so the round compiles).
                 is IPodEffect.SetLiked -> Unit
                 is IPodEffect.AddToPlaylist -> Unit
+                is IPodEffect.SetSleepTimer -> playerVm.setSleepTimer(effect.minutes)
             }
         }
     }

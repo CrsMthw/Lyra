@@ -151,6 +151,13 @@ data class LcdNowPlaying(
     val artistId: String? = null,
     /** A podcast episode: no like, no add-to-playlist, no album / artist. (D) */
     val isEpisode: Boolean = false,
+    /**
+     * The sleep timer as the player state reports it: the SETTING the user chose (0 = off) and the
+     * minutes still to run — the options menu's Sleep Timer row shows the remaining minutes and
+     * cycles the setting. (D)
+     */
+    val sleepTimerTotalMinutes: Int = 0,
+    val sleepTimerMinutes: Int = 0,
 )
 
 /**
