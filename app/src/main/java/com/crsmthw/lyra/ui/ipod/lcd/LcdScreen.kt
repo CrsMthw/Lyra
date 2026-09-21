@@ -4,7 +4,11 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
@@ -24,19 +28,26 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Fill
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -76,6 +87,19 @@ private data class LcdContentKey(val depth: Int, val screen: IPodScreen)
  * incoming screen's.
  */
 private class EntryHolder(var value: IPodStackEntry)
+
+/**
+ * Plain (non-snapshot) bookkeeping for the Cover Flow → Now Playing flight, assigned during
+ * composition / layout: the last content key (to detect the push), the centre cover's latest
+ * take-off rect, and the next flight id.
+ */
+private class FlightBookkeeping {
+    var lastKey: LcdContentKey? = null
+    var coverCentre: Rect? = null
+    var nextId = 0
+    /** Mirrors `flight != null` so the detection block never READS the snapshot state it may write. */
+    var active = false
+}
 
 // ── LcdScreen ───────────────────────────────────────────────────────────────
 
@@ -144,11 +168,18 @@ fun LcdScreen(
 
                 // Content area below the status bar.
                 val contentHeightDp = with(density) { contentHeight.toDp() }
+                // ── Cover Flow → Now Playing flight state (see LcdArtFlight.kt) ──
+                val bookkeeping = remember { FlightBookkeeping() }
+                var flight by remember { mutableStateOf<ArtFlight?>(null) }
+                val flightTarget = remember { mutableStateOf<Rect?>(null) }
+                val contentOrigin = remember { mutableStateOf(Offset.Zero) }
+                val flightProgress = remember { Animatable(0f) }
                 Box(
                     Modifier
                         .padding(top = with(density) { statusBarHeight.toDp() })
                         .fillMaxWidth()
-                        .height(contentHeightDp),
+                        .height(contentHeightDp)
+                        .onGloballyPositioned { contentOrigin.value = it.positionInRoot() },
                 ) {
                     val direction = state.direction
                     val currentKey = LcdContentKey(
@@ -156,22 +187,71 @@ fun LcdScreen(
                         screen = state.current.screen,
                     )
 
+                    // A SELECT on Cover Flow pushed Now Playing: start the flight from the centre
+                    // cover's last reported slot, carrying the picked song's art (the ViewModel put
+                    // it on nowPlaying optimistically before the push). Detected in composition so
+                    // the overlay and the two hidden arts appear in the same frame.
+                    val prevKey = bookkeeping.lastKey
+                    if (prevKey != null && prevKey != currentKey) {
+                        val coverToNowPlaying = prevKey.screen is IPodScreen.CoverFlow &&
+                            currentKey.screen is IPodScreen.NowPlaying &&
+                            currentKey.depth == prevKey.depth + 1 &&
+                            direction == LcdNavDirection.FORWARD
+                        if (coverToNowPlaying) {
+                            val from = bookkeeping.coverCentre
+                            val artUrl = state.nowPlaying?.artUrl?.takeIf { it.isNotBlank() }
+                                ?: state.stack.getOrNull(prevKey.depth - 1)?.let { e ->
+                                    e.list.items.getOrNull(e.list.selectedIndex)?.artUrl
+                                }
+                            if (from != null && !artUrl.isNullOrBlank()) {
+                                flightTarget.value = null
+                                flight = ArtFlight(id = bookkeeping.nextId++, artUrl = artUrl, from = from)
+                                bookkeeping.active = true
+                            }
+                        } else if (bookkeeping.active && currentKey.screen !is IPodScreen.NowPlaying) {
+                            // Left Now Playing mid-flight (MENU during the 320 ms): drop the overlay.
+                            flight = null
+                            bookkeeping.active = false
+                        }
+                    }
+                    bookkeeping.lastKey = currentKey
+
+                    LaunchedEffect(flight?.id) {
+                        val f = flight ?: return@LaunchedEffect
+                        flightProgress.snapTo(0f)
+                        flightProgress.animateTo(1f, tween(ART_FLIGHT_MILLIS, easing = FastOutSlowInEasing))
+                        if (flight?.id == f.id) {
+                            flight = null
+                            bookkeeping.active = false
+                        }
+                    }
+
                     AnimatedContent(
                         targetState = currentKey,
                         transitionSpec = {
                             val millis = IPodDimens.LcdSlideMillis
-                            when (direction) {
-                                LcdNavDirection.FORWARD ->
+                            // Cover Flow → Now Playing: no slide — the cover flies (the overlay) and
+                            // everything else crossfades under it, over the flight's duration.
+                            val coverToNowPlaying = initialState.screen is IPodScreen.CoverFlow &&
+                                targetState.screen is IPodScreen.NowPlaying &&
+                                direction == LcdNavDirection.FORWARD
+                            when {
+                                coverToNowPlaying ->
+                                    fadeIn(tween(ART_FLIGHT_MILLIS)) togetherWith
+                                        fadeOut(tween(ART_FLIGHT_MILLIS)) using
+                                        null as SizeTransform?
+
+                                direction == LcdNavDirection.FORWARD ->
                                     slideInHorizontally(tween(millis)) { it } togetherWith
                                         slideOutHorizontally(tween(millis)) { -it } using
                                         null as SizeTransform?
 
-                                LcdNavDirection.BACK ->
+                                direction == LcdNavDirection.BACK ->
                                     slideInHorizontally(tween(millis)) { -it } togetherWith
                                         slideOutHorizontally(tween(millis)) { it } using
                                         null as SizeTransform?
 
-                                LcdNavDirection.NONE ->
+                                else ->
                                     EnterTransition.None togetherWith
                                         ExitTransition.None using
                                         null as SizeTransform?
@@ -195,17 +275,31 @@ fun LcdScreen(
                             is IPodScreen.NowPlaying -> LcdNowPlayingContent(
                                 nowPlaying = state.nowPlaying,
                                 contentHeight = contentHeightDp,
+                                hideArt = flight != null,
+                                onArtBounds = { flightTarget.value = it },
                             )
                             is IPodScreen.CoverFlow -> LcdCoverFlowContent(
                                 entry = entry,
                                 likedIndex = state.likedIndex,
                                 contentHeight = contentHeightDp,
+                                hideCentreTile = flight != null,
+                                onCentreTileBounds = { bookkeeping.coverCentre = it },
                             )
                             else -> LcdMenuList(
                                 entry = entry,
                                 contentHeight = contentHeightDp,
                             )
                         }
+                    }
+
+                    // The flying cover, above both screens, clipped with the content.
+                    flight?.let { f ->
+                        ArtFlightOverlay(
+                            flight = f,
+                            target = flightTarget,
+                            containerOrigin = contentOrigin,
+                            progress = flightProgress,
+                        )
                     }
                 }
             }

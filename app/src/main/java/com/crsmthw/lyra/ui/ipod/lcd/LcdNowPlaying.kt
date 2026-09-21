@@ -58,6 +58,8 @@ import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
@@ -88,7 +90,7 @@ private const val BOTTOM_STRIP_FRACTION = 0.20f
  * Positive = the RIGHT edge is the near one — the Classic's art turns toward the text. (The first
  * build used −12°, which put the LEFT edge nearer: the mirror image of the reference photo.)
  */
-private const val ART_ROTATION_Y = 20f
+internal const val ART_ROTATION_Y = 20f
 
 /** The art's top edge, as a fraction of the content height. */
 private const val ART_TOP_FRACTION = 0.09f
@@ -106,12 +108,14 @@ private const val TEXT_TOP_OFFSET_FRACTION = 0.12f
  * so viewed the art from ~3× the default distance, which flattened the rotation into a faint skew.
  * A little closer than the default gives the Classic's visibly receding far edge.
  */
-private const val ART_CAMERA_DISTANCE = 7f
+internal const val ART_CAMERA_DISTANCE = 7f
 /** Starting alpha of the reflection at its top edge. */
-private const val REFLECTION_ALPHA = 0.6f
+internal const val REFLECTION_ALPHA = 0.6f
 /** Reflection height as a fraction of the art height. */
 /** The Classic's reflection is short and dies fast — it must end above the progress strip. */
-private const val REFLECTION_HEIGHT_FRACTION = 0.22f
+internal const val REFLECTION_HEIGHT_FRACTION = 0.22f
+/** The reflection mask's alpha half-way down — its fall-off; see LcdCoverFlow.reflectionMask. */
+internal const val REFLECTION_MID_ALPHA = 0.28f
 /** Progress bar track height as a fraction of the strip height. */
 /** The Classic's bar is a real channel, not a hairline: ~22 % of the strip (~4 % of the panel). */
 private const val PROGRESS_BAR_HEIGHT_FRACTION = 0.30f
@@ -148,6 +152,10 @@ private const val NOTE_GLYPH_FRACTION = 0.35f
 internal fun LcdNowPlayingContent(
     nowPlaying: LcdNowPlaying?,
     contentHeight: Dp,
+    /** True while a Cover Flow cover is flying into the art slot: the slot is laid out but drawn empty. */
+    hideArt: Boolean = false,
+    /** The art column's rect (art + reflection, untilted) in ROOT coordinates — the flight's landing. */
+    onArtBounds: (Rect) -> Unit = {},
 ) {
     if (nowPlaying == null) {
         LcdCentredMessage(
@@ -178,6 +186,8 @@ internal fun LcdNowPlayingContent(
                 contentWidthDp = contentWidthDp,
                 contentHeightPx = contentHeightPx,
                 contentHeight = contentHeight,
+                hideArt = hideArt,
+                onArtBounds = onArtBounds,
                 modifier = Modifier.fillMaxSize(),
             )
 
@@ -242,6 +252,8 @@ private fun NowPlayingUpperRegion(
     contentWidthDp: Dp,
     contentHeightPx: Float,
     contentHeight: Dp,
+    hideArt: Boolean,
+    onArtBounds: (Rect) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
@@ -268,9 +280,12 @@ private fun NowPlayingUpperRegion(
         NowPlayingArt(
             artUrl = artUrl,
             artSide = artSide,
+            hidden = hideArt,
             modifier = Modifier
                 .width(artSide)   // exactly the art: no slack column pushing the text away
-                .padding(top = artTop),
+                .padding(top = artTop)
+                // After the padding: the art column's own rect (art + reflection), untilted.
+                .onGloballyPositioned { onArtBounds(it.boundsInRoot()) },
         )
 
         Spacer(Modifier.width(gapWidth))
@@ -356,6 +371,7 @@ private fun NowPlayingUpperRegion(
 private fun NowPlayingArt(
     artUrl: String,
     artSide: Dp,
+    hidden: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -384,6 +400,9 @@ private fun NowPlayingArt(
                     rotationY = ART_ROTATION_Y
                     cameraDistance = ART_CAMERA_DISTANCE
                     transformOrigin = TransformOrigin(0.5f, pivotY)
+                    // Laid out (so the flight can measure its landing) but not drawn while the
+                    // Cover Flow cover is still in the air; the two swap in one composition.
+                    alpha = if (hidden) 0f else 1f
                 },
         ) {
             // The art. Placeholder always underneath; the AsyncImage lands on top with a crossfade,
@@ -434,7 +453,7 @@ private fun NowPlayingArt(
                                 brush = Brush.verticalGradient(
                                     0f to Color.Transparent,
                                     (1f - REFLECTION_HEIGHT_FRACTION) to Color.Transparent,
-                                    (1f - REFLECTION_HEIGHT_FRACTION * 0.5f) to Color.Black.copy(alpha = 0.28f),
+                                    (1f - REFLECTION_HEIGHT_FRACTION * 0.5f) to Color.Black.copy(alpha = REFLECTION_MID_ALPHA),
                                     1f to Color.Black,
                                 ),
                                 blendMode = BlendMode.DstIn,

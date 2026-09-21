@@ -64,6 +64,14 @@ private const val MODE_IDLE_RESET_MS = 5_000L
 private const val PAGE_TRIGGER_ROWS = 8
 
 /**
+ * How long a just-picked song is HELD on Now Playing against the player mirror. PlayerStateManager
+ * has no optimistic track — `playTrack` only marks isPlaying and resets progress — so until the
+ * poll reports the new uri its emissions still describe the PREVIOUS song; long enough for the
+ * cold-start App Remote path (connect + play + the next poll).
+ */
+private const val OPTIMISTIC_TRACK_MS = 10_000L
+
+/**
  * The iPod's brain: owns the LCD back stack and each entry's list, turns [WheelEvent]s into
  * navigation (MENU pops, SELECT pushes/activates, Scroll moves the highlight — or scrubs on Now
  * Playing) and into [IPodEffect]s for anything that touches playback. Mirrors
@@ -172,6 +180,24 @@ class IPodViewModel(
      */
     private val nextOffsetByKey = mutableMapOf<String, Int>()
 
+    // ── Optimistic Now Playing (a SELECT on Cover Flow / Music) ─────────────
+
+    /**
+     * The liked tracks behind the rows, by uri. The optimistic Now Playing needs the album name and
+     * the duration, which an [LcdItem] does not carry. Written only from viewModelScope (Main).
+     */
+    private val likedTrackByUri = HashMap<String, SpotifyTrack>()
+
+    /**
+     * The uri the user just picked. While set (and [optimisticUntilMs] has not passed) the player
+     * mirror's emissions for any OTHER uri are dropped, so Now Playing shows the picked song from the
+     * first frame — its art, title, album, duration — instead of the previous song until Spotify's
+     * `me/player` catches up. Cleared when the mirror reports this uri, on Next / Previous / Shuffle
+     * Songs, or when the hold expires.
+     */
+    private var optimisticUri: String? = null
+    private var optimisticUntilMs = 0L
+
     // ── Art prefetcher (Checkpoint C) ────────────────────────────────────────
 
     private val prefetcher = CoverArtPrefetcher(imageLoader, appContext, viewModelScope)
@@ -271,6 +297,16 @@ class IPodViewModel(
                 }
                 .distinctUntilChanged()
                 .collect { np ->
+                    // Optimistic hold (see [optimisticUri]): until the poll reports the picked uri,
+                    // emissions describing another song — or no song — are dropped.
+                    val held = optimisticUri
+                    if (held != null) {
+                        when {
+                            np?.uri == held -> optimisticUri = null
+                            System.currentTimeMillis() < optimisticUntilMs -> return@collect
+                            else -> optimisticUri = null
+                        }
+                    }
                     _uiState.update { state ->
                         // Carry a scrub-in-progress across the 1 Hz tick — of the SAME track only.
                         // A scrub belongs to one track; when the track changes (auto-advance, a
@@ -319,7 +355,7 @@ class IPodViewModel(
             val cached = withContext(Dispatchers.IO) {
                 libraryCache.loadTrackList(LibraryCache.LIKED_SONGS_KEY)
             }
-            val rows = cached?.tracks.orEmpty().distinctBy { it.uri }.map(::likedRow)
+            val rows = likedRows(cached?.tracks.orEmpty())
             if (rows.isNotEmpty()) {
                 updatePrefetchUrls(rows)
                 prefetcher.setFocus(0)
@@ -349,7 +385,7 @@ class IPodViewModel(
         viewModelScope.launch {
             likedSongsIndexer.appended.collect { newTracks ->
                 if (newTracks.isEmpty()) return@collect
-                val newRows = newTracks.map(::likedRow)
+                val newRows = likedRows(newTracks)
                 // Capture the grown liked items for a post-update prefetch call — never call
                 // updatePrefetchUrls inside the CAS lambda (the lambda can re-run under contention
                 // with the 1 Hz mirror, and it must not have side effects).
@@ -646,10 +682,12 @@ class IPodViewModel(
             }
             WheelButton.NEXT -> {
                 clearScrub()
+                optimisticUri = null   // the mirror decides what plays next
                 viewModelScope.launch { _effects.send(IPodEffect.Next) }
             }
             WheelButton.PREVIOUS -> {
                 clearScrub()
+                optimisticUri = null
                 viewModelScope.launch { _effects.send(IPodEffect.Previous) }
             }
         }
@@ -742,7 +780,7 @@ class IPodViewModel(
             val cached = withContext(Dispatchers.IO) {
                 libraryCache.loadTrackList(LibraryCache.LIKED_SONGS_KEY)
             }
-            val rows = cached?.tracks.orEmpty().distinctBy { it.uri }.map(::likedRow)
+            val rows = likedRows(cached?.tracks.orEmpty())
             replaceTopItems(screen, rows)
 
             // Update prefetch after the initial load — both Music and CoverFlow feed the same
@@ -756,7 +794,7 @@ class IPodViewModel(
             // Reconcile: use the atomic prependToLikedSongs so the indexer's concurrent appends
             // are not reverted.
             val merged = library.reconcileLikedSongs(cached) ?: return@launch
-            val reconciled = merged.distinctBy { it.uri }.map(::likedRow)
+            val reconciled = likedRows(merged)
             retopItemsPreservingHighlight(screen, reconciled)
 
             updatePrefetchUrls(reconciled)
@@ -779,6 +817,13 @@ class IPodViewModel(
         pushLikedList(IPodScreen.CoverFlow, LcdLabel.Res(R.string.ipod_menu_cover_flow))
     }
 
+    /** One row per song (distinct by uri), remembering each track for the optimistic Now Playing. */
+    private fun likedRows(tracks: List<SpotifyTrack>): List<LcdItem> {
+        val distinct = tracks.distinctBy { it.uri }
+        for (t in distinct) likedTrackByUri[t.uri] = t
+        return distinct.map(::likedRow)
+    }
+
     private fun likedRow(track: SpotifyTrack) = LcdItem(
         id = track.uri,
         title = LcdLabel.Text(track.name),
@@ -788,6 +833,9 @@ class IPodViewModel(
 
     private fun activateMusicItem(item: LcdItem, index: Int, items: List<LcdItem>) {
         rememberSelection(item.id, index, items.map { it.id })
+        // Now Playing shows THIS song from its first frame (the LCD's Cover Flow → Now Playing
+        // flight lands on its art); the mirror takes over once the poll reports it.
+        showOptimisticNowPlaying(item)
         viewModelScope.launch {
             _effects.send(IPodEffect.PlayLikedSong(item.id, shuffle = false))
         }
@@ -795,6 +843,45 @@ class IPodViewModel(
             IPodScreen.NowPlaying,
             LcdLabel.Res(R.string.ipod_menu_now_playing),
         )
+    }
+
+    /** Puts the picked song on Now Playing at 0:00, playing, and arms the hold against the mirror. */
+    private fun showOptimisticNowPlaying(item: LcdItem) {
+        val track = likedTrackByUri[item.id]
+        val sel = lastSelection
+        val pos = sel?.positionOf(item.id)
+        optimisticUri = item.id
+        optimisticUntilMs = System.currentTimeMillis() + OPTIMISTIC_TRACK_MS
+        // The previous song's pending scrub dies with it.
+        scrubJob?.cancel()
+        scrubJob = null
+        _uiState.update { state ->
+            val old = state.nowPlaying
+            val np = LcdNowPlaying(
+                uri = item.id,
+                title = track?.name ?: (item.title as? LcdLabel.Text)?.value.orEmpty(),
+                artist = track?.allArtists ?: (item.subtitle as? LcdLabel.Text)?.value.orEmpty(),
+                album = track?.album?.name.orEmpty(),
+                artUrl = track?.artUrl?.takeIf { it.isNotBlank() } ?: item.artUrl.orEmpty(),
+                isPlaying = true,
+                progressMs = 0L,
+                durationMs = track?.durationMs ?: 0L,
+                positionInList = pos,
+                listSize = if (pos != null) sel.sourceUris.size else null,
+                mode = NowPlayingMode.SCRUB,
+                volumePercent = old?.volumePercent ?: 0,
+                // A deliberate selection turns shuffle OFF (PlayLikedSong shuffle = false).
+                shuffleEnabled = false,
+                repeat = old?.repeat ?: LcdRepeat.OFF,
+            )
+            val next = state.copy(nowPlaying = np)
+            if (!lastHadNowPlaying) {
+                lastHadNowPlaying = true
+                rebuildMainMenuIfOnTop(next, hasNowPlaying = true)
+            } else {
+                next
+            }
+        }
     }
 
     // ── Albums ────────────────────────────────────────────────────────────────
@@ -1224,6 +1311,7 @@ class IPodViewModel(
     // ── Shuffle Songs ─────────────────────────────────────────────────────────
 
     private fun handleShuffleSongs() {
+        optimisticUri = null   // a shuffled context: whatever the mirror reports is right
         viewModelScope.launch {
             val userId = cachedUserId ?: library.resolveUserId().also { cachedUserId = it }
             if (userId != null) {

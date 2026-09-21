@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -26,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -33,6 +35,8 @@ import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
@@ -62,7 +66,7 @@ import kotlin.math.sign
 /** Rotation angle (degrees) of side covers toward the centre. */
 private const val COVER_SIDE_ANGLE = 65f
 /** Camera distance for the perspective tilt -- NOT multiplied by density. */
-private const val COVER_CAMERA_DISTANCE = 7f
+internal const val COVER_CAMERA_DISTANCE = 7f
 /** Centre cover side is this fraction of the content height. */
 private const val COVER_TILE_FRACTION = 0.50f
 /** Scale of side covers relative to the centre cover (1.0 = same size). */
@@ -72,9 +76,19 @@ private const val COVER_CENTRE_GAP = 0.08f
 /** Step between successive side covers, as fraction of tile side (< 1 means overlap). */
 private const val COVER_SIDE_STEP = 0.22f
 /** Height of the reflection as a fraction of the tile side. */
-private const val COVER_REFLECTION_HEIGHT = 0.35f
-/** Starting alpha of the reflection at the seam. */
-private const val COVER_REFLECTION_ALPHA = 0.35f
+internal const val COVER_REFLECTION_HEIGHT = 0.42f
+/** Alpha of the reflection layer (the seam is fully this; the mask below fades it out). */
+internal const val COVER_REFLECTION_ALPHA = 0.5f
+/** Mask alpha half-way down the reflection — the higher, the slower the fade. */
+internal const val COVER_REFLECTION_MID_ALPHA = 0.55f
+/** Mask alpha at 85 % of the reflection's height; 0 at the far edge. */
+internal const val COVER_REFLECTION_FAR_ALPHA = 0.15f
+/** Space between the content's top and the centre cover, as a fraction of the content height. */
+private const val COVER_TOP_PAD = 0.02f
+/** Height of the "Indexing N of M…" strip above the covers while the list is filling. */
+private const val COVER_INDEX_LINE_FRACTION = 0.06f
+/** Space under the "N of M" line, as a fraction of the content height — off the LCD's bottom edge. */
+private const val COVER_POSITION_BOTTOM_PAD = 0.04f
 /** Duration of the position animation per detent (finite tween, never a spring). */
 private const val COVER_SLIDE_MILLIS = 180
 /**
@@ -96,7 +110,7 @@ private const val COVER_POSITION_FRACTION = 0.038f
 /** Corner radius of the cover edge, as fraction of tile side. */
 private const val COVER_EDGE_CORNER_FRACTION = 0.02f
 /** Crossfade duration on cover art images. */
-private const val COVER_ART_CROSSFADE_MS = 150
+internal const val COVER_ART_CROSSFADE_MS = 150
 /** Space between the bottom of the covers+reflections and the text block, as fraction of content height. */
 private const val COVER_TEXT_TOP_GAP = 0.02f
 
@@ -116,6 +130,10 @@ internal fun LcdCoverFlowContent(
     entry: IPodStackEntry,
     likedIndex: LcdIndexStatus?,
     contentHeight: Dp,
+    /** True while the centre cover is FLYING into Now Playing (LcdScreen's overlay draws it instead). */
+    hideCentreTile: Boolean = false,
+    /** The centre cover's art rect in ROOT coordinates, reported on every layout — the flight's take-off. */
+    onCentreTileBounds: (Rect) -> Unit = {},
 ) {
     val list = entry.list
     val items = list.items
@@ -139,6 +157,8 @@ internal fun LcdCoverFlowContent(
             selectedIndex = list.selectedIndex,
             likedIndex = likedIndex,
             contentHeight = contentHeight,
+            hideCentreTile = hideCentreTile,
+            onCentreTileBounds = onCentreTileBounds,
         )
     }
 }
@@ -151,6 +171,8 @@ private fun CoverFlowRow(
     selectedIndex: Int,
     likedIndex: LcdIndexStatus?,
     contentHeight: Dp,
+    hideCentreTile: Boolean,
+    onCentreTileBounds: (Rect) -> Unit,
 ) {
     val density = LocalDensity.current
     val contentHeightPx = with(density) { contentHeight.toPx() }
@@ -209,30 +231,37 @@ private fun CoverFlowRow(
         val windowStart = (centreIndex - COVERS_PER_SIDE).coerceAtLeast(0)
         val windowEnd = (centreIndex + COVERS_PER_SIDE).coerceAtMost(items.lastIndex)
 
-        // Layout: a Column — the indexing line (only while the list is still filling) above, the
-        // covers box taking the remaining space, the text at the bottom. The covers sit vertically
-        // centred inside their box via translationY in the graphicsLayer.
+        // Layout: a Column — the covers box exactly as tall as the covers need (an indexing strip on
+        // top while the list is still filling, then the centre cover and its reflection), the
+        // title/artist right under it, and "N of M" pushed to the bottom with a margin.
         Column(Modifier.fillMaxSize()) {
-            if (likedIndex != null) {
-                CoverFlowIndexingLine(
-                    likedIndex = likedIndex,
-                    contentHeightPx = contentHeightPx,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
+            val indexLineHeightPx = if (likedIndex != null) contentHeightPx * COVER_INDEX_LINE_FRACTION else 0f
+            val topPadPx = contentHeightPx * COVER_TOP_PAD
+            val coversTopPx = indexLineHeightPx + topPadPx
+            val coversBoxHeightPx = coversTopPx + totalTileHeightPx
 
-            // Covers box: takes all remaining vertical space above the text. Tiles position
-            // themselves via graphicsLayer translationX/Y, centred vertically and horizontally.
-            BoxWithConstraints(
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f),
+                    .height(with(density) { coversBoxHeightPx.toDp() })
+                    .onGloballyPositioned { coords ->
+                        // The centre cover's slot (the rect every tile is translated to at d = 0),
+                        // in root coordinates — where the flight into Now Playing takes off from.
+                        val origin = coords.positionInRoot()
+                        val left = origin.x + contentWidthPx / 2f - tileSidePx / 2f
+                        val top = origin.y + coversTopPx
+                        onCentreTileBounds(Rect(left, top, left + tileSidePx, top + tileSidePx))
+                    },
             ) {
-                // The Box takes the remaining height above the text. Tiles position via
-                // graphicsLayer translationX/Y to centre horizontally and vertically.
-                val boxHeightPx = constraints.maxHeight.toFloat()
-                val coverVerticalCentrePx = ((boxHeightPx - totalTileHeightPx) / 2f)
-                    .coerceAtLeast(0f)
+                if (likedIndex != null) {
+                    CoverFlowIndexingLine(
+                        likedIndex = likedIndex,
+                        contentHeightPx = contentHeightPx,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(with(density) { indexLineHeightPx.toDp() }),
+                    )
+                }
 
                 for (i in windowStart..windowEnd) {
                     val item = items.getOrNull(i) ?: continue
@@ -242,6 +271,7 @@ private fun CoverFlowRow(
                             item = item,
                             index = i,
                             zOrder = zOrder,
+                            hidden = hideCentreTile && i == centreIndex,
                             tileSidePx = tileSidePx,
                             tileSideDp = tileSideDp,
                             reflectionHeightPx = reflectionHeightPx,
@@ -249,26 +279,34 @@ private fun CoverFlowRow(
                             contentWidthPx = contentWidthPx,
                             firstNeighbourOffsetPx = firstNeighbourOffsetPx,
                             sideStepPx = sideStepPx,
-                            coverVerticalOffsetPx = coverVerticalCentrePx,
+                            coverVerticalOffsetPx = coversTopPx,
                             position = position,
                         )
                     }
                 }
             }
 
-            // Text block below the covers, at the bottom of the content area: the cover the ribbon
-            // is centred on right now (it swaps as each cover crosses the centre, so a fast spin
-            // streams the titles past with the covers and the two never disagree).
+            // Title / artist right under the reflections: the cover the ribbon is centred on right
+            // now (it swaps as each cover crosses the centre, so a fast spin streams the titles
+            // past with the covers and the two never disagree).
             val highlightedItem = items.getOrNull(centreIndex)
             if (highlightedItem != null) {
                 Spacer(Modifier.height(contentHeight * COVER_TEXT_TOP_GAP))
                 CoverFlowText(
                     item = highlightedItem,
+                    contentHeightPx = contentHeightPx,
+                    contentWidthPx = contentWidthPx,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.weight(1f))
+                CoverFlowPosition(
                     itemIndex = centreIndex,
                     itemCount = items.size,
                     contentHeightPx = contentHeightPx,
                     contentWidthPx = contentWidthPx,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = contentHeight * COVER_POSITION_BOTTOM_PAD),
                 )
             }
         }
@@ -282,6 +320,8 @@ private fun CoverFlowTile(
     item: LcdItem,
     index: Int,
     zOrder: Float,
+    /** The centre cover while it flies into Now Playing: the overlay draws it, this slot stays empty. */
+    hidden: Boolean,
     tileSidePx: Float,
     tileSideDp: Dp,
     reflectionHeightPx: Float,
@@ -326,6 +366,7 @@ private fun CoverFlowTile(
                 rotationY = -c * COVER_SIDE_ANGLE
                 cameraDistance = COVER_CAMERA_DISTANCE
                 transformOrigin = TransformOrigin(0.5f, pivotY)
+                alpha = if (hidden) 0f else 1f
 
                 val scale = 1f - abs(c) * (1f - COVER_SIDE_SCALE)
                 scaleX = scale
@@ -390,11 +431,10 @@ private fun CoverFlowTile(
                     .drawWithContent {
                         drawContent()
                         drawRect(
-                            brush = Brush.verticalGradient(
-                                0f to Color.Transparent,
-                                (1f - COVER_REFLECTION_HEIGHT) to Color.Transparent,
-                                (1f - COVER_REFLECTION_HEIGHT * 0.5f) to Color.Black.copy(alpha = 0.3f),
-                                1f to Color.Black,
+                            brush = reflectionMask(
+                                heightFraction = COVER_REFLECTION_HEIGHT,
+                                midAlpha = COVER_REFLECTION_MID_ALPHA,
+                                farAlpha = COVER_REFLECTION_FAR_ALPHA,
                             ),
                             blendMode = BlendMode.DstIn,
                         )
@@ -420,8 +460,6 @@ private fun CoverFlowTile(
 @Composable
 private fun CoverFlowText(
     item: LcdItem,
-    itemIndex: Int,
-    itemCount: Int,
     contentHeightPx: Float,
     contentWidthPx: Float,
     modifier: Modifier = Modifier,
@@ -429,7 +467,6 @@ private fun CoverFlowText(
     val density = LocalDensity.current
     val titleFontSize = with(density) { (contentHeightPx * COVER_TITLE_FRACTION).toSp() }
     val subtitleFontSize = with(density) { (contentHeightPx * COVER_SUBTITLE_FRACTION).toSp() }
-    val positionFontSize = with(density) { (contentHeightPx * COVER_POSITION_FRACTION).toSp() }
     val sidePad = with(density) { (contentWidthPx * 0.08f).toDp() }
 
     Column(
@@ -467,26 +504,30 @@ private fun CoverFlowText(
                     .padding(horizontal = sidePad),
             )
         }
-
-        Spacer(Modifier.height(with(density) { (contentHeightPx * COVER_TEXT_TOP_GAP).toDp() }))
-
-        // "N of M", centred under the artist like the lines above it.
-        Text(
-            text = stringResource(
-                R.string.ipod_now_playing_position,
-                itemIndex + 1,
-                itemCount,
-            ),
-            fontFamily = IPodFontFamily,
-            fontSize = positionFontSize,
-            color = IPodColors.LcdTextSecondary,
-            maxLines = 1,
-            textAlign = TextAlign.Center,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = sidePad),
-        )
     }
+}
+
+/** "N of M", centred, at the bottom of the content with its own margin. */
+@Composable
+private fun CoverFlowPosition(
+    itemIndex: Int,
+    itemCount: Int,
+    contentHeightPx: Float,
+    contentWidthPx: Float,
+    modifier: Modifier = Modifier,
+) {
+    val density = LocalDensity.current
+    val positionFontSize = with(density) { (contentHeightPx * COVER_POSITION_FRACTION).toSp() }
+    val sidePad = with(density) { (contentWidthPx * 0.08f).toDp() }
+    Text(
+        text = stringResource(R.string.ipod_now_playing_position, itemIndex + 1, itemCount),
+        fontFamily = IPodFontFamily,
+        fontSize = positionFontSize,
+        color = IPodColors.LcdTextSecondary,
+        maxLines = 1,
+        textAlign = TextAlign.Center,
+        modifier = modifier.padding(horizontal = sidePad),
+    )
 }
 
 /** "Indexing N of M…" — centred above the covers, shown only while the liked list is still filling. */
@@ -509,6 +550,21 @@ private fun CoverFlowIndexingLine(
         color = IPodColors.LcdTextSecondary,
         maxLines = 1,
         textAlign = TextAlign.Center,
-        modifier = modifier.padding(top = with(density) { (contentHeightPx * COVER_TEXT_TOP_GAP).toDp() }),
+        modifier = modifier.wrapContentHeight(Alignment.CenterVertically),
     )
 }
+
+/**
+ * The DstIn mask that fades a flipped copy of the art into its reflection. In the flipped
+ * square's own coordinates 1f is the seam (opaque) and (1 − heightFraction) is the far edge
+ * (transparent); [midAlpha] / [farAlpha] shape the fall-off between them. Shared with the flight
+ * overlay so a cover's reflection can be morphed continuously into Now Playing's.
+ */
+internal fun reflectionMask(heightFraction: Float, midAlpha: Float, farAlpha: Float): Brush =
+    Brush.verticalGradient(
+        0f to Color.Transparent,
+        (1f - heightFraction) to Color.Transparent,
+        (1f - heightFraction * 0.85f) to Color.Black.copy(alpha = farAlpha),
+        (1f - heightFraction * 0.5f) to Color.Black.copy(alpha = midAlpha),
+        1f to Color.Black,
+    )
