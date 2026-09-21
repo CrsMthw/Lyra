@@ -9,6 +9,7 @@ import com.crsmthw.lyra.data.auth.SpotifyAuthManager
 import com.crsmthw.lyra.data.auth.TokenManager
 import com.crsmthw.lyra.data.local.EncryptedPrefs
 import com.crsmthw.lyra.data.local.LibraryCache
+import com.crsmthw.lyra.data.local.LikedSongsIndexer
 import com.crsmthw.lyra.data.local.LyraDataStore
 import com.crsmthw.lyra.BuildConfig
 import com.crsmthw.lyra.data.remote.LrcLibApiService
@@ -137,6 +138,9 @@ class AppContainer(context: Context) {
 
     // ── App-scoped player state ───────────────────────────────────────────────
     val playerStateManager = PlayerStateManager(context, spotifyRepository, remoteManager)
+
+    // ── Liked-songs indexer (shared by the foreground service and the iPod) ──
+    val likedSongsIndexer = LikedSongsIndexer(libraryCache, spotifyRepository, playerStateManager)
 
     // ── Audio visualizer ─────────────────────────────────────────────────────
     val visualizerManager = VisualizerManager(context)

@@ -65,6 +65,11 @@ data class LcdItem(
     val value: LcdLabel? = null,
     /** Draws the › chevron the Classic shows on rows that open a submenu. */
     val hasSubmenu: Boolean = false,
+    /**
+     * The row's cover (the track's 640px `artUrl`), read by Cover Flow to draw its tile. Null or
+     * blank → the placeholder tile. Menu rows leave it null. (Checkpoint C)
+     */
+    val artUrl: String? = null,
 )
 
 /** Rows the LCD shows for a list of single-line items (menus) and of two-line items (songs). */
@@ -133,6 +138,15 @@ data class LcdNowPlaying(
     val repeat: LcdRepeat = LcdRepeat.OFF,
 )
 
+/**
+ * How far the shared liked-songs indexer (`LikedSongsIndexer`) has got: [indexed] rows of the
+ * server's [total] are in the cache. The ViewModel sets it only while the index is INCOMPLETE and
+ * the total is known; null means "nothing to say" (complete, or unknown). Cover Flow may show it
+ * as a quiet "Indexing N of M" line while its list is still growing. (Checkpoint C)
+ */
+@Immutable
+data class LcdIndexStatus(val indexed: Int, val total: Int)
+
 @Immutable
 data class IPodUiState(
     /** Never empty; the last entry is showing. */
@@ -142,6 +156,8 @@ data class IPodUiState(
     val clickSounds: ClickSoundsConfig = ClickSoundsConfig(),
     /** Silver or black body — the iPod's own Settings → Color. */
     val bodyColor: IPodBodyColor = IPodBodyColor.SILVER,
+    /** Non-null while the liked-songs index is still filling — see [LcdIndexStatus]. */
+    val likedIndex: LcdIndexStatus? = null,
 ) {
     val current: IPodStackEntry get() = stack.last()
 }
