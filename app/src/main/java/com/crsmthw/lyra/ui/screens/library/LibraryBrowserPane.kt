@@ -349,7 +349,7 @@ internal fun LibraryBrowserPane(
     val paneHeightDp = with(density) { LocalWindowInfo.current.containerSize.height.toDp() }
     val useLargeBar  = paneHeightDp >= LargeBarMinPaneHeight
 
-    // A page's first row starts a gap below the tab row, and the `LibraryTabFadeHeight` fade at the
+    // A page's first row starts a gap below the tab row, and the `BarFadeHeight` fade at the
     // top of the content area dissolves it into that row — the same seam Search gives its results.
     val listContentPadding = remember(navBarBottomDp) {
         PaddingValues(top = BarContentGap, bottom = 100.dp + navBarBottomDp)
@@ -780,40 +780,12 @@ private fun LibraryTabRow(
         selectedTabIndex = selectedIndex,
         modifier         = modifier,
         containerColor   = containerColor,
-        // THE INDICATOR FOLLOWS THE PAGER, it does not animate after it. `tabIndicatorLayout` is
-        // M3's own hook for exactly this: the block runs on every LAYOUT pass and reads the pager's
-        // live page + offset fraction THERE, so a swipe re-places and re-measures the bar per frame
-        // while recomposing nothing (a state read inside a measure block invalidates layout, not
-        // composition). A TAP rides the same path: `animateScrollToPage` moves the pager, the bar
-        // moves with it — which is why the animated `tabIndicatorOffset` is gone rather than kept
-        // alongside. Two animations over one geometry would fight, and the old one was the whole
-        // defect Cris reported: driven by the ViewModel's filter, it did nothing until the swipe
-        // settled and then slid across on its own.
-        //
-        // THE HARD RULE (docs/MOTION.md) is not in play, and no longer even nearly: there is no
-        // `Animatable` and no `Transition` left in this row at all. The bar is scroll-driven
-        // geometry, like an app bar's collapse.
-        //
-        // Geometry, reproducing what `TabRowImpl` does for the stock indicator:
-        //  - `width` is the lerped CONTENT width (M3's `matchContentSize` look — the bar hugs the
-        //    label and MORPHS between two labels' widths mid-swipe) plus
-        //    [LibraryTabIndicatorCompensation], the 16dp the halved label padding costs;
-        //  - the bar ends up CENTRED in the tab, at `left + (tabWidth - width) / 2`, but that
-        //    centring is NOT added here. Reporting `placeable.width` (the lerped width) while
-        //    `TabRowImpl` measured this node at `minWidth = maxWidth = tabWidth` makes
-        //    `Placeable.width` coerce back up to `tabWidth` and sets
-        //    `apparentToRealOffset.x = (tabWidth - width) / 2`, which `place` applies for us. That
-        //    is stock M3's own mechanism — `TabIndicatorOffsetNode` also places at the bare `left`.
-        //    Adding the half-slack as well would double it: right of centre at rest, and invisible
-        //    mid-swipe, which is how such a bug survives a device pass.
-        //  - the RTL negation is `TabIndicatorOffsetNode`'s, for the same reason: `TabRowImpl`
-        //    places this node with `placeRelative`, so its own box is already mirrored.
-        //
-        // `width = Dp.Unspecified` on the indicator is still mandatory: `PrimaryIndicator`'s own
-        // default is a 24dp stub, and only `Dp.Unspecified` makes its `requiredWidth` a pass-through
-        // so the constraint below is what decides.
-        // The indicator follows the pager per frame — see `pagerTrackingIndicator`'s KDoc.
+        // The indicator follows the pager per frame — see `pagerTrackingIndicator`'s KDoc for the
+        // full mechanism (layout-driven, no recomposition, continuous across the flip).
+        // The old default indicator was driven by the ViewModel's filter and did nothing until the
+        // swipe settled, then slid across on its own (Cris, 2026-09-15).
         // `LibraryTabIndicatorCompensation` compensates the halved label padding (see its KDoc).
+        // `width = Dp.Unspecified` is mandatory — `PrimaryIndicator`'s default is a 24dp stub.
         indicator        = {
             TabRowDefaults.PrimaryIndicator(
                 modifier = pagerTrackingIndicator(pagerState, extraWidth = LibraryTabIndicatorCompensation),

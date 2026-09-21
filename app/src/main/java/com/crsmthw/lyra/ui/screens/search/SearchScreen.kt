@@ -70,8 +70,8 @@ import com.crsmthw.lyra.ui.components.toTrackActionTarget
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import com.crsmthw.lyra.util.ListScrollHaptics
 import com.crsmthw.lyra.util.confirm
-import com.crsmthw.lyra.util.press
 import com.crsmthw.lyra.util.pagerTrackingIndicator
+import com.crsmthw.lyra.util.press
 import com.crsmthw.lyra.util.rememberArtBoundsTransform
 import com.crsmthw.lyra.util.rememberSearchBarMorphClip
 import kotlin.math.abs
@@ -374,7 +374,16 @@ fun SearchScreen(
                         // compose it, satisfy `reachedBottom` immediately and fetch its page 2 for a
                         // tab the user never arrived at — then spring back, leaving a spinner and a
                         // mutated list behind on an off-screen tab.
-                        val isActive = pagerState.settledPage == page
+                        //
+                        // `!isScrollInProgress` is the same half the settle collector above uses:
+                        // `PagerState.scroll` writes `settledPageState = currentPage` on
+                        // start-over-finished, so `settledPage` can report an intermediate page for
+                        // a whole return animation — and that intermediate page could trigger a
+                        // page-2 fetch on the wrong tab. Do NOT add `currentPageOffsetFraction`
+                        // here — that is a per-frame value and this is a composition read inside
+                        // the pager's page lambda; it would recompose every page on every frame.
+                        val isActive = pagerState.settledPage == page &&
+                            !pagerState.isScrollInProgress
                         val paging   = state.pagingFor(pageTab)
 
                         when (pageTab) {
@@ -873,41 +882,12 @@ private fun SearchTabRow(
         selectedTabIndex = selectedIndex,
         modifier         = modifier,
         containerColor   = Color.Transparent,
-        // THE INDICATOR FOLLOWS THE PAGER, it does not animate after it. `tabIndicatorLayout` is
-        // M3's own hook for exactly this: the block runs on every LAYOUT pass and reads the pager's
-        // live page + offset fraction THERE, so a swipe re-places and re-measures the bar per frame
-        // while recomposing nothing (a state read inside a measure block invalidates layout, not
-        // composition). A TAP rides the same path: `animateScrollToPage` moves the pager and the bar
-        // moves with it, which is why the animated `tabIndicatorOffset` is gone rather than kept
-        // alongside — two animations over one geometry would fight. The default indicator was driven
-        // by the ViewModel's tab, which only moves once a swipe has SETTLED, so the bar sat still
-        // under the finger and then slid across at the end (Cris, 2026-09-15).
-        //
-        // THE HARD RULE (docs/MOTION.md) is not in play, and no longer even nearly: no `Animatable`
-        // and no `Transition` is left in this row. The bar is scroll-driven geometry.
-        //
-        // Geometry, reproducing what `TabRowImpl` does for the stock indicator:
-        //  - `width` is the lerped `TabPosition.contentWidth` — M3's `matchContentSize` look, the
-        //    bar hugging the label and MORPHING between two labels' widths mid-swipe. Taken as is:
-        //    these tabs use the `text =` slot, so their intrinsic width carries the 16dp a side that
-        //    `contentWidth` assumes (unlike the Library's row, which halves that padding and has to
-        //    add the difference back).
-        //  - the bar ends up CENTRED in the tab, at `left + (tabWidth - width) / 2`, but that
-        //    centring is NOT added here. Reporting `placeable.width` (the lerped width) while
-        //    `TabRowImpl` measured this node at `minWidth = maxWidth = tabWidth` makes
-        //    `Placeable.width` coerce back up to `tabWidth` and sets
-        //    `apparentToRealOffset.x = (tabWidth - width) / 2`, which `place` applies for us — stock
-        //    M3's own mechanism (`TabIndicatorOffsetNode` places at the bare `left` too). Adding the
-        //    half-slack as well would double it: right of centre at rest, invisible mid-swipe.
-        //  - the RTL negation is `TabIndicatorOffsetNode`'s, for the same reason: `TabRowImpl`
-        //    places this node with `placeRelative`, so its own box is already mirrored.
-        //
-        // `width = Dp.Unspecified` is mandatory: `PrimaryIndicator`'s own default is a 24dp stub,
-        // and only `Dp.Unspecified` makes its `requiredWidth` a pass-through so the constraint below
-        // is what decides.
-        // The indicator follows the pager per frame — see `pagerTrackingIndicator`'s KDoc.
-        // These tabs use the `text =` slot, so their intrinsic width carries the 16dp per side
-        // that `contentWidth` assumes — no extra compensation needed (default 0.dp).
+        // The indicator follows the pager per frame — see `pagerTrackingIndicator`'s KDoc for the
+        // full mechanism. The old default indicator was driven by the ViewModel's tab, which only
+        // moved once a swipe settled, so the bar sat still under the finger and then slid across at
+        // the end (Cris, 2026-09-15). These tabs use the `text =` slot, so their intrinsic width
+        // carries the 16dp per side that `contentWidth` assumes — no extra compensation needed.
+        // `width = Dp.Unspecified` is mandatory — `PrimaryIndicator`'s default is a 24dp stub.
         indicator        = {
             TabRowDefaults.PrimaryIndicator(
                 modifier = pagerTrackingIndicator(pagerState),
