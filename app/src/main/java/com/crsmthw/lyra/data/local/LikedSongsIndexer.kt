@@ -131,8 +131,10 @@ class LikedSongsIndexer(
                     _state.value = _state.value.copy(running = false)
                     demands.first { it.any }
                     // The world may have changed while parked (a Library replace, new likes):
-                    // the first tick after a park runs at the demand's own cadence.
+                    // re-seed from the cache on the first tick so we don't resume at a stale offset.
                     complete = false
+                    rawOffset = -1
+                    prevSize = -1
                 }
                 _state.value = _state.value.copy(running = true)
 
@@ -203,7 +205,7 @@ class LikedSongsIndexer(
                                 .filter { it.isPlayable != false }
 
                             if (newTracks.isNotEmpty()) {
-                                val result = libraryCache.appendToLikedSongs(newTracks, total)
+                                val result = libraryCache.appendToLikedSongs(newTracks)
                                 if (result != null) {
                                     prevSize = result.rowCount
                                     _state.value = _state.value.copy(

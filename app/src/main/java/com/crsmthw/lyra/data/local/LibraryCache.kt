@@ -332,11 +332,12 @@ class LibraryCache(context: Context) {
      * (a like, the iPod's reconcile) landing between the caller's earlier read and this write is
      * kept, not reverted — the `load()` … `saveTrackList(cached + page)` pair the foreground
      * service used to do had exactly that window. De-duplicates by id (heals an overlap when the
-     * seed offset started below the true raw position). [total] is the server's count and becomes
-     * the list's `snapshotId`; `likedSongCount` is left alone, as the old fetcher left it.
+     * seed offset started below the true raw position). Purely additive: `snapshotId` and
+     * `likedSongCount` are left alone — a backfill has no authority over the total (it was already
+     * counted), and writing a stale total would revert a concurrent like's increment.
      * Returns null when there is no liked list to append to.
      */
-    fun appendToLikedSongs(tracks: List<SpotifyTrack>, total: Int): LikedSongsAppend? {
+    fun appendToLikedSongs(tracks: List<SpotifyTrack>): LikedSongsAppend? {
         synchronized(lock) {
             val current  = loadLocked() ?: return null
             val existing = current.trackLists[LIKED_SONGS_KEY] ?: return null
@@ -344,7 +345,7 @@ class LibraryCache(context: Context) {
             val added    = tracks.filter { it.id !in held }.distinctBy { it.id }
             saveLocked(current.copy(
                 trackLists = current.trackLists + (LIKED_SONGS_KEY to
-                    CachedTrackList(total.toString(), existing.tracks + added)),
+                    CachedTrackList(existing.snapshotId, existing.tracks + added)),
             ))
             return LikedSongsAppend(added, existing.tracks.size + added.size)
         }

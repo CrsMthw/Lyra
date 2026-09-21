@@ -10,6 +10,7 @@ import coil3.size.Size
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -132,9 +133,9 @@ class CoverArtPrefetcher(
      * on a miss, then mark READY or FAILED. With nothing PENDING a worker PARKS on [wake] until
      * [setUrls] adds work — it never exits (see [wake]).
      */
-    private suspend fun processUrls() {
-        val workers = (0 until MAX_CONCURRENT).map {
-            scope.launch {
+    private suspend fun processUrls() = coroutineScope {
+        repeat(MAX_CONCURRENT) {
+            launch {
                 var seen = wake.value
                 while (true) {
                     val url = claimNextPending()
@@ -147,7 +148,6 @@ class CoverArtPrefetcher(
                 }
             }
         }
-        workers.forEach { it.join() }
     }
 
     /**
