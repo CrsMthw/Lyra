@@ -39,6 +39,33 @@ class SpotifyRepository(
         api.getUserPlaylists(limit, offset)
     }
 
+    /**
+     * Every playlist `me/playlists` knows about (2026-09-21): pages of 50, the offset advanced by
+     * [UserPlaylistsResponse.rawCount] (never by the filtered `items.size`), stopping on
+     * `next == null || rawCount == 0` — the shape `LibraryViewModel.loadCollections` pages saved
+     * albums with. [UserPlaylistsSweep.total] is the endpoint's own count from the FIRST page, so
+     * rows and count come from the same source. A failure on the first page is a failure; a failure
+     * on a later page returns the prefix with `complete = false`, and the caller decides whether a
+     * prefix is worth showing (the Library shows one only into an EMPTY list, never over a cached
+     * full one, and never persists it). Callers gate on `isRateLimited()` as for any sweep.
+     */
+    suspend fun getAllUserPlaylists(): Result<UserPlaylistsSweep> {
+        val items = mutableListOf<SpotifyPlaylist>()
+        var offset = 0
+        var total = 0
+        var first = true
+        while (true) {
+            val page = getUserPlaylists(limit = 50, offset = offset).getOrElse { e ->
+                return if (first) Result.failure(e) else Result.success(UserPlaylistsSweep(items, total, complete = false))
+            }
+            if (first) { total = page.total; first = false }
+            items += page.items
+            offset += page.rawCount
+            if (page.next == null || page.rawCount == 0) break
+        }
+        return Result.success(UserPlaylistsSweep(items, total, complete = true))
+    }
+
     suspend fun getLikedSongs(limit: Int = 50, offset: Int = 0): Result<SavedTracksResponse> = safeCall {
         api.getLikedSongs(limit, offset)
     }
