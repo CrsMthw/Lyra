@@ -88,6 +88,8 @@ object IPodColors {
     val ProgressGlassBottom = Color(0xFF4C9BF1)
     val ArtPlaceholder    = Color(0xFFBDBDBD)
     val ArtPlaceholderIcon = Color(0xFF7A7A7A)
+    /** Hairline edge on Cover Flow tiles so a white cover separates from the white LCD. */
+    val CoverEdge         = Color(0xFFD0D0D0)
 }
 
 /** The 6th-gen Classic came in silver and black. The LCD is identical; body and wheel differ. */
