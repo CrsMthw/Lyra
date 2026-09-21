@@ -426,7 +426,8 @@ class PlayerViewModel(
                     withContext(Dispatchers.IO) {
                         if (fullTrack != null) {
                             val knownTotal = libraryCache.load()?.playlists
-                                ?.firstOrNull { it.id == playlistId }?.trackCount ?: 0
+                                ?.firstOrNull { it.id == playlistId }?.trackCount
+                                ?: Int.MAX_VALUE  // unknown → treat cache as a prefix, announce only
                             libraryCache.appendToPlaylistTrackList(
                                 playlistId, knownTotal, fullTrack,
                             )
