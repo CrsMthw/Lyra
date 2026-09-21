@@ -19,6 +19,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,6 +52,7 @@ import com.crsmthw.lyra.ui.ipod.nav.IPodStackEntry
 import com.crsmthw.lyra.ui.ipod.nav.LcdIndexStatus
 import com.crsmthw.lyra.ui.ipod.nav.LcdItem
 import kotlin.math.abs
+import kotlin.math.roundToInt
 import kotlin.math.cos
 import kotlin.math.sign
 
@@ -74,6 +77,12 @@ private const val COVER_REFLECTION_HEIGHT = 0.35f
 private const val COVER_REFLECTION_ALPHA = 0.35f
 /** Duration of the position animation per detent (finite tween, never a spring). */
 private const val COVER_SLIDE_MILLIS = 180
+/**
+ * Floor of the glide under a fast spin. The glide's duration is COVER_SLIDE_MILLIS divided by the
+ * distance still to cover, so when detents arrive faster than one glide the ribbon speeds up
+ * instead of falling further behind with every detent (the lag is what blanked the screen).
+ */
+private const val COVER_FAST_SLIDE_MILLIS = 50
 /** Number of covers drawn per side of the centre cover. */
 private const val COVERS_PER_SIDE = 5
 /** Jump threshold: snap instead of animate when abs(delta) exceeds this. */
@@ -150,11 +159,29 @@ private fun CoverFlowRow(
     val position = remember { Animatable(selectedIndex.toFloat()) }
     LaunchedEffect(selectedIndex) {
         val target = selectedIndex.toFloat()
-        if (abs(target - position.value) > COVER_SNAP_THRESHOLD) {
-            position.snapTo(target)
-        } else {
-            position.animateTo(target, tween(COVER_SLIDE_MILLIS, easing = FastOutSlowInEasing))
+        val gap = abs(target - position.value)
+        when {
+            gap > COVER_SNAP_THRESHOLD -> position.snapTo(target)
+            gap > 0f -> {
+                // One detent glides for the full duration; a target several covers ahead (a fast
+                // spin re-targets before the last glide is done) gets a proportionally shorter
+                // glide, floored, so the position keeps up with the wheel.
+                val millis = (COVER_SLIDE_MILLIS / gap).roundToInt()
+                    .coerceIn(COVER_FAST_SLIDE_MILLIS, COVER_SLIDE_MILLIS)
+                position.animateTo(target, tween(millis, easing = FastOutSlowInEasing))
+            }
         }
+    }
+
+    // The cover the ribbon is CENTRED on right now — the animated position, rounded. The tile
+    // window, the z-order and the text all follow THIS, not the detent's selectedIndex: under a
+    // fast spin the position lags the detent by several covers, and a window built around the
+    // detent composed only tiles ahead of the visible centre (the departing side went blank, the
+    // whole ribbon once the lag passed COVERS_PER_SIDE) while a far incoming tile, nearer to the
+    // detent than a visually nearer one, drew on top of it. derivedStateOf recomposes once per
+    // cover crossed, never per frame.
+    val displayedCentre by remember(items.size) {
+        derivedStateOf { position.value.roundToInt().coerceIn(0, items.lastIndex.coerceAtLeast(0)) }
     }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -176,15 +203,24 @@ private fun CoverFlowRow(
         val reflectionHeightDp = with(density) { reflectionHeightPx.toDp() }
         val totalTileHeightDp = with(density) { totalTileHeightPx.toDp() }
 
-        // Window of tiles: composition-phase, changes only per detent (not per animation frame).
-        val centreIndex = selectedIndex.coerceIn(items.indices)
+        // Window of tiles around the DISPLAYED centre: composition-phase, changes once per cover
+        // crossed (not per animation frame).
+        val centreIndex = displayedCentre
         val windowStart = (centreIndex - COVERS_PER_SIDE).coerceAtLeast(0)
         val windowEnd = (centreIndex + COVERS_PER_SIDE).coerceAtMost(items.lastIndex)
 
-        // Layout: a Column with the covers box taking remaining space and the text at the bottom.
-        // The covers sit vertically centred inside their box via translationY in the graphicsLayer;
-        // the text sits at the bottom by layout, so no speculative height calculation is needed.
+        // Layout: a Column — the indexing line (only while the list is still filling) above, the
+        // covers box taking the remaining space, the text at the bottom. The covers sit vertically
+        // centred inside their box via translationY in the graphicsLayer.
         Column(Modifier.fillMaxSize()) {
+            if (likedIndex != null) {
+                CoverFlowIndexingLine(
+                    likedIndex = likedIndex,
+                    contentHeightPx = contentHeightPx,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+
             // Covers box: takes all remaining vertical space above the text. Tiles position
             // themselves via graphicsLayer translationX/Y, centred vertically and horizontally.
             BoxWithConstraints(
@@ -220,9 +256,9 @@ private fun CoverFlowRow(
                 }
             }
 
-            // Text block below the covers, at the bottom of the content area.
-            // The highlighted item for the text labels -- use the detent's selectedIndex, not the
-            // animated position, so labels swap at the detent with no mid-glide flicker.
+            // Text block below the covers, at the bottom of the content area: the cover the ribbon
+            // is centred on right now (it swaps as each cover crosses the centre, so a fast spin
+            // streams the titles past with the covers and the two never disagree).
             val highlightedItem = items.getOrNull(centreIndex)
             if (highlightedItem != null) {
                 Spacer(Modifier.height(contentHeight * COVER_TEXT_TOP_GAP))
@@ -230,7 +266,6 @@ private fun CoverFlowRow(
                     item = highlightedItem,
                     itemIndex = centreIndex,
                     itemCount = items.size,
-                    likedIndex = likedIndex,
                     contentHeightPx = contentHeightPx,
                     contentWidthPx = contentWidthPx,
                     modifier = Modifier.fillMaxWidth(),
@@ -387,7 +422,6 @@ private fun CoverFlowText(
     item: LcdItem,
     itemIndex: Int,
     itemCount: Int,
-    likedIndex: LcdIndexStatus?,
     contentHeightPx: Float,
     contentWidthPx: Float,
     modifier: Modifier = Modifier,
@@ -436,41 +470,45 @@ private fun CoverFlowText(
 
         Spacer(Modifier.height(with(density) { (contentHeightPx * COVER_TEXT_TOP_GAP).toDp() }))
 
-        // Bottom row: "N of M" right, indexing line left.
-        Box(
+        // "N of M", centred under the artist like the lines above it.
+        Text(
+            text = stringResource(
+                R.string.ipod_now_playing_position,
+                itemIndex + 1,
+                itemCount,
+            ),
+            fontFamily = IPodFontFamily,
+            fontSize = positionFontSize,
+            color = IPodColors.LcdTextSecondary,
+            maxLines = 1,
+            textAlign = TextAlign.Center,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = sidePad),
-        ) {
-            // Position counter -- bottom right.
-            Text(
-                text = stringResource(
-                    R.string.ipod_now_playing_position,
-                    itemIndex + 1,
-                    itemCount,
-                ),
-                fontFamily = IPodFontFamily,
-                fontSize = positionFontSize,
-                color = IPodColors.LcdTextSecondary,
-                maxLines = 1,
-                modifier = Modifier.align(Alignment.CenterEnd),
-            )
-
-            // Indexing status -- bottom left, only while the list is incomplete.
-            if (likedIndex != null) {
-                Text(
-                    text = stringResource(
-                        R.string.ipod_coverflow_indexing,
-                        likedIndex.indexed,
-                        likedIndex.total,
-                    ),
-                    fontFamily = IPodFontFamily,
-                    fontSize = positionFontSize,
-                    color = IPodColors.LcdTextSecondary,
-                    maxLines = 1,
-                    modifier = Modifier.align(Alignment.CenterStart),
-                )
-            }
-        }
+        )
     }
+}
+
+/** "Indexing N of M…" — centred above the covers, shown only while the liked list is still filling. */
+@Composable
+private fun CoverFlowIndexingLine(
+    likedIndex: LcdIndexStatus,
+    contentHeightPx: Float,
+    modifier: Modifier = Modifier,
+) {
+    val density = LocalDensity.current
+    val fontSize = with(density) { (contentHeightPx * COVER_POSITION_FRACTION).toSp() }
+    Text(
+        text = stringResource(
+            R.string.ipod_coverflow_indexing,
+            likedIndex.indexed,
+            likedIndex.total,
+        ),
+        fontFamily = IPodFontFamily,
+        fontSize = fontSize,
+        color = IPodColors.LcdTextSecondary,
+        maxLines = 1,
+        textAlign = TextAlign.Center,
+        modifier = modifier.padding(top = with(density) { (contentHeightPx * COVER_TEXT_TOP_GAP).toDp() }),
+    )
 }
