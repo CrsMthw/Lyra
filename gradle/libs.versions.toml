@@ -23,6 +23,7 @@ palette              = "1.0.0"
 graphicsShapes       = "1.1.0"
 commonsMath3         = "3.6.1"
 glance               = "1.3.0-alpha02"
+junit                = "4.13.2"
 
 [libraries]
 androidx-core-ktx                    = { group = "androidx.core",              name = "core-ktx",                    version.ref = "coreKtx" }
@@ -56,6 +57,9 @@ androidx-material3-adaptive          = { group = "androidx.compose.material3.ada
 commons-math3                        = { group = "org.apache.commons",                   name = "commons-math3",  version.ref = "commonsMath3" }
 glance-appwidget                     = { group = "androidx.glance",            name = "glance-appwidget",            version.ref = "glance" }
 glance-material3                     = { group = "androidx.glance",            name = "glance-material3",            version.ref = "glance" }
+junit                                = { group = "junit",                       name = "junit",                       version.ref = "junit" }
+kotlin-test-junit                    = { group = "org.jetbrains.kotlin",        name = "kotlin-test-junit",           version.ref = "kotlin" }
+kotlinx-coroutines-test              = { group = "org.jetbrains.kotlinx",      name = "kotlinx-coroutines-test",     version.ref = "coroutines" }
 
 [plugins]
 android-application = { id = "com.android.application",             version.ref = "agp" }
