@@ -67,8 +67,9 @@ object IPodColors {
     val ProgressBottom    = Color(0xFF2B66CF)
     val BatteryBody       = Color(0xFF3C3C3C)
     val BatteryFill       = Color(0xFF3FA84A)
-    val BatteryCharging   = Color(0xFF2B66CF)
-    val BatteryBolt       = Color(0xFFFFFFFF)
+    /** The charging bolt: dark across the green fill, with a light halo for the white body beyond a short fill. */
+    val BatteryBolt       = Color(0xFF1B1B1B)
+    val BatteryBoltHalo   = Color(0xCCFFFFFF)
     // Gloss — the Classic's title bar, play glyph, battery and progress bar are "aqua" glass.
     val LcdStatusGlossTop = Color(0xFFFFFFFF)
     val LcdStatusGlossMid = Color(0xFFECECEC)

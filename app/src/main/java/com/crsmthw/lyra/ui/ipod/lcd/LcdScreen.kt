@@ -573,11 +573,10 @@ private fun DrawScope.drawBattery(
     val fillHeight = bodyHeight - inset * 2f
     if (fillWidth > 0f) {
         // Glossy fill: pale at the top through the body colour, plus a white sheen on the upper half.
-        val (top, bottom) = if (battery.isCharging) {
-            IPodColors.ProgressGlassTop to IPodColors.BatteryCharging
-        } else {
-            IPodColors.BatteryGreenTop to IPodColors.BatteryGreenBottom
-        }
+        // Green whether charging or not — the Classic's charging battery is the same green fill
+        // with a bolt across it, not a different colour (the blue fill hid the white bolt).
+        val top = IPodColors.BatteryGreenTop
+        val bottom = IPodColors.BatteryGreenBottom
         drawRoundRect(
             brush = Brush.verticalGradient(
                 colors = listOf(top, bottom),
@@ -601,10 +600,11 @@ private fun DrawScope.drawBattery(
         )
     }
 
-    // Bolt icon when charging.
+    // Bolt icon when charging: a dark bolt across the body, as the Classic draws it, with a thin
+    // light halo so it reads over the green fill AND over the white body beyond a short fill.
     if (battery.isCharging) {
-        val boltHeight = bodyHeight * 0.6f
-        val boltWidth = boltHeight * 0.5f
+        val boltHeight = bodyHeight * 0.78f
+        val boltWidth = boltHeight * 0.6f
         val boltCx = bodyLeft + bodyWidth / 2f
         val boltCy = centerY
         val path = Path().apply {
@@ -616,6 +616,7 @@ private fun DrawScope.drawBattery(
             lineTo(boltCx - boltWidth * 0.05f, boltCy - boltHeight * 0.05f)
             close()
         }
+        drawPath(path, IPodColors.BatteryBoltHalo, style = androidx.compose.ui.graphics.drawscope.Stroke(width = height * 0.14f))
         drawPath(path, IPodColors.BatteryBolt, style = Fill)
     }
 }
