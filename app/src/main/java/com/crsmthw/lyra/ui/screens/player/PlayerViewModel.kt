@@ -383,6 +383,64 @@ class PlayerViewModel(
         }
     }
 
+    /**
+     * Sets the like state for a track identified by [uri] to the TARGET [liked]. Used by the iPod's
+     * options menu, where the track may or may not be the current one. Mirrors [toggleLike]'s
+     * behaviour: optimistic UI update (only when [uri] IS the current track), server call, cache
+     * patch. Never for an episode uri.
+     */
+    fun setLiked(uri: String, liked: Boolean) {
+        if (uri.startsWith("spotify:episode:")) return
+        val trackId = uri.substringAfterLast(':')
+        // Optimistic UI flip — only when the uri matches what the player is showing.
+        val currentTrack = _uiState.value.currentTrack?.takeIf { it.uri == uri }
+        if (currentTrack != null) {
+            _uiState.update { it.copy(isLiked = liked) }
+        }
+        viewModelScope.launch {
+            if (liked) {
+                repository.saveTrack(trackId)
+                if (currentTrack != null) {
+                    withContext(Dispatchers.IO) { libraryCache.prependToLikedSongs(currentTrack) }
+                }
+            } else {
+                repository.removeTrack(trackId)
+                withContext(Dispatchers.IO) { libraryCache.removeFromLikedSongs(trackId) }
+            }
+        }
+    }
+
+    /**
+     * Adds a track to a playlist by uri. Used by the iPod's add-to-playlist screen. Mirrors
+     * [TrackActionsController.togglePlaylistTrack]'s ADD branch: server POST, cache row append
+     * (when the full track is known and the cache holds the complete list — the guard inside
+     * [LibraryCache.appendToPlaylistTrackList] checks), mutation announcement for the Library's
+     * count reconcile. Never for an episode uri. Failures are logged, not surfaced.
+     */
+    fun addToPlaylist(playlistId: String, trackUri: String) {
+        if (trackUri.startsWith("spotify:episode:")) return
+        val fullTrack = _uiState.value.currentTrack?.takeIf { it.uri == trackUri }
+        viewModelScope.launch {
+            repository.addTrackToPlaylist(playlistId, trackUri).fold(
+                onSuccess = {
+                    withContext(Dispatchers.IO) {
+                        if (fullTrack != null) {
+                            val knownTotal = libraryCache.load()?.playlists
+                                ?.firstOrNull { it.id == playlistId }?.trackCount
+                                ?: Int.MAX_VALUE  // unknown → treat cache as a prefix, announce only
+                            libraryCache.appendToPlaylistTrackList(
+                                playlistId, knownTotal, fullTrack,
+                            )
+                        } else {
+                            libraryCache.notePlaylistMutated(playlistId)
+                        }
+                    }
+                },
+                onFailure = { e -> Log.w(TAG, "addToPlaylist failed: ${e.message}") },
+            )
+        }
+    }
+
     fun playFromLikedSongs(trackUri: String, shuffle: Boolean? = null) {
         viewModelScope.launch {
             val cached = withContext(Dispatchers.IO) {

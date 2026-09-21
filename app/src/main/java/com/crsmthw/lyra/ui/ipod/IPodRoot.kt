@@ -168,9 +168,10 @@ fun IPodRoot(container: AppContainer, modifier: Modifier = Modifier) {
                 is IPodEffect.SeekTo -> playerVm.seekTo(effect.fraction)
                 is IPodEffect.SetShuffle -> container.playerStateManager.setShuffle(effect.enabled)
                 is IPodEffect.SetRepeat -> container.playerStateManager.setRepeat(effect.state)
-                // Checkpoint D — routed by the shell lane (contract stubs so the round compiles).
-                is IPodEffect.SetLiked -> Unit
-                is IPodEffect.AddToPlaylist -> Unit
+                is IPodEffect.SetLiked -> playerVm.setLiked(effect.uri, effect.liked)
+                is IPodEffect.AddToPlaylist -> playerVm.addToPlaylist(
+                    effect.playlistId, effect.trackUri,
+                )
                 is IPodEffect.SetSleepTimer -> playerVm.setSleepTimer(effect.minutes)
             }
         }
@@ -196,6 +197,16 @@ fun IPodRoot(container: AppContainer, modifier: Modifier = Modifier) {
         vm.uiState.map { it.clickSounds }.distinctUntilChanged().collect { config ->
             sounds.configure(config)
         }
+    }
+
+    // ── Like mirror: PlayerViewModel.isLiked → IPodViewModel.nowPlaying ─────
+    // Keyed on the pair (uri, isLiked) so a track change that lands on the same liked state
+    // (liked→liked across auto-advance) still pushes — the observer clears isLiked only for
+    // episodes, not for track-to-track transitions, so a bare Boolean distinct would miss it.
+    LaunchedEffect(vm, playerVm) {
+        playerVm.uiState.map { it.currentTrack?.uri to it.isLiked }
+            .distinctUntilChanged()
+            .collect { (_, liked) -> vm.onPlayerLikedChanged(liked) }
     }
 
     // ── Exit dialog ─────────────────────────────────────────────────────────
