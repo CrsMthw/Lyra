@@ -505,15 +505,16 @@ class IPodViewModel(
         is WheelEvent.Scroll -> handleScroll(event.steps)
         is WheelEvent.Press -> { handlePress(event.button); true }
         is WheelEvent.LongPress -> {
-            if (event.button == WheelButton.SELECT) {
-                val top = _uiState.value.current
-                if (top.screen is IPodScreen.NowPlaying) {
-                    commitPendingScrubNow()
-                    pushNowPlayingOptions()
-                }
+            // True only when the hold DID something — the wheel clicks and buzzes on true alone,
+            // so a hold over a list is silent (Cris, round D pass).
+            val top = _uiState.value.current
+            if (event.button == WheelButton.SELECT && top.screen is IPodScreen.NowPlaying) {
+                commitPendingScrubNow()
+                pushNowPlayingOptions()
+                true
+            } else {
+                false
             }
-            // A long press is a button — always counts as handled (click sounds fire in the wheel).
-            true
         }
     }
 
@@ -900,6 +901,15 @@ class IPodViewModel(
 
     private fun activateMusicItem(item: LcdItem, index: Int, items: List<LcdItem>) {
         rememberSelection(item.id, index, items.map { it.id })
+        // The song that is ALREADY current: never restart it — resume if it is paused, and just go
+        // to Now Playing (Cris, round D pass: a cover of the playing song returns, it does not
+        // start over).
+        val current = _uiState.value.nowPlaying
+        if (current != null && current.uri == item.id) {
+            if (!current.isPlaying) viewModelScope.launch { _effects.send(IPodEffect.PlayPause) }
+            push(IPodScreen.NowPlaying, LcdLabel.Res(R.string.ipod_menu_now_playing))
+            return
+        }
         // Now Playing shows THIS song from its first frame (the LCD's Cover Flow → Now Playing
         // flight lands on its art); the mirror takes over once the poll reports it.
         showOptimisticNowPlaying(item)

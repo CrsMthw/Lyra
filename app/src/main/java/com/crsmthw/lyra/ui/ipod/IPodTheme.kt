@@ -60,9 +60,8 @@ object IPodColors {
     val HighlightBottom   = Color(0xFF1F5FD0)
     val HighlightText     = Color(0xFFFFFFFF)
     val Chevron           = Color(0xFF8F8F8F)
-    val ScrollbarTrack    = Color(0xFFEDEDED)
-    val ScrollbarThumbTop = Color(0xFF9FC3F7)
-    val ScrollbarThumbBottom = Color(0xFF3A78D8)
+    /** The list scrollbar: a translucent black capsule, no track (round D). */
+    val ScrollbarThumb    = Color(0x59000000)
     val ProgressTrack     = Color(0xFFE3E3E3)
     val ProgressTop       = Color(0xFF7FB2F4)
     val ProgressBottom    = Color(0xFF2B66CF)
@@ -176,4 +175,10 @@ object IPodDimens {
     const val LcdMaxHeightFraction  = 0.46f
     /** Menu push/pop slide — the spec's 200–250 ms; finite, never a spring. */
     const val LcdSlideMillis = 220
+    /**
+     * The LCD's bezel sits at least this far below the window's top edge. A camera cutout already
+     * pushes it lower on the cover screen; on a display without one (the Fold unfolded, the Fold 6's
+     * inner screen) the body padding alone left it hugging the top edge (Cris, round D pass).
+     */
+    val LcdMinTopInset = 40.dp
 }

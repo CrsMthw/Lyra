@@ -112,7 +112,8 @@ private const val INNER_SHADOW_WIDTH_DP = 3f
  * nothing. Ring sectors (MENU/PREVIOUS/NEXT/PLAY_PAUSE) do NOT long-press this round. The wheel
  * fires its own feedback from the gesture lambdas: `scrollTick()` + [ClickSounds.tick] per
  * detent, `press()` for MENU/PREVIOUS/NEXT/PLAY_PAUSE, `confirm()` + [ClickSounds.select] for
- * SELECT, `longPress()` + [ClickSounds.select] for LongPress.
+ * SELECT, `longPress()` + [ClickSounds.select] for a LongPress the ViewModel acted on (a hold that
+ * changes nothing is silent).
  *
  * The composable is square; its size is decided by the caller (IPodRoot).
  */
@@ -490,9 +491,13 @@ private suspend fun androidx.compose.ui.input.pointer.PointerInputScope.wheelGes
                     // ── Timeout: long press fired while finger is still down ──
                     longPressFired = true
                     longPressArmed = false
-                    haptics.longPress()
-                    soundsState.value?.select()
-                    onEventState.value(WheelEvent.LongPress(WheelButton.SELECT))
+                    // Feedback only when the ViewModel ACTED on it (the options menu opened over
+                    // Now Playing). A hold over a list does nothing, so it stays silent — the
+                    // clicker rule (feedback marks a change), extended to holds (Cris, round D).
+                    if (onEventState.value(WheelEvent.LongPress(WheelButton.SELECT))) {
+                        haptics.longPress()
+                        soundsState.value?.select()
+                    }
                     // Continue the loop: subsequent events are consumed, and the
                     // release will emit nothing (longPressFired suppresses Press).
                     continue

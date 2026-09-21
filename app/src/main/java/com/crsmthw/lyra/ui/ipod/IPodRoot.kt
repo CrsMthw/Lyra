@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.displayCutout
@@ -237,6 +238,11 @@ fun IPodRoot(container: AppContainer, modifier: Modifier = Modifier) {
                 ),
         ) {
             val isLandscape = maxWidth > maxHeight
+            // The LCD sits at least LcdMinTopInset below the window's top edge: the cutout inset
+            // already achieves that on the cover screen; on a display without one the body
+            // padding alone left the bezel hugging the top edge.
+            val cutoutTop = WindowInsets.displayCutout.asPaddingValues().calculateTopPadding()
+            val extraTop = (IPodDimens.LcdMinTopInset - IPodDimens.BodyPadding - cutoutTop).coerceAtLeast(0.dp)
 
             Column(
                 modifier = Modifier
@@ -244,7 +250,8 @@ fun IPodRoot(container: AppContainer, modifier: Modifier = Modifier) {
                     .padding(IPodDimens.BodyPadding)
                     // Pad for the display cutout so the LCD sits below the camera hole
                     // while the silver body runs behind it.
-                    .windowInsetsPadding(WindowInsets.displayCutout),
+                    .windowInsetsPadding(WindowInsets.displayCutout)
+                    .padding(top = extraTop),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 // Read available size AFTER padding + cutout inset, so the LCD cap

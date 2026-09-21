@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -61,6 +62,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.crsmthw.lyra.R
+import kotlinx.coroutines.delay
 import com.crsmthw.lyra.ui.ipod.IPodColors
 import com.crsmthw.lyra.ui.ipod.IPodDimens
 import com.crsmthw.lyra.ui.ipod.IPodFontFamily
@@ -713,6 +715,7 @@ private fun LcdItemList(
         if (items.size > visibleRows) {
             LcdScrollbar(
                 firstVisibleIndex = firstVisibleIndex,
+                selectedIndex = selectedIndex,
                 totalItems = items.size,
                 visibleRows = visibleRows,
                 contentHeightPx = contentHeightPx,
@@ -825,39 +828,50 @@ private fun LcdRow(
 
 // ── Scrollbar ───────────────────────────────────────────────────────────────
 
+/** How long the scrollbar stays after the wheel stops before it fades. */
+private const val SCROLLBAR_HIDE_DELAY_MS = 1_500L
+/** The scrollbar's fade-out. Finite, never a spring. */
+private const val SCROLLBAR_FADE_MILLIS = 350
+/** Thumb width as a fraction of the content height. */
+private const val SCROLLBAR_WIDTH_FRACTION = 0.016f
+
 /**
- * The scrollbar reads its position from [firstVisibleIndex] (state), not from a LazyListState,
- * so it tracks the window in the same frame as the rows.
+ * A translucent black capsule at the right edge with no track (Cris, round D pass). It reads its
+ * position from [firstVisibleIndex] (state), not from a LazyListState, so it tracks the window in
+ * the same frame as the rows; it shows whenever the wheel moves the highlight or the window and
+ * fades out [SCROLLBAR_HIDE_DELAY_MS] after the last detent. The alpha is read in the draw phase.
  */
 @Composable
 private fun LcdScrollbar(
     firstVisibleIndex: Int,
+    selectedIndex: Int,
     totalItems: Int,
     visibleRows: Int,
     contentHeightPx: Float,
 ) {
     val density = LocalDensity.current
-    val trackWidth = with(density) { (contentHeightPx * 0.02f).toDp() }
-    val trackWidthPx = contentHeightPx * 0.02f
+    val thumbWidthPx = contentHeightPx * SCROLLBAR_WIDTH_FRACTION
+    val thumbWidth = with(density) { thumbWidthPx.toDp() }
+
+    // Visible on every detent (a new window OR a new highlight), gone a moment after the last.
+    val alpha = remember { Animatable(1f) }
+    LaunchedEffect(firstVisibleIndex, selectedIndex) {
+        alpha.snapTo(1f)
+        delay(SCROLLBAR_HIDE_DELAY_MS)
+        alpha.animateTo(0f, tween(SCROLLBAR_FADE_MILLIS))
+    }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(end = 1.dp),
+            .padding(end = 2.dp, top = 2.dp, bottom = 2.dp),
         contentAlignment = Alignment.TopEnd,
     ) {
         Spacer(
             modifier = Modifier
-                .width(trackWidth)
-                .height(with(density) { contentHeightPx.toDp() })
+                .width(thumbWidth)
+                .fillMaxHeight()
                 .drawBehind {
-                    // Track.
-                    drawRoundRect(
-                        color = IPodColors.ScrollbarTrack,
-                        cornerRadius = CornerRadius(trackWidthPx / 2f),
-                    )
-
-                    // Thumb.
                     val thumbFraction = (visibleRows.toFloat() / totalItems).coerceIn(0.05f, 1f)
                     val thumbHeight = size.height * thumbFraction
                     val scrollFraction = if (totalItems > visibleRows) {
@@ -866,19 +880,12 @@ private fun LcdScrollbar(
                         0f
                     }
                     val thumbTop = scrollFraction * (size.height - thumbHeight)
-
                     drawRoundRect(
-                        brush = Brush.verticalGradient(
-                            colors = listOf(
-                                IPodColors.ScrollbarThumbTop,
-                                IPodColors.ScrollbarThumbBottom,
-                            ),
-                            startY = thumbTop,
-                            endY = thumbTop + thumbHeight,
-                        ),
+                        color = IPodColors.ScrollbarThumb,
                         topLeft = Offset(0f, thumbTop),
                         size = Size(size.width, thumbHeight),
-                        cornerRadius = CornerRadius(trackWidthPx / 2f),
+                        cornerRadius = CornerRadius(size.width / 2f),
+                        alpha = alpha.value,
                     )
                 },
         )
