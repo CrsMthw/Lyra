@@ -23,7 +23,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
@@ -37,17 +36,19 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.lerp
 import com.crsmthw.lyra.R
+import com.crsmthw.lyra.ui.components.BarContentGap
+import com.crsmthw.lyra.ui.components.BarFadeHeight
 import com.crsmthw.lyra.ui.components.CrampedLabelAutoSize
 import com.crsmthw.lyra.ui.components.LargeBarMinPaneHeight
+import com.crsmthw.lyra.ui.components.TopBarFade
 import com.crsmthw.lyra.ui.components.appBarWindowInsets
 import com.crsmthw.lyra.ui.components.toTrackActionTarget
 import com.crsmthw.lyra.util.ListScrollHaptics
 import com.crsmthw.lyra.util.confirm
+import com.crsmthw.lyra.util.pagerTrackingIndicator
 import com.crsmthw.lyra.util.press
 import com.crsmthw.lyra.util.rememberArtBoundsTransform
 import java.io.File
@@ -57,15 +58,9 @@ import kotlinx.coroutines.flow.filterNotNull
 
 // ── Library browser pane ──────────────────────────────────────────────────────
 
-/** Breathing room between the tab row and a page's first row — Search's `SearchTabRowGap`. */
-private val LibraryTabRowGap = 12.dp
-
-/**
- * How far the pane colour fades out below the tab row, dissolving the first rows into it — Search's
- * `TopScrimTail`. Only the tail: unlike Search's scrim this has no status bar or bar to hold down,
- * because the app bar and the tab row are solid and sit above the content in a `Column`.
- */
-private val LibraryTabFadeHeight = 24.dp
+// Seam constants — the shared `BarContentGap` / `BarFadeHeight` from `DetailTopBar.kt`.
+// These were private twins (`LibraryTabRowGap` / `LibraryTabFadeHeight`) until the de-dup
+// (see DetailTopBar.kt's KDoc on the constants).
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class,
        ExperimentalSharedTransitionApi::class)
@@ -300,7 +295,7 @@ internal fun LibraryBrowserPane(
     // conditional refresh-error warning. `@Composable RowScope.() -> Unit` is exactly the shape
     // `TopAppBar`/`LargeFlexibleTopAppBar` want, so it hands straight over.
     val actionsBar: @Composable RowScope.() -> Unit = {
-        if (state.refreshError != null) {
+        if (state.refreshError != null || state.refreshPartial) {
             IconButton(onClick = { showRefreshErrorDialog = true }) {
                 Icon(Icons.Default.Warning, contentDescription = stringResource(R.string.cd_refresh_error),
                     tint = MaterialTheme.colorScheme.error)
@@ -357,7 +352,7 @@ internal fun LibraryBrowserPane(
     // A page's first row starts a gap below the tab row, and the `LibraryTabFadeHeight` fade at the
     // top of the content area dissolves it into that row — the same seam Search gives its results.
     val listContentPadding = remember(navBarBottomDp) {
-        PaddingValues(top = LibraryTabRowGap, bottom = 100.dp + navBarBottomDp)
+        PaddingValues(top = BarContentGap, bottom = 100.dp + navBarBottomDp)
     }
 
     // The full-area states, hoisted out of the branch below because the pager's sync effect has to
@@ -544,9 +539,10 @@ internal fun LibraryBrowserPane(
                         modifier = Modifier.padding(horizontal = 32.dp)) {
                         Text(
                             text = if (isRateLimit) buildString {
-                                append("Spotify is rate limiting requests.")
+                                append(stringResource(R.string.library_rate_limit_body))
                                 if (retryDisplay != null) append("\n\nRetry-After: $retryDisplay")
-                                append("\n\nWait, then reopen.")
+                                append("\n\n")
+                                append(stringResource(R.string.library_rate_limit_reopen))
                             } else fullAreaError,
                             color     = if (isRateLimit) MaterialTheme.colorScheme.onSurfaceVariant
                                         else MaterialTheme.colorScheme.error,
@@ -658,22 +654,21 @@ internal fun LibraryBrowserPane(
                     // indicator()`), so this draws over the rows but under the indicator. A plain
                     // background Box takes no pointer input, so it cannot eat a drag on the rows
                     // beneath it.
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.TopCenter)
-                            .fillMaxWidth()
-                            .height(LibraryTabFadeHeight)
-                            .background(
-                                Brush.verticalGradient(listOf(paneColor, Color.Transparent))
-                            )
+                    TopBarFade(
+                        paneColor = paneColor,
+                        modifier  = Modifier.align(Alignment.TopCenter),
                     )
                 }
             }
         }
     }
 
-    if (showRefreshErrorDialog && state.refreshError != null) {
-        RefreshErrorDialog(error = state.refreshError, onDismiss = { showRefreshErrorDialog = false })
+    if (showRefreshErrorDialog && (state.refreshError != null || state.refreshPartial)) {
+        RefreshErrorDialog(
+            error          = state.refreshError,
+            isPartialSweep = state.refreshPartial,
+            onDismiss      = { showRefreshErrorDialog = false },
+        )
     }
 }
 
@@ -817,39 +812,11 @@ private fun LibraryTabRow(
         // `width = Dp.Unspecified` on the indicator is still mandatory: `PrimaryIndicator`'s own
         // default is a 24dp stub, and only `Dp.Unspecified` makes its `requiredWidth` a pass-through
         // so the constraint below is what decides.
+        // The indicator follows the pager per frame — see `pagerTrackingIndicator`'s KDoc.
+        // `LibraryTabIndicatorCompensation` compensates the halved label padding (see its KDoc).
         indicator        = {
             TabRowDefaults.PrimaryIndicator(
-                modifier = Modifier.tabIndicatorLayout { measurable, constraints, tabPositions ->
-                    // Stock `TabIndicatorOffsetNode`'s own guard, kept: `TabRowImpl` publishes the
-                    // tab positions from inside its own measure pass, so a measure that runs before
-                    // that has nothing to place.
-                    if (tabPositions.isEmpty()) return@tabIndicatorLayout layout(0, 0) {}
-                    val lastTab  = tabPositions.lastIndex
-                    val page     = pagerState.currentPage.coerceIn(0, lastTab)
-                    // Within ±0.5: past that `currentPage` flips and the sign inverts, and because
-                    // `lerp(a, b, 0.5) == lerp(b, a, 0.5)` the bar is continuous across the flip.
-                    // Do NOT rescale it to reach 1.0 — |fraction| already IS the distance travelled
-                    // towards the neighbour, and rescaling would overshoot past it.
-                    val fraction = pagerState.currentPageOffsetFraction
-                    val towards  = when {
-                        fraction > 0f -> page + 1
-                        fraction < 0f -> page - 1
-                        else          -> page
-                    }.coerceIn(0, lastTab)
-                    val t     = abs(fraction).coerceIn(0f, 1f)
-                    val left  = lerp(tabPositions[page].left, tabPositions[towards].left, t)
-                    val width = lerp(
-                        tabPositions[page].contentWidth    + LibraryTabIndicatorCompensation,
-                        tabPositions[towards].contentWidth + LibraryTabIndicatorCompensation,
-                        t,
-                    )
-                    val widthPx   = width.roundToPx().coerceAtLeast(0)
-                    val placeable =
-                        measurable.measure(constraints.copy(minWidth = widthPx, maxWidth = widthPx))
-                    val x = left.roundToPx()
-                        .let { if (layoutDirection == LayoutDirection.Ltr) it else -it }
-                    layout(placeable.width, placeable.height) { placeable.place(x, 0) }
-                },
+                modifier = pagerTrackingIndicator(pagerState, extraWidth = LibraryTabIndicatorCompensation),
                 width    = Dp.Unspecified,
             )
         },

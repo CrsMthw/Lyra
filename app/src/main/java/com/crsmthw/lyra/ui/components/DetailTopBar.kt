@@ -126,13 +126,12 @@ fun DetailTopBar(
 // ── The gap and the fade strip under an app bar ───────────────────────────────
 // Cris's device pass, 2026-09-16, items #12 and #22: "the detail bars could also use a fade out
 // scrim strip and padding under the bar, just like the one at the bottom of library's tab bar", and
-// the same for the root bars. The Library browser pane has had both since the app bars landed
-// (`LibraryTabRowGap` / `LibraryTabFadeHeight` under its pinned tab row); these are that treatment,
-// shared, for every other bar in the app.
+// the same for the root bars. The Library browser pane's pinned tab row was the original site; the
+// constants below are the shared successors and the Library now imports them too.
 
 /**
- * Breathing room between a bar's bottom edge and the first content under it — the Library browser
- * pane's `LibraryTabRowGap`, which is Search's `SearchTabRowGap`.
+ * Breathing room between a bar's bottom edge and the first content under it — used by every bar in
+ * the app, including the Library browser pane's pinned tab row and Search's tab row.
  *
  * On a detail surface it is part of [DetailArtHero]'s baked clearance (see [DetailTopBar] →
  * "Hero clearance and the fade strip"); on a root screen it is the scroller's own top
@@ -141,9 +140,9 @@ fun DetailTopBar(
 internal val BarContentGap = 12.dp
 
 /**
- * How far the pane colour fades out below a bar, dissolving the first rows into it — the Library
- * browser pane's `LibraryTabFadeHeight`, which is Search's `TopScrimTail`. Only the tail: every bar
- * in this app is solid and paints its own strip, so there is no status-bar half to hold down.
+ * How far the pane colour fades out below a bar, dissolving the first rows into it — used by every
+ * bar in the app, including the Library browser pane and Search. Only the tail: every bar in this
+ * app is solid and paints its own strip, so there is no status-bar half to hold down.
  */
 internal val BarFadeHeight = 24.dp
 

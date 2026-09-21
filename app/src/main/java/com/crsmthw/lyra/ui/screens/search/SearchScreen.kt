@@ -52,9 +52,7 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.lerp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -73,9 +71,12 @@ import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import com.crsmthw.lyra.util.ListScrollHaptics
 import com.crsmthw.lyra.util.confirm
 import com.crsmthw.lyra.util.press
+import com.crsmthw.lyra.util.pagerTrackingIndicator
 import com.crsmthw.lyra.util.rememberArtBoundsTransform
 import com.crsmthw.lyra.util.rememberSearchBarMorphClip
 import kotlin.math.abs
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 import com.crsmthw.lyra.util.visualizer.FftWaveCanvas
@@ -165,21 +166,41 @@ fun SearchScreen(
     val pagerState   = rememberPagerState(initialPage = state.tab.ordinal) { SearchTab.entries.size }
     val pagerVisible = !state.isLoading && state.error == null && state.results != null
 
-    // Swipe → tab. `settledPage` changes only once a drag or a programmatic scroll comes to rest:
-    // while one runs it holds the page the scroll STARTED from, which is the value this collector
-    // has already seen, so a tab tap's own `animateScrollToPage` can never write the old tab back
-    // mid-flight. `selectTab` no-ops on an unchanged tab, so the settle after a tap is silent too.
+    // Swipe → tab. Ported from the Library's hardened shape: the whole snapped-and-at-rest test
+    // lives INSIDE the snapshotFlow so every state the decision rests on is observed — a filter {}
+    // over a read outside would sample a stale value and silently drop emissions.
+    //
+    // NEITHER `settledPage` NOR `!isScrollInProgress` ALONE MEANS "SETTLED": a cancelled programmatic
+    // scroll is never re-settled by anything in the pager package, so `isScrollInProgress` can go
+    // false at a fractional offset; and `PagerState.scroll` writes `settledPageState = currentPage`
+    // when it starts over a finished scroll, so a correction tap ~150 ms after the first can make
+    // `settledPage` report an intermediate page for the whole return animation. Both halves are
+    // required. `distinctUntilChanged` is load-bearing: `snapshotFlow` only dedupes its own block
+    // result, so a 2 → null → 2 sequence would otherwise deliver 2 twice.
     LaunchedEffect(pagerState, viewModel) {
-        snapshotFlow { pagerState.settledPage }
+        snapshotFlow {
+            if (pagerState.isScrollInProgress ||
+                abs(pagerState.currentPageOffsetFraction) > 0.01f) null
+            else pagerState.currentPage
+        }
+            .filterNotNull()
+            .distinctUntilChanged()
             .collect { viewModel.selectTab(SearchTab.entries[it]) }
     }
     // Tab tap → pager, plus the reset to Tracks that clearing the field performs. The pager is not
     // composed while there are no results (or while a new query is loading), and a suspending
     // `animateScrollToPage` would park on the pager's first-layout wait and then animate that reset
     // in front of the user the moment the next query's results appeared — so jump the state instead.
+    //
+    // The early return carries BOTH halves of `animateScrollToPage`'s own guard
+    // (`page == currentPage && currentPageOffsetFraction == pageOffsetFraction`). The offset half
+    // matters: `currentPage` flips at the halfway mark while the offset is still fractional, and a
+    // re-key that cancels an in-flight programmatic scroll at that instant would otherwise return
+    // early and leave the pager parked between two pages with nothing to settle it.
     LaunchedEffect(state.tab, pagerVisible) {
         val target = state.tab.ordinal
-        if (pagerState.currentPage == target) return@LaunchedEffect
+        if (pagerState.currentPage == target &&
+            pagerState.currentPageOffsetFraction == 0f) return@LaunchedEffect
         if (pagerVisible) pagerState.animateScrollToPage(target)
         else              pagerState.requestScrollToPage(target)
     }
@@ -839,6 +860,7 @@ private val SearchTab.labelRes: Int
  * it. Selection for accessibility comes from each `Tab`'s own `selected` flag — do not "restore"
  * the parameter on the assumption that the indicator depends on it.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SearchTabRow(
     pagerState: PagerState,
@@ -883,39 +905,12 @@ private fun SearchTabRow(
         // `width = Dp.Unspecified` is mandatory: `PrimaryIndicator`'s own default is a 24dp stub,
         // and only `Dp.Unspecified` makes its `requiredWidth` a pass-through so the constraint below
         // is what decides.
+        // The indicator follows the pager per frame — see `pagerTrackingIndicator`'s KDoc.
+        // These tabs use the `text =` slot, so their intrinsic width carries the 16dp per side
+        // that `contentWidth` assumes — no extra compensation needed (default 0.dp).
         indicator        = {
             TabRowDefaults.PrimaryIndicator(
-                modifier = Modifier.tabIndicatorLayout { measurable, constraints, tabPositions ->
-                    // Stock `TabIndicatorOffsetNode`'s own guard, kept: `TabRowImpl` publishes the
-                    // tab positions from inside its own measure pass, so a measure that runs before
-                    // that has nothing to place.
-                    if (tabPositions.isEmpty()) return@tabIndicatorLayout layout(0, 0) {}
-                    val lastTab  = tabPositions.lastIndex
-                    val page     = pagerState.currentPage.coerceIn(0, lastTab)
-                    // Within ±0.5: past that `currentPage` flips and the sign inverts, and because
-                    // `lerp(a, b, 0.5) == lerp(b, a, 0.5)` the bar is continuous across the flip.
-                    // Do NOT rescale it to reach 1.0 — |fraction| already IS the distance travelled
-                    // towards the neighbour, and rescaling would overshoot past it.
-                    val fraction = pagerState.currentPageOffsetFraction
-                    val towards  = when {
-                        fraction > 0f -> page + 1
-                        fraction < 0f -> page - 1
-                        else          -> page
-                    }.coerceIn(0, lastTab)
-                    val t     = abs(fraction).coerceIn(0f, 1f)
-                    val left  = lerp(tabPositions[page].left, tabPositions[towards].left, t)
-                    val width = lerp(
-                        tabPositions[page].contentWidth,
-                        tabPositions[towards].contentWidth,
-                        t,
-                    )
-                    val widthPx   = width.roundToPx().coerceAtLeast(0)
-                    val placeable =
-                        measurable.measure(constraints.copy(minWidth = widthPx, maxWidth = widthPx))
-                    val x = left.roundToPx()
-                        .let { if (layoutDirection == LayoutDirection.Ltr) it else -it }
-                    layout(placeable.width, placeable.height) { placeable.place(x, 0) }
-                },
+                modifier = pagerTrackingIndicator(pagerState),
                 width    = Dp.Unspecified,
             )
         },
