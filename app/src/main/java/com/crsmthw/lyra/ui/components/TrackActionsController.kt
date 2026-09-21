@@ -170,7 +170,7 @@ class TrackActionsController(
             val userId = libraryCache.load()?.user?.id
                 ?: repository.getCurrentUser().getOrNull()?.id
             val playlists = libraryCache.load()?.playlists?.takeIf { it.isNotEmpty() }
-                ?: repository.getUserPlaylists().getOrNull()?.items
+                ?: repository.getAllUserPlaylists().getOrNull()?.items
                 ?: emptyList()
             val owned = if (userId != null) playlists.filter { it.owner?.id == userId } else playlists
             val cacheData = libraryCache.load()
