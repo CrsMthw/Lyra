@@ -430,6 +430,9 @@ fun LcdScreen(
 
 private const val STATUS_BAR_FRACTION = 0.12f
 
+/** The battery fill turns red below this while not charging — the Classic's "less than 20 percent". */
+private const val BATTERY_LOW_PERCENT = 20
+
 // ── Status Bar ──────────────────────────────────────────────────────────────
 
 @Composable
@@ -574,9 +577,12 @@ private fun DrawScope.drawBattery(
     if (fillWidth > 0f) {
         // Glossy fill: pale at the top through the body colour, plus a white sheen on the upper half.
         // Green whether charging or not — the Classic's charging battery is the same green fill
-        // with a bolt across it, not a different colour (the blue fill hid the white bolt).
-        val top = IPodColors.BatteryGreenTop
-        val bottom = IPodColors.BatteryGreenBottom
+        // with a bolt across it, not a different colour (the blue fill hid the white bolt) — and
+        // RED under BATTERY_LOW_PERCENT while not charging, as the Classic's ("less than 20 percent
+        // of your iPod's power left", iPod: The Missing Manual).
+        val low = !battery.isCharging && battery.percent < BATTERY_LOW_PERCENT
+        val top = if (low) IPodColors.BatteryRedTop else IPodColors.BatteryGreenTop
+        val bottom = if (low) IPodColors.BatteryRedBottom else IPodColors.BatteryGreenBottom
         drawRoundRect(
             brush = Brush.verticalGradient(
                 colors = listOf(top, bottom),

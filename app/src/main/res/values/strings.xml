@@ -314,7 +314,7 @@
 
     <!-- ═══════════════════ iPod mode (easter egg) ═══════════════════ -->
     <!-- iPod: shared -->
-    <string name="ipod_menu_title">iPod</string>
+    <string name="ipod_menu_title">iLyra</string>
     <string name="ipod_menu_cover_flow">Cover Flow</string>
     <string name="ipod_menu_music">Music</string>
     <string name="ipod_menu_albums">Albums</string>
@@ -325,7 +325,7 @@
     <string name="ipod_menu_now_playing">Now Playing</string>
     <string name="ipod_menu_settings">Settings</string>
     <string name="ipod_settings_click_sounds">Click Sounds</string>
-    <string name="ipod_settings_mode">iPod Mode</string>
+    <string name="ipod_settings_mode">iLyra Mode</string>
     <string name="ipod_value_on">On</string>
     <string name="ipod_value_off">Off</string>
     <string name="ipod_list_empty">No %1$s</string>
@@ -363,13 +363,13 @@
 
 
     <!-- iPod: shell + Settings row (lane: shell) -->
-    <string name="settings_ipod">iPod</string>
+    <string name="settings_ipod">iLyra</string>
     <string name="settings_ipod_desc">Relive the click wheel</string>
-    <string name="settings_ipod_unlocked">🎵 iPod mode unlocked</string>
-    <string name="ipod_exit_title">Exit iPod mode?</string>
+    <string name="settings_ipod_unlocked">🎵 iLyra mode unlocked</string>
+    <string name="ipod_exit_title">Exit iLyra mode?</string>
     <string name="ipod_exit_yes">Yes</string>
     <string name="ipod_exit_no">No</string>
-    <string name="ipod_portrait_hint">iPod mode works best in portrait</string>
+    <string name="ipod_portrait_hint">iLyra mode works best in portrait</string>
     <string name="about_credit_fonts">Liberation Sans font © Red Hat, Inc. — SIL Open Font License 1.1</string>
     <!-- (end shell) -->
 
@@ -381,7 +381,7 @@
 
 
     <!-- iPod: LCD + menus (lane: lcd) -->
-    <string name="ipod_cd_lcd">iPod screen</string>
+    <string name="ipod_cd_lcd">iLyra screen</string>
     <string name="ipod_now_playing_empty">No Track Selected</string>
     <string name="ipod_coverflow_indexing">Indexing %1$d of %2$d…</string>
     <!-- (end lcd) -->

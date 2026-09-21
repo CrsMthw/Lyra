@@ -79,6 +79,9 @@ object IPodColors {
     val BatteryOutline    = Color(0xFF4A4A4A)
     val BatteryGreenTop   = Color(0xFFB2EBA2)
     val BatteryGreenBottom = Color(0xFF3FA84A)
+    /** The low-battery fill (under 20 %, not charging) — the same glass, red. */
+    val BatteryRedTop     = Color(0xFFF7B3AD)
+    val BatteryRedBottom  = Color(0xFFD03A32)
     val ProgressTrackTop  = Color(0xFFD9D9D9)
     val ProgressTrackBottom = Color(0xFFFAFAFA)
     val ProgressTrackEdge = Color(0xFFB8B8B8)
