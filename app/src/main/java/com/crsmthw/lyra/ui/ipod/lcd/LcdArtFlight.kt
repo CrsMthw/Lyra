@@ -51,6 +51,14 @@ internal class ArtFlight(
 /** The flight's duration — also the fade of everything else on the two screens. Finite, never a spring. */
 internal const val ART_FLIGHT_MILLIS = 320
 
+/**
+ * After landing, the overlay fades out over the now-visible real art. The two are the same rect,
+ * tilt and mask, but the overlay's bitmap was decoded at the TILE's size (a memory-cache hit at
+ * take-off) while Now Playing's is decoded at its own, larger size — swapped in one frame that
+ * read as a flash; crossfaded it is a sharpening nobody notices.
+ */
+internal const val ART_LANDING_FADE_MILLIS = 120
+
 @Composable
 internal fun ArtFlightOverlay(
     flight: ArtFlight,
@@ -59,6 +67,8 @@ internal fun ArtFlightOverlay(
     /** The LCD content box's root position — the overlay is placed relative to it. */
     containerOrigin: State<Offset>,
     progress: Animatable<Float, AnimationVector1D>,
+    /** 1 during the flight; animated to 0 over [ART_LANDING_FADE_MILLIS] once landed, over the real art. */
+    overlayAlpha: Animatable<Float, AnimationVector1D>,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -81,7 +91,7 @@ internal fun ArtFlightOverlay(
     val reflectionFraction = lerp(COVER_REFLECTION_HEIGHT, REFLECTION_HEIGHT_FRACTION, p)
     val reflectionAlpha = lerp(COVER_REFLECTION_ALPHA, REFLECTION_ALPHA, p)
     val midAlpha = lerp(COVER_REFLECTION_MID_ALPHA, REFLECTION_MID_ALPHA, p)
-    val farAlpha = lerp(COVER_REFLECTION_FAR_ALPHA, 0f, p)
+    val farAlpha = lerp(COVER_REFLECTION_FAR_ALPHA, REFLECTION_FAR_ALPHA, p)
     val reflectionPx = side * reflectionFraction
     val pivotY = (side / 2f) / (side + reflectionPx)
 
@@ -100,7 +110,8 @@ internal fun ArtFlightOverlay(
     Box(
         modifier = modifier
             .offset { IntOffset(left.roundToInt(), top.roundToInt()) }
-            .size(sideDp, sideDp + reflectionDp),
+            .size(sideDp, sideDp + reflectionDp)
+            .graphicsLayer { alpha = overlayAlpha.value },
     ) {
         Column(
             modifier = Modifier

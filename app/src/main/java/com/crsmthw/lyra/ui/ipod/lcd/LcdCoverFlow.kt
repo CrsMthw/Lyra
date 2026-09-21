@@ -83,8 +83,12 @@ internal const val COVER_REFLECTION_ALPHA = 0.5f
 internal const val COVER_REFLECTION_MID_ALPHA = 0.55f
 /** Mask alpha at 85 % of the reflection's height; 0 at the far edge. */
 internal const val COVER_REFLECTION_FAR_ALPHA = 0.15f
-/** Space between the content's top and the centre cover, as a fraction of the content height. */
-private const val COVER_TOP_PAD = 0.02f
+/**
+ * Where the covers sit vertically: art + reflection centred in the content, then shifted by this
+ * fraction of the content height (negative = up). The Classic's Cover Flow sits a little high, and
+ * the text block is drawn OVER the reflection floor below.
+ */
+private const val COVER_VERTICAL_BIAS = -0.05f
 /** Height of the "Indexing N of M…" strip above the covers while the list is filling. */
 private const val COVER_INDEX_LINE_FRACTION = 0.06f
 /** Space under the "N of M" line, as a fraction of the content height — off the LCD's bottom edge. */
@@ -231,19 +235,17 @@ private fun CoverFlowRow(
         val windowStart = (centreIndex - COVERS_PER_SIDE).coerceAtLeast(0)
         val windowEnd = (centreIndex + COVERS_PER_SIDE).coerceAtMost(items.lastIndex)
 
-        // Layout: a Column — the covers box exactly as tall as the covers need (an indexing strip on
-        // top while the list is still filling, then the centre cover and its reflection), the
-        // title/artist right under it, and "N of M" pushed to the bottom with a margin.
-        Column(Modifier.fillMaxSize()) {
-            val indexLineHeightPx = if (likedIndex != null) contentHeightPx * COVER_INDEX_LINE_FRACTION else 0f
-            val topPadPx = contentHeightPx * COVER_TOP_PAD
-            val coversTopPx = indexLineHeightPx + topPadPx
-            val coversBoxHeightPx = coversTopPx + totalTileHeightPx
+        // Layout: the covers (art + reflection) centred in the content with a slight upward bias,
+        // the title / artist / "N of M" block drawn OVER the reflection floor at the bottom, and —
+        // while the list is still filling — the indexing line over the empty band above the covers.
+        val indexLineHeightPx = contentHeightPx * COVER_INDEX_LINE_FRACTION
+        val coversTopPx = ((contentHeightPx - totalTileHeightPx) / 2f + contentHeightPx * COVER_VERTICAL_BIAS)
+            .coerceAtLeast(if (likedIndex != null) indexLineHeightPx else 0f)
 
+        Box(Modifier.fillMaxSize()) {
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .height(with(density) { coversBoxHeightPx.toDp() })
+                    .fillMaxSize()
                     .onGloballyPositioned { coords ->
                         // The centre cover's slot (the rect every tile is translated to at d = 0),
                         // in root coordinates — where the flight into Now Playing takes off from.
@@ -253,16 +255,6 @@ private fun CoverFlowRow(
                         onCentreTileBounds(Rect(left, top, left + tileSidePx, top + tileSidePx))
                     },
             ) {
-                if (likedIndex != null) {
-                    CoverFlowIndexingLine(
-                        likedIndex = likedIndex,
-                        contentHeightPx = contentHeightPx,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(with(density) { indexLineHeightPx.toDp() }),
-                    )
-                }
-
                 for (i in windowStart..windowEnd) {
                     val item = items.getOrNull(i) ?: continue
                     val zOrder = -(abs(i - centreIndex).toFloat())
@@ -286,28 +278,44 @@ private fun CoverFlowRow(
                 }
             }
 
-            // Title / artist right under the reflections: the cover the ribbon is centred on right
+            if (likedIndex != null) {
+                CoverFlowIndexingLine(
+                    likedIndex = likedIndex,
+                    contentHeightPx = contentHeightPx,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .fillMaxWidth()
+                        .height(with(density) { indexLineHeightPx.toDp() }),
+                )
+            }
+
+            // The text block, over the reflection floor: the cover the ribbon is centred on right
             // now (it swaps as each cover crosses the centre, so a fast spin streams the titles
             // past with the covers and the two never disagree).
             val highlightedItem = items.getOrNull(centreIndex)
             if (highlightedItem != null) {
-                Spacer(Modifier.height(contentHeight * COVER_TEXT_TOP_GAP))
-                CoverFlowText(
-                    item = highlightedItem,
-                    contentHeightPx = contentHeightPx,
-                    contentWidthPx = contentWidthPx,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.weight(1f))
-                CoverFlowPosition(
-                    itemIndex = centreIndex,
-                    itemCount = items.size,
-                    contentHeightPx = contentHeightPx,
-                    contentWidthPx = contentWidthPx,
+                Column(
                     modifier = Modifier
+                        .align(Alignment.BottomCenter)
                         .fillMaxWidth()
                         .padding(bottom = contentHeight * COVER_POSITION_BOTTOM_PAD),
-                )
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    CoverFlowText(
+                        item = highlightedItem,
+                        contentHeightPx = contentHeightPx,
+                        contentWidthPx = contentWidthPx,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(contentHeight * COVER_TEXT_TOP_GAP))
+                    CoverFlowPosition(
+                        itemIndex = centreIndex,
+                        itemCount = items.size,
+                        contentHeightPx = contentHeightPx,
+                        contentWidthPx = contentWidthPx,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
         }
     }

@@ -174,6 +174,9 @@ fun LcdScreen(
                 val flightTarget = remember { mutableStateOf<Rect?>(null) }
                 val contentOrigin = remember { mutableStateOf(Offset.Zero) }
                 val flightProgress = remember { Animatable(0f) }
+                /** True once the cover has landed: the real art shows while the overlay fades out over it. */
+                val flightLanded = remember { mutableStateOf(false) }
+                val overlayAlpha = remember { Animatable(1f) }
                 Box(
                     Modifier
                         .padding(top = with(density) { statusBarHeight.toDp() })
@@ -205,12 +208,14 @@ fun LcdScreen(
                                 }
                             if (from != null && !artUrl.isNullOrBlank()) {
                                 flightTarget.value = null
+                                flightLanded.value = false
                                 flight = ArtFlight(id = bookkeeping.nextId++, artUrl = artUrl, from = from)
                                 bookkeeping.active = true
                             }
                         } else if (bookkeeping.active && currentKey.screen !is IPodScreen.NowPlaying) {
                             // Left Now Playing mid-flight (MENU during the 320 ms): drop the overlay.
                             flight = null
+                            flightLanded.value = false
                             bookkeeping.active = false
                         }
                     }
@@ -219,9 +224,15 @@ fun LcdScreen(
                     LaunchedEffect(flight?.id) {
                         val f = flight ?: return@LaunchedEffect
                         flightProgress.snapTo(0f)
+                        overlayAlpha.snapTo(1f)
                         flightProgress.animateTo(1f, tween(ART_FLIGHT_MILLIS, easing = FastOutSlowInEasing))
+                        // Landed: show the real art and fade the overlay out over it (same rect,
+                        // tilt and mask — only the decode's sharpness differs).
+                        if (flight?.id == f.id) flightLanded.value = true
+                        overlayAlpha.animateTo(0f, tween(ART_LANDING_FADE_MILLIS))
                         if (flight?.id == f.id) {
                             flight = null
+                            flightLanded.value = false
                             bookkeeping.active = false
                         }
                     }
@@ -275,7 +286,7 @@ fun LcdScreen(
                             is IPodScreen.NowPlaying -> LcdNowPlayingContent(
                                 nowPlaying = state.nowPlaying,
                                 contentHeight = contentHeightDp,
-                                hideArt = flight != null,
+                                hideArt = flight != null && !flightLanded.value,
                                 onArtBounds = { flightTarget.value = it },
                             )
                             is IPodScreen.CoverFlow -> LcdCoverFlowContent(
@@ -299,6 +310,7 @@ fun LcdScreen(
                             target = flightTarget,
                             containerOrigin = contentOrigin,
                             progress = flightProgress,
+                            overlayAlpha = overlayAlpha,
                         )
                     }
                 }

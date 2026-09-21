@@ -110,12 +110,19 @@ private const val TEXT_TOP_OFFSET_FRACTION = 0.12f
  */
 internal const val ART_CAMERA_DISTANCE = 7f
 /** Starting alpha of the reflection at its top edge. */
-internal const val REFLECTION_ALPHA = 0.6f
+internal const val REFLECTION_ALPHA = 0.5f
 /** Reflection height as a fraction of the art height. */
 /** The Classic's reflection is short and dies fast — it must end above the progress strip. */
-internal const val REFLECTION_HEIGHT_FRACTION = 0.22f
-/** The reflection mask's alpha half-way down — its fall-off; see LcdCoverFlow.reflectionMask. */
-internal const val REFLECTION_MID_ALPHA = 0.28f
+internal const val REFLECTION_HEIGHT_FRACTION = 0.42f
+/**
+ * The reflection mask's fall-off (alpha half-way down / at 85 % of its height) — see
+ * LcdCoverFlow.reflectionMask. REFLECTION_HEIGHT_FRACTION / REFLECTION_ALPHA / these two are kept
+ * EQUAL to Cover Flow's (Cris, 2026-09-21: "the same reflection strength and fade out distance"),
+ * which also makes the SELECT flight's landing pixel-identical. The bottom strip is drawn over the
+ * reflection's tail.
+ */
+internal const val REFLECTION_MID_ALPHA = 0.55f
+internal const val REFLECTION_FAR_ALPHA = 0.15f
 /** Progress bar track height as a fraction of the strip height. */
 /** The Classic's bar is a real channel, not a hairline: ~22 % of the strip (~4 % of the panel). */
 private const val PROGRESS_BAR_HEIGHT_FRACTION = 0.30f
@@ -450,11 +457,10 @@ private fun NowPlayingArt(
                         .drawWithContent {
                             drawContent()
                             drawRect(
-                                brush = Brush.verticalGradient(
-                                    0f to Color.Transparent,
-                                    (1f - REFLECTION_HEIGHT_FRACTION) to Color.Transparent,
-                                    (1f - REFLECTION_HEIGHT_FRACTION * 0.5f) to Color.Black.copy(alpha = REFLECTION_MID_ALPHA),
-                                    1f to Color.Black,
+                                brush = reflectionMask(
+                                    heightFraction = REFLECTION_HEIGHT_FRACTION,
+                                    midAlpha = REFLECTION_MID_ALPHA,
+                                    farAlpha = REFLECTION_FAR_ALPHA,
                                 ),
                                 blendMode = BlendMode.DstIn,
                             )
@@ -600,6 +606,9 @@ private fun NowPlayingProgressStrip(
                 modifier = Modifier
                     .weight(1f)
                     .height(with(density) { (barHeightPx * 4f).toDp() })
+                    // Offscreen so drawProgressBar's DstIn reflection mask fades the bar's
+                    // mirrored copy, not the album art's reflection behind it.
+                    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
                     .drawBehind {
                         drawProgressBar(
                             fraction = fraction,
@@ -648,6 +657,9 @@ private fun NowPlayingVolumeStrip(
                 modifier = Modifier
                     .weight(1f)
                     .height(with(density) { (barHeightPx * 4f).toDp() })
+                    // Offscreen so drawProgressBar's DstIn reflection mask fades the bar's
+                    // mirrored copy, not the album art's reflection behind it.
+                    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
                     .drawBehind {
                         drawProgressBar(fraction = fraction, barHeight = barHeightPx, markerRadius = 0f, isScrubbing = false)
                     },
@@ -884,29 +896,26 @@ private fun DrawScope.drawProgressBar(
         }
     }
 
-    // Reflection first: the bar mirrored about its own bottom edge, then faded into the LCD white
-    // over REFLECTION of its height and covered entirely below that. The upright bar is drawn on
-    // top so the seam stays crisp.
+    // Reflection first: the bar mirrored about its own bottom edge, faded out over 0.75 of its
+    // height and gone below that. The fade is a DstIn MASK (the caller's Box is an offscreen
+    // layer), not white paint: the album art's reflection now runs under this strip, and painting
+    // the LCD's white here would cut it with a hard edge. The upright bar is drawn on top so the
+    // seam stays crisp.
     val reflectionHeight = barHeight * 0.75f
     withTransform({ scale(scaleX = 1f, scaleY = -1f, pivot = Offset(size.width / 2f, barBottom)) }) {
         drawBar(alpha = 0.55f)
     }
-    drawRect(
-        brush = Brush.verticalGradient(
-            0f to IPodColors.LcdBackground.copy(alpha = 0.35f),
-            1f to IPodColors.LcdBackground,
-            startY = barBottom,
-            endY = barBottom + reflectionHeight,
-        ),
-        topLeft = Offset(0f, barBottom),
-        size = Size(size.width, reflectionHeight),
-    )
-    val coverTop = barBottom + reflectionHeight
-    if (coverTop < size.height) {
+    if (barBottom < size.height) {
         drawRect(
-            color = IPodColors.LcdBackground,
-            topLeft = Offset(0f, coverTop),
-            size = Size(size.width, size.height - coverTop),
+            brush = Brush.verticalGradient(
+                0f to Color.Black.copy(alpha = 0.65f),
+                1f to Color.Transparent,
+                startY = barBottom,
+                endY = barBottom + reflectionHeight,
+            ),
+            topLeft = Offset(0f, barBottom),
+            size = Size(size.width, size.height - barBottom),
+            blendMode = BlendMode.DstIn,
         )
     }
 
