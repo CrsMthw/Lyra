@@ -95,7 +95,7 @@ private class EntryHolder(var value: IPodStackEntry)
  */
 private class FlightBookkeeping {
     var lastKey: LcdContentKey? = null
-    var coverCentre: Rect? = null
+    var geometry: CoverFlowGeometry? = null
     var nextId = 0
     /** Mirrors `flight != null` so the detection block never READS the snapshot state it may write. */
     var active = false
@@ -201,15 +201,23 @@ fun LcdScreen(
                             currentKey.depth == prevKey.depth + 1 &&
                             direction == LcdNavDirection.FORWARD
                         if (coverToNowPlaying) {
-                            val from = bookkeeping.coverCentre
-                            val artUrl = state.nowPlaying?.artUrl?.takeIf { it.isNotBlank() }
-                                ?: state.stack.getOrNull(prevKey.depth - 1)?.let { e ->
-                                    e.list.items.getOrNull(e.list.selectedIndex)?.artUrl
-                                }
-                            if (from != null && !artUrl.isNullOrBlank()) {
+                            // The SELECTED cover — the detent's index, which the ribbon may still be
+                            // gliding toward — at the pose it is drawn in right now.
+                            val coverEntry = state.stack.getOrNull(prevKey.depth - 1)
+                            val coverIndex = coverEntry?.list?.selectedIndex
+                            val geometry = bookkeeping.geometry
+                            val artUrl = coverEntry?.list?.items?.getOrNull(coverIndex ?: -1)?.artUrl
+                                ?.takeIf { it.isNotBlank() }
+                                ?: state.nowPlaying?.artUrl?.takeIf { it.isNotBlank() }
+                            if (geometry != null && coverIndex != null && !artUrl.isNullOrBlank()) {
                                 flightTarget.value = null
                                 flightLanded.value = false
-                                flight = ArtFlight(id = bookkeeping.nextId++, artUrl = artUrl, from = from)
+                                flight = ArtFlight(
+                                    id = bookkeeping.nextId++,
+                                    artUrl = artUrl,
+                                    coverIndex = coverIndex,
+                                    from = geometry.poseOf(coverIndex),
+                                )
                                 bookkeeping.active = true
                             }
                         } else if (bookkeeping.active && currentKey.screen !is IPodScreen.NowPlaying) {
@@ -293,8 +301,8 @@ fun LcdScreen(
                                 entry = entry,
                                 likedIndex = state.likedIndex,
                                 contentHeight = contentHeightDp,
-                                hideCentreTile = flight != null,
-                                onCentreTileBounds = { bookkeeping.coverCentre = it },
+                                hiddenIndex = flight?.coverIndex,
+                                onGeometry = { bookkeeping.geometry = it },
                             )
                             else -> LcdMenuList(
                                 entry = entry,

@@ -51,8 +51,10 @@ import kotlin.math.roundToInt
 internal class ArtFlight(
     val id: Int,
     val artUrl: String,
-    /** The centre cover's art square (no reflection) in ROOT coordinates at take-off. */
-    val from: Rect,
+    /** The tile that is flying — hidden in the ribbon for the duration. */
+    val coverIndex: Int,
+    /** The cover's pose at take-off: its unscaled art rect in ROOT coordinates, scale and tilt (mid-glide it is not at rest). */
+    val from: CoverPose,
 )
 
 /** The flight's duration — also the fade of everything else on the two screens. Finite, never a spring. */
@@ -98,19 +100,24 @@ internal fun ArtFlightOverlay(
             ?.bitmap?.asImageBitmap()
     }
     val p = progress.value
-    val from = flight.from
+    val from = flight.from.artRect
     // Until Now Playing has been measured (its first layout, one frame in), aim at the take-off.
     val to = target.value
     val toSide = to?.width ?: from.width
-    val toLeft = to?.left ?: from.left
-    val toTop = to?.top ?: from.top
+    // Both ends scale and turn about the ART's centre (the tile's and Now Playing's transform
+    // origin), so the flight lerps that centre and lays the box out around it.
+    val toCentreX = to?.let { it.left + it.width / 2f } ?: from.center.x
+    val toCentreY = to?.let { it.top + it.width / 2f } ?: from.center.y
 
     // Pose at this progress: position, size, tilt, reflection — every one a lerp between the
-    // ribbon's centre cover and Now Playing's art.
+    // selected cover as it is drawn right now and Now Playing's art.
     val side = lerp(from.width, toSide, p)
-    val left = lerp(from.left, toLeft, p) - containerOrigin.value.x
-    val top = lerp(from.top, toTop, p) - containerOrigin.value.y
-    val rotation = lerp(0f, ART_ROTATION_Y, p)
+    val centreX = lerp(from.center.x, toCentreX, p) - containerOrigin.value.x
+    val centreY = lerp(from.center.y, toCentreY, p) - containerOrigin.value.y
+    val left = centreX - side / 2f
+    val top = centreY - side / 2f
+    val extraScale = lerp(flight.from.scale, 1f, p)
+    val rotation = lerp(flight.from.rotationY, ART_ROTATION_Y, p)
     val camera = lerp(COVER_CAMERA_DISTANCE, ART_CAMERA_DISTANCE, p)
     val reflectionFraction = lerp(COVER_REFLECTION_HEIGHT, REFLECTION_HEIGHT_FRACTION, p)
     val reflectionAlpha = lerp(COVER_REFLECTION_ALPHA, REFLECTION_ALPHA, p)
@@ -144,6 +151,8 @@ internal fun ArtFlightOverlay(
                     rotationY = rotation
                     cameraDistance = camera
                     transformOrigin = TransformOrigin(0.5f, pivotY)
+                    scaleX = extraScale
+                    scaleY = extraScale
                 },
         ) {
             Box(Modifier.size(sideDp), contentAlignment = Alignment.Center) {

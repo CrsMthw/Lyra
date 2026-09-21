@@ -1,6 +1,7 @@
 package com.crsmthw.lyra.ui.ipod.lcd
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.border
@@ -27,6 +28,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
@@ -129,15 +131,63 @@ private const val COVER_TEXT_TOP_GAP = 0.02f
  * No touch handling (rule: the wheel is the only input). No haptics or sounds (fired by the
  * wheel, never here). Reads NOTHING from nowPlaying so the 1 Hz tick cannot recompose it.
  */
+/** A cover's pose at one instant: its unscaled art rect in root coordinates, plus the scale and tilt drawn around the art's centre. */
+internal class CoverPose(val artRect: Rect, val scale: Float, val rotationY: Float)
+
+/**
+ * The ribbon's layout in root coordinates plus its LIVE position, reported by Cover Flow on every
+ * layout. LcdScreen asks it for the SELECTED cover's pose at the instant of a SELECT — which may
+ * be mid-glide, a little to one side, smaller and turned — so the flight into Now Playing takes
+ * off from where that cover really is instead of from the centre slot (the one-frame jump that
+ * read as a flash when SELECT landed within the glide).
+ */
+internal class CoverFlowGeometry(
+    private val originInRoot: Offset,
+    private val contentWidthPx: Float,
+    private val tileSidePx: Float,
+    private val coversTopPx: Float,
+    private val firstNeighbourOffsetPx: Float,
+    private val sideStepPx: Float,
+    private val position: Animatable<Float, AnimationVector1D>,
+) {
+    fun poseOf(index: Int): CoverPose {
+        val d = index.toFloat() - position.value
+        val pose = tilePose(d, firstNeighbourOffsetPx, sideStepPx)
+        val left = originInRoot.x + contentWidthPx / 2f - tileSidePx / 2f + pose.offsetX
+        val top = originInRoot.y + coversTopPx
+        return CoverPose(Rect(left, top, left + tileSidePx, top + tileSidePx), pose.scale, pose.rotationY)
+    }
+}
+
+/** The ribbon's pose function: where a tile at signed distance [d] from the centre sits, how big, how turned. */
+internal class TilePose(val offsetX: Float, val scale: Float, val rotationY: Float)
+
+internal fun tilePose(d: Float, firstNeighbourOffsetPx: Float, sideStepPx: Float): TilePose {
+    val c = d.coerceIn(-1f, 1f)
+    // Within the first step the offset is interpolated linearly with |d| (as the angle and scale
+    // are) so a glide never pops; from the first neighbour on, every cover steps COVER_SIDE_STEP
+    // outward — the Classic's tightly packed rolodex.
+    val a = abs(d)
+    val mag = if (a <= 1f) a * firstNeighbourOffsetPx else firstNeighbourOffsetPx + (a - 1f) * sideStepPx
+    return TilePose(
+        offsetX = sign(d) * mag,
+        scale = 1f - abs(c) * (1f - COVER_SIDE_SCALE),
+        // A tile to the RIGHT of centre (d > 0) presents its LEFT edge toward the viewer, which is
+        // negative rotationY (positive rotationY brings the right edge nearer) — the opposite of
+        // the Now Playing art, which faces right.
+        rotationY = -c * COVER_SIDE_ANGLE,
+    )
+}
+
 @Composable
 internal fun LcdCoverFlowContent(
     entry: IPodStackEntry,
     likedIndex: LcdIndexStatus?,
     contentHeight: Dp,
-    /** True while the centre cover is FLYING into Now Playing (LcdScreen's overlay draws it instead). */
-    hideCentreTile: Boolean = false,
-    /** The centre cover's art rect in ROOT coordinates, reported on every layout — the flight's take-off. */
-    onCentreTileBounds: (Rect) -> Unit = {},
+    /** The tile that is FLYING into Now Playing (LcdScreen's overlay draws it; this slot stays empty). */
+    hiddenIndex: Int? = null,
+    /** The ribbon's geometry + live position, reported on every layout — the flight's take-off. */
+    onGeometry: (CoverFlowGeometry) -> Unit = {},
 ) {
     val list = entry.list
     val items = list.items
@@ -161,8 +211,8 @@ internal fun LcdCoverFlowContent(
             selectedIndex = list.selectedIndex,
             likedIndex = likedIndex,
             contentHeight = contentHeight,
-            hideCentreTile = hideCentreTile,
-            onCentreTileBounds = onCentreTileBounds,
+            hiddenIndex = hiddenIndex,
+            onGeometry = onGeometry,
         )
     }
 }
@@ -175,8 +225,8 @@ private fun CoverFlowRow(
     selectedIndex: Int,
     likedIndex: LcdIndexStatus?,
     contentHeight: Dp,
-    hideCentreTile: Boolean,
-    onCentreTileBounds: (Rect) -> Unit,
+    hiddenIndex: Int?,
+    onGeometry: (CoverFlowGeometry) -> Unit,
 ) {
     val density = LocalDensity.current
     val contentHeightPx = with(density) { contentHeight.toPx() }
@@ -247,12 +297,17 @@ private fun CoverFlowRow(
                 modifier = Modifier
                     .fillMaxSize()
                     .onGloballyPositioned { coords ->
-                        // The centre cover's slot (the rect every tile is translated to at d = 0),
-                        // in root coordinates — where the flight into Now Playing takes off from.
-                        val origin = coords.positionInRoot()
-                        val left = origin.x + contentWidthPx / 2f - tileSidePx / 2f
-                        val top = origin.y + coversTopPx
-                        onCentreTileBounds(Rect(left, top, left + tileSidePx, top + tileSidePx))
+                        onGeometry(
+                            CoverFlowGeometry(
+                                originInRoot = coords.positionInRoot(),
+                                contentWidthPx = contentWidthPx,
+                                tileSidePx = tileSidePx,
+                                coversTopPx = coversTopPx,
+                                firstNeighbourOffsetPx = firstNeighbourOffsetPx,
+                                sideStepPx = sideStepPx,
+                                position = position,
+                            ),
+                        )
                     },
             ) {
                 for (i in windowStart..windowEnd) {
@@ -263,7 +318,7 @@ private fun CoverFlowRow(
                             item = item,
                             index = i,
                             zOrder = zOrder,
-                            hidden = hideCentreTile && i == centreIndex,
+                            hidden = hiddenIndex == i,
                             tileSidePx = tileSidePx,
                             tileSideDp = tileSideDp,
                             reflectionHeightPx = reflectionHeightPx,
@@ -363,32 +418,19 @@ private fun CoverFlowTile(
             .size(tileSideDp, totalTileHeightDp)
             .zIndex(zOrder)
             .graphicsLayer {
-                val posVal = position.value
-                val d = index.toFloat() - posVal
-                val c = d.coerceIn(-1f, 1f)
-
-                // Rotation: a tile to the RIGHT of centre (d > 0) presents its LEFT edge
-                // toward the viewer, which is negative rotationY (positive rotationY brings
-                // the right edge nearer). This is the opposite of the Now Playing art, which
-                // faces right.
-                rotationY = -c * COVER_SIDE_ANGLE
+                // The pose is ONE function of the signed distance from the animated centre —
+                // tilePose — shared with CoverFlowGeometry.poseOf so a flight takes off from
+                // exactly where the tile is drawn.
+                val pose = tilePose(index.toFloat() - position.value, firstNeighbourOffsetPx, sideStepPx)
+                rotationY = pose.rotationY
                 cameraDistance = COVER_CAMERA_DISTANCE
                 transformOrigin = TransformOrigin(0.5f, pivotY)
                 alpha = if (hidden) 0f else 1f
-
-                val scale = 1f - abs(c) * (1f - COVER_SIDE_SCALE)
-                scaleX = scale
-                scaleY = scale
-
-                // Translation: the pose offset is where this tile's CENTRE sits relative to the
-                // centre cover's centre. Within the first step it is interpolated linearly with |d|
-                // (as the angle and scale are) so a glide never pops; from the first neighbour on,
-                // every cover steps COVER_SIDE_STEP outward — the Classic's tightly packed rolodex.
-                // translationY centres the tile vertically in the weighted Box above the text.
-                val a = abs(d)
-                val mag = if (a <= 1f) a * firstNeighbourOffsetPx
-                          else firstNeighbourOffsetPx + (a - 1f) * sideStepPx
-                translationX = contentWidthPx / 2f - tileSidePx / 2f + sign(d) * mag
+                scaleX = pose.scale
+                scaleY = pose.scale
+                // translationX places the tile's centre at the pose offset from the ribbon's centre;
+                // translationY is the covers' top in the content.
+                translationX = contentWidthPx / 2f - tileSidePx / 2f + pose.offsetX
                 translationY = coverVerticalOffsetPx
             },
     ) {
