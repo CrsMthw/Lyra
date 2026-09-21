@@ -311,6 +311,7 @@ fun LcdScreen(
                             containerOrigin = contentOrigin,
                             progress = flightProgress,
                             overlayAlpha = overlayAlpha,
+                            landed = flightLanded,
                         )
                     }
                 }

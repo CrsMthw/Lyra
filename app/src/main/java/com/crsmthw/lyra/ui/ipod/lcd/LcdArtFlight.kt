@@ -2,6 +2,7 @@ package com.crsmthw.lyra.ui.ipod.lcd
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -22,13 +23,19 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.util.lerp
+import coil3.BitmapImage
+import coil3.SingletonImageLoader
 import coil3.compose.AsyncImage
+import coil3.memory.MemoryCache
 import coil3.request.ImageRequest
 import coil3.request.crossfade
 import kotlin.math.roundToInt
@@ -69,10 +76,27 @@ internal fun ArtFlightOverlay(
     progress: Animatable<Float, AnimationVector1D>,
     /** 1 during the flight; animated to 0 over [ART_LANDING_FADE_MILLIS] once landed, over the real art. */
     overlayAlpha: Animatable<Float, AnimationVector1D>,
+    /**
+     * True once landed and the real art is showing underneath. The overlay's REFLECTION goes out
+     * at that instant: two half-transparent reflections stacked through the crossfade read as one
+     * brighter reflection that then dims — a flash. Only the opaque art crossfades.
+     */
+    landed: State<Boolean>,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
+
+    // The tile's bitmap, straight from Coil's memory cache, drawn synchronously. An AsyncImage
+    // resolves its size from the first layout and delivers even a memory-cache hit a frame later,
+    // so the overlay's first frame showed the grey placeholder — a flash at take-off. The key is
+    // the url (no transformations → no extras); a miss (evicted, or the tile never loaded) falls
+    // back to the AsyncImage path below.
+    val cachedBitmap = remember(flight.artUrl) {
+        val loader = SingletonImageLoader.get(context)
+        (loader.memoryCache?.get(MemoryCache.Key(flight.artUrl))?.image as? BitmapImage)
+            ?.bitmap?.asImageBitmap()
+    }
     val p = progress.value
     val from = flight.from
     // Until Now Playing has been measured (its first layout, one frame in), aim at the take-off.
@@ -124,12 +148,7 @@ internal fun ArtFlightOverlay(
         ) {
             Box(Modifier.size(sideDp), contentAlignment = Alignment.Center) {
                 ArtPlaceholder(Modifier.fillMaxSize(), sideDp)
-                AsyncImage(
-                    model = imageRequest,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
-                )
+                FlightArt(cachedBitmap, imageRequest, Modifier.fillMaxSize())
             }
             Box(
                 modifier = Modifier
@@ -143,7 +162,8 @@ internal fun ArtFlightOverlay(
                         .size(sideDp)
                         .graphicsLayer {
                             scaleY = -1f
-                            alpha = reflectionAlpha
+                            // Gone the instant the real reflection appears (see [landed]).
+                            alpha = if (landed.value) 0f else reflectionAlpha
                             compositingStrategy = CompositingStrategy.Offscreen
                         }
                         .drawWithContent {
@@ -156,14 +176,29 @@ internal fun ArtFlightOverlay(
                     contentAlignment = Alignment.Center,
                 ) {
                     ArtPlaceholder(Modifier.fillMaxSize(), sideDp)
-                    AsyncImage(
-                        model = imageRequest,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize(),
-                    )
+                    FlightArt(cachedBitmap, imageRequest, Modifier.fillMaxSize())
                 }
             }
         }
+    }
+}
+
+/** The memory-cached bitmap when there is one (first frame, no load); otherwise Coil's own path. */
+@Composable
+private fun FlightArt(cachedBitmap: ImageBitmap?, request: ImageRequest, modifier: Modifier) {
+    if (cachedBitmap != null) {
+        Image(
+            painter = BitmapPainter(cachedBitmap),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = modifier,
+        )
+    } else {
+        AsyncImage(
+            model = request,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = modifier,
+        )
     }
 }
