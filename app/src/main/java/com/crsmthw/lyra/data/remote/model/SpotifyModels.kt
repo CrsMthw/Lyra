@@ -308,6 +308,15 @@ data class UserPlaylistsResponse(
     val rawCount: Int                   get() = rawItems?.size ?: 0
 }
 
+/** The result of `SpotifyRepository.getAllUserPlaylists` — see there. Not a Gson model (never on disk). */
+data class UserPlaylistsSweep(
+    val items   : List<SpotifyPlaylist>,
+    /** The endpoint's `total` from the first page — the ONE authoritative playlist count. */
+    val total   : Int,
+    /** False when a later page failed and [items] is only a prefix. */
+    val complete: Boolean,
+)
+
 data class PlaylistTracksResponse(
     @SerializedName("items") val rawItems: List<PlaylistTrack?>? = null,
     val total  : Int     = 0,
