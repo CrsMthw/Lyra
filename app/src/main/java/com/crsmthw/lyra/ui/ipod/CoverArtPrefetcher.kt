@@ -14,7 +14,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.withContext
 
 /**
@@ -52,9 +51,9 @@ class CoverArtPrefetcher(
 
     // ── Internal state ───────────────────────────────────────────────────────
 
-    private enum class UrlState { PENDING, READY, FAILED }
+    private enum class UrlState { PENDING, IN_FLIGHT, READY, FAILED }
 
-    /** Ordered map url → state; insertion order = list order (the Cover Flow order). */
+    /** Ordered map url -> state; insertion order = list order (the Cover Flow order). */
     private val urlStates = LinkedHashMap<String, UrlState>()
 
     /** The urls list as an indexable array, kept in sync with [urlStates]. */
@@ -64,13 +63,10 @@ class CoverArtPrefetcher(
     @Volatile
     private var focusIndex = 0
 
-    /** Guards the [urlStates] map. */
+    /** Guards the [urlStates] map and [urlList]. */
     private val lock = Any()
 
-    /** Concurrency limiter: at most [MAX_CONCURRENT] network fetches in flight. */
-    private val semaphore = Semaphore(MAX_CONCURRENT)
-
-    /** The worker job that iterates through PENDING urls. */
+    /** The worker job that manages the parallel worker coroutines. */
     private var workerJob: Job? = null
 
     private var cancelled = false
@@ -99,7 +95,7 @@ class CoverArtPrefetcher(
     /** Fetch nearest-first around this index of the last [setUrls] list. Cheap; called per detent. */
     fun setFocus(index: Int) {
         focusIndex = index.coerceIn(0, (urlList.size - 1).coerceAtLeast(0))
-        // The worker re-evaluates priority on each pick, so no restart needed — it will naturally
+        // The workers re-evaluate priority on each pick, so no restart needed — each will naturally
         // pick the nearest PENDING url next time it finishes the current one.
     }
 
@@ -121,23 +117,16 @@ class CoverArtPrefetcher(
     }
 
     /**
-     * Iterates through PENDING urls nearest-first around [focusIndex]. Each iteration picks the
-     * closest PENDING url, probes the disk cache, and fetches on a miss. The semaphore bounds
-     * concurrent fetches; the pick re-evaluates after each completion so a [setFocus] change
-     * redirects the next pick.
+     * Launches [MAX_CONCURRENT] parallel workers. Each worker loops: claim the nearest PENDING url
+     * (atomically marking it IN_FLIGHT so no other worker picks it), probe the disk cache, fetch on
+     * a miss, then mark READY or FAILED. When no PENDING url remains all workers exit.
      */
     private suspend fun processUrls() {
-        // Launch up to MAX_CONCURRENT parallel workers that each pick the next nearest PENDING url.
         val workers = (0 until MAX_CONCURRENT).map {
             scope.launch {
                 while (true) {
-                    val url = pickNextPending() ?: break
-                    semaphore.acquire()
-                    try {
-                        processUrl(url)
-                    } finally {
-                        semaphore.release()
-                    }
+                    val url = claimNextPending() ?: break
+                    processUrl(url)
                 }
             }
         }
@@ -145,14 +134,16 @@ class CoverArtPrefetcher(
     }
 
     /**
-     * Picks the PENDING url nearest to [focusIndex]. On ties, the later one (scrolling forward)
-     * wins: if focus=10 and urls at 9 and 11 are both pending, 11 is returned.
+     * Atomically claims the PENDING url nearest to [focusIndex], marking it IN_FLIGHT so no other
+     * worker picks it. On ties, the later one (scrolling forward) wins: if focus=10 and urls at 9
+     * and 11 are both pending, 11 is returned.
      */
-    private fun pickNextPending(): String? {
+    private fun claimNextPending(): String? {
         synchronized(lock) {
             if (urlList.isEmpty()) return null
             val focus = focusIndex.coerceIn(urlList.indices)
             var bestUrl: String? = null
+            var bestIdx = -1
             var bestDist = Int.MAX_VALUE
 
             for (i in urlList.indices) {
@@ -160,10 +151,15 @@ class CoverArtPrefetcher(
                 if (urlStates[url] != UrlState.PENDING) continue
                 val dist = kotlin.math.abs(i - focus)
                 // Prefer smaller distance; on equal distance, prefer higher index (forward bias).
-                if (dist < bestDist || (dist == bestDist && i > (urlList.indexOf(bestUrl ?: "")))) {
+                if (dist < bestDist || (dist == bestDist && i > bestIdx)) {
                     bestDist = dist
                     bestUrl = url
+                    bestIdx = i
                 }
+            }
+            // Mark IN_FLIGHT so no other worker claims it.
+            if (bestUrl != null) {
+                urlStates[bestUrl] = UrlState.IN_FLIGHT
             }
             return bestUrl
         }
@@ -216,7 +212,7 @@ class CoverArtPrefetcher(
 
     private fun updateProgress() {
         val (ready, total) = synchronized(lock) {
-            val readyCount = urlStates.values.count { it != UrlState.PENDING }
+            val readyCount = urlStates.values.count { it == UrlState.READY || it == UrlState.FAILED }
             readyCount to urlStates.size
         }
         _progress.value = Progress(ready = ready, total = total)
