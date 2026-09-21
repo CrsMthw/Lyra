@@ -324,7 +324,7 @@ class IPodLibrary(
         val diff = total - cachedCount
         if (diff == 0 && cachedTracks.isNotEmpty()) return null
 
-        val merged: List<SpotifyTrack> = if (diff in 1..200) {
+        if (diff in 1..200) {
             // Newest first, in pages of 50, until `diff` slots have been read.
             val fresh = mutableListOf<SpotifyTrack>()
             var offset = 0
@@ -336,19 +336,26 @@ class IPodLibrary(
                 if (page.rawCount == 0) break
                 offset += page.rawCount
             }
-            (fresh + cachedTracks).distinctBy { it.id }
+            // Atomic prepend: a page the indexer appends between our earlier cache read and this
+            // write is kept rather than reverted (the old load() … saveTrackList(cached + page)
+            // pair had exactly that window). prependToLikedSongs returns the merged list as written.
+            val merged = withContext(Dispatchers.IO) {
+                libraryCache.prependToLikedSongs(fresh, total)
+            }
+            return merged
         } else {
             // Shrunk, or jumped by more than we chase: start over with a fresh first page (the
-            // background fetcher and the Library's paging refill the rest).
+            // background fetcher and the Library's paging refill the rest). A deliberate wholesale
+            // reset the indexer re-seeds from, so saveTrackList is correct here.
             val page = repository.getLikedSongs(limit = 50, offset = 0)
                 .onFailure { noteIfRateLimited(it) }
                 .getOrNull() ?: return null
-            (page.items ?: emptyList()).mapNotNull { it.track }.filter { it.isPlayable != false }
+            val merged = (page.items ?: emptyList()).mapNotNull { it.track }.filter { it.isPlayable != false }
+            withContext(Dispatchers.IO) {
+                libraryCache.saveTrackList(LibraryCache.LIKED_SONGS_KEY, total.toString(), merged)
+            }
+            return merged
         }
-        withContext(Dispatchers.IO) {
-            libraryCache.saveTrackList(LibraryCache.LIKED_SONGS_KEY, total.toString(), merged)
-        }
-        return merged
     }
 
     /**
