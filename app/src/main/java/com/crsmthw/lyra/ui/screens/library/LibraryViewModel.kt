@@ -609,10 +609,10 @@ class LibraryViewModel(
                     s.copy(
                         playlists     = sweep.items,
                         playlistCount = sweep.total,
-                        refreshError  = if (!sweep.complete) "Some playlists could not be loaded" else s.refreshError,
+                        refreshError  = if (!sweep.complete) sweep.error?.message ?: "Some playlists could not be loaded" else s.refreshError,
                     )
                 else if (!sweep.complete)
-                    s.copy(refreshError = "Some playlists could not be loaded")
+                    s.copy(refreshError = sweep.error?.message ?: "Some playlists could not be loaded")
                 else s
             }
 
@@ -925,10 +925,10 @@ class LibraryViewModel(
                     s.copy(
                         playlists     = sweep.items,
                         playlistCount = sweep.total,
-                        refreshError  = if (!sweep.complete) "Some playlists could not be loaded" else s.refreshError,
+                        refreshError  = if (!sweep.complete) sweep.error?.message ?: "Some playlists could not be loaded" else s.refreshError,
                     )
                 else if (!sweep.complete)
-                    s.copy(refreshError = "Some playlists could not be loaded")
+                    s.copy(refreshError = sweep.error?.message ?: "Some playlists could not be loaded")
                 else s
             }
 
