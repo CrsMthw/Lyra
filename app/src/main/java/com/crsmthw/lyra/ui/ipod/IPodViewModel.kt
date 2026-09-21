@@ -5,9 +5,12 @@ import android.media.AudioManager
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import coil3.ImageLoader
 import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.local.LibraryCache
+import com.crsmthw.lyra.data.local.LikedSongsIndexer
 import com.crsmthw.lyra.data.player.PlayerStateManager
+import com.crsmthw.lyra.data.remote.model.SpotifyTrack
 import com.crsmthw.lyra.data.repository.SettingsRepository
 import com.crsmthw.lyra.data.repository.SpotifyRepository
 import com.crsmthw.lyra.di.AppContainer
@@ -16,6 +19,7 @@ import com.crsmthw.lyra.ui.ipod.nav.IPodStackEntry
 import com.crsmthw.lyra.ui.ipod.nav.IPodUiState
 import com.crsmthw.lyra.ui.ipod.nav.LCD_ROWS_SINGLE_LINE
 import com.crsmthw.lyra.ui.ipod.nav.LCD_ROWS_TWO_LINE
+import com.crsmthw.lyra.ui.ipod.nav.LcdIndexStatus
 import com.crsmthw.lyra.ui.ipod.nav.LcdItem
 import com.crsmthw.lyra.ui.ipod.nav.LcdLabel
 import com.crsmthw.lyra.ui.ipod.nav.LcdListState
@@ -89,6 +93,18 @@ private const val PAGE_TRIGGER_ROWS = 8
  * touches only `nowPlaying`), so composables that read only the stack or its entries skip
  * automatically. Scrub-in-progress fields are carried forward from the previous `nowPlaying`
  * during the tick, so the scrub position is never stomped by the player mirror.
+ *
+ * ### Checkpoint C additions
+ *
+ * - **Cover Flow**: one row per liked song with [artUrl], pushed by [pushLikedList] (shared with
+ *   Music). SELECT = the same [activateMusicItem] activation path as Music.
+ * - **Prefetch**: [CoverArtPrefetcher] warms Coil's disk cache with covers near the Cover Flow
+ *   highlight; constructed in [init] from the first cache read and updated on every liked-list
+ *   load/reconcile/indexer append.
+ * - **Indexer**: [LikedSongsIndexer.setFastDemand] held for the VM's lifetime; appended pages grow
+ *   every Music/CoverFlow stack entry in place (not top-only).
+ * - **Reconcile write**: Music/CoverFlow reconcile uses the atomic [LibraryCache.prependToLikedSongs]
+ *   so an indexer append landing between the read and the write is not reverted.
  */
 class IPodViewModel(
     private val settingsRepository: SettingsRepository,
@@ -97,6 +113,9 @@ class IPodViewModel(
     private val playerStateManager: PlayerStateManager,
     /** Application-context AudioManager — the Now Playing volume bar drives Android's media stream. */
     private val audioManager: AudioManager?,
+    private val likedSongsIndexer: LikedSongsIndexer,
+    private val imageLoader: ImageLoader,
+    private val appContext: Context,
 ) : ViewModel() {
 
     private val library = IPodLibrary(libraryCache, repository, playerStateManager)
@@ -152,6 +171,43 @@ class IPodViewModel(
      * rendered list is filtered (nulls, isPlayable, de-dup) so its length != the API offset.
      */
     private val nextOffsetByKey = mutableMapOf<String, Int>()
+
+    // ── Art prefetcher (Checkpoint C) ────────────────────────────────────────
+
+    private val prefetcher = CoverArtPrefetcher(imageLoader, appContext, viewModelScope)
+
+    /**
+     * Maps a liked-row index to its prefetcher-url-list index, so [setFocus] passes the correct
+     * collapsed index. The prefetcher collapses blanks and duplicates, while Cover Flow has one
+     * row per song (duplicates of an album cover are expected). Built once per [setUrls] call.
+     */
+    private var rowToPrefetchIndex: IntArray = IntArray(0)
+
+    /** Feed the prefetcher with the covers' urls and build the row→collapsed-index map. */
+    private fun updatePrefetchUrls(rows: List<LcdItem>) {
+        val rawUrls = rows.map { it.artUrl.orEmpty() }
+        // Build the collapsed list and the row→collapsed-index map at the same time.
+        val seen = LinkedHashMap<String, Int>()  // url → collapsed index
+        val mapping = IntArray(rawUrls.size)
+        for ((i, url) in rawUrls.withIndex()) {
+            if (url.isBlank()) {
+                mapping[i] = -1
+            } else {
+                val idx = seen.getOrPut(url) { seen.size }
+                mapping[i] = idx
+            }
+        }
+        rowToPrefetchIndex = mapping
+        prefetcher.setUrls(seen.keys.toList())
+    }
+
+    /** Translate a row index to the collapsed prefetcher index and call setFocus. */
+    private fun updatePrefetchFocus(rowIndex: Int) {
+        val map = rowToPrefetchIndex
+        if (rowIndex !in map.indices) return
+        val collapsed = map[rowIndex]
+        if (collapsed >= 0) prefetcher.setFocus(collapsed)
+    }
 
     init {
         // Mirror all three clicker settings (enabled, volume, pitch) into the UI state.
@@ -250,6 +306,102 @@ class IPodViewModel(
                     }
                 }
         }
+
+        // ── Checkpoint C: indexer + prefetch bootstrap ──────────────────────────
+
+        // Activate the fast-cadence demand for the whole iPod session.
+        likedSongsIndexer.setFastDemand(true)
+
+        // Seed the prefetcher from the cache on first entry (before the appended collector is live,
+        // so a page emitted in the gap between init and the collector's registration is accepted as a
+        // degradation — a re-entry via MENU-out/in re-reads the cache and catches up).
+        viewModelScope.launch {
+            val cached = withContext(Dispatchers.IO) {
+                libraryCache.loadTrackList(LibraryCache.LIKED_SONGS_KEY)
+            }
+            val rows = cached?.tracks.orEmpty().distinctBy { it.uri }.map(::likedRow)
+            if (rows.isNotEmpty()) {
+                updatePrefetchUrls(rows)
+                prefetcher.setFocus(0)
+            }
+        }
+
+        // Collect indexer state → likedIndex (non-null only while incomplete and known).
+        viewModelScope.launch {
+            likedSongsIndexer.state
+                .map { s ->
+                    if (s.total != null && s.cached != null && !s.complete && s.cached < s.total) {
+                        LcdIndexStatus(s.cached, s.total)
+                    } else {
+                        null
+                    }
+                }
+                .distinctUntilChanged()
+                .collect { status ->
+                    _uiState.update { state ->
+                        if (state.likedIndex == status) state
+                        else state.copy(likedIndex = status)
+                    }
+                }
+        }
+
+        // Collect indexer appended pages → grow every Music/CoverFlow entry in the stack.
+        viewModelScope.launch {
+            likedSongsIndexer.appended.collect { newTracks ->
+                if (newTracks.isEmpty()) return@collect
+                val newRows = newTracks.map(::likedRow)
+                // Capture the grown liked items for a post-update prefetch call — never call
+                // updatePrefetchUrls inside the CAS lambda (the lambda can re-run under contention
+                // with the 1 Hz mirror, and it must not have side effects).
+                var grownItems: List<LcdItem>? = null
+                _uiState.update { state ->
+                    grownItems = null   // reset per CAS attempt
+                    var changed = false
+                    val updatedStack = state.stack.map { entry ->
+                        val isLikedScreen = entry.screen is IPodScreen.Music ||
+                            entry.screen is IPodScreen.CoverFlow
+                        if (!isLikedScreen) return@map entry
+                        // Skip entries still loading (no items yet) — their cache read will
+                        // include these rows when it lands.
+                        if (entry.list.items.isEmpty()) return@map entry
+                        val existingIds = entry.list.items.mapTo(HashSet()) { it.id }
+                        val toAdd = newRows.filter { it.id !in existingIds }
+                        if (toAdd.isEmpty()) return@map entry
+                        changed = true
+                        val combined = entry.list.items + toAdd
+                        val visibleRows = computeVisibleRows(combined)
+                        // Never move selectedIndex or firstVisibleIndex — paging appends only grow items.
+                        val updated = entry.copy(
+                            list = entry.list.copy(
+                                items = combined,
+                                visibleRows = visibleRows,
+                            ),
+                        )
+                        // Capture the last liked-screen items for the prefetch update.
+                        grownItems = combined
+                        updated
+                    }
+                    if (!changed) return@update state
+                    state.copy(stack = updatedStack)
+                }
+                // Side effects AFTER the update.
+                grownItems?.let { items ->
+                    updatePrefetchUrls(items)
+                    // Re-focus: the items grew but selectedIndex did not move; use the current top
+                    // only if it is Cover Flow (Music ignores focus).
+                    val top = _uiState.value.current
+                    if (top.screen is IPodScreen.CoverFlow) {
+                        updatePrefetchFocus(top.list.selectedIndex)
+                    }
+                }
+            }
+        }
+    }
+
+    override fun onCleared() {
+        likedSongsIndexer.setFastDemand(false)
+        prefetcher.cancel()
+        super.onCleared()
     }
 
     // ── Wheel event dispatch ──────────────────────────────────────────────────
@@ -336,10 +488,17 @@ class IPodViewModel(
 
         // The scrub debounce belongs to the Now Playing screen only — a detent on any list
         // must never re-arm (or keep deferring) a seek.
-        if (_uiState.value.current.screen is IPodScreen.NowPlaying) {
+        val currentTop = _uiState.value.current
+        if (currentTop.screen is IPodScreen.NowPlaying) {
             launchScrubCommitIfNeeded()
             armModeIdleReset()   // a turn on the volume / shuffle / repeat bar keeps it up
         }
+
+        // Cover Flow: update prefetch focus to the new highlight after the state update.
+        if (currentTop.screen is IPodScreen.CoverFlow && moved) {
+            updatePrefetchFocus(currentTop.list.selectedIndex)
+        }
+
         return moved
     }
 
@@ -538,6 +697,7 @@ class IPodViewModel(
         when (top.screen) {
             is IPodScreen.MainMenu -> activateMainMenuItem(selected.id)
             is IPodScreen.Music -> activateMusicItem(selected, top.list.selectedIndex, items)
+            is IPodScreen.CoverFlow -> activateMusicItem(selected, top.list.selectedIndex, items)
             is IPodScreen.Settings -> activateSettingsItem(selected.id)
             is IPodScreen.Albums -> activateAlbumItem(selected)
             is IPodScreen.AlbumTracks -> activateAlbumTrackItem(top.screen, selected, top.list.selectedIndex, items)
@@ -555,10 +715,7 @@ class IPodViewModel(
 
     private fun activateMainMenuItem(id: String) {
         when (id) {
-            "coverflow" -> push(
-                IPodScreen.CoverFlow,
-                LcdLabel.Res(R.string.ipod_menu_cover_flow),
-            )
+            "coverflow" -> pushCoverFlow()
             "music" -> pushMusic()
             "albums" -> pushAlbums()
             "artists" -> pushArtists()
@@ -573,32 +730,60 @@ class IPodViewModel(
         }
     }
 
-    // ── Music (liked songs from cache) ────────────────────────────────────────
+    // ── Music / Cover Flow (liked songs from cache) ─────────────────────────
 
-    private fun pushMusic() {
-        push(
-            screen = IPodScreen.Music,
-            title = LcdLabel.Res(R.string.ipod_menu_music),
-            loading = true,
-        )
+    /**
+     * Shared loader for Music and Cover Flow. Both show the liked songs list — Cover Flow adds
+     * [artUrl] per row. Push, load from the cache, replace the top, then reconcile the server.
+     */
+    private fun pushLikedList(screen: IPodScreen, title: LcdLabel) {
+        push(screen = screen, title = title, loading = true)
         viewModelScope.launch {
             val cached = withContext(Dispatchers.IO) {
                 libraryCache.loadTrackList(LibraryCache.LIKED_SONGS_KEY)
             }
-            replaceTopItems(IPodScreen.Music, cached?.tracks.orEmpty().distinctBy { it.uri }.map(::likedRow))
+            val rows = cached?.tracks.orEmpty().distinctBy { it.uri }.map(::likedRow)
+            replaceTopItems(screen, rows)
 
-            // Then reconcile exactly as the Library does when it opens Liked Songs: one count
-            // call, new songs prepended, the cache updated — so what you liked since last time
-            // appears here without a detour through the normal UI.
+            // Update prefetch after the initial load — both Music and CoverFlow feed the same
+            // liked-song urls so a reconcile's newly-prepended songs reach the prefetcher even
+            // while the user is in Music. Focus is Cover-Flow-only (Music ignores it).
+            updatePrefetchUrls(rows)
+            if (screen is IPodScreen.CoverFlow) {
+                updatePrefetchFocus(0)
+            }
+
+            // Reconcile: use the atomic prependToLikedSongs so the indexer's concurrent appends
+            // are not reverted.
             val merged = library.reconcileLikedSongs(cached) ?: return@launch
-            retopItemsPreservingHighlight(IPodScreen.Music, merged.distinctBy { it.uri }.map(::likedRow))
+            val reconciled = merged.distinctBy { it.uri }.map(::likedRow)
+            retopItemsPreservingHighlight(screen, reconciled)
+
+            updatePrefetchUrls(reconciled)
+            // Re-focus after reconcile: retopItemsPreservingHighlight may have shifted the
+            // highlight index when songs were prepended.
+            if (screen is IPodScreen.CoverFlow) {
+                val top = _uiState.value.current
+                if (top.screen is IPodScreen.CoverFlow) {
+                    updatePrefetchFocus(top.list.selectedIndex)
+                }
+            }
         }
     }
 
-    private fun likedRow(track: com.crsmthw.lyra.data.remote.model.SpotifyTrack) = LcdItem(
+    private fun pushMusic() {
+        pushLikedList(IPodScreen.Music, LcdLabel.Res(R.string.ipod_menu_music))
+    }
+
+    private fun pushCoverFlow() {
+        pushLikedList(IPodScreen.CoverFlow, LcdLabel.Res(R.string.ipod_menu_cover_flow))
+    }
+
+    private fun likedRow(track: SpotifyTrack) = LcdItem(
         id = track.uri,
         title = LcdLabel.Text(track.name),
         subtitle = LcdLabel.Text(track.allArtists),
+        artUrl = track.artUrl.takeIf { it.isNotBlank() },
     )
 
     private fun activateMusicItem(item: LcdItem, index: Int, items: List<LcdItem>) {
@@ -1441,5 +1626,8 @@ class IPodViewModelFactory(
             repository         = container.spotifyRepository,
             playerStateManager = container.playerStateManager,
             audioManager       = appContext.getSystemService(AudioManager::class.java),
+            likedSongsIndexer  = container.likedSongsIndexer,
+            imageLoader        = container.imageLoader,
+            appContext         = appContext,
         ) as T
 }
