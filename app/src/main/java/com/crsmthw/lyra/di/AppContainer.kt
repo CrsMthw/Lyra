@@ -110,6 +110,9 @@ class AppContainer(context: Context) {
         .build()
 
     // ── Image loader (permanent disk cache in filesDir) ──────────────────────
+    // 500 MB (Cris, 2026-09-21; was 150): the iPod's Cover Flow prefetch warms every liked song's
+    // 640px cover — on the order of 2000 distinct covers, 100+ MB — and at 150 MB that set would
+    // have churned the cache and evicted the rest of the app's art to fit.
     val imageLoader: ImageLoader = ImageLoader.Builder(context)
         .memoryCache {
             MemoryCache.Builder()
@@ -119,7 +122,7 @@ class AppContainer(context: Context) {
         .diskCache {
             DiskCache.Builder()
                 .directory(context.filesDir.resolve("lyra_image_cache").toOkioPath())
-                .maxSizeBytes(150L * 1024 * 1024)
+                .maxSizeBytes(500L * 1024 * 1024)
                 .build()
         }
         .components { add(OkHttpNetworkFetcherFactory(imageOkHttpClient)) }
