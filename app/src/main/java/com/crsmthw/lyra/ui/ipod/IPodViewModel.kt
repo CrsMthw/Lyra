@@ -319,11 +319,9 @@ class IPodViewModel(
             val cached = withContext(Dispatchers.IO) {
                 libraryCache.loadTrackList(LibraryCache.LIKED_SONGS_KEY)
             }
-            val urls = cached?.tracks.orEmpty()
-                .distinctBy { it.uri }
-                .mapNotNull { it.artUrl.takeIf { u -> u.isNotBlank() } }
-            if (urls.isNotEmpty()) {
-                prefetcher.setUrls(urls)
+            val rows = cached?.tracks.orEmpty().distinctBy { it.uri }.map(::likedRow)
+            if (rows.isNotEmpty()) {
+                updatePrefetchUrls(rows)
                 prefetcher.setFocus(0)
             }
         }
@@ -352,7 +350,12 @@ class IPodViewModel(
             likedSongsIndexer.appended.collect { newTracks ->
                 if (newTracks.isEmpty()) return@collect
                 val newRows = newTracks.map(::likedRow)
+                // Capture the grown liked items for a post-update prefetch call — never call
+                // updatePrefetchUrls inside the CAS lambda (the lambda can re-run under contention
+                // with the 1 Hz mirror, and it must not have side effects).
+                var grownItems: List<LcdItem>? = null
                 _uiState.update { state ->
+                    grownItems = null   // reset per CAS attempt
                     var changed = false
                     val updatedStack = state.stack.map { entry ->
                         val isLikedScreen = entry.screen is IPodScreen.Music ||
@@ -368,21 +371,28 @@ class IPodViewModel(
                         val combined = entry.list.items + toAdd
                         val visibleRows = computeVisibleRows(combined)
                         // Never move selectedIndex or firstVisibleIndex — paging appends only grow items.
-                        entry.copy(
+                        val updated = entry.copy(
                             list = entry.list.copy(
                                 items = combined,
                                 visibleRows = visibleRows,
                             ),
                         )
+                        // Capture the last liked-screen items for the prefetch update.
+                        grownItems = combined
+                        updated
                     }
                     if (!changed) return@update state
-                    val newState = state.copy(stack = updatedStack)
-                    // Update prefetch urls with the grown Cover Flow list (if present).
-                    val cfEntry = updatedStack.lastOrNull { it.screen is IPodScreen.CoverFlow }
-                    if (cfEntry != null) {
-                        updatePrefetchUrls(cfEntry.list.items)
+                    state.copy(stack = updatedStack)
+                }
+                // Side effects AFTER the update.
+                grownItems?.let { items ->
+                    updatePrefetchUrls(items)
+                    // Re-focus: the items grew but selectedIndex did not move; use the current top
+                    // only if it is Cover Flow (Music ignores focus).
+                    val top = _uiState.value.current
+                    if (top.screen is IPodScreen.CoverFlow) {
+                        updatePrefetchFocus(top.list.selectedIndex)
                     }
-                    newState
                 }
             }
         }
@@ -735,9 +745,11 @@ class IPodViewModel(
             val rows = cached?.tracks.orEmpty().distinctBy { it.uri }.map(::likedRow)
             replaceTopItems(screen, rows)
 
-            // Update prefetch after the initial load.
+            // Update prefetch after the initial load — both Music and CoverFlow feed the same
+            // liked-song urls so a reconcile's newly-prepended songs reach the prefetcher even
+            // while the user is in Music. Focus is Cover-Flow-only (Music ignores it).
+            updatePrefetchUrls(rows)
             if (screen is IPodScreen.CoverFlow) {
-                updatePrefetchUrls(rows)
                 updatePrefetchFocus(0)
             }
 
@@ -747,8 +759,14 @@ class IPodViewModel(
             val reconciled = merged.distinctBy { it.uri }.map(::likedRow)
             retopItemsPreservingHighlight(screen, reconciled)
 
+            updatePrefetchUrls(reconciled)
+            // Re-focus after reconcile: retopItemsPreservingHighlight may have shifted the
+            // highlight index when songs were prepended.
             if (screen is IPodScreen.CoverFlow) {
-                updatePrefetchUrls(reconciled)
+                val top = _uiState.value.current
+                if (top.screen is IPodScreen.CoverFlow) {
+                    updatePrefetchFocus(top.list.selectedIndex)
+                }
             }
         }
     }
