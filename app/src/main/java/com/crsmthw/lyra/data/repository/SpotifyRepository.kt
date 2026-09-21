@@ -49,23 +49,8 @@ class SpotifyRepository(
      * prefix is worth showing (the Library shows one only into an EMPTY list, never over a cached
      * full one, and never persists it). Callers gate on `isRateLimited()` as for any sweep.
      */
-    suspend fun getAllUserPlaylists(): Result<UserPlaylistsSweep> {
-        val items = mutableListOf<SpotifyPlaylist>()
-        var offset = 0
-        var total = 0
-        var first = true
-        while (true) {
-            val page = getUserPlaylists(limit = 50, offset = offset).getOrElse { e ->
-                return if (first) Result.failure(e)
-                else Result.success(UserPlaylistsSweep(items, total, complete = false, error = e))
-            }
-            if (first) { total = page.total; first = false }
-            items += page.items
-            offset += page.rawCount
-            if (page.next == null || page.rawCount == 0) break
-        }
-        return Result.success(UserPlaylistsSweep(items, total, complete = true))
-    }
+    suspend fun getAllUserPlaylists(): Result<UserPlaylistsSweep> =
+        sweepUserPlaylists { offset -> getUserPlaylists(limit = 50, offset = offset) }
 
     suspend fun getLikedSongs(limit: Int = 50, offset: Int = 0): Result<SavedTracksResponse> = safeCall {
         api.getLikedSongs(limit, offset)
@@ -306,4 +291,29 @@ class SpotifyRepository(
                 }
             }
         }
+}
+
+/**
+ * The paging loop behind [SpotifyRepository.getAllUserPlaylists], extracted so unit tests can
+ * supply a fake page fetcher without constructing a full repository (which needs `EncryptedPrefs`
+ * and therefore a `Context`).
+ */
+internal suspend fun sweepUserPlaylists(
+    fetch: suspend (offset: Int) -> Result<UserPlaylistsResponse>,
+): Result<UserPlaylistsSweep> {
+    val items = mutableListOf<SpotifyPlaylist>()
+    var offset = 0
+    var total = 0
+    var first = true
+    while (true) {
+        val page = fetch(offset).getOrElse { e ->
+            return if (first) Result.failure(e)
+            else Result.success(UserPlaylistsSweep(items, total, complete = false, error = e))
+        }
+        if (first) { total = page.total; first = false }
+        items += page.items
+        offset += page.rawCount
+        if (page.next == null || page.rawCount == 0) break
+    }
+    return Result.success(UserPlaylistsSweep(items, total, complete = true))
 }

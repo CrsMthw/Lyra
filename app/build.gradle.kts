@@ -80,14 +80,11 @@ android {
 
 kotlin { jvmToolchain(21) }
 
-// This project ships no tests (no src/test or src/androidTest). AGP still creates
-// unit-test + android-test components for every variant, and that test-component
-// wiring is what trips Gradle's "Project object as a dependency notation" deprecation
-// (from AGP's own VariantDependenciesBuilder, not our code). Disabling the unused test
-// components keeps AGP off that deprecated path — remove this block if tests are added.
+// Host tests (JVM unit tests) are enabled; device tests (androidTest) stay disabled.
+// The device-test component wiring is what trips Gradle's "Project object as a dependency
+// notation" deprecation (from AGP's own VariantDependenciesBuilder, not our code).
 androidComponents {
     beforeVariants(selector().all()) { variant ->
-        variant.hostTests.forEach { (_, hostTest) -> hostTest.enable = false }
         variant.deviceTests.forEach { (_, deviceTest) -> deviceTest.enable = false }
     }
 }
@@ -151,5 +148,11 @@ dependencies {
 
     // ─── Spotify App Remote SDK ────────────────────────────────────────────
     implementation(files("libs/spotify-app-remote-release-0.8.0.aar"))
+    // ───────────────────────────────────────────────────────────────────────
+
+    // ─── Unit tests ────────────────────────────────────────────────────────
+    testImplementation(libs.junit)
+    testImplementation(libs.kotlin.test.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
     // ───────────────────────────────────────────────────────────────────────
 }
