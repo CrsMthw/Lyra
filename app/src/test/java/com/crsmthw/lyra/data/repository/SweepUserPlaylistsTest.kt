@@ -8,7 +8,6 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
-import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -88,7 +87,9 @@ class SweepUserPlaylistsTest {
 
     @Test
     fun `stops on rawCount zero even if next is non-null`() = runTest {
+        var calls = 0
         val result = sweepUserPlaylists { _ ->
+            if (++calls > 3) error("rawCount==0 guard regressed — infinite loop")
             Result.success(UserPlaylistsResponse(
                 rawItems = emptyList(), total = 0, next = "some_url",
             ))
@@ -97,6 +98,7 @@ class SweepUserPlaylistsTest {
         val sweep = result.getOrThrow()
         assertTrue(sweep.items.isEmpty())
         assertTrue(sweep.complete)
+        assertEquals(1, calls)
     }
 
     @Test
@@ -126,7 +128,7 @@ class SweepUserPlaylistsTest {
         assertEquals(2, sweep.items.size)
         assertEquals(100, sweep.total)
         assertFalse(sweep.complete)
-        assertNotNull(sweep.error)
+        assertEquals(error, sweep.error)
     }
 
     @Test
