@@ -71,9 +71,34 @@ class ReorderCalculator private constructor(
         throw IllegalStateException("Dragged slot no longer in the raw list")
     }
 
+    // ── Confirmed baseline ─────────────────────────────────────────────────────
+    // The raw list arrangement the SERVER last confirmed via a successful PUT (or construction for
+    // the initial state). Advances only on [adoptConfirmed] — never by local moves. Reverts use
+    // this, not the live list, so a second drag's local swaps cannot corrupt the revert target.
+
+    private var confirmedRaw: MutableList<RawSlot> = rawList.toMutableList()
+
+    /**
+     * The confirmed visible tracks — the order the server has. This is what the UI reverts to on
+     * failure and what [finishExitReorderMode] persists to the cache.
+     */
+    fun confirmedTracks(): List<SpotifyTrack> =
+        confirmedRaw.filterIsInstance<RawSlot.Visible>().map { it.track }
+
+    /**
+     * Advances the confirmed baseline by applying [params] (the same API move the PUT sent).
+     * Called on PUT success, so the baseline always reflects the server's actual order.
+     */
+    fun adoptConfirmed(params: ReorderApiParams) {
+        val slot = confirmedRaw.removeAt(params.rangeStart)
+        val insertAt = if (params.insertBefore > params.rangeStart)
+            params.insertBefore - 1 else params.insertBefore
+        confirmedRaw.add(insertAt, slot)
+    }
+
     // ── Drag state ──────────────────────────────────────────────────────────────
 
-    /** A snapshot of the raw list taken at [beginDrag], representing the server-confirmed state. */
+    /** A snapshot of the raw list taken at [beginDrag], representing the live state at drag start. */
     private var snapshot: List<RawSlot>? = null
 
     /** The raw position of the dragged slot in the [snapshot]. */
@@ -82,7 +107,7 @@ class ReorderCalculator private constructor(
     /** The slot being dragged, identified by reference (=== identity). */
     private var draggedSlot: RawSlot? = null
 
-    /** True while a drag is in progress (between [beginDrag] and [commitDrag]/[cancelDrag]). */
+    /** True while a drag is in progress (between [beginDrag] and [commitDrag]). */
     val isDragging: Boolean get() = snapshot != null
 
     /**
@@ -152,21 +177,8 @@ class ReorderCalculator private constructor(
         return ReorderApiParams(startPos, insertBefore)
     }
 
-    /**
-     * Cancels a drag in progress: reverts the pending raw list to the snapshot and clears the
-     * drag state. Used when the server rejects a prior commit and the mode is exited.
-     */
-    fun cancelDrag() {
-        val snap = snapshot ?: return
-        rawList.clear()
-        rawList.addAll(snap)
-        snapshot = null
-        draggedSlot = null
-        dragStartRawPos = -1
-    }
-
-    /** Returns a snapshot of the current visible tracks for persisting as the confirmed order. */
-    fun confirmedTracks(): List<SpotifyTrack> = visibleTracks.toList()
+    /** The current (pending) visible tracks — includes uncommitted local moves. */
+    fun pendingTracks(): List<SpotifyTrack> = visibleTracks.toList()
 
     /** Total raw slots — the value to persist as `rawOffset` when caching the finished order. */
     val totalRawSlots: Int get() = rawList.size

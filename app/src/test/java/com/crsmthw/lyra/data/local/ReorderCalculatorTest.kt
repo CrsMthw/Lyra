@@ -73,16 +73,29 @@ class ReorderCalculatorTest {
     }
 
     @Test
-    fun `confirmedTracks returns defensive copy`() {
+    fun `confirmedTracks is unchanged by local moves until adoptConfirmed`() {
         val c = calc(pt(track("A")), pt(track("B")))
-        val copy1 = c.confirmedTracks()
+        val before = c.confirmedTracks()
+        assertEquals(listOf("A", "B"), before.map { it.id })
         c.beginDrag(0)
         c.applyLocalMove(0, 1)
+        val params = c.commitDrag()
+        assertNotNull(params)
+        // Local move happened, but confirmedTracks still shows the old order.
+        assertEquals(listOf("A", "B"), c.confirmedTracks().map { it.id })
+        // Only adoptConfirmed advances the baseline.
+        c.adoptConfirmed(params)
+        assertEquals(listOf("B", "A"), c.confirmedTracks().map { it.id })
+    }
+
+    @Test
+    fun `pendingTracks reflects local moves immediately`() {
+        val c = calc(pt(track("A")), pt(track("B")))
+        c.beginDrag(0)
+        c.applyLocalMove(0, 1)
+        assertEquals(listOf("B", "A"), c.pendingTracks().map { it.id })
         c.commitDrag()
-        val copy2 = c.confirmedTracks()
-        // copy1 was taken before the move and should NOT reflect it.
-        assertEquals(listOf("A", "B"), copy1.map { it.id })
-        assertEquals(listOf("B", "A"), copy2.map { it.id })
+        assertEquals(listOf("B", "A"), c.pendingTracks().map { it.id })
     }
 
     // ── Spotify doc examples ────────────────────────────────────────────────────
@@ -410,21 +423,6 @@ class ReorderCalculatorTest {
         assertEquals(0, p2.insertBefore)
     }
 
-    // ── cancelDrag ──────────────────────────────────────────────────────────────
-
-    @Test
-    fun `cancelDrag reverts to snapshot`() {
-        val c = calc(pt(track("A")), pt(track("B")), pt(track("C")))
-        c.beginDrag(0)
-        c.applyLocalMove(0, 1)
-        c.applyLocalMove(1, 2)
-        assertEquals(listOf("B", "C", "A"), c.labels())
-
-        c.cancelDrag()
-        assertEquals(listOf("A", "B", "C"), c.labels())
-        assertFalse(c.isDragging)
-    }
-
     // ── isDragging state ────────────────────────────────────────────────────────
 
     @Test
@@ -470,5 +468,98 @@ class ReorderCalculatorTest {
         assertEquals(3, params.rangeStart)
         assertEquals(2, params.insertBefore)
         assertEquals(listOf("A", "C", "B"), c.labels())
+    }
+
+    // ── Pipelined baseline (fix 3) ─────────────────────────────────────────────
+    // A second drag starts while the first PUT is in flight. The confirmed baseline must NOT
+    // include the second drag's local moves, so a failure of the second PUT reverts to exactly
+    // the post-PUT-1 order.
+
+    @Test
+    fun `pipelined - second drag does not pollute confirmed baseline after first adoptConfirmed`() {
+        // [A, B, C, D]
+        val c = calc(pt(track("A")), pt(track("B")), pt(track("C")), pt(track("D")))
+
+        // Drag 1: move A to after C → [B, C, A, D]
+        c.beginDrag(0)
+        c.applyLocalMove(0, 1)
+        c.applyLocalMove(1, 2)
+        val p1 = c.commitDrag()
+        assertNotNull(p1)
+        assertEquals(listOf("B", "C", "A", "D"), c.labels())
+
+        // PUT 1 hasn't landed yet. Drag 2 starts: move D to before B → [D, B, C, A]
+        c.beginDrag(3)
+        c.applyLocalMove(3, 2)
+        c.applyLocalMove(2, 1)
+        c.applyLocalMove(1, 0)
+        val p2 = c.commitDrag()
+        assertNotNull(p2)
+        assertEquals(listOf("D", "B", "C", "A"), c.labels())
+
+        // At this point, confirmedTracks should still be the ORIGINAL order (no adoptConfirmed yet).
+        assertEquals(listOf("A", "B", "C", "D"), c.confirmedTracks().map { it.id })
+
+        // PUT 1 succeeds: advance the baseline with p1.
+        c.adoptConfirmed(p1)
+        // Baseline is now [B, C, A, D] — the post-drag-1 order.
+        assertEquals(listOf("B", "C", "A", "D"), c.confirmedTracks().map { it.id })
+
+        // PUT 2 fails: the revert target is the confirmed baseline = [B, C, A, D].
+        // The UI should show this, NOT [D, B, C, A] (which includes the failed move).
+        val revert = c.confirmedTracks()
+        assertEquals(listOf("B", "C", "A", "D"), revert.map { it.id })
+    }
+
+    @Test
+    fun `pipelined - both PUTs succeed advances baseline twice`() {
+        val c = calc(pt(track("A")), pt(track("B")), pt(track("C")))
+
+        // Drag 1: A after B → [B, A, C]
+        c.beginDrag(0)
+        c.applyLocalMove(0, 1)
+        val p1 = c.commitDrag()
+        assertNotNull(p1)
+
+        // Drag 2 starts before PUT 1 lands: C before B → [C, B, A]
+        c.beginDrag(2)
+        c.applyLocalMove(2, 1)
+        c.applyLocalMove(1, 0)
+        val p2 = c.commitDrag()
+        assertNotNull(p2)
+
+        // Confirm still original.
+        assertEquals(listOf("A", "B", "C"), c.confirmedTracks().map { it.id })
+
+        // PUT 1 succeeds.
+        c.adoptConfirmed(p1)
+        assertEquals(listOf("B", "A", "C"), c.confirmedTracks().map { it.id })
+
+        // PUT 2 succeeds.
+        c.adoptConfirmed(p2)
+        assertEquals(listOf("C", "B", "A"), c.confirmedTracks().map { it.id })
+    }
+
+    @Test
+    fun `adoptConfirmed matches independent API-move oracle`() {
+        // Verify adoptConfirmed produces the same result as the independent applyApiMove oracle.
+        val c = calc(pt(track("A")), null, pt(track("B")), pt(track("C")))
+
+        c.beginDrag(0)
+        c.applyLocalMove(0, 1)
+        c.applyLocalMove(1, 2)
+        val params = c.commitDrag()
+        assertNotNull(params)
+
+        // Oracle: apply same move to a reference list.
+        val rawRef = mutableListOf("A", "<h>", "B", "C")
+        applyApiMove(rawRef, params.rangeStart, params.insertBefore)
+        val oracleVisible = rawRef.filter { it != "<h>" }
+
+        // Calculator's adoptConfirmed.
+        c.adoptConfirmed(params)
+        val calcConfirmed = c.confirmedTracks().map { it.id }
+
+        assertEquals(oracleVisible, calcConfirmed)
     }
 }
