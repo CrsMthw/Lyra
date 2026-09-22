@@ -23,8 +23,10 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
@@ -135,6 +137,15 @@ fun ClickWheel(
     val cd = stringResource(R.string.ilyra_cd_click_wheel)
     val menuLabel = stringResource(R.string.ilyra_wheel_menu)
 
+    // Accessibility: resolve all action labels outside the semantics lambda (not composable there).
+    val actionMenuLabel     = stringResource(R.string.ilyra_cd_action_menu)
+    val actionSelectLabel   = stringResource(R.string.ilyra_cd_action_select)
+    val actionPlayLabel     = stringResource(R.string.ilyra_cd_action_play_pause)
+    val actionNextLabel     = stringResource(R.string.ilyra_cd_action_next)
+    val actionPreviousLabel = stringResource(R.string.ilyra_cd_action_previous)
+    val actionScrollFwdLabel  = stringResource(R.string.ilyra_cd_action_scroll_forward)
+    val actionScrollBackLabel = stringResource(R.string.ilyra_cd_action_scroll_back)
+
     // Which sector is pressed: null = nothing, -1 = centre, 0-3 = MENU/NEXT/PLAY_PAUSE/PREVIOUS.
     val pressedSector = remember { mutableStateOf<Int?>(null) }
 
@@ -148,7 +159,32 @@ fun ClickWheel(
 
     Canvas(
         modifier = modifier
-            .semantics { contentDescription = cd }
+            .semantics {
+                contentDescription = cd
+                customActions = listOf(
+                    CustomAccessibilityAction(actionMenuLabel) {
+                        onEventState.value(WheelEvent.Press(WheelButton.MENU)); true
+                    },
+                    CustomAccessibilityAction(actionSelectLabel) {
+                        onEventState.value(WheelEvent.Press(WheelButton.SELECT)); true
+                    },
+                    CustomAccessibilityAction(actionPlayLabel) {
+                        onEventState.value(WheelEvent.Press(WheelButton.PLAY_PAUSE)); true
+                    },
+                    CustomAccessibilityAction(actionNextLabel) {
+                        onEventState.value(WheelEvent.Press(WheelButton.NEXT)); true
+                    },
+                    CustomAccessibilityAction(actionPreviousLabel) {
+                        onEventState.value(WheelEvent.Press(WheelButton.PREVIOUS)); true
+                    },
+                    CustomAccessibilityAction(actionScrollFwdLabel) {
+                        onEventState.value(WheelEvent.Scroll(1)); true
+                    },
+                    CustomAccessibilityAction(actionScrollBackLabel) {
+                        onEventState.value(WheelEvent.Scroll(-1)); true
+                    },
+                )
+            }
             .fillMaxSize()
             .pointerInput(Unit) {
                 wheelGestureLoop(

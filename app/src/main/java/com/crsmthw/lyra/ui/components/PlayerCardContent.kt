@@ -42,6 +42,8 @@ import androidx.compose.ui.platform.LocalDensity
 import android.widget.Toast
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -377,7 +379,11 @@ fun PlayerCardContent(
                 }
                 // Hidden for an episode — `me/tracks` liking does not accept one.
                 if (!isEpisode) {
-                    IconButton(onClick = { haptics.toggle(!state.isLiked); playerViewModel.toggleLike() }) {
+                    val likeStateDesc = stringResource(if (state.isLiked) R.string.cd_state_liked else R.string.cd_state_not_liked)
+                    IconButton(
+                        onClick  = { haptics.toggle(!state.isLiked); playerViewModel.toggleLike() },
+                        modifier = Modifier.semantics { stateDescription = likeStateDesc },
+                    ) {
                         Icon(
                             imageVector        = if (state.isLiked) Icons.Default.Favorite else Icons.Outlined.FavoriteBorder,
                             contentDescription = stringResource(R.string.cd_like),
@@ -446,7 +452,11 @@ fun PlayerCardContent(
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically) {
                 Box(contentAlignment = Alignment.Center) {
-                    IconButton(onClick = { haptics.toggle(!state.shuffleEnabled); playerViewModel.toggleShuffle() }) {
+                    val shuffleStateDesc = stringResource(if (state.shuffleEnabled) R.string.cd_state_on else R.string.cd_state_off)
+                    IconButton(
+                        onClick  = { haptics.toggle(!state.shuffleEnabled); playerViewModel.toggleShuffle() },
+                        modifier = Modifier.semantics { stateDescription = shuffleStateDesc },
+                    ) {
                         Icon(Icons.Default.Shuffle, stringResource(R.string.player_shuffle),
                             tint = if (state.shuffleEnabled) surfaceAccentColor else MaterialTheme.colorScheme.onSurfaceVariant)
                     }
@@ -497,14 +507,22 @@ fun PlayerCardContent(
                     Icon(Icons.Default.SkipNext, stringResource(R.string.player_next), modifier = Modifier.size(36.dp))
                 }
                 Box(contentAlignment = Alignment.Center) {
-                    IconButton(onClick = {
-                        when (state.repeatMode) {
-                            RepeatMode.OFF   -> haptics.toggle(true)
-                            RepeatMode.TRACK -> haptics.toggle(false)
-                            else             -> haptics.press()
-                        }
-                        playerViewModel.cycleRepeat()
-                    }) {
+                    val repeatStateDesc = stringResource(when (state.repeatMode) {
+                        RepeatMode.OFF   -> R.string.cd_repeat_off
+                        RepeatMode.CONTEXT -> R.string.cd_repeat_context
+                        RepeatMode.TRACK -> R.string.cd_repeat_track
+                    })
+                    IconButton(
+                        onClick = {
+                            when (state.repeatMode) {
+                                RepeatMode.OFF   -> haptics.toggle(true)
+                                RepeatMode.TRACK -> haptics.toggle(false)
+                                else             -> haptics.press()
+                            }
+                            playerViewModel.cycleRepeat()
+                        },
+                        modifier = Modifier.semantics { stateDescription = repeatStateDesc },
+                    ) {
                         Icon(
                             imageVector = when (state.repeatMode) {
                                 RepeatMode.TRACK -> Icons.Default.RepeatOne else -> Icons.Default.Repeat

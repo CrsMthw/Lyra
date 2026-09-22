@@ -28,6 +28,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -209,7 +211,7 @@ fun StatsScreen(
                                         text     = stringResource(R.string.stats_top_artists).uppercase(),
                                         style    = MaterialTheme.typography.labelMedium,
                                         color    = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 8.dp),
+                                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 8.dp).semantics { heading() },
                                     )
                                 }
                                 item(key = "artists_row_${state.range}") {
@@ -233,7 +235,7 @@ fun StatsScreen(
                                         text     = stringResource(R.string.stats_top_tracks).uppercase(),
                                         style    = MaterialTheme.typography.labelMedium,
                                         color    = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 8.dp),
+                                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 8.dp).semantics { heading() },
                                     )
                                 }
                                 itemsIndexed(state.current.topTracks, key = { _, t -> "${state.range}_${t.id}" }) { idx, track ->

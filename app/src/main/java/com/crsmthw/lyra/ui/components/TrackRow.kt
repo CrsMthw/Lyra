@@ -4,6 +4,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
@@ -16,6 +17,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
@@ -42,20 +44,27 @@ fun TrackRow(
     selected    : Boolean? = null,
 ) {
     val haptics = LocalHapticFeedback.current
+    val longClickLabel = if (onLongClick != null && selected == null) stringResource(R.string.cd_track_actions) else null
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .combinedClickable(
-                // In selection mode a tap is a check, not playback — so it ticks like a notch
-                // instead of confirming, and a long-press only toggles (there is no menu to reveal).
-                onClick     = {
-                    if (selected != null) haptics.tick() else haptics.confirm()
-                    onClick()
-                },
-                onLongClick = onLongClick?.let { handler -> {
-                    if (selected != null) haptics.tick() else haptics.longPress()
-                    handler()
-                } },
+            .then(
+                if (selected != null) {
+                    // Selection mode: expose as a Checkbox toggle so TalkBack announces checked state.
+                    Modifier.toggleable(
+                        value         = selected,
+                        role          = Role.Checkbox,
+                        onValueChange = { haptics.tick(); onClick() },
+                    )
+                } else {
+                    Modifier.combinedClickable(
+                        onClick        = { haptics.confirm(); onClick() },
+                        onLongClick    = onLongClick?.let { handler -> {
+                            haptics.longPress(); handler()
+                        } },
+                        onLongClickLabel = longClickLabel,
+                    )
+                }
             )
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,

@@ -57,14 +57,16 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
-import com.crsmthw.lyra.R
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.crossfade
+import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.repository.LyricsState
 import com.crsmthw.lyra.ui.components.AddToPlaylistSheet
 import com.crsmthw.lyra.ui.components.DevicePickerSheet
@@ -891,7 +893,11 @@ private fun PlayerControls(
         // Hidden for an episode: `me/tracks` liking does not accept an episode. The unified
         // library could save episodes, but that is a separate feature, not a re-used heart.
         if (!isEpisode) {
-            IconButton(onClick = { haptics.toggle(!state.isLiked); onToggleLike() }) {
+            val likeStateDesc = stringResource(if (state.isLiked) R.string.cd_state_liked else R.string.cd_state_not_liked)
+            IconButton(
+                onClick  = { haptics.toggle(!state.isLiked); onToggleLike() },
+                modifier = Modifier.semantics { stateDescription = likeStateDesc },
+            ) {
                 Icon(
                     imageVector        = if (state.isLiked) Icons.Default.Favorite else Icons.Outlined.FavoriteBorder,
                     contentDescription = stringResource(R.string.cd_like),
@@ -974,7 +980,11 @@ private fun PlayerControls(
         verticalAlignment     = Alignment.CenterVertically,
     ) {
         Box(contentAlignment = Alignment.Center) {
-            IconButton(onClick = { haptics.toggle(!state.shuffleEnabled); onToggleShuffle() }) {
+            val shuffleStateDesc = stringResource(if (state.shuffleEnabled) R.string.cd_state_on else R.string.cd_state_off)
+            IconButton(
+                onClick  = { haptics.toggle(!state.shuffleEnabled); onToggleShuffle() },
+                modifier = Modifier.semantics { stateDescription = shuffleStateDesc },
+            ) {
                 Icon(Icons.Default.Shuffle, contentDescription = stringResource(R.string.player_shuffle),
                     tint = if (state.shuffleEnabled) surfaceAccentColor
                            else MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1035,14 +1045,22 @@ private fun PlayerControls(
         }
 
         Box(contentAlignment = Alignment.Center) {
-            IconButton(onClick = {
-                when (state.repeatMode) {
-                    RepeatMode.OFF   -> haptics.toggle(true)    // turning repeat on
-                    RepeatMode.TRACK -> haptics.toggle(false)   // cycling back to off
-                    else             -> haptics.press()         // context → track
-                }
-                onCycleRepeat()
-            }) {
+            val repeatStateDesc = stringResource(when (state.repeatMode) {
+                RepeatMode.OFF   -> R.string.cd_repeat_off
+                RepeatMode.CONTEXT -> R.string.cd_repeat_context
+                RepeatMode.TRACK -> R.string.cd_repeat_track
+            })
+            IconButton(
+                onClick = {
+                    when (state.repeatMode) {
+                        RepeatMode.OFF   -> haptics.toggle(true)    // turning repeat on
+                        RepeatMode.TRACK -> haptics.toggle(false)   // cycling back to off
+                        else             -> haptics.press()         // context → track
+                    }
+                    onCycleRepeat()
+                },
+                modifier = Modifier.semantics { stateDescription = repeatStateDesc },
+            ) {
                 Icon(
                     imageVector = when (state.repeatMode) {
                         RepeatMode.TRACK -> Icons.Default.RepeatOne

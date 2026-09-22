@@ -18,10 +18,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
-import com.crsmthw.lyra.ui.components.CappedModalBottomSheet
-import com.crsmthw.lyra.ui.components.ConnectedChoiceRow
-import com.crsmthw.lyra.ui.components.sheetTopGap
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -40,6 +38,9 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import com.crsmthw.lyra.util.confirm
 import com.crsmthw.lyra.util.horizontalSystemBarsPadding
 import com.crsmthw.lyra.util.screenTransitionSpec
@@ -58,8 +59,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.crsmthw.lyra.BuildConfig
 import com.crsmthw.lyra.R
 import com.crsmthw.lyra.ui.components.BarContentGap
+import com.crsmthw.lyra.ui.components.CappedModalBottomSheet
+import com.crsmthw.lyra.ui.components.ConnectedChoiceRow
 import com.crsmthw.lyra.ui.components.RootTopBar
 import com.crsmthw.lyra.ui.components.TopBarFade
+import com.crsmthw.lyra.ui.components.sheetTopGap
 import com.crsmthw.lyra.ui.theme.ThemeMode
 import com.crsmthw.lyra.util.visualizer.VisualizerStyle
 import kotlin.math.roundToInt
@@ -539,8 +543,9 @@ private fun ThemeSheet(
                 tint = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.width(12.dp))
             Text(
-                text  = stringResource(R.string.settings_theme_display),
-                style = MaterialTheme.typography.titleLarge,
+                text     = stringResource(R.string.settings_theme_display),
+                style    = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.semantics { heading() },
             )
         }
 
@@ -644,8 +649,9 @@ private fun VisualizerSheet(
                         tint = MaterialTheme.colorScheme.primary)
                     Spacer(Modifier.width(12.dp))
                     Text(
-                        text  = stringResource(R.string.settings_visualizer_advanced),
-                        style = MaterialTheme.typography.titleLarge,
+                        text     = stringResource(R.string.settings_visualizer_advanced),
+                        style    = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.semantics { heading() },
                     )
                 }
 
@@ -766,7 +772,7 @@ private fun VisualizerSectionLabel(text: String) {
         text     = text,
         style    = MaterialTheme.typography.labelLarge,
         color    = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp),
+        modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp).semantics { heading() },
     )
 }
 
@@ -784,11 +790,14 @@ private fun VisualizerTip(text: String) {
 private fun SyncToggleRow(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
     val haptics = LocalHapticFeedback.current
     Row(
-        modifier          = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 4.dp),
+        modifier          = Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp, top = 4.dp)
+            .toggleable(value = checked, role = Role.Switch, onValueChange = { haptics.toggle(it); onCheckedChange(it) }),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-        Switch(checked = checked, onCheckedChange = { haptics.toggle(it); onCheckedChange(it) })
+        Switch(checked = checked, onCheckedChange = null)
     }
 }
 
@@ -1051,7 +1060,7 @@ private fun SettingsSectionHeader(title: String) {
         text     = title,
         style    = MaterialTheme.typography.labelMedium,
         color    = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 16.dp, top = 20.dp, bottom = 4.dp),
+        modifier = Modifier.padding(start = 16.dp, top = 20.dp, bottom = 4.dp).semantics { heading() },
     )
 }
 
@@ -1093,9 +1102,9 @@ private fun SettingsToggleItem(
             tint = MaterialTheme.colorScheme.onSurfaceVariant) },
         supportingContent= subtitle?.let { { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) } },
         trailingContent  = {
-            Switch(checked = checked, onCheckedChange = toggleWithHaptic)
+            Switch(checked = checked, onCheckedChange = null)
         },
-        modifier = Modifier.clickable { toggleWithHaptic(!checked) },
+        modifier = Modifier.toggleable(value = checked, role = Role.Switch, onValueChange = toggleWithHaptic),
         content  = { Text(title) },
     )
 }

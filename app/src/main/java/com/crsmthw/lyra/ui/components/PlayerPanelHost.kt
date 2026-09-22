@@ -17,25 +17,27 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.material3.adaptive.currentWindowAdaptiveInfoV2
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.material3.adaptive.currentWindowAdaptiveInfoV2
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigationevent.NavigationEventTransitionState
 import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
+import com.crsmthw.lyra.R
+import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import com.crsmthw.lyra.util.NavTransitionMillis
 import com.crsmthw.lyra.util.confirm
 import com.crsmthw.lyra.util.screenTransitionSpec
-import androidx.compose.ui.unit.dp
-import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -807,6 +809,7 @@ fun PlayerPanelHost(
             // cannot re-open the hole this gate exists to close: `panelTransition.targetState` is
             // true only when `surfaceTarget == Panel` — which requires `visible` — or during
             // exactly that gesture.
+            val dismissPanelLabel = stringResource(R.string.cd_dismiss_panel)
             if ((visible || panelTransition.targetState) && scrimAlpha > 0f) {
                 Box(
                     modifier = Modifier
@@ -814,7 +817,7 @@ fun PlayerPanelHost(
                         .background(Color.Black.copy(alpha = scrimAlpha))
                         .then(
                             if (panelVisible)
-                                Modifier.clickable { haptics.confirm(); closePanel() }
+                                Modifier.clickable(onClickLabel = dismissPanelLabel) { haptics.confirm(); closePanel() }
                             else Modifier
                         )
                 )
