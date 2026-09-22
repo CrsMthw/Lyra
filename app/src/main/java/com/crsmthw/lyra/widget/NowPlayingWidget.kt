@@ -133,7 +133,7 @@ class NowPlayingWidget : GlanceAppWidget() {
             modifier = root.padding(10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Art(art, 48.dp)
+            Art(art, 48.dp, contentDescription = context.getString(R.string.widget_cd_now_playing, s.title, s.artist))
             Spacer(GlanceModifier.width(10.dp))
             Box(GlanceModifier.defaultWeight()) { TrackText(s) }
             Spacer(GlanceModifier.width(6.dp))
@@ -147,7 +147,7 @@ class NowPlayingWidget : GlanceAppWidget() {
             modifier = root.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Art(art, 64.dp)
+            Art(art, 64.dp, contentDescription = context.getString(R.string.widget_cd_now_playing, s.title, s.artist))
             Spacer(GlanceModifier.width(12.dp))
             Box(GlanceModifier.defaultWeight()) { TrackText(s) }
             Spacer(GlanceModifier.width(4.dp))
@@ -175,7 +175,7 @@ class NowPlayingWidget : GlanceAppWidget() {
             Box(
                 modifier = GlanceModifier.defaultWeight().fillMaxWidth(),
                 contentAlignment = Alignment.Center,
-            ) { Art(art, artDim) }
+            ) { Art(art, artDim, contentDescription = context.getString(R.string.widget_cd_now_playing, s.title, s.artist)) }
             Spacer(GlanceModifier.height(12.dp))
             TrackText(s, center = true)
             Spacer(GlanceModifier.height(12.dp))
@@ -219,7 +219,7 @@ class NowPlayingWidget : GlanceAppWidget() {
             Box(
                 modifier = GlanceModifier.defaultWeight().fillMaxWidth(),
                 contentAlignment = Alignment.Center,
-            ) { Art(art, artDim) }
+            ) { Art(art, artDim, contentDescription = context.getString(R.string.widget_cd_now_playing, s.title, s.artist)) }
             Spacer(GlanceModifier.height(6.dp))
             Row(
                 modifier = GlanceModifier.fillMaxWidth(),
@@ -288,12 +288,12 @@ class NowPlayingWidget : GlanceAppWidget() {
     }
 
     @Composable
-    private fun Art(art: Bitmap?, sizeDp: androidx.compose.ui.unit.Dp) {
+    private fun Art(art: Bitmap?, sizeDp: androidx.compose.ui.unit.Dp, contentDescription: String? = null) {
         val mod = GlanceModifier.size(sizeDp).cornerRadius(10.dp)
         if (art != null) {
             Image(
                 provider = ImageProvider(art),
-                contentDescription = null,
+                contentDescription = contentDescription,
                 modifier = mod,
                 contentScale = ContentScale.Crop,
             )
@@ -304,7 +304,7 @@ class NowPlayingWidget : GlanceAppWidget() {
             ) {
                 Image(
                     provider = ImageProvider(R.drawable.ic_widget_music_note),
-                    contentDescription = null,
+                    contentDescription = contentDescription,
                     modifier = GlanceModifier.size(sizeDp.times(0.45f)),
                 )
             }
@@ -382,11 +382,18 @@ class NowPlayingWidget : GlanceAppWidget() {
 
 // ── Colour scheme seeded from the album palette ────────────────────────────────
 
+/** WCAG 2.x contrast ratio between two opaque colours (range 1..21). */
+private fun contrastRatio(fg: Color, bg: Color): Float {
+    val l1 = maxOf(fg.luminance(), bg.luminance())
+    val l2 = minOf(fg.luminance(), bg.luminance())
+    return (l1 + 0.05f) / (l2 + 0.05f)
+}
+
 private fun playingColors(s: WidgetSnapshot) = run {
     val accent   = Color(s.accentArgb.takeIf { it != 0 } ?: NowPlayingWidgetUpdater.SPOTIFY_GREEN)
     val dominant = Color(s.dominantArgb.takeIf { it != 0 } ?: NowPlayingWidgetUpdater.SPOTIFY_GREEN)
     val bg       = if (s.amoled) Color.Black else lerp(Color(0xFF0E0E0E), dominant, 0.55f)
-    val onBg     = if (bg.luminance() < 0.5f) Color.White else Color.Black
+    val onBg     = if (contrastRatio(Color.White, bg) >= 4.5f) Color.White else Color.Black
     val onAccent = if (accent.luminance() < 0.5f) Color.White else Color.Black
     ColorProviders(
         darkColorScheme(

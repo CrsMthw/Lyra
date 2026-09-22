@@ -21,3 +21,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "Lyra"
 include(":app")
+include(":baselineprofile")

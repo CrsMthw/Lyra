@@ -39,6 +39,10 @@
     <string name="track_action_remove_from_playlist">Remove from %1$s</string>
     <string name="track_action_go_to_album">Go to album</string>
     <string name="track_action_go_to_artist">Go to artist</string>
+    <string name="track_action_add_to_queue">Add to queue</string>
+    <string name="track_action_queued">Added to queue</string>
+    <string name="track_action_queue_failed">Couldn\'t add to queue</string>
+    <string name="track_action_share">Share</string>
     <string name="create_playlist_name_label">Name</string>
     <string name="create_playlist_name_placeholder">My playlist</string>
     <string name="create_playlist_description_label">Description</string>
@@ -62,6 +66,88 @@
     <string name="player_device_volume">Device volume</string>
     <string name="player_volume_down">Volume down</string>
     <string name="player_volume_up">Volume up</string>
+
+    <!-- Shared content descriptions / generic actions -->
+    <string name="cd_back">Back</string>
+    <string name="cd_close">Close</string>
+    <string name="cd_full_screen">Full screen</string>
+    <string name="cd_search">Search</string>
+    <string name="cd_album_art">Album art</string>
+    <string name="cd_like">Like</string>
+    <string name="cd_toggle_visibility">Toggle visibility</string>
+    <string name="cd_refresh_error">Refresh error</string>
+    <string name="action_retry">Retry</string>
+    <string name="action_ok">OK</string>
+    <string name="cd_follow">Save to library</string>
+    <string name="cd_unfollow">Remove from library</string>
+
+    <!-- Library sections -->
+    <string name="library_jump_back_in">Jump back in</string>
+    <string name="library_on_repeat">On repeat</string>
+    <string name="library_my_playlists">My Playlists</string>
+    <string name="library_following">Following</string>
+    <string name="library_select_playlist">Select a playlist</string>
+    <string name="library_playlist_fallback">Playlist</string>
+    <string name="library_filter_playlists">Playlists</string>
+    <string name="library_filter_albums">Albums</string>
+    <string name="library_filter_artists">Artists</string>
+    <string name="library_filter_shows">Shows</string>
+    <string name="library_no_albums">No saved albums</string>
+    <string name="library_no_artists">No followed artists</string>
+    <string name="library_no_shows">No followed shows</string>
+    <plurals name="library_track_count">
+        <item quantity="one">%1$d track</item>
+        <item quantity="other">%1$d tracks</item>
+    </plurals>
+    <!-- Library top app bar subtitle -->
+    <plurals name="library_bar_playlists">
+        <item quantity="one">%1$d playlist</item>
+        <item quantity="other">%1$d playlists</item>
+    </plurals>
+    <plurals name="library_bar_liked">
+        <item quantity="one">%1$d liked song</item>
+        <item quantity="other">%1$d liked songs</item>
+    </plurals>
+
+    <!-- Podcast shows -->
+    <plurals name="show_episode_count">
+        <item quantity="one">%1$d episode</item>
+        <item quantity="other">%1$d episodes</item>
+    </plurals>
+    <string name="show_no_episodes">No episodes yet</string>
+    <string name="show_fallback_title">Podcast</string>
+    <!-- Episode progress. %1$s is an already-formatted duration ("42m", "1h 5m"), so the phrase
+         needs no plural form of its own. -->
+    <string name="show_episode_played">Played</string>
+    <string name="show_episode_time_left">%1$s left</string>
+    <string name="show_resume_scope_hint">Reconnect Spotify in Settings to see episode progress</string>
+
+    <!-- Player labels -->
+    <string name="player_now_playing_label">NOW PLAYING</string>
+
+    <!-- Search -->
+    <string name="search_no_results">No results for “%1$s”</string>
+
+    <!-- Settings cache / disconnect -->
+    <string name="settings_image_cache">Image Cache</string>
+    <string name="settings_library_cache">Library Cache</string>
+    <string name="settings_clear">Clear</string>
+    <string name="settings_clear_image_cache_title">Clear Image Cache?</string>
+    <string name="settings_clear_image_cache_message">Playlist artwork will be re-downloaded next time it\'s needed.</string>
+    <string name="settings_clear_library_cache_title">Clear Library Cache?</string>
+    <string name="settings_clear_library_cache_message">Playlist and track data will be re-fetched from Spotify next time you open the library.</string>
+    <string name="settings_disconnect_title">Disconnect Spotify?</string>
+    <string name="settings_disconnect_message">This will clear your tokens. You\'ll need to reconnect your Client ID.</string>
+    <string name="settings_disconnect">Disconnect</string>
+
+    <!-- Stats ("Wrapped-lite") -->
+    <string name="stats_title">Your stats</string>
+    <string name="stats_range_short">4 weeks</string>
+    <string name="stats_range_medium">6 months</string>
+    <string name="stats_range_long">All time</string>
+    <string name="stats_top_artists">Top artists</string>
+    <string name="stats_top_tracks">Top tracks</string>
+    <string name="stats_empty">No listening data yet</string>
 
     <!-- Queue -->
     <string name="player_queue">Queue</string>
@@ -87,6 +173,8 @@
     <string name="settings_amoled_desc">Ultra-dark background in dark mode</string>
     <string name="settings_dynamic_color">Material You Colors</string>
     <string name="settings_dynamic_color_desc">Extract accent color from your wallpaper</string>
+    <string name="settings_for_you">For you band</string>
+    <string name="settings_for_you_desc">Show Jump back in and On repeat on the Library</string>
     <string name="settings_haptics">Haptic feedback</string>
     <string name="settings_haptics_desc">Vibrate on taps, toggles, and gestures</string>
     <string name="settings_visualizer_desc">Show audio wave animation while music is playing</string>
@@ -171,7 +259,7 @@
     <string name="nav_back">Back</string>
 
     <!-- Search -->
-    <string name="search_placeholder">Songs/Artists/Albums</string>
+    <string name="search_placeholder">Songs/Artists/Albums/Podcasts</string>
     <string name="search_clear">Clear</string>
     <string name="search_recent">Recent</string>
 
@@ -190,4 +278,156 @@
     <string name="widget_cd_previous">Previous</string>
     <string name="widget_cd_shuffle">Shuffle</string>
     <string name="widget_cd_repeat">Repeat</string>
+
+    <!-- Playlist multi-select removal (owned playlists) -->
+    <string name="track_action_select">Select</string>
+    <string name="library_select_songs">Select songs</string>
+    <plurals name="library_selected_count">
+        <item quantity="one">%1$d selected</item>
+        <item quantity="other">%1$d selected</item>
+    </plurals>
+    <string name="library_selection_remove">Remove selected songs</string>
+    <string name="library_selection_cancel">Cancel selection</string>
+    <string name="library_selection_remove_failed">Couldn\'t remove the selected songs</string>
+    <string name="library_selection_confirm_title">Remove songs?</string>
+    <plurals name="library_selection_confirm_message">
+        <item quantity="one">Remove %1$d song from “%2$s”?</item>
+        <item quantity="other">Remove %1$d songs from “%2$s”?</item>
+    </plurals>
+    <string name="library_selection_confirm_button">Remove</string>
+    <!-- Recent searches -->
+    <string name="search_recent_remove">Remove from recent searches</string>
+    <string name="search_recent_clear_all">Clear all</string>
+    <!-- Search result paging -->
+    <string name="search_load_more_retry">Couldn\'t load more — tap to retry</string>
+    <!-- Search result type chooser -->
+    <string name="search_tab_tracks">Tracks</string>
+    <string name="search_tab_albums">Albums</string>
+    <string name="search_tab_artists">Artists</string>
+    <string name="search_tab_shows">Shows</string>
+    <string name="search_type_artist">Artist</string>
+    <string name="search_type_album">Album</string>
+    <string name="search_type_show">Podcast</string>
+    <!-- Incoming Spotify links -->
+    <string name="deeplink_resolving">Opening link…</string>
+    <string name="deeplink_unsupported">Lyra can\'t open that Spotify link</string>
+
+    <!-- ═══════════════════ iLyra mode (easter egg) ═══════════════════ -->
+    <!-- iLyra: shared -->
+    <string name="ilyra_menu_title">iLyra</string>
+    <string name="ilyra_menu_cover_flow">Cover Flow</string>
+    <string name="ilyra_menu_music">Music</string>
+    <string name="ilyra_menu_albums">Albums</string>
+    <string name="ilyra_menu_artists">Artists</string>
+    <string name="ilyra_menu_playlists">Playlists</string>
+    <string name="ilyra_menu_podcasts">Podcasts</string>
+    <string name="ilyra_menu_shuffle_songs">Shuffle Songs</string>
+    <string name="ilyra_menu_now_playing">Now Playing</string>
+    <string name="ilyra_menu_settings">Settings</string>
+    <string name="ilyra_settings_click_sounds">Click Sounds</string>
+    <string name="ilyra_settings_mode">iLyra Mode</string>
+    <string name="ilyra_value_on">On</string>
+    <string name="ilyra_value_off">Off</string>
+    <string name="ilyra_list_empty">No %1$s</string>
+    <string name="ilyra_list_loading">Loading…</string>
+    <string name="ilyra_list_error">Couldn\'t load %1$s</string>
+    <string name="ilyra_settings_click_volume">Click Volume</string>
+    <string name="ilyra_settings_click_pitch">Click Pitch</string>
+    <string name="ilyra_value_percent">%1$d%%</string>
+    <string name="ilyra_value_low">Low</string>
+    <string name="ilyra_value_medium">Medium</string>
+    <string name="ilyra_value_high">High</string>
+    <string name="ilyra_now_playing_position">%1$d of %2$d</string>
+    <string name="ilyra_now_playing_remaining">-%1$s</string>
+    <string name="ilyra_settings_color">Color</string>
+    <string name="ilyra_value_silver">Silver</string>
+    <string name="ilyra_value_black">Black</string>
+    <string name="ilyra_value_all">All</string>
+    <string name="ilyra_value_one">One</string>
+    <string name="ilyra_options_title">Options</string>
+    <string name="ilyra_option_like">Add to Liked Songs</string>
+    <string name="ilyra_option_unlike">Remove from Liked Songs</string>
+    <string name="ilyra_option_add_to_playlist">Add to Playlist</string>
+    <string name="ilyra_option_go_to_album">Go to Album</string>
+    <string name="ilyra_option_go_to_artist">Go to Artist</string>
+    <string name="ilyra_option_sleep_timer">Sleep Timer</string>
+    <string name="ilyra_value_minutes_left">%1$d min left</string>
+    <!-- (end shared) -->
+
+
+    <!-- iLyra: ViewModel + data (lane: vm) -->
+    <string name="ilyra_vm_load_error">Couldn\'t load</string>
+    <!-- (end vm) -->
+
+
+    <!-- iLyra: shell + Settings row (lane: shell) -->
+    <string name="settings_ilyra">iLyra</string>
+    <string name="settings_ilyra_desc">Relive the click wheel</string>
+    <string name="settings_ilyra_unlocked">🎵 iLyra mode unlocked</string>
+    <string name="ilyra_exit_title">Exit iLyra mode?</string>
+    <string name="ilyra_exit_yes">Yes</string>
+    <string name="ilyra_exit_no">No</string>
+    <string name="ilyra_portrait_hint">iLyra mode works best in portrait</string>
+    <string name="about_credit_fonts">Liberation Sans font © Red Hat, Inc. — SIL Open Font License 1.1</string>
+    <!-- (end shell) -->
+
+
+    <!-- iLyra: click wheel (lane: wheel) -->
+    <string name="ilyra_cd_click_wheel">Click wheel</string>
+    <string name="ilyra_wheel_menu">MENU</string>
+    <!-- (end wheel) -->
+
+
+    <!-- iLyra: LCD + menus (lane: lcd) -->
+    <string name="ilyra_cd_lcd">iLyra screen</string>
+    <string name="ilyra_now_playing_empty">No Track Selected</string>
+    <string name="ilyra_coverflow_indexing">Indexing %1$d of %2$d…</string>
+    <!-- (end lcd) -->
+
+
+    <!-- Library: refresh / rate-limit errors (lane: hygiene) -->
+    <string name="library_rate_limited_title">Rate Limited</string>
+    <string name="library_refresh_error_title">Refresh Error</string>
+    <string name="library_rate_limit_body">Spotify is rate limiting requests.</string>
+    <string name="library_rate_limit_wait">Cached data is shown. Wait, then retry.</string>
+    <string name="library_rate_limit_reopen">Wait, then reopen.</string>
+    <string name="library_partial_load_error">Some playlists could not be loaded</string>
+    <!-- (end hygiene) -->
+    <!-- Playlist editing (lane: playlist-edit) -->
+    <string name="edit_playlist_details">Edit details</string>
+    <string name="edit_playlist_title">Edit playlist details</string>
+    <string name="edit_playlist_name_label">Name</string>
+    <string name="edit_playlist_description_label">Description (optional)</string>
+    <string name="edit_playlist_save">Save</string>
+    <string name="edit_playlist_error">Couldn\'t update playlist details</string>
+    <string name="edit_playlist_description_cannot_clear">Spotify doesn\'t let an app remove a description — replace it instead.</string>
+    <string name="reorder_songs">Reorder songs</string>
+    <string name="reorder_songs_title">Reorder songs</string>
+    <string name="reorder_done">Done</string>
+    <string name="reorder_loading">Loading all songs…</string>
+    <string name="reorder_error">Couldn\'t load all songs for reordering</string>
+    <string name="reorder_failed">Couldn\'t reorder songs</string>
+    <string name="cd_drag_handle">Drag to reorder</string>
+    <!-- (end playlist-edit) -->
+    <!-- Accessibility (lane: a11y) -->
+    <string name="cd_track_actions">Song actions</string>
+    <string name="cd_state_on">On</string>
+    <string name="cd_state_off">Off</string>
+    <string name="cd_state_liked">Liked</string>
+    <string name="cd_state_not_liked">Not liked</string>
+    <string name="cd_repeat_off">Off</string>
+    <string name="cd_repeat_context">All</string>
+    <string name="cd_repeat_track">One</string>
+    <string name="cd_dismiss_panel">Close player panel</string>
+    <string name="cd_reorder_move_up">Move up</string>
+    <string name="cd_reorder_move_down">Move down</string>
+    <string name="widget_cd_now_playing">%1$s by %2$s</string>
+    <string name="ilyra_cd_action_menu">Menu</string>
+    <string name="ilyra_cd_action_select">Select</string>
+    <string name="ilyra_cd_action_play_pause">Play or pause</string>
+    <string name="ilyra_cd_action_next">Next</string>
+    <string name="ilyra_cd_action_previous">Previous</string>
+    <string name="ilyra_cd_action_scroll_forward">Scroll forward</string>
+    <string name="ilyra_cd_action_scroll_back">Scroll back</string>
+    <!-- (end a11y) -->
 </resources>

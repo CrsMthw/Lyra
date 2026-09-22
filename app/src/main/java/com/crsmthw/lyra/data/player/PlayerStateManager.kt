@@ -25,6 +25,17 @@ data class PlayerState(
     val durationMs            : Long           = 0L,
     val shuffleEnabled        : Boolean        = false,
     val repeatState           : String         = "off",
+    /**
+     * Does the current playback have a CONTEXT (playlist / album / artist / show), as opposed to a
+     * bare `uris` list? `QueueViewModel` needs it because `me/player/queue` echoes the playing item
+     * back as the queue head only in the context-less case.
+     *
+     * Unlike [repeatState] it has no optimistic lock of its own — nothing in the app mutates it
+     * locally — but it DOES follow the mid-transfer track lock: `item` and `context` go null
+     * together while Spotify switches devices, and taking it raw there would read "no context" for
+     * a poll window while [currentTrack] is still held at the previous track.
+     */
+    val hasContext            : Boolean        = false,
     val sleepTimerMinutes     : Int            = 0,
     val sleepTimerTotalMinutes: Int            = 0,
     val currentDevice         : SpotifyDevice? = null,
@@ -93,6 +104,9 @@ class PlayerStateManager(
                             durationMs     = if (lockingTransfer) it.durationMs else (response.item?.durationMs ?: it.durationMs),
                             shuffleEnabled = if (now < shuffleLockUntil) it.shuffleEnabled else response.shuffleState,
                             repeatState    = if (now < repeatLockUntil) it.repeatState else response.repeatState,
+                            // Locked with the TRACK, not on a lock of its own: `context` goes null
+                            // alongside `item` mid-transfer, and the queue's echo drop reads this.
+                            hasContext     = if (lockingTransfer) it.hasContext else response.context != null,
                             currentDevice  = response.device,
                         )
                     }
@@ -299,6 +313,42 @@ class PlayerStateManager(
         }
     }
 
+    /**
+     * Sets shuffle to [enabled] without toggling — the Classic's deliberate-selection path (shuffle OFF
+     * before playing the tapped song) and Shuffle Songs (shuffle ON). Mirrors [toggleShuffle]'s
+     * structure: optimistic lock + optimistic state + Web API, 404 → App Remote.
+     */
+    fun setShuffle(enabled: Boolean) {
+        lockShuffle()
+        _state.update { it.copy(shuffleEnabled = enabled) }
+        scope.launch {
+            repository.setShuffle(enabled).onFailure { e ->
+                if (e.message?.contains("404") == true) remoteManager.setShuffle(enabled)
+            }
+        }
+    }
+
+    /**
+     * Awaitable variant of [setShuffle] for callers that need to sequence the shuffle change BEFORE
+     * a play request (iLyra mode: shuffle OFF → play the tapped song, otherwise the uris body starts
+     * at a random entry). Returns the Web API result; a 404 is NOT swallowed — the caller owns the
+     * App Remote fallback and must apply shuffle there too.
+     */
+    suspend fun applyShuffle(enabled: Boolean): Result<Unit> {
+        lockShuffle()
+        _state.update { it.copy(shuffleEnabled = enabled) }
+        return repository.setShuffle(enabled)
+    }
+
+    /**
+     * Clears the optimistic shuffle lock so the next [fetchPlayerState] writes the server's truth.
+     * Used by the shuffle-re-assert path in [PlayerViewModel.shuffleContext]: the 1.5 s verification
+     * fetch must read the REAL server state, not the locked-true optimistic value.
+     */
+    fun clearShuffleLock() {
+        shuffleLockUntil = 0L
+    }
+
     fun cycleRepeat() {
         val next = when (_state.value.repeatState) {
             "context" -> "track"
@@ -310,6 +360,18 @@ class PlayerStateManager(
         val sdkMode = when (next) { "context" -> 1; "track" -> 2; else -> 0 }
         scope.launch {
             repository.setRepeat(next).onFailure { e ->
+                if (e.message?.contains("404") == true) remoteManager.setRepeat(sdkMode)
+            }
+        }
+    }
+
+    /** Sets repeat to an explicit state ("off" / "context" / "track") — the Classic's repeat bar. */
+    fun setRepeat(state: String) {
+        lockRepeat()
+        _state.update { it.copy(repeatState = state) }
+        val sdkMode = when (state) { "context" -> 1; "track" -> 2; else -> 0 }
+        scope.launch {
+            repository.setRepeat(state).onFailure { e ->
                 if (e.message?.contains("404") == true) remoteManager.setRepeat(sdkMode)
             }
         }

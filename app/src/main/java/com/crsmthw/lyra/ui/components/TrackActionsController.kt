@@ -29,7 +29,14 @@ data class TrackActionTarget(
     val removable : RemovablePlaylist? = null, // "Remove from <name>" shown only when non-null
     val track     : SpotifyTrack? = null,      // full track, when known — lets add-to-playlist
                                                // surgically append to the playlist's cached list
-)
+) {
+    /**
+     * The open.spotify.com page for the row, or null when there is none to share — a local file
+     * ([SpotifyTrack.shareUrl] is null there, and for a Gson-null id). Both builders below set
+     * [track], so the bare-id fallback only serves a target built by hand.
+     */
+    val shareUrl: String? get() = if (track != null) track.shareUrl else "https://open.spotify.com/track/$id"
+}
 
 /** The owned playlist the long-pressed row currently lives in, if any. */
 data class RemovablePlaylist(val id: String, val name: String)
@@ -76,6 +83,8 @@ data class TrackActionsState(
     val target             : TrackActionTarget? = null,  // non-null = the actions sheet is open
     val isLiked            : Boolean?           = null,  // null = still resolving
     val showPlaylistPicker : Boolean           = false,
+    val isQueueing         : Boolean           = false,  // add-to-queue in flight (row disabled)
+    val queueResult        : Boolean?          = null,   // non-null = done; true = queued OK
 )
 
 /**
@@ -112,6 +121,22 @@ class TrackActionsController(
         _pickerState.value = PlaylistPickerState()
     }
 
+    /**
+     * Appends the target to the playback queue (`POST /me/player/queue`). The sheet stays open
+     * (row disabled) until the result lands; [TrackActionsHost] toasts it and dismisses.
+     */
+    fun addToQueue() {
+        val t = _state.value.target ?: return
+        if (_state.value.isQueueing) return
+        _state.update { if (it.target?.id == t.id) it.copy(isQueueing = true) else it }
+        scope.launch {
+            val ok = repository.addToQueue(t.uri).isSuccess
+            _state.update {
+                if (it.target?.id == t.id) it.copy(isQueueing = false, queueResult = ok) else it
+            }
+        }
+    }
+
     /** Optimistic; the sheet stays open and reflects the new state, reverting on failure. */
     fun toggleLike() {
         val s = _state.value
@@ -142,13 +167,13 @@ class TrackActionsController(
         _state.update { it.copy(showPlaylistPicker = true) }
         _pickerState.value = PlaylistPickerState(isLoading = true)
         scope.launch {
-            val userId = libraryCache.load()?.user?.id
+            val cacheData = libraryCache.load()
+            val userId = cacheData?.user?.id
                 ?: repository.getCurrentUser().getOrNull()?.id
-            val playlists = libraryCache.load()?.playlists?.takeIf { it.isNotEmpty() }
-                ?: repository.getUserPlaylists().getOrNull()?.items
+            val playlists = cacheData?.playlists?.takeIf { it.isNotEmpty() }
+                ?: repository.getAllUserPlaylists().getOrNull()?.items
                 ?: emptyList()
             val owned = if (userId != null) playlists.filter { it.owner?.id == userId } else playlists
-            val cacheData = libraryCache.load()
             val containing = owned.filter { playlist ->
                 cacheData?.trackLists?.get(playlist.id)?.tracks?.any { it.id == t.id } == true
             }.map { it.id }.toSet()
@@ -190,10 +215,14 @@ class TrackActionsController(
                                 addResult             = AddToPlaylistResult.Added(playlist.name),
                             )
                         }
-                        t.track?.let { full ->
-                            withContext(Dispatchers.IO) {
-                                libraryCache.appendToPlaylistTrackList(playlist.id, playlist.trackCount, full)
-                            }
+                        withContext(Dispatchers.IO) {
+                            val full = t.track
+                            // The cached list can only take the new row when the full track is known;
+                            // either way the playlist just grew server-side, so the mutation is
+                            // always announced — that's what schedules the Library's authoritative
+                            // count reconcile (appendToPlaylistTrackList announces it itself).
+                            if (full != null) libraryCache.appendToPlaylistTrackList(playlist.id, playlist.trackCount, full)
+                            else              libraryCache.notePlaylistMutated(playlist.id)
                         }
                     },
                     onFailure = { e -> _pickerState.update { it.copy(addResult = errorResult(e)) } },

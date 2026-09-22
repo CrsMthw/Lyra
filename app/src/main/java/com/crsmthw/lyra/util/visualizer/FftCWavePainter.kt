@@ -40,8 +40,9 @@ class FftCWavePainter(
     var isActive: Boolean = false
         private set
 
-    fun setFftData(fftBytes: ByteArray) {
-        val raw = getFftMagnitudeRange(fftBytes, startHz, endHz)
+    /** [sampleRateHz] arrives from the capture callback via [FftFrame], so the band edges are exact. */
+    fun setFftData(fftBytes: ByteArray, sampleRateHz: Int = DefaultSampleRateHz) {
+        val raw = getFftMagnitudeRange(fftBytes, startHz, endHz, sampleRateHz)
         if (raw.size < 3) return
 
         // Beat-matched rotation: detect the kick from the SUB-BASS only (bins 0-3 ≈ 47-187 Hz)

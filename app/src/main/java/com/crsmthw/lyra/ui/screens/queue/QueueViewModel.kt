@@ -57,16 +57,60 @@ class QueueViewModel(
     private suspend fun fetchQueue() {
         repository.getQueue().fold(
             onSuccess = { response ->
+                // `me/player/queue` echoes the currently playing item back as the HEAD of `queue`
+                // when the playback context is a single-item `uris` list — exactly the body Lyra
+                // sends for a one-episode show — so "Next up" listed the episode that was already
+                // playing (checklist 13). The reference documents neither the echo nor an exception
+                // to it ("The tracks or episodes in the queue. Can be empty." is all it says), so
+                // this is read off behaviour, not spec.
+                //
+                // TWO conditions, both matching the mechanism the echo was actually observed under:
+                //   • repeat is OFF — with repeat "track" a queue entry equal to the current item
+                //     is the truth, and dropping it would hide what plays next;
+                //   • the playback has NO CONTEXT (`GET me/player` → `context == null`) — the echo
+                //     comes from a context-less `uris` play. Inside a playlist/album/show context a
+                //     queue head equal to the playing item is the user's own "Add to queue" of the
+                //     track that is playing (the song menu offers that for the playing track, and
+                //     `POST me/player/queue` then really does return it as the queue head), and the
+                //     drop hid their own action — again on every re-fetch.
+                // Deliberately NOT gated on `isEpisode`: `SpotifyRepository.play` sends the same
+                // one-item `uris` body for a single TRACK (a Search result tap), so the echo shape
+                // exists there too. Accepted residual: a deliberate enqueue of the CURRENT item
+                // during a context-less single play is still hidden — by shape it is the echo.
+                //
+                // Read off the RAW `currently_playing`, not the isQueueable-filtered field below —
+                // the filter can null that while the queue head is still the same item.
+                val currentUri = response?.currentlyPlaying?.uri
+                // Not snapshot-observed: the queue is only re-fetched on a track change or a manual
+                // refresh, so flipping repeat — or starting playback with a context — re-evaluates
+                // these on the next fetch, not immediately.
+                val playerState = playerStateManager.state.value
+                val repeatOff   = playerState.repeatState == "off"
+                val hasContext  = playerState.hasContext
                 _uiState.update {
                     if (response == null) {
                         it.copy(isLoading = false, currentlyPlaying = null, queue = emptyList(), error = null)
                     } else {
                         it.copy(
                             isLoading        = false,
-                            currentlyPlaying = response.currentlyPlaying
-                                ?.takeIf { t -> t.uri.startsWith("spotify:track:") },
+                            // `me/player/queue` returns TrackObject | EpisodeObject and takes no
+                            // additional_types parameter, so podcast episodes have always been in
+                            // this payload — the old `spotify:track:` filter is what dropped them.
+                            // The allowlist keeps that filter's real purpose (excluding ads and
+                            // local files, which can't be rendered or acted on) while letting
+                            // episodes through; QueueScreen suppresses their actions sheet.
+                            currentlyPlaying = response.currentlyPlaying?.takeIf { t -> t.isQueueable },
                             queue            = response.queue
-                                .filter { t -> t.uri.startsWith("spotify:track:") && t.isPlayable != false }
+                                .filter { t -> t.isQueueable && t.isPlayable != false }
+                                // LEADING copies of the current item only — a copy further down is
+                                // a genuine re-queue and stays. Dropped BEFORE distinctBy so a run
+                                // of echoes goes entirely; after it, distinctBy would have collapsed
+                                // the run into one survivor that then reads as a real next item.
+                                .let { q ->
+                                    if (repeatOff && !hasContext && currentUri != null)
+                                        q.dropWhile { t -> t.uri == currentUri }
+                                    else q
+                                }
                                 .distinctBy { it.uri },
                             error            = null,
                         )
@@ -79,6 +123,10 @@ class QueueViewModel(
         )
     }
 }
+
+/** Renderable in the queue: a catalogue track or a podcast episode — not an ad or a local file. */
+private val SpotifyTrack.isQueueable: Boolean
+    get() = uri.startsWith("spotify:track:") || uri.startsWith("spotify:episode:")
 
 class QueueViewModelFactory(private val container: AppContainer) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")

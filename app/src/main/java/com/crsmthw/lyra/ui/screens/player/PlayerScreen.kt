@@ -22,6 +22,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.offset
 import androidx.compose.material3.MaterialShapes
@@ -56,19 +57,23 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
-import com.crsmthw.lyra.R
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.crossfade
+import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.repository.LyricsState
 import com.crsmthw.lyra.ui.components.AddToPlaylistSheet
 import com.crsmthw.lyra.ui.components.DevicePickerSheet
+import com.crsmthw.lyra.ui.components.LocalPlayerArtKey
 import com.crsmthw.lyra.ui.components.PlainLyricsView
 import com.crsmthw.lyra.ui.components.SyncedLyricsView
+import com.crsmthw.lyra.ui.components.ValueSlider
 import androidx.compose.ui.platform.LocalHapticFeedback
 import com.crsmthw.lyra.util.confirm
 import com.crsmthw.lyra.util.loadAlbumArtColors
@@ -194,8 +199,10 @@ fun PlayerScreen(
         ImageRequest.Builder(context).data(displayedTrack?.artUrl).crossfade(200).build()
     }
 
+    // Keyed on the id, not the item: the art slide must run on every change of the playing item,
+    // episode or not. `recheckLiked` takes the whole item so it can skip episodes itself.
     LaunchedEffect(state.currentTrack?.id) {
-        state.currentTrack?.id?.let { viewModel.recheckLiked(it) }
+        state.currentTrack?.let { viewModel.recheckLiked(it) }
         val incoming = state.currentTrack
         if (incoming?.id != displayedTrack?.id) {
             if (incoming != null && displayedTrack != null) {
@@ -294,7 +301,7 @@ fun PlayerScreen(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         modifier            = Modifier.fillMaxWidth(),
                     ) {
-                        Text("NOW PLAYING",
+                        Text(stringResource(R.string.player_now_playing_label),
                             style = MaterialTheme.typography.labelSmall,
                             color = topContentColor)
                     }
@@ -305,13 +312,13 @@ fun PlayerScreen(
                         // (where the chevron would be), so the right side carries only the options menu.
                         if (onFullScreen != null) {
                             IconButton(onClick = onFullScreen) {
-                                Icon(Icons.Default.OpenInFull, contentDescription = "Full screen",
+                                Icon(Icons.Default.OpenInFull, contentDescription = stringResource(R.string.cd_full_screen),
                                     tint = topContentColor)
                             }
                         }
                     } else {
                         IconButton(onClick = { haptics.confirm(); onBack() }) {
-                            Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Close",
+                            Icon(Icons.Default.KeyboardArrowDown, contentDescription = stringResource(R.string.cd_close),
                                 tint = topContentColor)
                         }
                     }
@@ -333,7 +340,7 @@ fun PlayerScreen(
                             val lyricsShowing   = state.lyricsMode && lyricsAvailable
                             val lyricsLoading   = state.lyricsState is LyricsState.Loading
                             DropdownMenuGroup(shapes = MenuDefaults.groupShapes()) {
-                                DropdownMenuItem(
+                                CheckableDropdownMenuItem(
                                     checked       = lyricsShowing,
                                     onCheckedChange = {
                                         haptics.toggle(!lyricsShowing)
@@ -352,7 +359,7 @@ fun PlayerScreen(
                                         selectedContainerColor = surfaceAccentColor.copy(alpha = 0.15f),
                                     ),
                                 )
-                                DropdownMenuItem(
+                                CheckableDropdownMenuItem(
                                     checked       = state.visualizerEnabled,
                                     onCheckedChange = { enable ->
                                         haptics.toggle(enable)
@@ -415,10 +422,17 @@ fun PlayerScreen(
                     val side = minOf(maxWidth, maxHeight * 0.82f)
                     val displaySide = side * artScale
 
+                    // The shared-element modifier. `LocalPlayerArtKey` carries a generation the
+                    // host advances after an ABANDONED seek and at no other settle, so a morph
+                    // that follows a cancelled gesture has no state from it to inherit. A
+                    // generation is a fresh ELEMENT only — recreating the LayoutNode that carries
+                    // this modifier was tried and changed nothing on device. See
+                    // `LocalPlayerArtKey` in PlayerPanelHost.
                     val artMod = if (sharedTransitionScope != null && animatedContentScope != null) {
                         with(sharedTransitionScope) {
+                            val artState = rememberSharedContentState(LocalPlayerArtKey.current)
                             Modifier.sharedElement(
-                                sharedContentState      = rememberSharedContentState("album-art"),
+                                sharedContentState      = artState,
                                 animatedVisibilityScope = animatedContentScope,
                                 boundsTransform         = rememberArtBoundsTransform(),
                             )
@@ -466,7 +480,7 @@ fun PlayerScreen(
                                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                     AsyncImage(
                                         model              = artImageModel,
-                                        contentDescription = "Album art",
+                                        contentDescription = stringResource(R.string.cd_album_art),
                                         contentScale       = ContentScale.Crop,
                                         modifier           = artMod
                                             .size(displaySide)
@@ -543,11 +557,13 @@ fun PlayerScreen(
                             onOpenQueue        = onOpenQueue,
                             onOpenAlbum        = onOpenAlbum,
                             onOpenArtist       = onOpenArtist,
+                            // Nothing to share for an item with no open.spotify.com page (a local
+                            // file) — `shareUrl` is null there and the button stays inert.
                             onShare            = {
-                                state.currentTrack?.id?.let { id ->
+                                state.currentTrack?.shareUrl?.let { url ->
                                     context.startActivity(Intent.createChooser(
                                         Intent(Intent.ACTION_SEND).apply {
-                                            putExtra(Intent.EXTRA_TEXT, "https://open.spotify.com/track/$id")
+                                            putExtra(Intent.EXTRA_TEXT, url)
                                             type = "text/plain"
                                         }, null
                                     ))
@@ -581,10 +597,14 @@ fun PlayerScreen(
                     val side = minOf(maxWidth, maxHeight)
                     val displaySide = side * artScale
 
+                    // Shared-element modifier (keyed on `LocalPlayerArtKey` — a fresh element per
+                    // abandoned seek, and nothing at an ordinary settle) — see the landscape
+                    // branch above, and `LocalPlayerArtKey` in PlayerPanelHost.
                     val artMod = if (sharedTransitionScope != null && animatedContentScope != null) {
                         with(sharedTransitionScope) {
+                            val artState = rememberSharedContentState(LocalPlayerArtKey.current)
                             Modifier.sharedElement(
-                                sharedContentState      = rememberSharedContentState("album-art"),
+                                sharedContentState      = artState,
                                 animatedVisibilityScope = animatedContentScope,
                                 boundsTransform         = rememberArtBoundsTransform(),
                             )
@@ -632,7 +652,7 @@ fun PlayerScreen(
                                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                     AsyncImage(
                                         model              = artImageModel,
-                                        contentDescription = "Album art",
+                                        contentDescription = stringResource(R.string.cd_album_art),
                                         contentScale       = ContentScale.Crop,
                                         modifier           = artMod
                                             .size(displaySide)
@@ -702,11 +722,12 @@ fun PlayerScreen(
                         onOpenQueue        = onOpenQueue,
                         onOpenAlbum        = onOpenAlbum,
                         onOpenArtist       = onOpenArtist,
+                        // Same null-skip as the landscape layout above.
                         onShare            = {
-                            state.currentTrack?.id?.let { id ->
+                            state.currentTrack?.shareUrl?.let { url ->
                                 context.startActivity(Intent.createChooser(
                                     Intent(Intent.ACTION_SEND).apply {
-                                        putExtra(Intent.EXTRA_TEXT, "https://open.spotify.com/track/$id")
+                                        putExtra(Intent.EXTRA_TEXT, url)
                                         type = "text/plain"
                                     }, null
                                 ))
@@ -799,6 +820,9 @@ private fun PlayerControls(
     spacingSmall       : Dp = 12.dp,
 ) {
     val haptics = LocalHapticFeedback.current
+    // A podcast episode has no artists, no album and cannot be liked, added to a playlist or
+    // matched against LRCLIB — every one of those endpoints is track-specific.
+    val isEpisode = state.currentTrack?.isEpisode == true
     // Track name + like
     Row(
         modifier          = Modifier.fillMaxWidth(),
@@ -813,6 +837,9 @@ private fun PlayerControls(
                 modifier = Modifier.basicMarquee(),
             )
             val artists = state.currentTrack?.artists.orEmpty()
+            // An episode's subtitle is its show's name, and it is NOT tappable: there is no
+            // artist page behind it (the artist links stay a full-player-only affordance).
+            val showName = state.currentTrack?.show?.name?.takeIf { isEpisode && it.isNotBlank() }
             if (artists.isNotEmpty()) {
                 FlowRow {
                     artists.forEachIndexed { index, artist ->
@@ -835,6 +862,14 @@ private fun PlayerControls(
                         )
                     }
                 }
+            } else if (showName != null) {
+                Text(
+                    text     = showName,
+                    style    = MaterialTheme.typography.bodyMedium,
+                    color    = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             } else {
                 Text(
                     text  = "–",
@@ -842,6 +877,7 @@ private fun PlayerControls(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            // Null for an episode (no album object), so this link hides itself.
             val albumId   = state.currentTrack?.album?.id
             val albumName = state.currentTrack?.album?.name
             if (albumName != null && albumId != null && onOpenAlbum != null) {
@@ -855,12 +891,20 @@ private fun PlayerControls(
                 )
             }
         }
-        IconButton(onClick = { haptics.toggle(!state.isLiked); onToggleLike() }) {
-            Icon(
-                imageVector        = if (state.isLiked) Icons.Default.Favorite else Icons.Outlined.FavoriteBorder,
-                contentDescription = "Like",
-                tint               = if (state.isLiked) surfaceAccentColor else LocalContentColor.current,
-            )
+        // Hidden for an episode: `me/tracks` liking does not accept an episode. The unified
+        // library could save episodes, but that is a separate feature, not a re-used heart.
+        if (!isEpisode) {
+            val likeStateDesc = stringResource(if (state.isLiked) R.string.cd_state_liked else R.string.cd_state_not_liked)
+            IconButton(
+                onClick  = { haptics.toggle(!state.isLiked); onToggleLike() },
+                modifier = Modifier.semantics { stateDescription = likeStateDesc },
+            ) {
+                Icon(
+                    imageVector        = if (state.isLiked) Icons.Default.Favorite else Icons.Outlined.FavoriteBorder,
+                    contentDescription = stringResource(R.string.cd_like),
+                    tint               = if (state.isLiked) surfaceAccentColor else LocalContentColor.current,
+                )
+            }
         }
     }
 
@@ -899,7 +943,7 @@ private fun PlayerControls(
             )
         }
         var lastSeekNotch by remember { mutableIntStateOf(-1) }
-        Slider(
+        ValueSlider(
             value                 = if (isDragging) dragValue else state.progress,
             onValueChange         = {
                 isDragging = true; dragValue = it
@@ -937,7 +981,11 @@ private fun PlayerControls(
         verticalAlignment     = Alignment.CenterVertically,
     ) {
         Box(contentAlignment = Alignment.Center) {
-            IconButton(onClick = { haptics.toggle(!state.shuffleEnabled); onToggleShuffle() }) {
+            val shuffleStateDesc = stringResource(if (state.shuffleEnabled) R.string.cd_state_on else R.string.cd_state_off)
+            IconButton(
+                onClick  = { haptics.toggle(!state.shuffleEnabled); onToggleShuffle() },
+                modifier = Modifier.semantics { stateDescription = shuffleStateDesc },
+            ) {
                 Icon(Icons.Default.Shuffle, contentDescription = stringResource(R.string.player_shuffle),
                     tint = if (state.shuffleEnabled) surfaceAccentColor
                            else MaterialTheme.colorScheme.onSurfaceVariant)
@@ -998,14 +1046,22 @@ private fun PlayerControls(
         }
 
         Box(contentAlignment = Alignment.Center) {
-            IconButton(onClick = {
-                when (state.repeatMode) {
-                    RepeatMode.OFF   -> haptics.toggle(true)    // turning repeat on
-                    RepeatMode.TRACK -> haptics.toggle(false)   // cycling back to off
-                    else             -> haptics.press()         // context → track
-                }
-                onCycleRepeat()
-            }) {
+            val repeatStateDesc = stringResource(when (state.repeatMode) {
+                RepeatMode.OFF   -> R.string.cd_repeat_off
+                RepeatMode.CONTEXT -> R.string.cd_repeat_context
+                RepeatMode.TRACK -> R.string.cd_repeat_track
+            })
+            IconButton(
+                onClick = {
+                    when (state.repeatMode) {
+                        RepeatMode.OFF   -> haptics.toggle(true)    // turning repeat on
+                        RepeatMode.TRACK -> haptics.toggle(false)   // cycling back to off
+                        else             -> haptics.press()         // context → track
+                    }
+                    onCycleRepeat()
+                },
+                modifier = Modifier.semantics { stateDescription = repeatStateDesc },
+            ) {
                 Icon(
                     imageVector = when (state.repeatMode) {
                         RepeatMode.TRACK -> Icons.Default.RepeatOne
@@ -1078,38 +1134,97 @@ private fun PlayerControls(
             containerColor = surfaceAccentColor.copy(alpha = 0.12f),
             contentColor   = surfaceAccentColor,
         )
-        // Connected icon buttons. A plain Row (not M3 ButtonGroup) is used deliberately: the overflow
-        // feature was disabled (empty overflowIndicator/menuContent), and ButtonGroup's overflow
-        // MeasurePolicy crashes with an inverted Constraints when the folded-landscape controls column
-        // is tight (IllegalArgumentException: maxWidth must be >= minWidth). A Row clips instead.
-        Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-            FilledTonalIconButton(
-                onClick  = { haptics.press(); onOpenQueue() },
-                enabled  = state.currentTrack != null,
-                modifier = Modifier.size(40.dp),
-                shape    = ButtonGroupDefaults.connectedLeadingButtonShape,
-                colors   = accentButtonColors,
-            ) {
-                Icon(Icons.AutoMirrored.Filled.QueueMusic, queueLabel, Modifier.size(18.dp))
-            }
-            FilledTonalIconButton(
-                onClick  = { haptics.press(); onShare() },
-                enabled  = state.currentTrack != null,
-                modifier = Modifier.size(40.dp),
-                shape    = RoundedCornerShape(2.dp),
-                colors   = accentButtonColors,
-            ) {
-                Icon(Icons.Default.Share, shareLabel, Modifier.size(18.dp))
-            }
-            FilledTonalIconButton(
-                onClick  = { haptics.press(); onAddToPlaylist() },
-                enabled  = state.currentTrack != null,
-                modifier = Modifier.size(40.dp),
-                shape    = ButtonGroupDefaults.connectedTrailingButtonShape,
-                colors   = accentButtonColors,
-            ) {
-                Icon(Icons.Default.LibraryAdd, addToPlaylistLabel, Modifier.size(18.dp))
-            }
+        // Real M3 ButtonGroup (see docs/MATERIAL3.md → ButtonGroup). The old plain-Row workaround
+        // existed because the group was built with overflow DISABLED (empty overflowIndicator),
+        // whose measure policy computes a negative child width in the tight folded-landscape
+        // controls column (IllegalArgumentException: maxWidth must be >= minWidth). With a real
+        // OverflowIndicator an item that can't fit collapses into the overflow menu instead, and
+        // customItem + animateWidth restores the inter-button press-squeeze the Row lost.
+        val queueInteraction = remember { MutableInteractionSource() }
+        val shareInteraction = remember { MutableInteractionSource() }
+        val addInteraction   = remember { MutableInteractionSource() }
+        ButtonGroup(
+            overflowIndicator = { menuState ->
+                ButtonGroupDefaults.OverflowIndicator(
+                    menuState = menuState,
+                    modifier  = Modifier.size(40.dp),
+                    colors    = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = surfaceAccentColor.copy(alpha = 0.12f),
+                        contentColor   = surfaceAccentColor,
+                    ),
+                )
+            },
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            customItem(
+                buttonGroupContent = {
+                    FilledTonalIconButton(
+                        onClick           = { haptics.press(); onOpenQueue() },
+                        enabled           = state.currentTrack != null,
+                        modifier          = Modifier.size(40.dp).animateWidth(queueInteraction),
+                        shape             = ButtonGroupDefaults.connectedLeadingButtonShape,
+                        colors            = accentButtonColors,
+                        interactionSource = queueInteraction,
+                    ) {
+                        Icon(Icons.AutoMirrored.Filled.QueueMusic, queueLabel, Modifier.size(18.dp))
+                    }
+                },
+                menuContent = { menuState ->
+                    DropdownMenuItem(
+                        text        = { Text(queueLabel) },
+                        leadingIcon = { Icon(Icons.AutoMirrored.Filled.QueueMusic, null) },
+                        enabled     = state.currentTrack != null,
+                        onClick     = { haptics.press(); menuState.dismiss(); onOpenQueue() },
+                    )
+                },
+            )
+            customItem(
+                buttonGroupContent = {
+                    FilledTonalIconButton(
+                        onClick           = { haptics.press(); onShare() },
+                        enabled           = state.currentTrack != null,
+                        modifier          = Modifier.size(40.dp).animateWidth(shareInteraction),
+                        shape             = RoundedCornerShape(2.dp),
+                        colors            = accentButtonColors,
+                        interactionSource = shareInteraction,
+                    ) {
+                        Icon(Icons.Default.Share, shareLabel, Modifier.size(18.dp))
+                    }
+                },
+                menuContent = { menuState ->
+                    DropdownMenuItem(
+                        text        = { Text(shareLabel) },
+                        leadingIcon = { Icon(Icons.Default.Share, null) },
+                        enabled     = state.currentTrack != null,
+                        onClick     = { haptics.press(); menuState.dismiss(); onShare() },
+                    )
+                },
+            )
+            customItem(
+                buttonGroupContent = {
+                    FilledTonalIconButton(
+                        onClick           = { haptics.press(); onAddToPlaylist() },
+                        // Disabled rather than removed for an episode: dropping a segment from a
+                        // connected ButtonGroup would re-shape its neighbours (share would become
+                        // the trailing pill) every time the now-playing item changed type.
+                        enabled           = state.currentTrack != null && !isEpisode,
+                        modifier          = Modifier.size(40.dp).animateWidth(addInteraction),
+                        shape             = ButtonGroupDefaults.connectedTrailingButtonShape,
+                        colors            = accentButtonColors,
+                        interactionSource = addInteraction,
+                    ) {
+                        Icon(Icons.Default.LibraryAdd, addToPlaylistLabel, Modifier.size(18.dp))
+                    }
+                },
+                menuContent = { menuState ->
+                    DropdownMenuItem(
+                        text        = { Text(addToPlaylistLabel) },
+                        leadingIcon = { Icon(Icons.Default.LibraryAdd, null) },
+                        enabled     = state.currentTrack != null && !isEpisode,
+                        onClick     = { haptics.press(); menuState.dismiss(); onAddToPlaylist() },
+                    )
+                },
+            )
         }
     }
 }
@@ -1151,6 +1266,6 @@ private fun SleepTimerDialog(
             }
         },
         confirmButton = {},
-        dismissButton = { TextButton(onClick = { haptics.press(); onDismiss() }) { Text("Cancel") } },
+        dismissButton = { TextButton(onClick = { haptics.press(); onDismiss() }) { Text(stringResource(R.string.action_cancel)) } },
     )
 }

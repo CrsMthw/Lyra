@@ -152,7 +152,7 @@ fun AuthScreen(
                         Icon(
                             if (showClientId) Icons.Default.VisibilityOff
                             else              Icons.Default.Visibility,
-                            contentDescription = "Toggle visibility",
+                            contentDescription = stringResource(R.string.cd_toggle_visibility),
                         )
                     }
                 },

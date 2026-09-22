@@ -61,6 +61,15 @@ class SettingsViewModel(
     val hapticsEnabled: StateFlow<Boolean> = settingsRepo.hapticsEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), true)
 
+    val forYouEnabled: StateFlow<Boolean> = settingsRepo.forYouEnabled
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    val ilyraUnlocked: StateFlow<Boolean> = settingsRepo.ilyraUnlocked
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    val ilyraEnabled: StateFlow<Boolean> = settingsRepo.ilyraEnabled
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
     private val _imageCacheBytes   = MutableStateFlow(0L)
     val imageCacheBytes: StateFlow<Long> = _imageCacheBytes
 
@@ -82,6 +91,9 @@ class SettingsViewModel(
     fun setVisualizerGainBottom(offset: Int)    { viewModelScope.launch { settingsRepo.setVisualizerGainBottom(offset) } }
     fun setVisualizerGainSync(sync: Boolean)    { viewModelScope.launch { settingsRepo.setVisualizerGainSync(sync) } }
     fun setHapticsEnabled  (enabled: Boolean)   { viewModelScope.launch { settingsRepo.setHapticsEnabled(enabled)      } }
+    fun setForYouEnabled   (enabled: Boolean)   { viewModelScope.launch { settingsRepo.setForYouEnabled(enabled)       } }
+    fun unlockIlyra()                             { viewModelScope.launch { settingsRepo.setIlyraUnlocked(true)           } }
+    fun setIlyraEnabled     (enabled: Boolean)   { viewModelScope.launch { settingsRepo.setIlyraEnabled(enabled)         } }
 
     /** Reset every visualizer setting to its default (surfaces=Both, 24 bands, gain 0, synced, mean). */
     fun resetVisualizerSettings() {

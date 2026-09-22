@@ -1,58 +1,84 @@
 package com.crsmthw.lyra.ui.screens.search
 
+import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedContentScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerState
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.foundation.text.input.clearText
+import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Podcasts
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
 import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.local.RecentSearch
 import com.crsmthw.lyra.data.remote.model.SpotifyAlbum
 import com.crsmthw.lyra.data.remote.model.SpotifyArtist
-import com.crsmthw.lyra.data.remote.model.SpotifyPlaylist
-import com.crsmthw.lyra.ui.components.TopScrim
+import com.crsmthw.lyra.data.remote.model.SpotifyShow
+import com.crsmthw.lyra.ui.components.LocalPopOutPanelOpen
+import com.crsmthw.lyra.ui.components.TrackActionTarget
 import com.crsmthw.lyra.ui.components.TrackActionsHost
 import com.crsmthw.lyra.ui.components.TrackRow
 import com.crsmthw.lyra.ui.components.toTrackActionTarget
+import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import com.crsmthw.lyra.util.ListScrollHaptics
 import com.crsmthw.lyra.util.confirm
+import com.crsmthw.lyra.util.pagerTrackingIndicator
+import com.crsmthw.lyra.util.press
 import com.crsmthw.lyra.util.rememberArtBoundsTransform
+import com.crsmthw.lyra.util.rememberSearchBarMorphClip
+import kotlin.math.abs
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import com.crsmthw.lyra.util.visualizer.FftWaveCanvas
 import com.crsmthw.lyra.util.visualizer.LocalVisualizerAccentColor
 
@@ -61,10 +87,12 @@ import com.crsmthw.lyra.util.visualizer.LocalVisualizerAccentColor
 @Composable
 fun SearchScreen(
     viewModel             : SearchViewModel,
+    playerViewModel       : PlayerViewModel,
     onBack                : () -> Unit,
     onOpenPlayer          : () -> Unit,
     onAlbumClick          : (albumId: String) -> Unit,
     onArtistClick         : (artistId: String) -> Unit,
+    onShowClick           : (showId: String) -> Unit,
     onTrackClick          : (uri: String, allUris: List<String>) -> Unit,
     sharedTransitionScope : SharedTransitionScope? = null,
     animatedContentScope  : AnimatedContentScope? = null,
@@ -72,12 +100,116 @@ fun SearchScreen(
     val state          by viewModel.uiState.collectAsStateWithLifecycle()
     val recents        by viewModel.recentSearches.collectAsStateWithLifecycle()
     val keyboard        = LocalSoftwareKeyboardController.current
+    val focusManager    = LocalFocusManager.current
     val focusRequester  = remember { FocusRequester() }
     val haptics         = LocalHapticFeedback.current
 
+    // The input field owns its own text (M3's TextFieldState form). The ViewModel stays the source
+    // of truth for the *searched* query, fed from here so its 400 ms debounce is untouched; it is
+    // seeded from the VM so returning to a still-live Search entry keeps what was typed.
+    val queryState      = rememberTextFieldState(initialText = state.query)
+    LaunchedEffect(queryState, viewModel) {
+        snapshotFlow { queryState.text.toString() }.collect { viewModel.onQueryChange(it) }
+    }
+    // Collapsed to a Boolean on purpose. `TextFieldState.text` reads one snapshot state carrying
+    // text PLUS selection PLUS composing region, so reading it directly in the content lambda below
+    // subscribed that whole scope — the results LazyColumn included — to cursor drags and IME
+    // composing updates. Derived, only a genuine blank↔non-blank flip invalidates it, and
+    // derivedStateOf adds no frame of lag (dependents are notified with the recomputed value).
+    val queryBlank by remember(queryState) { derivedStateOf { queryState.text.isBlank() } }
+
+    // One scroll position per tab, kept at screen scope so switching away and back lands where you
+    // left off — the pager composes only the settled page plus, mid-swipe, its neighbour.
+    // `rememberLazyListState` is already `rememberSaveable`-backed, and three distinct call sites
+    // get three distinct keys.
+    val tracksListState  = rememberLazyListState()
+    val albumsListState  = rememberLazyListState()
+    val artistsListState = rememberLazyListState()
+    val showsListState   = rememberLazyListState()
+    // A new search starts at the top of every tab. The states are hoisted so each tab keeps its
+    // scroll position across tab switches — which would also carry the previous query's position
+    // into the next one, i.e. new results landing mid-list. Keyed on the SEARCHED query, not the
+    // live field text. (The other half of that inheritance — an immediate page-2 fetch — is closed
+    // by the stale-layout guard inside `SearchResultsList`, not here.)
+    //
+    // A CHANGE of that query, not merely an entry. `LaunchedEffect(state.resultsQuery)` runs again
+    // every time the screen is composed, and popping back from Album/Artist/Show detail composes
+    // Search afresh against the SAME ViewModel — same `resultsQuery`, four `LazyListState`s just
+    // restored to where the user left them — so an unguarded reset threw all four away and dumped
+    // them at the top of the list they had just come back from (device pass 2026-09-13). The guard
+    // is `rememberSaveable`, never a plain `remember`: it has to survive the same save/restore that
+    // brings the scroll offsets back, or a re-entry would read it fresh and reset anyway. `null` is
+    // the sentinel rather than "" so "no reset has run in this instance" stays distinguishable from
+    // "the reset ran for a cleared field". A query typed after returning is a genuine change and
+    // still resets all four.
+    //
+    // `requestScrollToItem`, NOT the suspending `scrollToItem`, for the same reason the pager effect
+    // below uses `requestScrollToPage`: `LazyListState.scroll` waits for that list's FIRST layout
+    // before doing anything, and only the settled page is composed (`beyondViewportPageCount = 0`),
+    // so a tab that has never been laid out in this composition blocks forever — and blocks every
+    // call after it in this one coroutine. A genuine new query is exactly that case: the three tabs
+    // the user is not on have not been measured for these results, so the suspending form would
+    // park on the first of them and leave the rest holding the previous query's offset. The request
+    // form writes the position synchronously and schedules the remeasure, composed or not.
+    var lastResetQuery by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(state.resultsQuery) {
+        if (state.resultsQuery == lastResetQuery) return@LaunchedEffect
+        lastResetQuery = state.resultsQuery
+        tracksListState.requestScrollToItem(0)
+        albumsListState.requestScrollToItem(0)
+        artistsListState.requestScrollToItem(0)
+        showsListState.requestScrollToItem(0)
+    }
+
+    // One page per tab, so the lists can be SWIPED between as well as tapped. The pager is
+    // composed only in the results branch below, which is exactly `pagerVisible`.
+    val pagerState   = rememberPagerState(initialPage = state.tab.ordinal) { SearchTab.entries.size }
+    val pagerVisible = !state.isLoading && state.error == null && state.results != null
+
+    // Swipe → tab. Ported from the Library's hardened shape: the whole snapped-and-at-rest test
+    // lives INSIDE the snapshotFlow so every state the decision rests on is observed — a filter {}
+    // over a read outside would sample a stale value and silently drop emissions.
+    //
+    // NEITHER `settledPage` NOR `!isScrollInProgress` ALONE MEANS "SETTLED": a cancelled programmatic
+    // scroll is never re-settled by anything in the pager package, so `isScrollInProgress` can go
+    // false at a fractional offset; and `PagerState.scroll` writes `settledPageState = currentPage`
+    // when it starts over a finished scroll, so a correction tap ~150 ms after the first can make
+    // `settledPage` report an intermediate page for the whole return animation. Both halves are
+    // required. `distinctUntilChanged` is load-bearing: `snapshotFlow` only dedupes its own block
+    // result, so a 2 → null → 2 sequence would otherwise deliver 2 twice.
+    LaunchedEffect(pagerState, viewModel) {
+        snapshotFlow {
+            if (pagerState.isScrollInProgress ||
+                abs(pagerState.currentPageOffsetFraction) > 0.01f) null
+            else pagerState.currentPage
+        }
+            .filterNotNull()
+            .distinctUntilChanged()
+            .collect { viewModel.selectTab(SearchTab.entries[it]) }
+    }
+    // Tab tap → pager, plus the reset to Tracks that clearing the field performs. The pager is not
+    // composed while there are no results (or while a new query is loading), and a suspending
+    // `animateScrollToPage` would park on the pager's first-layout wait and then animate that reset
+    // in front of the user the moment the next query's results appeared — so jump the state instead.
+    //
+    // The early return carries BOTH halves of `animateScrollToPage`'s own guard
+    // (`page == currentPage && currentPageOffsetFraction == pageOffsetFraction`). The offset half
+    // matters: `currentPage` flips at the halfway mark while the offset is still fractional, and a
+    // re-key that cancels an in-flight programmatic scroll at that instant would otherwise return
+    // early and leave the pager parked between two pages with nothing to settle it.
+    LaunchedEffect(state.tab, pagerVisible) {
+        val target = state.tab.ordinal
+        if (pagerState.currentPage == target &&
+            pagerState.currentPageOffsetFraction == 0f) return@LaunchedEffect
+        if (pagerVisible) pagerState.animateScrollToPage(target)
+        else              pagerState.requestScrollToPage(target)
+    }
+
     // Container transform: the floating bar shares bounds with the Library search FAB (same
     // SEARCH_BAR_SHARED_KEY) so tapping the FAB expands it into this bar. Null scopes (two-pane /
-    // previews) fall back to no morph.
+    // previews) fall back to no morph. clipInOverlayDuringTransition is the OUTLINE morph
+    // (stadium ↔ SoftBurst) — the identical clip both Library FAB call sites pass, so the exiting
+    // and entering halves are clipped to the same path on every frame. See util/SearchBarMorph.kt.
     val searchBarSharedModifier: Modifier =
         if (sharedTransitionScope != null && animatedContentScope != null) {
             with(sharedTransitionScope) {
@@ -85,6 +217,7 @@ fun SearchScreen(
                     sharedContentState      = rememberSharedContentState(key = SEARCH_BAR_SHARED_KEY),
                     animatedVisibilityScope = animatedContentScope,
                     boundsTransform         = rememberArtBoundsTransform(),
+                    clipInOverlayDuringTransition = rememberSearchBarMorphClip(),
                 )
             }
         } else Modifier
@@ -96,131 +229,404 @@ fun SearchScreen(
     val navBarBottomDp = with(density) { WindowInsets.navigationBars.getBottom(this).toDp() }
     val scrimHeight    = navBarBottomDp + 48.dp
     val background     = MaterialTheme.colorScheme.background
-    // Top content inset clears the floating bar: status bar + top margin + bar height + a gap.
-    val topInset       = statusBarTopDp + 8.dp + SearchBarHeight + 12.dp
+    // Two different top insets, because the two things that live under the bar are mutually
+    // exclusive: the Recent list only exists while the query is BLANK, which is exactly when the
+    // tab row is absent — so handing it the results' inset would shove it down by a row height
+    // with nothing above it.
+    val barInset       = statusBarTopDp + SearchBarBlockHeight
+    val tabRowBottom   = barInset + SearchTabRowHeight
+    val resultsInset   = tabRowBottom + SearchTabRowGap
+    // Where the full-area states (spinner, error) must start so they centre in the VISIBLE area
+    // rather than in the whole screen: half of a `ContainedLoadingIndicator` used to sit behind the
+    // bar and the type chooser (device pass 2026-09-12, checklist 1). The per-tab "No results"
+    // message takes the same inset from its list's own `contentPadding`.
+    val fullAreaInset  = if (queryBlank) barInset else resultsInset
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        // Scrolling content rides above the keyboard; the floating bar + top scrim do not.
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal))
-                .imePadding(),
-        ) {
+    // Long-press on a result opens the song menu — but not until the keyboard is gone. The menu is a
+    // ModalBottomSheet in its own dialog window, and when that window appears in the same frame the
+    // IME starts hiding, the sheet's enter animation stalls behind the IME hide animation (device
+    // pass 2026-09-12: "the bottom sheet slide out lags for a second"). Search is the only screen in
+    // the app with a keyboard up over a track list, so this stays local to it.
+    var pendingTrackAction by remember { mutableStateOf<TrackActionTarget?>(null) }
+    val imeInsets = WindowInsets.ime
+    LaunchedEffect(pendingTrackAction) {
+        val target = pendingTrackAction ?: return@LaunchedEffect
+        // Reading the inset through a snapshotFlow rather than the composable `isImeVisible` keeps
+        // the IME's per-frame inset changes out of this screen's content lambda. An already-hidden
+        // keyboard resolves on the first emission, so a long-press with no keyboard up adds no
+        // delay; the timeout covers a device that never reports the inset reaching zero.
+        withTimeoutOrNull(ImeHideTimeoutMs) {
+            snapshotFlow { imeInsets.getBottom(density) }.first { it == 0 }
+        }
+        viewModel.trackActions.open(target)
+        pendingTrackAction = null
+    }
+
+    // Dragging the results drops the keyboard. Scrolling a list is the user saying they are done
+    // typing and want to look at what came back, and the field kept both the cursor and the IME
+    // through the whole scroll (device pass 2026-09-14, checklist 6) — with `imePadding()` on the
+    // results that also meant reading the tab through a half-height viewport.
+    //
+    // A NESTED SCROLL connection, not `snapshotFlow { listState.isScrollInProgress }`, because the
+    // source is the thing that has to be discriminated, not the fact of a scroll:
+    // `NestedScrollSource.UserInput` is a real drag (or a mouse wheel) and excludes the fling
+    // (`SideEffect`) that follows it as well as the IME's own bring-into-view (`Relocate`) — while
+    // `isScrollInProgress` cannot tell a drag from ANY programmatic scroll on these four hoisted
+    // list states, so it would quietly depend on `requestScrollToItem` (the per-query reset above)
+    // not counting as one. The pager's horizontal swipe dispatches an x-only delta and a
+    // `LazyColumn` a y-only one, so `available.y != 0f` is what keeps a tab swipe — and a tab tap,
+    // which dispatches nothing at all — on the keyboard, exactly as today.
+    //
+    // Gated on the field actually holding focus so the pair fires ONCE per gesture rather than on
+    // every delta of it, and so it cannot fight anything that already dropped the IME: the row taps
+    // and the back arrow call `keyboard?.hide()` themselves, and a long-press hands `pendingTrackAction`
+    // to the effect above, which waits for the inset to reach zero before opening the sheet. The flag
+    // is written from the field's focus callback and read ONLY from this lambda (pointer input, not
+    // composition), so nothing subscribes to it and a focus change recomposes nothing.
+    val fieldFocused = remember { mutableStateOf(false) }
+    val dismissImeOnScroll = remember(focusManager, keyboard) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (fieldFocused.value &&
+                    source == NestedScrollSource.UserInput &&
+                    available.y != 0f
+                ) {
+                    focusManager.clearFocus(force = true)
+                    keyboard?.hide()
+                }
+                return Offset.Zero   // observing, never consuming
+            }
+        }
+    }
+
+    // THE screen's single horizontal inset. In landscape with 3-button navigation the nav bar sits
+    // on the left or right edge, and the search field, the Recent rows' X buttons and the result
+    // rows all ran underneath it — only the inner results Box carried a narrower nav-bars-only
+    // inset, and the bar and recents had none at all. Applied once here, every descendant clears
+    // it, and because `windowInsetsPadding` CONSUMES what it applies, the `navigationBarsPadding()`
+    // calls further down resolve to the remaining BOTTOM inset only, so there is no double padding
+    // (CLAUDE.md → Inset Rules). `displayCutout` joins the union for a landscape notch on the same
+    // edge. The scrims are inset along with everything else, which is invisible: nothing is drawn
+    // in that strip any more either. The mini player is NOT affected — the app-wide
+    // `PlayerPanelHost` in `LyraNavGraph` renders it outside this screen and insets it itself.
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .windowInsetsPadding(
+                WindowInsets.systemBars.union(WindowInsets.displayCutout)
+                    .only(WindowInsetsSides.Horizontal)
+            ),
+    ) {
+        // Scrolling content rides above the keyboard; the floating bar + tab row do not. The bottom
+        // scrim + wave ride it too, but from a wrapper of their own below the Recent list — they
+        // used to be the last two children of THIS Box, which is what let the recents draw over
+        // them (see the overlay Box further down).
+        Box(modifier = Modifier.fillMaxSize().imePadding()) {
             when {
                 state.isLoading -> {
-                    Box(Modifier.fillMaxSize().navigationBarsPadding(), contentAlignment = Alignment.Center) {
+                    Box(
+                        modifier         = Modifier.fillMaxSize()
+                            .padding(top = fullAreaInset).navigationBarsPadding(),
+                        contentAlignment = Alignment.Center,
+                    ) {
                         ContainedLoadingIndicator(modifier = Modifier.size(90.dp))
                     }
                 }
                 state.error != null -> {
-                    Box(Modifier.fillMaxSize().navigationBarsPadding(), contentAlignment = Alignment.Center) {
+                    Box(
+                        modifier         = Modifier.fillMaxSize()
+                            .padding(top = fullAreaInset).navigationBarsPadding(),
+                        contentAlignment = Alignment.Center,
+                    ) {
                         Text(state.error!!, color = MaterialTheme.colorScheme.error)
                     }
                 }
                 state.results != null -> {
-                    val results   = state.results!!
-                    val tracks    = results.tracks?.items    ?: emptyList()
-                    val albums    = results.albums?.items    ?: emptyList()
-                    val artists   = results.artists?.items   ?: emptyList()
-                    val playlists = results.playlists?.items ?: emptyList()
+                    val results     = state.results!!
+                    val emptyText   = stringResource(R.string.search_no_results, state.query)
+                    val listPadding = remember(resultsInset, navBarBottomDp) {
+                        // 100dp of mini-player clearance on top of the nav bar, so the last row
+                        // scrolls clear of the floating bar (UI_PATTERNS.md → "LazyColumn bottom
+                        // padding must include nav bar height").
+                        PaddingValues(top = resultsInset, bottom = 100.dp + navBarBottomDp)
+                    }
 
-                    val hasAny = tracks.isNotEmpty() || albums.isNotEmpty() ||
-                                 artists.isNotEmpty() || playlists.isNotEmpty()
+                    // One vertical list per type, one page each, so the tabs can be swiped as well
+                    // as tapped. Not an `AnimatedContent`: the pager's own snap IS the swap, it is
+                    // gesture-driven rather than a content-swap transition, so the finite
+                    // `screenTransitionSpec()` rule (docs/MOTION.md → THE HARD RULE) is not in play.
+                    HorizontalPager(
+                        state                   = pagerState,
+                        // The results container is where the keyboard-dismissing nested scroll
+                        // connection attaches: it is the parent of both the pager's own horizontal
+                        // scrollable and every page's LazyColumn, so one connection sees all four
+                        // lists and can tell their vertical drags from a tab swipe by axis alone.
+                        modifier                = Modifier
+                            .fillMaxSize()
+                            .nestedScroll(dismissImeOnScroll),
+                        // Neighbours compose only while a drag is actually in flight; the `isActive`
+                        // gate below is what stops one of them paging itself as it slides into view.
+                        beyondViewportPageCount = 0,
+                    ) { page ->
+                        val pageTab  = SearchTab.entries[page]
+                        // The paging trigger belongs to the tab the user has SETTLED on. Without
+                        // this a 10px drag toward a short tab (fewer rows than the threshold) would
+                        // compose it, satisfy `reachedBottom` immediately and fetch its page 2 for a
+                        // tab the user never arrived at — then spring back, leaving a spinner and a
+                        // mutated list behind on an off-screen tab.
+                        //
+                        // `!isScrollInProgress` is the same half the settle collector above uses:
+                        // `PagerState.scroll` writes `settledPageState = currentPage` on
+                        // start-over-finished, so `settledPage` can report an intermediate page for
+                        // a whole return animation — and that intermediate page could trigger a
+                        // page-2 fetch on the wrong tab. Do NOT add `currentPageOffsetFraction`
+                        // here — that is a per-frame value and this is a composition read inside
+                        // the pager's page lambda; it would recompose every page on every frame.
+                        val isActive = pagerState.settledPage == page &&
+                            !pagerState.isScrollInProgress
+                        val paging   = state.pagingFor(pageTab)
 
-                    if (!hasAny) {
-                        Box(Modifier.fillMaxSize().navigationBarsPadding(), contentAlignment = Alignment.Center) {
-                            Text("No results for \"${state.query}\"",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    } else {
-                        val resultsListState = rememberLazyListState()
-                        ListScrollHaptics(resultsListState)
-                        LazyColumn(
-                            state          = resultsListState,
-                            modifier       = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(top = topInset, bottom = navBarBottomDp + 16.dp),
-                        ) {
-
-                            // ── Artists — horizontal stories row ──────────────
-                            if (artists.isNotEmpty()) {
-                                item(key = "section_artists") {
-                                    SectionHeader("Artists")
-                                }
-                                item(key = "artists_row") {
-                                    LazyRow(
-                                        contentPadding = PaddingValues(horizontal = 8.dp),
-                                    ) {
-                                        items(artists, key = { "artist_${it.id}" }) { artist ->
-                                            ArtistChip(
-                                                artist  = artist,
-                                                onClick = {
-                                                    viewModel.addRecentSearch(artist.toRecentSearch())
-                                                    onArtistClick(artist.id)
-                                                },
-                                            )
-                                        }
+                        when (pageTab) {
+                            SearchTab.TRACKS -> {
+                                val tracks = results.tracks?.items ?: emptyList()
+                                SearchResultsList(
+                                    tab            = SearchTab.TRACKS,
+                                    listState      = tracksListState,
+                                    itemCount      = tracks.size,
+                                    paging         = paging,
+                                    isActive       = isActive,
+                                    isLoading      = state.isLoading,
+                                    emptyText      = emptyText,
+                                    contentPadding = listPadding,
+                                    onLoadMore     = viewModel::loadMore,
+                                    onRetry        = viewModel::retryLoadMore,
+                                ) {
+                                    items(tracks, key = { "track_${it.id}" }) { track ->
+                                        TrackRow(
+                                            track   = track,
+                                            // Drop the keyboard from the gesture, exactly as the
+                                            // album/artist/show rows do. A track tap pushes the
+                                            // full player, and the mini player's bottom inset
+                                            // unions the IME — dismissing it here is what lets the
+                                            // bar ride the keyboard down on the way out instead of
+                                            // the IME retracting behind the pushed screen.
+                                            onClick = {
+                                                keyboard?.hide()
+                                                viewModel.addRecentSearch(track.toRecentSearch())
+                                                val idx = tracks.indexOfFirst { it.uri == track.uri }.coerceAtLeast(0)
+                                                onTrackClick(track.uri, tracks.drop(idx).map { it.uri })
+                                            },
+                                            // Drop the keyboard HERE, from the gesture, then hand
+                                            // the target to the effect above — it opens the sheet
+                                            // once the IME inset is actually back to zero. TrackRow
+                                            // still fires its own long-press haptic on the gesture.
+                                            onLongClick = {
+                                                focusManager.clearFocus(force = true)
+                                                keyboard?.hide()
+                                                pendingTrackAction = track.toTrackActionTarget()
+                                            },
+                                        )
                                     }
                                 }
                             }
 
-                            // ── Tracks ────────────────────────────────────────
-                            if (tracks.isNotEmpty()) {
-                                item(key = "section_tracks") {
-                                    SectionHeader("Tracks")
-                                }
-                                items(tracks, key = { "track_${it.id}" }) { track ->
-                                    TrackRow(
-                                        track   = track,
-                                        onClick = {
-                                            viewModel.addRecentSearch(track.toRecentSearch())
-                                            val idx = tracks.indexOfFirst { it.uri == track.uri }.coerceAtLeast(0)
-                                            onTrackClick(track.uri, tracks.drop(idx).map { it.uri })
-                                        },
-                                        onLongClick = { viewModel.trackActions.open(track.toTrackActionTarget()) },
-                                    )
-                                }
-                            }
-
-                            // ── Albums ────────────────────────────────────────
-                            if (albums.isNotEmpty()) {
-                                item(key = "section_albums") {
-                                    SectionHeader("Albums")
-                                }
-                                items(albums, key = { "album_${it.id}" }) { album ->
-                                    AlbumRow(
-                                        album   = album,
-                                        onClick = {
-                                            viewModel.addRecentSearch(album.toRecentSearch())
-                                            onAlbumClick(album.id)
-                                        },
-                                    )
-                                }
-                            }
-
-                            // ── Playlists ─────────────────────────────────────
-                            if (playlists.isNotEmpty()) {
-                                item(key = "section_playlists") {
-                                    SectionHeader("Playlists")
-                                }
-                                items(playlists, key = { "playlist_${it.id}" }) { playlist ->
-                                    PlaylistRow(
-                                        playlist = playlist,
-                                        onClick  = {
-                                            viewModel.addRecentSearch(playlist.toRecentSearch())
-                                            onOpenPlayer()
-                                        },
-                                    )
+                            SearchTab.ALBUMS -> {
+                                val albums = results.albums?.items ?: emptyList()
+                                SearchResultsList(
+                                    tab            = SearchTab.ALBUMS,
+                                    listState      = albumsListState,
+                                    itemCount      = albums.size,
+                                    paging         = paging,
+                                    isActive       = isActive,
+                                    isLoading      = state.isLoading,
+                                    emptyText      = emptyText,
+                                    contentPadding = listPadding,
+                                    onLoadMore     = viewModel::loadMore,
+                                    onRetry        = viewModel::retryLoadMore,
+                                ) {
+                                    items(albums, key = { "album_${it.id}" }) { album ->
+                                        AlbumRow(
+                                            album   = album,
+                                            // Drop the keyboard from the gesture, as the back arrow
+                                            // does. Nothing dismissed the IME on the way OUT to a
+                                            // detail screen, so it was still animating down (or
+                                            // still up) behind the pushed screen, and the state on
+                                            // return depended on that race. Same on the track,
+                                            // artist and show rows and on the Recent list below.
+                                            onClick = {
+                                                keyboard?.hide()
+                                                viewModel.addRecentSearch(album.toRecentSearch())
+                                                onAlbumClick(album.id)
+                                            },
+                                        )
+                                    }
                                 }
                             }
 
-                            item(key = "footer_space") { Spacer(Modifier.height(16.dp)) }
+                            SearchTab.ARTISTS -> {
+                                val artists = results.artists?.items ?: emptyList()
+                                SearchResultsList(
+                                    tab            = SearchTab.ARTISTS,
+                                    listState      = artistsListState,
+                                    itemCount      = artists.size,
+                                    paging         = paging,
+                                    isActive       = isActive,
+                                    isLoading      = state.isLoading,
+                                    emptyText      = emptyText,
+                                    contentPadding = listPadding,
+                                    onLoadMore     = viewModel::loadMore,
+                                    onRetry        = viewModel::retryLoadMore,
+                                ) {
+                                    items(artists, key = { "artist_${it.id}" }) { artist ->
+                                        ArtistRow(
+                                            artist  = artist,
+                                            onClick = {
+                                                keyboard?.hide()
+                                                viewModel.addRecentSearch(artist.toRecentSearch())
+                                                onArtistClick(artist.id)
+                                            },
+                                        )
+                                    }
+                                }
+                            }
+
+                            SearchTab.SHOWS -> {
+                                // Id-less shows are dropped once, up front: every podcast field is
+                                // nullable (Gson bypasses the constructor), and a show with no id
+                                // can neither be opened nor keyed. Deriving the list here keeps
+                                // `itemCount` in step with what is actually rendered — pass the
+                                // unfiltered size and an all-id-less page would show a blank list
+                                // with no empty state.
+                                val shows = results.shows?.items?.filter { !it.id.isNullOrBlank() }
+                                            ?: emptyList()
+                                SearchResultsList(
+                                    tab            = SearchTab.SHOWS,
+                                    listState      = showsListState,
+                                    itemCount      = shows.size,
+                                    paging         = paging,
+                                    isActive       = isActive,
+                                    isLoading      = state.isLoading,
+                                    emptyText      = emptyText,
+                                    contentPadding = listPadding,
+                                    onLoadMore     = viewModel::loadMore,
+                                    onRetry        = viewModel::retryLoadMore,
+                                ) {
+                                    items(shows, key = { "show_${it.id}" }) { show ->
+                                        ShowRow(
+                                            show    = show,
+                                            onClick = {
+                                                keyboard?.hide()
+                                                viewModel.addRecentSearch(show.toRecentSearch())
+                                                show.id?.let(onShowClick)
+                                            },
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
                 // Blank query → nothing; just the floating bar over an empty background.
             }
+        }
 
+        // Recent searches — only while the query is blank. Lives in the outer (non-ime-padded) Box,
+        // top-anchored, so the keyboard never lifts it; it vanishes the moment anything is typed.
+        // It is NOT the last content sibling: the bottom scrim + wave are composed after it on
+        // purpose (see the overlay Box below), because they used to sit inside the results Box above
+        // and this list drew straight over them.
+        // Gated on the *field's* text, not the ViewModel's: the VM is a debounce-coupled frame or
+        // two behind now, which would flash this list over the results on the first keystroke.
+        if (queryBlank && recents.isNotEmpty()) {
+            // A full cap-10 list plus its header and Clear all overruns the shorter geometries
+            // (folded outer screen, any landscape), and Clear all sits at the END — so the column
+            // scrolls. Only the IME is applied OUTSIDE the scroll: the screen auto-focuses, so the
+            // keyboard is up by default and a viewport that ran under it would park Clear all out of
+            // reach at full scroll. Everything else is scroll CONTENT, exactly like the results'
+            // contentPadding — the leading Spacer puts the first row under the floating bar (so the
+            // top scrim has rows to fade) and the trailing one carries the nav bar + mini-player
+            // clearance, so with the keyboard down the last rows scroll under the nav bar and
+            // dissolve into the bottom scrim instead of stopping dead above it. Until 2026-09-17 the
+            // nav bar was part of the OUTSIDE inset, which left a solid `background` strip the height
+            // of the nav bar under the fade with nothing ever passing beneath it — Cris read it as an
+            // opaque bar (checklist 14). Top-anchoring (the reason this lives in the outer,
+            // non-imePadding Box) is untouched.
+            //
+            // `dismissImeOnScroll` BEFORE `verticalScroll`, as on the results pager: a real drag on
+            // the recents drops the keyboard and the cursor the same way (Cris, 2026-09-17). The
+            // connection observes and never consumes, and the ordering is load-bearing — after the
+            // scrollable it would be silently inert.
+            Column(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .windowInsetsPadding(WindowInsets.ime.only(WindowInsetsSides.Bottom))
+                    .nestedScroll(dismissImeOnScroll)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                Spacer(Modifier.height(barInset))
+                SectionHeader(stringResource(R.string.search_recent))
+                recents.forEach { recent ->
+                    RecentSearchRow(
+                        recent   = recent,
+                        onClick  = {
+                            haptics.confirm()
+                            // The keyboard is up by default over this list (blank field ⇒
+                            // auto-focus), so hiding it from the gesture matters most here.
+                            keyboard?.hide()
+                            viewModel.addRecentSearch(recent)   // re-tapping moves it to the front
+                            when (recent.type) {
+                                "track"    -> onTrackClick(recent.uri, listOf(recent.uri))
+                                "album"    -> onAlbumClick(recent.id)
+                                "artist"   -> onArtistClick(recent.id)
+                                "show"     -> onShowClick(recent.id)
+                                "playlist" -> onOpenPlayer()
+                            }
+                        },
+                        onRemove = {
+                            haptics.press()
+                            viewModel.removeRecentSearch(recent.id)
+                        },
+                    )
+                }
+                TextButton(
+                    onClick  = {
+                        haptics.press()
+                        viewModel.clearRecentSearches()
+                    },
+                    modifier = Modifier.padding(start = 4.dp, bottom = 8.dp),
+                ) {
+                    Text(stringResource(R.string.search_recent_clear_all))
+                }
+                // Nav bar + mini-player + bottom-scrim clearance, INSIDE the scroll (the results'
+                // `bottom = 100.dp + navBarBottomDp` contentPadding, in Column form): "Clear all" is
+                // the last thing in the list, and the floating bar (once something is playing) and
+                // the scrim + wave that draw over this list would otherwise cover it. With the
+                // keyboard up the IME inset outside already spans the nav bar, so this is a little
+                // generous there — harmless, it only lets the list scroll a touch further. The rows'
+                // tappability does NOT depend on this spacer — the overlay below has no pointer input.
+                Spacer(Modifier.height(100.dp + navBarBottomDp))
+            }
+        }
+
+        // Bottom scrim + visualizer wave, ABOVE both scrollable lists. These were the last two
+        // children of the results Box above until 2026-09-16, i.e. composed BEFORE the Recent
+        // column, so a full cap-10 recents list — whose `ListItem` rows are an opaque
+        // `colorScheme.surface` — drew straight over them and clipped the top half of the wave with
+        // the keyboard down and hid it entirely with enough rows (device report). Every other list
+        // in the app scrolls UNDER its bottom scrim; composed here the recents do too.
+        //
+        // The wrapper is the same `fillMaxSize().imePadding()` chain as the results Box, so the two
+        // children keep the exact ancestor shape they had: same parent size, same `BottomCenter`
+        // anchor, same `scrimHeight`, same IME response — identical by construction rather than by
+        // an argument about where `imePadding()` lands relative to `height()` and `align()`, which
+        // is why this is a wrapper and not a per-child inset.
+        //
+        // It carries NO pointer input (a `background` Box and `FftWaveCanvas`'s `drawBehind`
+        // Spacer), so it is not a hit-test target and taps fall through to the lists underneath —
+        // the same reason the bottom rows of the results pager have always stayed tappable under
+        // it. It must stay BELOW the top scrim and the floating bar, hence composed before them.
+        Box(modifier = Modifier.fillMaxSize().imePadding()) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -238,52 +644,94 @@ fun SearchScreen(
             )
         }
 
-        // Recent searches — only while the query is blank. Lives in the outer (non-ime-padded) Box,
-        // top-anchored, so the keyboard never lifts it; it vanishes the moment anything is typed.
-        if (state.query.isBlank() && recents.isNotEmpty()) {
-            Column(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .fillMaxWidth()
-                    .padding(top = topInset),
-            ) {
-                SectionHeader(stringResource(R.string.search_recent))
-                recents.forEach { recent ->
-                    RecentSearchRow(
-                        recent  = recent,
-                        onClick = {
-                            haptics.confirm()
-                            viewModel.addRecentSearch(recent)   // re-tapping moves it to the front
-                            when (recent.type) {
-                                "track"    -> onTrackClick(recent.uri, listOf(recent.uri))
-                                "album"    -> onAlbumClick(recent.id)
-                                "artist"   -> onArtistClick(recent.id)
-                                "playlist" -> onOpenPlayer()
-                            }
-                        },
+        // Top scrim — fades content out under the floating controls (covers the status bar; no
+        // statusBarsPadding). Not the shared `TopScrim`, because this one has to reach the tab row:
+        // with full-width tabs, rows scroll under BOTH the bar and the tabs, and a plain
+        // top-to-transparent gradient was already spent by the time it got there — rows slid
+        // visibly past the tab labels and the fade read as aimed at the status bar instead (device
+        // pass 2026-09-12, checklist 10). So while the tabs are up the gradient stays fully opaque
+        // down to the tab row's BOTTOM edge and only fades out over a `TopScrimTail` below it, and
+        // rows dissolve into the tabs. A blank query has no tab row, so its scrim holds the
+        // background down to the floating BAR's bottom edge instead and fades over the same tail:
+        // the recents now scroll under the bar (their top inset is scroll content since
+        // 2026-09-17), and without this they slid past it with no fade at all (checklist 14 —
+        // "the top fade scrim is either non-existent or behind").
+        val (topScrimHeight, topScrimBrush) =
+            remember(queryBlank, barInset, tabRowBottom, background) {
+                if (queryBlank) {
+                    val height = barInset + TopScrimTail
+                    height to Brush.verticalGradient(
+                        0f                   to background,
+                        (barInset / height)  to background,
+                        1f                   to Color.Transparent,
+                    )
+                } else {
+                    val height = tabRowBottom + TopScrimTail
+                    height to Brush.verticalGradient(
+                        0f                       to background,
+                        (tabRowBottom / height)  to background,
+                        1f                       to Color.Transparent,
                     )
                 }
             }
-        }
-
-        // Top scrim — fades content under the status bar (covers the bar; no statusBarsPadding).
-        TopScrim(color = background, modifier = Modifier.align(Alignment.TopCenter))
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .height(topScrimHeight)
+                .background(topScrimBrush)
+        )
 
         // Floating M3 search bar. The back arrow is its own leading icon, so there is no separate
         // floating back pill — one element, which also keeps the FAB→bar morph clean.
         SearchInputBar(
-            query          = state.query,
-            onQueryChange  = viewModel::onQueryChange,
+            queryState     = queryState,
             onBack         = { keyboard?.hide(); haptics.confirm(); onBack() },
-            onClear        = viewModel::clearQuery,
+            // Focus AND show the keyboard, in that order — clearing is the start of typing the
+            // next query, so the ✕ has to leave the field ready to type in from either state it
+            // can be tapped in:
+            //  - unfocused (a re-entry over restored results, where the auto-focus effect below
+            //    deliberately no longer fires): `requestFocus()` does the work, and the IME comes
+            //    up with the focus gain.
+            //  - focused with the IME hidden — the state a system swipe-down dismissal leaves
+            //    behind: `requestFocus()` is a no-op on an already-focused field, so the ✕ used to
+            //    clear the text and leave the user staring at a cursor with no keyboard (device
+            //    pass 2026-09-14, checklist 6). The focus never went away, so the field's text
+            //    input session is still alive and an explicit `show()` reaches it.
+            // The M3 InputField is on the TextFieldState path and does not intercept either call;
+            // its own clear-focus-on-collapse effect is unarmed, the SearchBarState being pinned
+            // Expanded (see SearchInputBar's KDoc).
+            onClear        = {
+                queryState.clearText()
+                viewModel.clearQuery()
+                focusRequester.requestFocus()
+                keyboard?.show()
+            },
             onSearch       = { keyboard?.hide() },
             focusRequester = focusRequester,
+            onFocusChanged = { fieldFocused.value = it },
             modifier       = Modifier
                 .align(Alignment.TopCenter)
                 .statusBarsPadding()
                 .padding(start = 16.dp, end = 16.dp, top = 8.dp)
                 .then(searchBarSharedModifier),
         )
+
+        // Result-type tabs, FIXED in the same floating layer as the bar so they stay put while a
+        // list scrolls underneath them. Results used to be one LazyColumn of stacked sections, so
+        // every appended page of tracks pushed Albums further out of reach; each type is now its
+        // own list, and its own pager page. Only shown once something is typed — the Recent list
+        // owns the blank state.
+        if (!queryBlank) {
+            SearchTabRow(
+                pagerState = pagerState,
+                onSelect   = viewModel::selectTab,
+                modifier   = Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .padding(top = SearchBarBlockHeight),
+            )
+        }
     }
 
     TrackActionsHost(
@@ -292,18 +740,308 @@ fun SearchScreen(
         onGoToArtist = onArtistClick,
     )
 
-    // Auto-focus the field. If we arrived via the FAB→bar shared-element morph, wait for it to
-    // settle before popping the keyboard so the layout shift doesn't stutter the transition.
+    // Auto-focus the field — on the FIRST entry of this screen instance (the arrival from the
+    // Library FAB, where the whole point is to start typing), or on any entry where the field is
+    // blank and there is nothing to look at behind the keyboard.
+    //
+    // Not on a re-entry over results: `LaunchedEffect(Unit)` runs again every time the screen is
+    // composed, and popping back from Album/Artist/Show detail composes Search afresh, so the
+    // unguarded version threw the keyboard back up over the restored results the user had just
+    // returned to (device pass 2026-09-13 — and it is the state the podcast crash was hit from).
+    // The flag is `rememberSaveable` for the same reason the scroll-reset guard above is: it has to
+    // survive the save/restore a pop performs, or every re-entry would read it fresh and focus.
+    //
+    // Never on a re-entry while the POP-OUT PANEL is open: on a wide screen the panel is what the
+    // user is looking at — open it over the Recent list (blank field), tap its full-screen button,
+    // back out of the full player, and the panel comes back with a keyboard rising over its lower
+    // half (Cris, 2026-09-17). The host drops focus when it opens the panel precisely so the IME
+    // cannot cover it (`onRequestPlayer`), and the blank-field re-entry rule below undid that.
+    // The FIRST entry is exempt: arriving from the FAB is a request to type, and a panel left open
+    // on the Library is disowned by the new surface key anyway. The flag is read AFTER the wait
+    // below, through `rememberUpdatedState`, never captured at launch: on the pop back off the
+    // full player (button or gesture alike) the NavHost composes this screen while the host still
+    // derives the panel's visibility from the OUTGOING route — so at launch it reads FALSE and only
+    // flips true once the pop's back-stack state lands, which is before the entry resumes. The
+    // first build of this fix captured it at launch and changed nothing on device (2026-09-17).
+    //
+    // The wait itself is for this DESTINATION to be RESUMED. Inside the NavHost `LocalLifecycleOwner`
+    // is the NavBackStackEntry, and Navigation resumes an entry only once it is the current
+    // destination AND its transition has completed (`onTransitionComplete` →
+    // `markTransitionComplete`), so one signal says "settled, and into view". It does what the old
+    // wait was for — the keyboard pops only after the FAB→bar shared-element morph has settled, so
+    // the layout shift cannot stutter it, and a blank re-entry's request stays out of the pop slide
+    // — and it closes the gap the old wait had. That wait was on `animatedContentScope.transition`
+    // (this content's own `Transition<EnterExitState>`) settling, which is NOT a settle into view:
+    // a predictive back off the full player composes Search as the seek's TARGET, PreEnter →
+    // Visible under the finger, and a CANCELLED gesture ends in the NavHost's `snapTo(fullPlayer)`,
+    // whose `onTransitionEnd()` recurses into every child transition and sets
+    // `currentState = targetState` — with the child's target still the stale `Visible`, because
+    // only the next composition re-derives it as PreEnter (compose-animation
+    // `SeekableTransitionState.snapTo`, `Transition.onTransitionEnd`, `targetEnterExit`). For one
+    // snapshot the child read Visible == Visible, the equality test fired, the pop-out is of course
+    // not visible over the full player, and this effect focused a screen about to be disposed: the
+    // keyboard rose over the full player the user had just decided to stay on (Cris, 2026-09-17 —
+    // twice: a `== Visible` term added to the same test fell through the same one-snapshot gap).
+    // A cancelled seek never resumes this entry — it is not the current destination — and the
+    // disposal that follows cancels the wait.
+    var autoFocused by rememberSaveable { mutableStateOf(false) }
+    val popOutPanelOpen = rememberUpdatedState(LocalPopOutPanelOpen.current)
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(Unit) {
-        animatedContentScope?.transition?.let { t ->
-            snapshotFlow { t.currentState == t.targetState }.first { it }
-        }
+        // The field's own text, not `state.query`: the field is the thing being focused, and this
+        // reads it once from a coroutine, so the screen scope gains no subscription to it.
+        val reEntry = autoFocused
+        if (reEntry && queryState.text.isNotBlank()) return@LaunchedEffect
+        autoFocused = true
+        lifecycle.currentStateFlow.first { it.isAtLeast(Lifecycle.State.RESUMED) }
+        // Read only now — see above: at launch the route may still be the full player's.
+        if (reEntry && popOutPanelOpen.value) return@LaunchedEffect
         focusRequester.requestFocus()
     }
 }
 
 /** Pairs the Library search FAB with the Search screen's bar for the container transform. */
 private const val SEARCH_BAR_SHARED_KEY = "search-bar"
+
+/** How close to the end of a results list a scroll gets before the next page is requested. */
+private const val LOAD_MORE_THRESHOLD = 5
+
+/** Height of the floating search bar — matches the M3 search input-field height. */
+private val SearchBarHeight = 56.dp
+
+/** Top margin + bar + gap: where the next floating element starts, measured below the status bar. */
+private val SearchBarBlockHeight: Dp = 8.dp + SearchBarHeight + 12.dp
+
+/**
+ * What a [PrimaryTabRow] of text-only [Tab]s measures — `PrimaryNavigationTabTokens.ContainerHeight`
+ * read off the Material3 1.5.0-alpha27 sources (the token is internal). Re-check on a BOM bump.
+ */
+private val SearchTabRowHeight = 48.dp
+
+/** Breathing room between the tab row and the first result row. */
+private val SearchTabRowGap = 12.dp
+
+/** How far past its opaque end the top scrim fades out — the shared `TopScrim`'s own tail. */
+private val TopScrimTail = 24.dp
+
+/**
+ * Upper bound on how long a long-press waits for the keyboard to finish hiding before opening the
+ * song menu anyway. The IME hide animation is well under this; the timeout only exists so a device
+ * that never reports the inset back at zero still gets its sheet.
+ */
+private const val ImeHideTimeoutMs = 300L
+
+/** The tab label for each result type. */
+@get:StringRes
+private val SearchTab.labelRes: Int
+    get() = when (this) {
+        SearchTab.TRACKS  -> R.string.search_tab_tracks
+        SearchTab.ALBUMS  -> R.string.search_tab_albums
+        SearchTab.ARTISTS -> R.string.search_tab_artists
+        SearchTab.SHOWS   -> R.string.search_tab_shows
+    }
+
+/**
+ * The result-type tabs — a Material 3 [PrimaryTabRow], full width, floating over the results.
+ *
+ * Two deliberate departures from the defaults:
+ * - **`containerColor = Color.Transparent`**, so the screen's own growing top scrim (which fades the
+ *   scrolling rows out into this row's bottom edge) shows through instead of a flat surface band.
+ * - **no `divider`**. The default `HorizontalDivider` would draw a hard line exactly where the scrim
+ *   turns transparent, reinstating the band edge the scrim exists to avoid.
+ *
+ * `unselectedContentColor` is passed explicitly because M3's own default for it is
+ * `selectedContentColor` — which `PrimaryTabRow` sets to `primary` for the whole row, so leaving it
+ * alone renders the unselected tabs in the accent colour as well. The value here is the
+ * `InactiveLabelTextColor` token (`onSurfaceVariant`) that default is presumably meant to resolve to.
+ *
+ * The indicator is not the default one — it FOLLOWS the pager; see the comment on it below.
+ *
+ * **Which tab reads as selected is the PAGER's `currentPage`, not the ViewModel's tab** — "the page
+ * that sits closest to the snapped position", so it flips at the midpoint of a swipe, which is
+ * exactly when the label should take the accent colour. The VM still learns the tab at settle (the
+ * `settledPage` collector in `SearchScreen`, which also gates per-tab paging); this row simply stops
+ * waiting for it, as the indicator does. Reading it in composition recomposes this row once per page
+ * change — four `Tab`s and a `Spacer`, the indicator's geometry being layout-only.
+ *
+ * `selectedTabIndex` is passed for readability and is otherwise INERT: `PrimaryTabRow` uses it only
+ * inside its own default `indicator` lambda, which this row replaces, and `TabRowImpl` never sees
+ * it. Selection for accessibility comes from each `Tab`'s own `selected` flag — do not "restore"
+ * the parameter on the assumption that the indicator depends on it.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SearchTabRow(
+    pagerState: PagerState,
+    onSelect: (SearchTab) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val haptics       = LocalHapticFeedback.current
+    val selectedIndex = pagerState.currentPage
+    PrimaryTabRow(
+        selectedTabIndex = selectedIndex,
+        modifier         = modifier,
+        containerColor   = Color.Transparent,
+        // The indicator follows the pager per frame — see `pagerTrackingIndicator`'s KDoc for the
+        // full mechanism. The old default indicator was driven by the ViewModel's tab, which only
+        // moved once a swipe settled, so the bar sat still under the finger and then slid across at
+        // the end (Cris, 2026-09-15). These tabs use the `text =` slot, so their intrinsic width
+        // carries the 16dp per side that `contentWidth` assumes — no extra compensation needed.
+        // `width = Dp.Unspecified` is mandatory — `PrimaryIndicator`'s default is a 24dp stub.
+        indicator        = {
+            TabRowDefaults.PrimaryIndicator(
+                modifier = Modifier.pagerTrackingIndicator(this, pagerState),
+                width    = Dp.Unspecified,
+            )
+        },
+        divider          = {},
+    ) {
+        SearchTab.entries.forEachIndexed { index, tab ->
+            Tab(
+                selected = index == selectedIndex,
+                // Fired from the gesture, and only on a genuine change — re-tapping the tab that is
+                // VISUALLY selected (the pager's page, not the VM's tab, which can still be catching
+                // up) is intentionally silent, matching the picker this replaced.
+                onClick  = {
+                    if (index != selectedIndex) {
+                        haptics.press()
+                        onSelect(tab)
+                    }
+                },
+                text     = {
+                    Text(
+                        stringResource(tab.labelRes),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
+                selectedContentColor   = MaterialTheme.colorScheme.primary,
+                unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/**
+ * One tab's results list — the rows are the caller's, everything around them is shared: the
+ * per-tab empty state, scroll haptics, the paging trigger and the paging footer.
+ *
+ * The trigger is the Library's house pattern (`LibraryTrackListPane.TrackList`): a `derivedStateOf`
+ * Boolean plus a `LaunchedEffect` keyed on it (and on [tab], so switching lists re-evaluates for
+ * the new one). Every tab appends its rows at the bottom of its OWN list now, so an append always
+ * grows `totalItemsCount` past the threshold and un-latches the trigger — the old "artists render
+ * as two fixed items, so appending them never grew the count and the trigger stayed satisfied"
+ * failure mode (docs/UI_PATTERNS.md → Search pagination) is closed by construction.
+ *
+ * [isActive] is the pager's doing: a neighbouring page composes while a swipe is in flight, so
+ * without it a short tab would page itself the moment it slid into view, for a tab the user may
+ * never settle on. It is both a key and part of the condition — a page that becomes the settled one
+ * must get its chance to fire.
+ */
+@Composable
+private fun SearchResultsList(
+    tab           : SearchTab,
+    listState     : LazyListState,
+    itemCount     : Int,
+    paging        : TabPaging,
+    isActive      : Boolean,
+    isLoading     : Boolean,
+    emptyText     : String,
+    contentPadding: PaddingValues,
+    onLoadMore    : (SearchTab) -> Unit,
+    onRetry       : (SearchTab) -> Unit,
+    rows          : LazyListScope.() -> Unit,
+) {
+    if (itemCount == 0) {
+        // Per-tab: the other two are unaffected, and the query may well have results in them. The
+        // top inset is the list's own, so the message centres in the area BELOW the tabs rather
+        // than behind them.
+        Box(
+            modifier         = Modifier
+                .fillMaxSize()
+                .padding(top = contentPadding.calculateTopPadding())
+                .navigationBarsPadding(),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(emptyText, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    } else {
+        val haptics = LocalHapticFeedback.current
+        ListScrollHaptics(listState)
+
+        // Everything this `LazyColumn` declares below: the caller's rows, the optional paging
+        // footer, the trailing spacer. A measure of THESE contents reports exactly this many items.
+        val declaredItems = itemCount +
+                            (if (paging.isLoadingMore || paging.pagingFailed) 1 else 0) +
+                            1
+        val reachedBottom by remember(listState, declaredItems) {
+            derivedStateOf {
+                val info = listState.layoutInfo
+                // Stale-layout guard. `layoutInfo` is the LAST measure and is never reset when the
+                // list leaves composition — a new query removes the pager while `isLoading`, so on
+                // the frame the new results compose it still describes the PREVIOUS query's rows,
+                // parked wherever the user left them (i.e. "at the bottom"). The per-query reset
+                // writes the new scroll position synchronously, but the measure that applies it
+                // runs in the traversal AFTER this effect, so without this every new query fired a
+                // page-2 fetch on its first frame. Comparing against the declared count makes the
+                // guard independent of effect ordering: it lets the trigger through only once a
+                // measure of the CURRENT contents exists, and it self-clears at that measure.
+                if (info.totalItemsCount != declaredItems) return@derivedStateOf false
+                val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: return@derivedStateOf false
+                lastVisible >= info.totalItemsCount - LOAD_MORE_THRESHOLD
+            }
+        }
+
+        // The paging flags are KEYS, not just reads: a page that adds fewer rows than the threshold
+        // leaves `reachedBottom` latched true, so without them the effect would never re-run and the
+        // tab would stop paging until the user scrolled away and back. With them the sequence is
+        // loop-free — fire → isLoadingMore=true (restart, no-op) → page lands → isLoadingMore=false
+        // (restart, fires again only while canLoadMore is still true).
+        LaunchedEffect(reachedBottom, tab, isActive, paging.canLoadMore, paging.isLoadingMore) {
+            if (isActive && reachedBottom && paging.canLoadMore && !isLoading && !paging.isLoadingMore) {
+                onLoadMore(tab)
+            }
+        }
+
+        LazyColumn(
+            state          = listState,
+            modifier       = Modifier.fillMaxSize(),
+            contentPadding = contentPadding,
+        ) {
+            rows()
+
+            // Paging footer — spinner XOR retry, never both, so the one `load_more` key is safe and
+            // the item count doesn't churn across the loading→failed flip. The spinner is a small
+            // inline one, per MATERIAL3.md's loading conventions (ContainedLoadingIndicator is for
+            // full-area states). The retry row is the only way back from a failed page: this tab's
+            // `canLoadMore` stays false while it is shown, so the trigger above cannot refire on
+            // its own — and it re-arms the tab it belongs to, not "whichever tab is showing now".
+            if (paging.isLoadingMore || paging.pagingFailed) {
+                item(key = "load_more") {
+                    Box(
+                        modifier         = Modifier.fillMaxWidth().padding(16.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (paging.isLoadingMore) {
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                        } else {
+                            TextButton(
+                                onClick = {
+                                    haptics.press()
+                                    onRetry(tab)
+                                },
+                            ) {
+                                Text(stringResource(R.string.search_load_more_retry))
+                            }
+                        }
+                    }
+                }
+            }
+
+            item(key = "footer_space") { Spacer(Modifier.height(16.dp)) }
+        }
+    }
+}
 
 @Composable
 private fun SectionHeader(title: String) {
@@ -314,12 +1052,16 @@ private fun SectionHeader(title: String) {
     )
 }
 
-/** One row of the "Recent" list — mirrors [AlbumRow]'s look; artist art is a circle. */
+/**
+ * One row of the "Recent" list — mirrors [AlbumRow]'s look; artist art is a circle, everything
+ * else (tracks, albums, shows) a rounded square. The remove X goes in `trailingContent`, not inside
+ * the row's own clickable area: the [IconButton] consumes the tap there, so removing an entry can't
+ * also navigate to it.
+ */
 @Composable
-private fun RecentSearchRow(recent: RecentSearch, onClick: () -> Unit) {
+private fun RecentSearchRow(recent: RecentSearch, onClick: () -> Unit, onRemove: () -> Unit) {
     val artShape = if (recent.type == "artist") CircleShape else RoundedCornerShape(4.dp)
     ListItem(
-        headlineContent   = { Text(recent.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         supportingContent = {
             Text(
                 recent.subtitle,
@@ -341,7 +1083,11 @@ private fun RecentSearchRow(recent: RecentSearch, onClick: () -> Unit) {
                     color = MaterialTheme.colorScheme.surfaceVariant) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
-                            if (recent.type == "artist") Icons.Default.Person else Icons.Default.MusicNote,
+                            when (recent.type) {
+                                "artist" -> Icons.Default.Person
+                                "show"   -> Icons.Default.Podcasts
+                                else     -> Icons.Default.MusicNote
+                            },
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -349,61 +1095,71 @@ private fun RecentSearchRow(recent: RecentSearch, onClick: () -> Unit) {
                 }
             }
         },
+        trailingContent = {
+            IconButton(onClick = onRemove) {
+                Icon(Icons.Default.Close,
+                    contentDescription = stringResource(R.string.search_recent_remove))
+            }
+        },
         modifier = Modifier.clickable(onClick = onClick),
+        content  = { Text(recent.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
     )
 }
 
+/**
+ * An artist result, as a full-width row. Artists used to be a horizontal `LazyRow` of circular
+ * chips pinned above the tracks; with a tab of their own they page like everything else, so they
+ * read as ordinary rows — circular art (the one thing kept from the chips), the name, and an
+ * "Artist" subtitle, matching what [RecentSearchRow] renders for an artist entry.
+ */
 @Composable
-private fun ArtistChip(artist: SpotifyArtist, onClick: () -> Unit) {
-    Column(
-        modifier            = Modifier
-            .width(88.dp)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        val imageUrl = artist.images?.firstOrNull()?.url
-        if (imageUrl != null) {
-            AsyncImage(
-                model              = imageUrl,
-                contentDescription = artist.name,
-                contentScale       = ContentScale.Crop,
-                modifier           = Modifier.size(64.dp).clip(CircleShape),
+private fun ArtistRow(artist: SpotifyArtist, onClick: () -> Unit) {
+    val imageUrl = artist.images?.firstOrNull()?.url
+    ListItem(
+        supportingContent = {
+            Text(
+                stringResource(R.string.search_type_artist),
+                color    = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
-        } else {
-            Surface(
-                modifier = Modifier.size(64.dp),
-                shape    = CircleShape,
-                color    = MaterialTheme.colorScheme.surfaceVariant,
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Default.Person, contentDescription = null,
-                        modifier = Modifier.size(28.dp),
-                        tint     = MaterialTheme.colorScheme.onSurfaceVariant)
+        },
+        leadingContent = {
+            if (imageUrl != null) {
+                AsyncImage(
+                    model              = imageUrl,
+                    contentDescription = artist.name,
+                    contentScale       = ContentScale.Crop,
+                    modifier           = Modifier.size(52.dp).clip(CircleShape),
+                )
+            } else {
+                Surface(
+                    modifier = Modifier.size(52.dp),
+                    shape    = CircleShape,
+                    color    = MaterialTheme.colorScheme.surfaceVariant,
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Default.Person, contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
             }
-        }
-        Spacer(Modifier.height(6.dp))
-        Text(
-            text      = artist.name,
-            style     = MaterialTheme.typography.labelSmall,
-            maxLines  = 2,
-            overflow  = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-        )
-    }
+        },
+        modifier = Modifier.clickable(onClick = onClick),
+        content  = { Text(artist.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+    )
 }
 
 @Composable
 private fun AlbumRow(album: SpotifyAlbum, onClick: () -> Unit) {
     val imageUrl    = album.images?.firstOrNull()?.url
     val artistNames = album.artists?.joinToString(", ") { it.name } ?: ""
+    val fallback    = stringResource(R.string.search_type_album)
 
     ListItem(
-        headlineContent  = { Text(album.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         supportingContent= {
             Text(
-                artistNames.ifBlank { "Album" },
+                artistNames.ifBlank { fallback },
                 color    = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -431,27 +1187,44 @@ private fun AlbumRow(album: SpotifyAlbum, onClick: () -> Unit) {
             }
         },
         modifier = Modifier.clickable(onClick = onClick),
+        content  = { Text(album.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
     )
 }
 
+/**
+ * A podcast show result — [AlbumRow]'s twin: square art, the show name, and an "N episodes"
+ * subtitle. Deliberately NOT the Library's `ShowListCard`, which is a `Card` in the Library's own
+ * browser style; Search renders every type as a plain `ListItem` row.
+ *
+ * The subtitle is the episode count and never the publisher — February 2026 deprecated
+ * `show.publisher` and the device spike confirmed it is absent from live responses. A show that
+ * omits `total_episodes` falls back to a plain "Podcast", the same shape [AlbumRow] uses when a
+ * result has no artists.
+ *
+ * Only ever handed shows with a non-blank id (filtered at the call site), so the tap can navigate.
+ */
 @Composable
-private fun PlaylistRow(playlist: SpotifyPlaylist, onClick: () -> Unit) {
+private fun ShowRow(show: SpotifyShow, onClick: () -> Unit) {
+    val imageUrl = show.images?.firstOrNull()?.url
+    val fallback = stringResource(R.string.search_type_show)
+    val subtitle = show.totalEpisodes
+        ?.let { pluralStringResource(R.plurals.show_episode_count, it, it) }
+        ?: fallback
+
     ListItem(
-        headlineContent  = { Text(playlist.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-        supportingContent= {
+        supportingContent = {
             Text(
-                playlist.owner?.displayName ?: "Playlist",
+                subtitle,
                 color    = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
         },
         leadingContent = {
-            val imageUrl = playlist.thumbnailUrl.ifBlank { null }
             if (imageUrl != null) {
                 AsyncImage(
                     model              = imageUrl,
-                    contentDescription = playlist.name,
+                    contentDescription = show.name,
                     contentScale       = ContentScale.Crop,
                     modifier           = Modifier.size(52.dp).clip(RoundedCornerShape(4.dp)),
                 )
@@ -462,36 +1235,47 @@ private fun PlaylistRow(playlist: SpotifyPlaylist, onClick: () -> Unit) {
                     color    = MaterialTheme.colorScheme.surfaceVariant,
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.Default.MusicNote, contentDescription = null,
+                        Icon(Icons.Default.Podcasts, contentDescription = null,
                             tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
         },
         modifier = Modifier.clickable(onClick = onClick),
+        content  = { Text(show.name.orEmpty(), maxLines = 1, overflow = TextOverflow.Ellipsis) },
     )
 }
-
-/** Height of the floating search bar — matches the M3 search input-field height. */
-private val SearchBarHeight = 56.dp
 
 /**
  * Floating Material 3 search bar. A `SearchBarDefaults.InputField` (transparent container) inside a
  * stadium [Surface] tinted to match the screen's other floating pills (`surfaceContainerHigh` + a
  * small shadow). The back arrow is the field's own leading icon — no separate back pill — so the
  * whole control is a single bounding box (which the FAB→bar container transform will share).
+ *
+ * The only non-deprecated `InputField` overload takes a [TextFieldState] **and** a [SearchBarState]
+ * (both the `query`/`onQueryChange` and the `expanded`/`onExpandedChange` forms are deprecated in
+ * Material3 1.5.0-alpha27). Lyra never expands into a full-screen search bar — there is no
+ * `ExpandedFullScreenSearchBar` anywhere — so the required state is created **already Expanded**
+ * and then left alone. That is deliberate, not cosmetic: starting it Collapsed makes the field
+ * (a) run `animateToExpanded()` on focus, whose `Animatable` is read during composition and so
+ * recomposes the field every frame for the length of a slow spatial spring, (b) keep a
+ * `snapshotFlow { text }` collector alive for the whole screen just to trigger that same expansion
+ * on the first keystroke, and (c) arm its clear-focus-on-collapse effect — all for an expansion
+ * nothing renders. Expanded short-circuits all three. Nothing in the field's *appearance* depends
+ * on the value (only key handling, the a11y state description, and that focus effect do).
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SearchInputBar(
-    query         : String,
-    onQueryChange : (String) -> Unit,
+    queryState    : TextFieldState,
     onBack        : () -> Unit,
     onClear       : () -> Unit,
     onSearch      : () -> Unit,
     focusRequester: FocusRequester,
+    onFocusChanged: (Boolean) -> Unit,
     modifier      : Modifier = Modifier,
 ) {
+    val searchBarState = rememberSearchBarState(initialValue = SearchBarValue.Expanded)
+
     Surface(
         modifier        = modifier.fillMaxWidth().height(SearchBarHeight),
         shape           = CircleShape,
@@ -499,20 +1283,27 @@ private fun SearchInputBar(
         shadowElevation = 3.dp,
     ) {
         SearchBarDefaults.InputField(
-            query            = query,
-            onQueryChange    = onQueryChange,
-            onSearch         = { onSearch() },
-            expanded         = false,
-            onExpandedChange = {},
-            modifier         = Modifier.fillMaxWidth().focusRequester(focusRequester),
-            placeholder      = { Text(stringResource(R.string.search_placeholder)) },
-            leadingIcon      = {
+            textFieldState = queryState,
+            searchBarState = searchBarState,
+            onSearch       = { onSearch() },
+            // `isFocused || hasFocus`, not `isFocused` alone: if the InputField interposes a
+            // focusTarget of its own between this modifier and the inner text field, the observer
+            // node here is reported as ActiveParent (isFocused false, hasFocus true) and a
+            // focus-only read would silently never go true — i.e. a green build with a dead
+            // scroll-dismissal. The union is true in both shapes and false only when the whole
+            // subtree is unfocused, which is all the caller asks.
+            modifier       = Modifier
+                .fillMaxWidth()
+                .focusRequester(focusRequester)
+                .onFocusChanged { onFocusChanged(it.isFocused || it.hasFocus) },
+            placeholder    = { Text(stringResource(R.string.search_placeholder)) },
+            leadingIcon    = {
                 IconButton(onClick = onBack) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = stringResource(R.string.nav_back))
                 }
             },
-            trailingIcon     = if (query.isNotBlank()) {
+            trailingIcon   = if (queryState.text.isNotBlank()) {
                 {
                     IconButton(onClick = onClear) {
                         Icon(Icons.Default.Close,

@@ -30,28 +30,79 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- open.spotify.com deep links — tracks -->
-            <!-- autoVerify=false: open.spotify.com is Spotify's domain; verification is impossible.
-                 Users set Lyra as default handler manually via Settings → Open by default. -->
+            <!--
+                Incoming Spotify links.
+
+                autoVerify stays "false" on the https filters: these are Spotify's domains, so
+                Lyra can never satisfy Digital Asset Links for them — the user adds the hosts by
+                hand under Settings → Apps → Lyra → Open by default → Add link.
+
+                Every <data> element inside ONE filter contributes to that filter's scheme /
+                host / path LISTS, and a URI matches when it matches one entry from EACH list
+                (the cross product) — NOT element by element. That is why these are three
+                separate filters: folding the short-link hosts in with open.spotify.com would
+                force open.spotify.com's path list onto them too, and the opaque `spotify:`
+                scheme has no authority at all for a host list to match against.
+
+                Everything that gets in is funnelled through ONE resolver destination
+                (Screen.LinkResolver) which normalises the URL and decides where it lands, so a
+                filter slightly wider than the routes Lyra supports costs a toast, not a crash.
+                See LyraNavGraph + ui/screens/deeplink/.
+            -->
+
+            <!-- 1. open.spotify.com/<type>/<id>, with or without Spotify's /intl-xx/ locale
+                 segment ("open.spotify.com/intl-de/show/<id>").
+
+                 pathPrefix keeps the plain form exact — the trailing slash is what stops
+                 "/trackfoo/…" matching. The locale form needs pathAdvancedPattern
+                 (PatternMatcher.PATTERN_ADVANCED_GLOB, API 26+): it matches the WHOLE path and
+                 has no backtracking, but a greedy [^/]+ can never cross a '/', so it stops
+                 exactly at the next segment boundary. Hence "/intl-de/show/<id>" matches while
+                 "/intl-de/a/b/show/<id>" and "/intl-de/showfoo/<id>" do not. -->
             <intent-filter android:autoVerify="false">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="https" android:host="open.spotify.com" android:pathPrefix="/track/" />
+                <!-- One attribute per <data> tag: the filter combines them into one matcher anyway,
+                     and this shape makes that explicit (lint IntentFilterUniqueDataAttributes). -->
+                <data android:scheme="https" />
+                <data android:host="open.spotify.com" />
+                <data android:pathPrefix="/track/" />
+                <data android:pathPrefix="/album/" />
+                <data android:pathPrefix="/artist/" />
+                <data android:pathPrefix="/show/" />
+                <data android:pathPrefix="/episode/" />
+                <data android:pathPrefix="/playlist/" />
+                <data android:pathAdvancedPattern="/intl-[^/]+/track/[^/]+" />
+                <data android:pathAdvancedPattern="/intl-[^/]+/album/[^/]+" />
+                <data android:pathAdvancedPattern="/intl-[^/]+/artist/[^/]+" />
+                <data android:pathAdvancedPattern="/intl-[^/]+/show/[^/]+" />
+                <data android:pathAdvancedPattern="/intl-[^/]+/episode/[^/]+" />
+                <data android:pathAdvancedPattern="/intl-[^/]+/playlist/[^/]+" />
             </intent-filter>
-            <!-- open.spotify.com deep links — albums -->
+
+            <!-- 2. Branch short links — what the Spotify app's own share sheet produces today
+                 ("https://spotify.link/<code>"). The code carries no type, so ANY path on these
+                 hosts is accepted and the resolver follows the redirect chain to find out what
+                 it points at. -->
             <intent-filter android:autoVerify="false">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="https" android:host="open.spotify.com" android:pathPrefix="/album/" />
+                <data android:scheme="https" />
+                <data android:host="spotify.link" />
+                <data android:host="spotify.app.link" />
+                <data android:host="spotify-alternate.app.link" />
             </intent-filter>
-            <!-- open.spotify.com deep links — artists -->
-            <intent-filter android:autoVerify="false">
+
+            <!-- 3. The "Copy Spotify URI" form, e.g. "spotify:track:<id>". This is an OPAQUE
+                 URI — no authority, no path — so the scheme is the only thing an intent filter
+                 can match on; the resolver parses the scheme-specific part itself. -->
+            <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="https" android:host="open.spotify.com" android:pathPrefix="/artist/" />
+                <data android:scheme="spotify" />
             </intent-filter>
         </activity>
 

@@ -1,6 +1,5 @@
 package com.crsmthw.lyra.ui.components
 
-import androidx.compose.animation.AnimatedContentScope
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
@@ -8,6 +7,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import kotlin.math.abs
 import androidx.compose.animation.animateColorAsState
@@ -15,6 +15,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -41,6 +42,8 @@ import androidx.compose.ui.platform.LocalDensity
 import android.widget.Toast
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -60,6 +63,7 @@ import com.crsmthw.lyra.util.rememberArtBoundsTransform
 import com.crsmthw.lyra.util.tick
 import com.crsmthw.lyra.util.toTimeString
 import com.crsmthw.lyra.util.toggle
+import com.crsmthw.lyra.util.visualizer.FftCWaveCanvas
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class, ExperimentalSharedTransitionApi::class)
@@ -72,12 +76,15 @@ fun PlayerCardContent(
     // Local scope — mini player ↔ panel expansion
     sharedTransitionScope   : SharedTransitionScope? = null,
     animatedVisibilityScope : AnimatedVisibilityScope? = null,
-    // Nav scope — panel → full PlayerScreen
+    // Nav scope — panel → full PlayerScreen. It rides the SAME [animatedVisibilityScope] as the
+    // local morph: the panel lives outside the NavHost now, so its own show/hide (which the route
+    // gates — see PlayerPanelHost's `panelVisible`) is the enter/exit the nav morph uses.
     navSharedTransitionScope  : SharedTransitionScope? = null,
-    navAnimatedContentScope   : AnimatedContentScope? = null,
 ) {
     val state by playerViewModel.uiState.collectAsStateWithLifecycle()
     val pickerState by playerViewModel.pickerState.collectAsStateWithLifecycle()
+    // A podcast episode can't be liked or added to a playlist — both endpoints are track-only.
+    val isEpisode = state.currentTrack?.isEpisode == true
     var showDevicePicker by remember { mutableStateOf(false) }
     var showPlaylistPicker by remember { mutableStateOf(false) }
 
@@ -208,6 +215,25 @@ fun PlayerCardContent(
         }
     }
 
+    // ── Circle visualizer ────────────────────────────────────────────────────
+    // Same gate as PlayerScreen: shown only when the master toggle is on AND the chosen style
+    // includes the circle (Surfaces = Bottom hides it here too). The canvas must be *composed*
+    // conditionally — `enabled = false` alone would not suppress it, since the painter draws
+    // whenever it has a spline.
+    val circleVisible = state.visualizerEnabled && state.visualizerStyle.showCircle
+
+    // ── Art shrink when the circle visualizer is on ──────────────────────────
+    // A pure value animation on content that stays on screen, so a spring is correct here (see
+    // docs/MOTION.md → What springs). In practice it never runs in the panel: the visualizer
+    // toggle lives in the full player's menu and the panel content is composed fresh on each
+    // open, so this initialises at its target — which is what keeps the mini ↔ panel shared
+    // element's bounds stable from the first frame instead of fighting the bounds transform.
+    val artScale by animateFloatAsState(
+        targetValue   = if (circleVisible) 0.8f else 1.0f,
+        animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
+        label         = "panelArtScale",
+    )
+
     // ── Play/pause button shape (M3 Expressive cookie) ───────────────────────
     val squigglyShape = MaterialShapes.Cookie12Sided.toShape()
 
@@ -242,7 +268,7 @@ fun PlayerCardContent(
                 IconButton(onClick = { haptics.confirm(); onClose() }) {
                     Icon(Icons.Default.KeyboardArrowDown, "Close", tint = topContentColor)
                 }
-                Text("NOW PLAYING", style = MaterialTheme.typography.labelSmall,
+                Text(stringResource(R.string.player_now_playing_label), style = MaterialTheme.typography.labelSmall,
                     color = topContentColor)
                 IconButton(onClick = { haptics.confirm(); onFullScreen() }) {
                     Icon(Icons.Default.OpenInFull, "Full screen", tint = topContentColor)
@@ -252,60 +278,95 @@ fun PlayerCardContent(
             // Album art — participates in two independent shared element transitions:
             // 1. Local scope: mini player ↔ panel expansion
             // 2. Nav scope: panel → full PlayerScreen navigation
+            // The key carries the host's re-key generation (`LocalPlayerArtKey`), which advances
+            // after an ABANDONED seek and at no other settle, so a morph that follows a cancelled
+            // gesture starts from a shared element with no history — read once for both
+            // registrations. A generation is a fresh ELEMENT only: recreating the LayoutNode that
+            // carries these modifiers was tried and changed nothing on device (see that KDoc).
+            val artKey = LocalPlayerArtKey.current
             val localArtMod = if (sharedTransitionScope != null && animatedVisibilityScope != null) {
                 with(sharedTransitionScope) {
+                    val artState = rememberSharedContentState(key = artKey)
                     Modifier.sharedElement(
-                        sharedContentState      = rememberSharedContentState(key = "album-art"),
+                        sharedContentState      = artState,
                         animatedVisibilityScope = animatedVisibilityScope,
                         boundsTransform         = rememberArtBoundsTransform(),
                     )
                 }
             } else Modifier
-            val navArtMod = if (navSharedTransitionScope != null && navAnimatedContentScope != null) {
+            val navArtMod = if (navSharedTransitionScope != null && animatedVisibilityScope != null) {
                 with(navSharedTransitionScope) {
+                    val artState = rememberSharedContentState(key = artKey)
                     Modifier.sharedElement(
-                        sharedContentState      = rememberSharedContentState(key = "album-art"),
-                        animatedVisibilityScope = navAnimatedContentScope,
+                        sharedContentState      = artState,
+                        animatedVisibilityScope = animatedVisibilityScope,
                         boundsTransform         = rememberArtBoundsTransform(),
                     )
                 }
             } else Modifier
             val artSharedMod = localArtMod.then(navArtMod)
-            AsyncImage(
-                model              = artImageModel,
-                contentDescription = "Album art",
-                contentScale       = ContentScale.Crop,
-                modifier           = artSharedMod
-                    .size(artSize)
-                    .clip(RoundedCornerShape(16.dp))
-                    .graphicsLayer { translationX = (artDragX * 0.3f).coerceIn(-80f, 80f) + artOffsetX.value }
-                    .pointerInput(Unit) {
-                        detectHorizontalDragGestures(
-                            onDragStart      = { artDragX = 0f },
-                            onDragEnd        = {
-                                when {
-                                    artDragX < -swipeThresholdPx -> {
-                                        val s = (artDragX * 0.3f).coerceIn(-80f, 80f); artDragX = 0f; skipDirection = 1
-                                        scope.launch { artOffsetX.snapTo(s); artOffsetX.animateTo(-1500f, tween(250, easing = FastOutLinearInEasing)) }
-                                        playerViewModel.skipNext()
+
+            // The art SLOT stays `artSize` whether or not the circle is on — the canvas fills it
+            // and the art shrinks inside it — so the Column's height is unchanged and
+            // `reservedChrome` above still describes the card. Exactly PlayerScreen's arrangement
+            // (canvas as a preceding sibling in the slot Box, `displaySide = side * artScale` on
+            // the art), so the shared-element modifiers keep their place at the head of the art's
+            // chain and the mini ↔ panel / panel ↔ full-player morphs are untouched.
+            val displaySide = artSize * artScale
+            Box(Modifier.size(artSize), contentAlignment = Alignment.Center) {
+                // No capture plumbing is needed and none should be added: PlayerViewModel starts
+                // the single app-wide Visualizer(0) on (isPlaying && visualizerEnabled), and this
+                // reads the same instance the full player does via LocalFftData. Without
+                // RECORD_AUDIO, tryInitialize() bails and fftData stays null, so the painter never
+                // activates and only the static base disc is drawn — the panel must never prompt
+                // for the permission itself. The canvas is a draw-only Spacer (no pointer input),
+                // so the art's swipe-to-skip gesture below is unaffected. Composed only while the
+                // panel is visible, so its per-frame loop dies with it.
+                if (circleVisible) {
+                    FftCWaveCanvas(
+                        modifier = Modifier.fillMaxSize(),
+                        color    = surfaceAccentColor,
+                        alpha    = 0.40f,
+                        enabled  = true,
+                    )
+                }
+                AsyncImage(
+                    model              = artImageModel,
+                    contentDescription = stringResource(R.string.cd_album_art),
+                    contentScale       = ContentScale.Crop,
+                    modifier           = artSharedMod
+                        .size(displaySide)
+                        .clip(RoundedCornerShape(16.dp))
+                        .graphicsLayer { translationX = (artDragX * 0.3f).coerceIn(-80f, 80f) + artOffsetX.value }
+                        .pointerInput(Unit) {
+                            detectHorizontalDragGestures(
+                                onDragStart      = { artDragX = 0f },
+                                onDragEnd        = {
+                                    when {
+                                        artDragX < -swipeThresholdPx -> {
+                                            val s = (artDragX * 0.3f).coerceIn(-80f, 80f); artDragX = 0f; skipDirection = 1
+                                            scope.launch { artOffsetX.snapTo(s); artOffsetX.animateTo(-1500f, tween(250, easing = FastOutLinearInEasing)) }
+                                            playerViewModel.skipNext()
+                                        }
+                                        artDragX > swipeThresholdPx -> {
+                                            val s = (artDragX * 0.3f).coerceIn(-80f, 80f); artDragX = 0f; skipDirection = -1
+                                            scope.launch { artOffsetX.snapTo(s); artOffsetX.animateTo(1500f, tween(250, easing = FastOutLinearInEasing)) }
+                                            playerViewModel.skipPrevious()
+                                        }
+                                        else -> artDragX = 0f
                                     }
-                                    artDragX > swipeThresholdPx -> {
-                                        val s = (artDragX * 0.3f).coerceIn(-80f, 80f); artDragX = 0f; skipDirection = -1
-                                        scope.launch { artOffsetX.snapTo(s); artOffsetX.animateTo(1500f, tween(250, easing = FastOutLinearInEasing)) }
-                                        playerViewModel.skipPrevious()
-                                    }
-                                    else -> artDragX = 0f
-                                }
-                            },
-                            onDragCancel     = { artDragX = 0f },
-                            onHorizontalDrag = { _, amount -> artDragX += amount },
-                        )
-                    },
-            )
+                                },
+                                onDragCancel     = { artDragX = 0f },
+                                onHorizontalDrag = { _, amount -> artDragX += amount },
+                            )
+                        },
+                )
+            }
 
             Spacer(Modifier.height(16.dp))
 
-            // Track info + like
+            // Track info + like. `allArtists` already resolves to the show's name for a podcast
+            // episode (see SpotifyTrack), so only the like button needs an episode branch.
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(state.currentTrack?.name ?: "Nothing playing",
@@ -313,14 +374,22 @@ fun PlayerCardContent(
                         overflow = TextOverflow.Clip, modifier = Modifier.basicMarquee())
                     Text(state.currentTrack?.allArtists ?: "–",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,
+                        overflow = TextOverflow.Ellipsis)
                 }
-                IconButton(onClick = { haptics.toggle(!state.isLiked); playerViewModel.toggleLike() }) {
-                    Icon(
-                        imageVector        = if (state.isLiked) Icons.Default.Favorite else Icons.Outlined.FavoriteBorder,
-                        contentDescription = "Like",
-                        tint               = if (state.isLiked) surfaceAccentColor else LocalContentColor.current,
-                    )
+                // Hidden for an episode — `me/tracks` liking does not accept one.
+                if (!isEpisode) {
+                    val likeStateDesc = stringResource(if (state.isLiked) R.string.cd_state_liked else R.string.cd_state_not_liked)
+                    IconButton(
+                        onClick  = { haptics.toggle(!state.isLiked); playerViewModel.toggleLike() },
+                        modifier = Modifier.semantics { stateDescription = likeStateDesc },
+                    ) {
+                        Icon(
+                            imageVector        = if (state.isLiked) Icons.Default.Favorite else Icons.Outlined.FavoriteBorder,
+                            contentDescription = stringResource(R.string.cd_like),
+                            tint               = if (state.isLiked) surfaceAccentColor else LocalContentColor.current,
+                        )
+                    }
                 }
             }
 
@@ -357,7 +426,7 @@ fun PlayerCardContent(
                     )
                 }
                 var lastSeekNotch by remember { mutableIntStateOf(-1) }
-                Slider(
+                ValueSlider(
                     value                 = if (isDragging) dragValue else state.progress,
                     onValueChange         = {
                         isDragging = true; dragValue = it
@@ -383,7 +452,11 @@ fun PlayerCardContent(
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically) {
                 Box(contentAlignment = Alignment.Center) {
-                    IconButton(onClick = { haptics.toggle(!state.shuffleEnabled); playerViewModel.toggleShuffle() }) {
+                    val shuffleStateDesc = stringResource(if (state.shuffleEnabled) R.string.cd_state_on else R.string.cd_state_off)
+                    IconButton(
+                        onClick  = { haptics.toggle(!state.shuffleEnabled); playerViewModel.toggleShuffle() },
+                        modifier = Modifier.semantics { stateDescription = shuffleStateDesc },
+                    ) {
                         Icon(Icons.Default.Shuffle, stringResource(R.string.player_shuffle),
                             tint = if (state.shuffleEnabled) surfaceAccentColor else MaterialTheme.colorScheme.onSurfaceVariant)
                     }
@@ -434,14 +507,22 @@ fun PlayerCardContent(
                     Icon(Icons.Default.SkipNext, stringResource(R.string.player_next), modifier = Modifier.size(36.dp))
                 }
                 Box(contentAlignment = Alignment.Center) {
-                    IconButton(onClick = {
-                        when (state.repeatMode) {
-                            RepeatMode.OFF   -> haptics.toggle(true)
-                            RepeatMode.TRACK -> haptics.toggle(false)
-                            else             -> haptics.press()
-                        }
-                        playerViewModel.cycleRepeat()
-                    }) {
+                    val repeatStateDesc = stringResource(when (state.repeatMode) {
+                        RepeatMode.OFF   -> R.string.cd_repeat_off
+                        RepeatMode.CONTEXT -> R.string.cd_repeat_context
+                        RepeatMode.TRACK -> R.string.cd_repeat_track
+                    })
+                    IconButton(
+                        onClick = {
+                            when (state.repeatMode) {
+                                RepeatMode.OFF   -> haptics.toggle(true)
+                                RepeatMode.TRACK -> haptics.toggle(false)
+                                else             -> haptics.press()
+                            }
+                            playerViewModel.cycleRepeat()
+                        },
+                        modifier = Modifier.semantics { stateDescription = repeatStateDesc },
+                    ) {
                         Icon(
                             imageVector = when (state.repeatMode) {
                                 RepeatMode.TRACK -> Icons.Default.RepeatOne else -> Icons.Default.Repeat
@@ -468,6 +549,10 @@ fun PlayerCardContent(
 
             // Action bar — device chip left, S-size icon-only connected button group right
             val enabled = state.currentTrack != null
+            // Add-to-playlist is disabled rather than removed for an episode: dropping a segment
+            // from a connected ButtonGroup would re-shape its neighbours whenever the now-playing
+            // item changed type. The playlist endpoints are track-only.
+            val addEnabled = enabled && !isEpisode
             val deviceIcon = when (state.currentDevice?.type?.lowercase()) {
                 "computer"               -> Icons.Default.Computer
                 "smartphone"             -> Icons.Default.PhoneAndroid
@@ -515,47 +600,108 @@ fun PlayerCardContent(
                     containerColor = surfaceAccentColor.copy(alpha = 0.12f),
                     contentColor   = surfaceAccentColor,
                 )
-                // Plain Row, not M3 ButtonGroup: overflow was disabled here, and ButtonGroup's overflow
-                // MeasurePolicy crashes with an inverted Constraints when the column is tight (see the
-                // matching note + folded-landscape crash fix in PlayerScreen). A Row clips instead.
-                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                    FilledTonalIconButton(
-                        onClick  = { haptics.press(); onOpenQueue() },
-                        enabled  = enabled,
-                        modifier = Modifier.size(40.dp),
-                        shape    = ButtonGroupDefaults.connectedLeadingButtonShape,
-                        colors   = accentButtonColors,
-                    ) {
-                        Icon(Icons.AutoMirrored.Filled.QueueMusic, queueLabel, Modifier.size(18.dp))
+                // Real M3 ButtonGroup with a real OverflowIndicator — see the matching note in
+                // PlayerScreen and docs/MATERIAL3.md → ButtonGroup: the old plain-Row workaround
+                // only existed because a DISABLED overflow (empty overflowIndicator) mis-measures
+                // in tight columns. customItem + animateWidth restores the press-squeeze.
+
+                // `shareUrl` is null for an item with no open.spotify.com page (a local file), so
+                // the chooser is skipped there. The press tick stays OUTSIDE the skip: haptics fire
+                // from the gesture, not from state (CLAUDE.md → Haptics).
+                val shareTrack = {
+                    haptics.press()
+                    state.currentTrack?.shareUrl?.let { url ->
+                        context.startActivity(Intent.createChooser(
+                            Intent(Intent.ACTION_SEND).apply {
+                                putExtra(Intent.EXTRA_TEXT, url)
+                                type = "text/plain"
+                            }, null
+                        ))
                     }
-                    FilledTonalIconButton(
-                        onClick = {
-                            haptics.press()
-                            state.currentTrack?.id?.let { id ->
-                                context.startActivity(Intent.createChooser(
-                                    Intent(Intent.ACTION_SEND).apply {
-                                        putExtra(Intent.EXTRA_TEXT, "https://open.spotify.com/track/$id")
-                                        type = "text/plain"
-                                    }, null
-                                ))
+                    Unit
+                }
+                val queueInteraction = remember { MutableInteractionSource() }
+                val shareInteraction = remember { MutableInteractionSource() }
+                val addInteraction   = remember { MutableInteractionSource() }
+                ButtonGroup(
+                    overflowIndicator = { menuState ->
+                        ButtonGroupDefaults.OverflowIndicator(
+                            menuState = menuState,
+                            modifier  = Modifier.size(40.dp),
+                            colors    = IconButtonDefaults.filledIconButtonColors(
+                                containerColor = surfaceAccentColor.copy(alpha = 0.12f),
+                                contentColor   = surfaceAccentColor,
+                            ),
+                        )
+                    },
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    customItem(
+                        buttonGroupContent = {
+                            FilledTonalIconButton(
+                                onClick           = { haptics.press(); onOpenQueue() },
+                                enabled           = enabled,
+                                modifier          = Modifier.size(40.dp).animateWidth(queueInteraction),
+                                shape             = ButtonGroupDefaults.connectedLeadingButtonShape,
+                                colors            = accentButtonColors,
+                                interactionSource = queueInteraction,
+                            ) {
+                                Icon(Icons.AutoMirrored.Filled.QueueMusic, queueLabel, Modifier.size(18.dp))
                             }
                         },
-                        enabled  = enabled,
-                        modifier = Modifier.size(40.dp),
-                        shape    = RoundedCornerShape(2.dp),
-                        colors   = accentButtonColors,
-                    ) {
-                        Icon(Icons.Default.Share, shareLabel, Modifier.size(18.dp))
-                    }
-                    FilledTonalIconButton(
-                        onClick  = { haptics.press(); playerViewModel.loadOwnedPlaylists(); showPlaylistPicker = true },
-                        enabled  = enabled,
-                        modifier = Modifier.size(40.dp),
-                        shape    = ButtonGroupDefaults.connectedTrailingButtonShape,
-                        colors   = accentButtonColors,
-                    ) {
-                        Icon(Icons.Default.LibraryAdd, addToPlaylistLabel, Modifier.size(18.dp))
-                    }
+                        menuContent = { menuState ->
+                            DropdownMenuItem(
+                                text        = { Text(queueLabel) },
+                                leadingIcon = { Icon(Icons.AutoMirrored.Filled.QueueMusic, null) },
+                                enabled     = enabled,
+                                onClick     = { haptics.press(); menuState.dismiss(); onOpenQueue() },
+                            )
+                        },
+                    )
+                    customItem(
+                        buttonGroupContent = {
+                            FilledTonalIconButton(
+                                onClick           = shareTrack,
+                                enabled           = enabled,
+                                modifier          = Modifier.size(40.dp).animateWidth(shareInteraction),
+                                shape             = RoundedCornerShape(2.dp),
+                                colors            = accentButtonColors,
+                                interactionSource = shareInteraction,
+                            ) {
+                                Icon(Icons.Default.Share, shareLabel, Modifier.size(18.dp))
+                            }
+                        },
+                        menuContent = { menuState ->
+                            DropdownMenuItem(
+                                text        = { Text(shareLabel) },
+                                leadingIcon = { Icon(Icons.Default.Share, null) },
+                                enabled     = enabled,
+                                onClick     = { menuState.dismiss(); shareTrack() },
+                            )
+                        },
+                    )
+                    customItem(
+                        buttonGroupContent = {
+                            FilledTonalIconButton(
+                                onClick           = { haptics.press(); playerViewModel.loadOwnedPlaylists(); showPlaylistPicker = true },
+                                enabled           = addEnabled,
+                                modifier          = Modifier.size(40.dp).animateWidth(addInteraction),
+                                shape             = ButtonGroupDefaults.connectedTrailingButtonShape,
+                                colors            = accentButtonColors,
+                                interactionSource = addInteraction,
+                            ) {
+                                Icon(Icons.Default.LibraryAdd, addToPlaylistLabel, Modifier.size(18.dp))
+                            }
+                        },
+                        menuContent = { menuState ->
+                            DropdownMenuItem(
+                                text        = { Text(addToPlaylistLabel) },
+                                leadingIcon = { Icon(Icons.Default.LibraryAdd, null) },
+                                enabled     = addEnabled,
+                                onClick     = { haptics.press(); menuState.dismiss(); playerViewModel.loadOwnedPlaylists(); showPlaylistPicker = true },
+                            )
+                        },
+                    )
                 }
             }
         }

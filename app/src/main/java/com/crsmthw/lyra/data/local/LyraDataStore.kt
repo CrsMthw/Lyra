@@ -79,6 +79,39 @@ class LyraDataStore(private val context: Context) {
         prefs[Keys.HAPTICS_ENABLED] ?: true
     }
 
+    // Default OFF: the "For you" band is opt-in — algorithmic resurfacing is the kind of
+    // Spotify bloat Lyra exists to escape.
+    val forYouEnabled: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[Keys.FOR_YOU_ENABLED] ?: false
+    }
+
+    // ── iLyra mode (easter egg) ───────────────────────────────────────────────
+    // `ilyraUnlocked` is set once by the 5-tap on the Settings version line and never cleared;
+    // it only gates whether the "iLyra" row is visible. `ilyraEnabled` swaps the whole UI for the
+    // Classic recreation (MainActivity branches on it, before the first frame). Click
+    // sounds are the Classic's own setting, independent of the Lyra haptics toggle.
+    val ilyraUnlocked: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[Keys.ILYRA_UNLOCKED] ?: false
+    }
+    val ilyraEnabled: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[Keys.ILYRA_ENABLED] ?: false
+    }
+    val ilyraClickSounds: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[Keys.ILYRA_CLICK_SOUNDS] ?: true
+    }
+    /** 0..100, default 50 — the first clicker was too loud on the Fold. */
+    val ilyraClickVolume: Flow<Int> = context.dataStore.data.map { prefs ->
+        prefs[Keys.ILYRA_CLICK_VOLUME] ?: 50
+    }
+    /** ClickPitch ordinal: 0 low, 1 medium (default), 2 high. */
+    val ilyraClickPitch: Flow<Int> = context.dataStore.data.map { prefs ->
+        prefs[Keys.ILYRA_CLICK_PITCH] ?: 1
+    }
+    /** ILyraBodyColor ordinal: 0 silver (default), 1 black. */
+    val ilyraBodyColor: Flow<Int> = context.dataStore.data.map { prefs ->
+        prefs[Keys.ILYRA_BODY_COLOR] ?: 0
+    }
+
     // ── Writes ──────────────────────────────────────────────────────────────
 
     suspend fun setThemeMode(mode: ThemeMode) {
@@ -133,6 +166,34 @@ class LyraDataStore(private val context: Context) {
         context.dataStore.edit { it[Keys.HAPTICS_ENABLED] = enabled }
     }
 
+    suspend fun setForYouEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.FOR_YOU_ENABLED] = enabled }
+    }
+
+    suspend fun setIlyraUnlocked(unlocked: Boolean) {
+        context.dataStore.edit { it[Keys.ILYRA_UNLOCKED] = unlocked }
+    }
+
+    suspend fun setIlyraEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.ILYRA_ENABLED] = enabled }
+    }
+
+    suspend fun setIlyraClickSounds(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.ILYRA_CLICK_SOUNDS] = enabled }
+    }
+
+    suspend fun setIlyraClickVolume(percent: Int) {
+        context.dataStore.edit { it[Keys.ILYRA_CLICK_VOLUME] = percent.coerceIn(0, 100) }
+    }
+
+    suspend fun setIlyraClickPitch(ordinal: Int) {
+        context.dataStore.edit { it[Keys.ILYRA_CLICK_PITCH] = ordinal }
+    }
+
+    suspend fun setIlyraBodyColor(ordinal: Int) {
+        context.dataStore.edit { it[Keys.ILYRA_BODY_COLOR] = ordinal }
+    }
+
     // ── Keys ────────────────────────────────────────────────────────────────
 
     private object Keys {
@@ -150,5 +211,12 @@ class LyraDataStore(private val context: Context) {
         val VISUALIZER_GAIN_BOTTOM = intPreferencesKey("visualizer_gain_bottom")
         val VISUALIZER_GAIN_SYNC = booleanPreferencesKey("visualizer_gain_sync")
         val HAPTICS_ENABLED     = booleanPreferencesKey("haptics_enabled")
+        val FOR_YOU_ENABLED     = booleanPreferencesKey("for_you_enabled")
+        val ILYRA_UNLOCKED       = booleanPreferencesKey("ilyra_unlocked")
+        val ILYRA_ENABLED        = booleanPreferencesKey("ilyra_enabled")
+        val ILYRA_CLICK_SOUNDS   = booleanPreferencesKey("ilyra_click_sounds")
+        val ILYRA_CLICK_VOLUME   = intPreferencesKey("ilyra_click_volume")
+        val ILYRA_CLICK_PITCH    = intPreferencesKey("ilyra_click_pitch")
+        val ILYRA_BODY_COLOR     = intPreferencesKey("ilyra_body_color")
     }
 }

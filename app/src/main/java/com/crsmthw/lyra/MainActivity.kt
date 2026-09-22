@@ -17,30 +17,42 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import com.crsmthw.lyra.ui.ilyra.ILyraRoot
 import com.crsmthw.lyra.ui.navigation.LyraNavGraph
 import com.crsmthw.lyra.ui.theme.LyraTheme
 import com.crsmthw.lyra.ui.theme.ThemeMode
 import com.crsmthw.lyra.util.HapticsConfig
+import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
 
     private val requestNotificationPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
-    // Warm-start deep link: set in onNewIntent, read by LyraNavGraph via handleDeepLink.
+    // The VIEW intent that brought us here, cold start or warm. LyraNavGraph funnels it into the
+    // link-resolver destination itself — no destination declares a navDeepLink any more, so
+    // NavHost's own automatic handleDeepLink on the launch intent has nothing to match.
     private var pendingDeepLinkIntent by mutableStateOf<Intent?>(null)
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        // launchMode is singleTop, so a link tapped while Lyra is alive arrives here rather than
+        // in a second instance. Keep getIntent() in step with what we are about to act on.
+        setIntent(intent)
         pendingDeepLinkIntent = intent
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        installSplashScreen()
+        val splash = installSplashScreen()
         super.onCreate(savedInstanceState)
+        // Cold-start deep link — seeded only on a FRESH launch. On an Activity recreation the
+        // same VIEW intent is re-delivered, and re-firing it would push a second copy of the
+        // destination on top of the back stack Navigation has just restored.
+        if (savedInstanceState == null) pendingDeepLinkIntent = intent
         if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestNotificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
@@ -57,6 +69,34 @@ class MainActivity : ComponentActivity() {
             val hapticsEnabled by container.dataStore.hapticsEnabled.collectAsState(initial = true)
             LaunchedEffect(hapticsEnabled) { HapticsConfig.enabled = hapticsEnabled }
 
+            // ── iLyra flag: read before the first frame ────────────────────────
+            // `Boolean?` — null means DataStore has not emitted yet; the splash stays on screen
+            // until it does (or the safety timeout fires, so a stuck DataStore never holds the
+            // splash forever). The three-way branch below avoids composing LyraNavGraph while
+            // the flag is still null, which would create and immediately tear down the
+            // NavController, LibraryViewModel.init, PlayerPanelHost, and the deep-link funnel.
+            val ilyraEnabled by container.dataStore.ilyraEnabled.collectAsState(initial = null)
+            var ilyraFlagLoaded by remember { mutableStateOf(false) }
+            var flagTimedOut by remember { mutableStateOf(false) }
+            LaunchedEffect(ilyraEnabled) {
+                if (ilyraEnabled != null) ilyraFlagLoaded = true
+            }
+            LaunchedEffect(Unit) {
+                delay(1_500L)
+                flagTimedOut = true
+            }
+            splash.setKeepOnScreenCondition { !ilyraFlagLoaded && !flagTimedOut }
+
+            // Deep link while in iLyra mode: auto-exit so the normal funnel handles it. Safe to key
+            // on both because LyraNavGraph nulls the intent once it has acted on it
+            // (onDeepLinkConsumed) — so re-enabling iLyra mode later cannot re-fire on a stale link.
+            LaunchedEffect(pendingDeepLinkIntent, ilyraEnabled) {
+                val intent = pendingDeepLinkIntent ?: return@LaunchedEffect
+                if (ilyraEnabled == true && intent.action == Intent.ACTION_VIEW && intent.data != null) {
+                    container.settingsRepository.setIlyraEnabled(false)
+                }
+            }
+
             val systemDark = isSystemInDarkTheme()
             val isDark = when (themeMode) {
                 ThemeMode.DARK   -> true
@@ -66,12 +106,19 @@ class MainActivity : ComponentActivity() {
 
             // Re-apply edge-to-edge style whenever dark/light flips so status
             // bar and nav bar icon colors follow the in-app theme, not the system theme.
-            SideEffect {
-                val barStyle = if (isDark)
-                    SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
-                else
-                    SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT)
-                enableEdgeToEdge(statusBarStyle = barStyle, navigationBarStyle = barStyle)
+            // Skipped while iLyra mode is active: it is its own immersive world and the
+            // light/dark icon colours are irrelevant with system bars hidden.
+            if (ilyraEnabled != true) {
+                SideEffect {
+                    val barStyle = if (isDark)
+                        SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+                    else
+                        SystemBarStyle.light(
+                            android.graphics.Color.TRANSPARENT,
+                            android.graphics.Color.TRANSPARENT,
+                        )
+                    enableEdgeToEdge(statusBarStyle = barStyle, navigationBarStyle = barStyle)
+                }
             }
 
             LyraTheme(
@@ -80,10 +127,17 @@ class MainActivity : ComponentActivity() {
                 dynamicColor = dynamicColor,
             ) {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    LyraNavGraph(
-                        container              = container,
-                        pendingDeepLinkIntent  = pendingDeepLinkIntent,
-                    )
+                    when {
+                        ilyraEnabled == true && container.authManager.isAuthenticated() ->
+                            ILyraRoot(container)
+                        ilyraEnabled != null || flagTimedOut ->
+                            LyraNavGraph(
+                                container             = container,
+                                pendingDeepLinkIntent = pendingDeepLinkIntent,
+                                onDeepLinkConsumed    = { pendingDeepLinkIntent = null },
+                            )
+                        // else: splash is still up, compose nothing
+                    }
                 }
             }
         }

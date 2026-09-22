@@ -10,13 +10,16 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import android.widget.Toast
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
-import com.crsmthw.lyra.ui.components.CappedModalBottomSheet
-import com.crsmthw.lyra.ui.components.sheetTopGap
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -31,11 +34,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import com.crsmthw.lyra.util.confirm
+import com.crsmthw.lyra.util.horizontalSystemBarsPadding
+import com.crsmthw.lyra.util.screenTransitionSpec
 import com.crsmthw.lyra.util.press
 import com.crsmthw.lyra.util.tick
 import com.crsmthw.lyra.util.toggle
@@ -50,16 +58,24 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.crsmthw.lyra.BuildConfig
 import com.crsmthw.lyra.R
-import com.crsmthw.lyra.ui.components.HeroBandHeight
-import com.crsmthw.lyra.ui.components.TitlePill
-import com.crsmthw.lyra.ui.components.TopActionPill
-import com.crsmthw.lyra.ui.components.TopScrim
-import com.crsmthw.lyra.ui.components.rememberHeroScrollProgress
+import com.crsmthw.lyra.ui.components.BarContentGap
+import com.crsmthw.lyra.ui.components.CappedModalBottomSheet
+import com.crsmthw.lyra.ui.components.ConnectedChoiceRow
+import com.crsmthw.lyra.ui.components.RootTopBar
+import com.crsmthw.lyra.ui.components.rememberRootTopBarScrollBehavior
+import com.crsmthw.lyra.ui.components.TopBarFade
+import com.crsmthw.lyra.ui.components.sheetTopGap
+import com.crsmthw.lyra.ui.components.ValueSlider
 import com.crsmthw.lyra.ui.theme.ThemeMode
 import com.crsmthw.lyra.util.visualizer.VisualizerStyle
 import kotlin.math.roundToInt
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun SettingsScreen(
     viewModel: SettingsViewModel,
@@ -70,6 +86,13 @@ fun SettingsScreen(
     val amoledBlack         by viewModel.amoledBlack.collectAsStateWithLifecycle()
     val dynamicColor        by viewModel.dynamicColor.collectAsStateWithLifecycle()
     val visualizerEnabled   by viewModel.visualizerEnabled.collectAsStateWithLifecycle()
+    // The master toggle asks for RECORD_AUDIO exactly like the player's own toggle: flipping the
+    // setting on without the permission left the visualizer silently enabled-but-inert (device pass
+    // 2026-09-12, item 44). Denied → the toggle stays off.
+    val context             = LocalContext.current
+    val recordAudioLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted -> if (granted) viewModel.setVisualizerEnabled(true) }
     val visualizerStyle     by viewModel.visualizerStyle.collectAsStateWithLifecycle()
     val visualizerResolution by viewModel.visualizerResolution.collectAsStateWithLifecycle()
     val visualizerDramatic  by viewModel.visualizerDramatic.collectAsStateWithLifecycle()
@@ -79,12 +102,18 @@ fun SettingsScreen(
     val visualizerGainBottom by viewModel.visualizerGainBottom.collectAsStateWithLifecycle()
     val visualizerGainSync  by viewModel.visualizerGainSync.collectAsStateWithLifecycle()
     val hapticsEnabled      by viewModel.hapticsEnabled.collectAsStateWithLifecycle()
+    val forYouEnabled       by viewModel.forYouEnabled.collectAsStateWithLifecycle()
+    val ilyraUnlocked        by viewModel.ilyraUnlocked.collectAsStateWithLifecycle()
+    val ilyraEnabled         by viewModel.ilyraEnabled.collectAsStateWithLifecycle()
     val haptics              = LocalHapticFeedback.current
     val imageCacheBytes        by viewModel.imageCacheBytes.collectAsStateWithLifecycle()
     val libraryCacheBytes      by viewModel.libraryCacheBytes.collectAsStateWithLifecycle()
     var showLogoutDialog  by remember { mutableStateOf(false) }
     var showThemeSheet    by remember { mutableStateOf(false) }
     var showVisualizerSheet by remember { mutableStateOf(false) }
+    // Hoisted at screen level (`rememberTopAppBarState` is `rememberSaveable`) so the bar's collapse
+    // survives navigating away and back.
+    val barState = rememberTopAppBarState()
 
     Scaffold(
         contentWindowInsets = WindowInsets(0),
@@ -94,256 +123,327 @@ fun SettingsScreen(
         val scrimHeight    = navBarBottomDp + 48.dp
         val background     = MaterialTheme.colorScheme.background
         val scrollState    = rememberScrollState()
-        val heroHeight     = HeroBandHeight
-        val titlePillAlpha = rememberHeroScrollProgress(scrollState, heroHeight)
 
-        Box(
+        // Horizontal system-bar inset, applied ONCE here on the outermost content container — in
+        // landscape with 3-button navigation the nav bar sits on a side edge, and the app bar's own
+        // row plus the settings rows (switches, pickers) would run under it. The bar takes
+        // `appBarWindowInsets` (top only) and nothing else, so the horizontal term is applied
+        // exactly once, here. The sheets opened from here are separate windows and inset themselves.
+        Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(paddingValues),
+                .padding(paddingValues)
+                .horizontalSystemBarsPadding(),
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(scrollState),
-            ) {
-
-            // ── Settings hero ──────────────────────────────────────────────────
-            Box(
-                modifier         = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .height(heroHeight),
-                contentAlignment = Alignment.BottomStart,
-            ) {
-                Text(
-                    text     = stringResource(R.string.settings_title),
-                    style    = MaterialTheme.typography.displayMedium,
-                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
-                )
-            }
-
-            // ── Spotify ───────────────────────────────────────────────────────
-            SettingsSectionHeader(stringResource(R.string.settings_spotify))
-
-            SettingsItem(
-                icon    = Icons.Default.Key,
-                title   = stringResource(R.string.settings_client_id),
-                subtitle= viewModel.clientIdMasked(),
-            )
-
-            SettingsItem(
-                icon      = Icons.AutoMirrored.Filled.Logout,
-                title     = stringResource(R.string.settings_logout),
-                subtitle  = stringResource(R.string.settings_logout_desc),
-                onClick   = { showLogoutDialog = true },
-                tintError = true,
-            )
-
-            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-
-            // ── Lyra ──────────────────────────────────────────────────────────
-            SettingsSectionHeader(stringResource(R.string.settings_lyra))
-
-            // Theme — opens the display-theme modal sheet (mode + AMOLED + Material You)
-            SettingsItem(
-                icon     = Icons.Default.Palette,
-                title    = stringResource(R.string.settings_theme),
-                subtitle = when (themeMode) {
-                    ThemeMode.SYSTEM -> stringResource(R.string.settings_theme_system)
-                    ThemeMode.LIGHT  -> stringResource(R.string.settings_theme_light)
-                    ThemeMode.DARK   -> stringResource(R.string.settings_theme_dark)
+            // Root-screen bar: a large flexible "Settings" title that compresses to the small bar as
+            // the content scrolls and stays small until it is back at the top, or a small pinned bar
+            // on a pane under 600dp tall. It replaced the 300dp hero band + TopScrim + back/title
+            // pills, so nothing below it needs a status-bar inset any more.
+            val scrollBehavior = rememberRootTopBarScrollBehavior(barState)
+            RootTopBar(
+                title          = stringResource(R.string.settings_title),
+                scrollBehavior = scrollBehavior,
+                navigationIcon = {
+                    IconButton(onClick = { haptics.confirm(); onBack() }) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.nav_back))
+                    }
                 },
-                onClick  = { showThemeSheet = true },
+                containerColor = background,
             )
 
-            // Haptic feedback toggle (app-wide)
-            SettingsToggleItem(
-                icon    = Icons.Default.Vibration,
-                title   = stringResource(R.string.settings_haptics),
-                subtitle= stringResource(R.string.settings_haptics_desc),
-                checked = hapticsEnabled,
-                onCheckedChange = viewModel::setHapticsEnabled,
-            )
+            Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        // ORDER IS LOAD-BEARING: `.nestedScroll(conn).verticalScroll(state)`. Reversed,
+                        // the connection sits INSIDE the scroller and is silently inert — the build stays
+                        // green and the bar simply never collapses.
+                        .nestedScroll(scrollBehavior.nestedScrollConnection)
+                        .verticalScroll(scrollState)
+                        // The gap under the app bar (device pass #22), AFTER the scroller so it is
+                        // part of the scrollable content — a lazy list's top `contentPadding`, in
+                        // the only form a plain Column has. Before it, it would be a permanent dead
+                        // strip; and it is NOT an inset (the bar is a Column sibling whose measured
+                        // height already owns the strip above this Box).
+                        .padding(top = BarContentGap),
+                ) {
 
-            // Visualizer toggle
-            SettingsToggleItem(
-                icon            = Icons.Default.Equalizer,
-                title           = stringResource(R.string.player_visualizer),
-                subtitle        = stringResource(R.string.settings_visualizer_desc),
-                checked         = visualizerEnabled,
-                onCheckedChange = viewModel::setVisualizerEnabled,
-            )
+                // ── Spotify ───────────────────────────────────────────────────────
+                SettingsSectionHeader(stringResource(R.string.settings_spotify))
 
-            // Advanced visualizer settings — revealed only when the visualizer is on; opens a
-            // bottom sheet (style / resolution / dramatic peaks) to keep the main list tidy.
-            AnimatedVisibility(
-                visible = visualizerEnabled,
-                enter   = fadeIn() + expandVertically(MaterialTheme.motionScheme.defaultSpatialSpec<IntSize>()),
-                exit    = shrinkVertically(MaterialTheme.motionScheme.defaultSpatialSpec<IntSize>()) + fadeOut(),
-            ) {
                 SettingsItem(
-                    icon     = Icons.Default.Tune,
-                    title    = stringResource(R.string.settings_visualizer_advanced),
-                    subtitle = stringResource(R.string.settings_visualizer_advanced_desc),
-                    onClick  = { showVisualizerSheet = true },
+                    icon    = Icons.Default.Key,
+                    title   = stringResource(R.string.settings_client_id),
+                    subtitle= viewModel.clientIdMasked(),
                 )
-            }
 
-            // Live notifications (Android 16+) — sleep timer as a pinned Live notification.
-            if (Build.VERSION.SDK_INT >= 36) {
-                val context = LocalContext.current
-                val nm = context.getSystemService(NotificationManager::class.java)
-                var liveNotifsEnabled by remember { mutableStateOf(nm.canPostPromotedNotifications()) }
-                LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-                    liveNotifsEnabled = nm.canPostPromotedNotifications()
-                }
-                var showLiveNotifHelpDialog by remember { mutableStateOf(false) }
+                SettingsItem(
+                    icon      = Icons.AutoMirrored.Filled.Logout,
+                    title     = stringResource(R.string.settings_logout),
+                    subtitle  = stringResource(R.string.settings_logout_desc),
+                    onClick   = { showLogoutDialog = true },
+                    tintError = true,
+                )
 
-                ListItem(
-                    leadingContent   = {
-                        Icon(Icons.Default.Timer, contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+
+                // ── Lyra ──────────────────────────────────────────────────────────
+                SettingsSectionHeader(stringResource(R.string.settings_lyra))
+
+                // Theme — opens the display-theme modal sheet (mode + AMOLED + Material You)
+                SettingsItem(
+                    icon     = Icons.Default.Palette,
+                    title    = stringResource(R.string.settings_theme),
+                    subtitle = when (themeMode) {
+                        ThemeMode.SYSTEM -> stringResource(R.string.settings_theme_system)
+                        ThemeMode.LIGHT  -> stringResource(R.string.settings_theme_light)
+                        ThemeMode.DARK   -> stringResource(R.string.settings_theme_dark)
                     },
-                    headlineContent  = { Text(stringResource(R.string.settings_live_notifications)) },
-                    supportingContent = {
-                        Text(
-                            stringResource(
-                                if (liveNotifsEnabled) R.string.settings_live_notifications_on
-                                else R.string.settings_live_notifications_off
-                            ),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    },
-                    trailingContent  = {
-                        if (liveNotifsEnabled) {
-                            Icon(Icons.Default.Check, contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary)
+                    onClick  = { showThemeSheet = true },
+                )
+
+                // "For you" band toggle — opt-in (default OFF): algorithmic resurfacing is the kind
+                // of Spotify bloat Lyra exists to escape, so it must be asked for, never imposed.
+                SettingsToggleItem(
+                    icon            = Icons.Default.AutoAwesome,
+                    title           = stringResource(R.string.settings_for_you),
+                    subtitle        = stringResource(R.string.settings_for_you_desc),
+                    checked         = forYouEnabled,
+                    onCheckedChange = viewModel::setForYouEnabled,
+                )
+
+                // Haptic feedback toggle (app-wide)
+                SettingsToggleItem(
+                    icon    = Icons.Default.Vibration,
+                    title   = stringResource(R.string.settings_haptics),
+                    subtitle= stringResource(R.string.settings_haptics_desc),
+                    checked = hapticsEnabled,
+                    onCheckedChange = viewModel::setHapticsEnabled,
+                )
+
+                // Visualizer toggle
+                SettingsToggleItem(
+                    icon            = Icons.Default.Equalizer,
+                    title           = stringResource(R.string.player_visualizer),
+                    subtitle        = stringResource(R.string.settings_visualizer_desc),
+                    checked         = visualizerEnabled,
+                    onCheckedChange = { enable ->
+                        if (!enable) {
+                            viewModel.setVisualizerEnabled(false)
                         } else {
-                            TextButton(onClick = {
-                                haptics.press()
-                                if (Build.MANUFACTURER.equals("samsung", ignoreCase = true)) {
-                                    showLiveNotifHelpDialog = true
-                                } else {
-                                    @Suppress("NewApi")
-                                    val launched = try {
-                                        context.startActivity(
-                                            Intent(Settings.ACTION_APP_NOTIFICATION_PROMOTION_SETTINGS).apply {
-                                                putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-                                            }
-                                        ); true
-                                    } catch (_: android.content.ActivityNotFoundException) { false }
-                                    if (!launched) context.startActivity(
-                                        Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
-                                            putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-                                        }
-                                    )
-                                }
-                            }) {
-                                Text(stringResource(R.string.settings_live_notifications_enable))
-                            }
+                            val granted = ContextCompat.checkSelfPermission(
+                                context, Manifest.permission.RECORD_AUDIO,
+                            ) == PackageManager.PERMISSION_GRANTED
+                            if (granted) viewModel.setVisualizerEnabled(true)
+                            else recordAudioLauncher.launch(Manifest.permission.RECORD_AUDIO)
                         }
                     },
                 )
 
-                if (showLiveNotifHelpDialog) {
+                // Advanced visualizer settings — revealed only when the visualizer is on; opens a
+                // bottom sheet (style / resolution / dramatic peaks) to keep the main list tidy.
+                AnimatedVisibility(
+                    visible = visualizerEnabled,
+                    enter   = fadeIn(screenTransitionSpec()) + expandVertically(screenTransitionSpec<IntSize>()),
+                    exit    = shrinkVertically(screenTransitionSpec<IntSize>()) + fadeOut(screenTransitionSpec()),
+                ) {
+                    SettingsItem(
+                        icon     = Icons.Default.Tune,
+                        title    = stringResource(R.string.settings_visualizer_advanced),
+                        subtitle = stringResource(R.string.settings_visualizer_advanced_desc),
+                        onClick  = { showVisualizerSheet = true },
+                    )
+                }
+
+                // Live notifications (Android 16+) — sleep timer as a pinned Live notification.
+                if (Build.VERSION.SDK_INT >= 36) {
+                    val context = LocalContext.current
+                    val nm = context.getSystemService(NotificationManager::class.java)
+                    var liveNotifsEnabled by remember { mutableStateOf(nm.canPostPromotedNotifications()) }
+                    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+                        liveNotifsEnabled = nm.canPostPromotedNotifications()
+                    }
+                    var showLiveNotifHelpDialog by remember { mutableStateOf(false) }
+
+                    ListItem(
+                        leadingContent   = {
+                            Icon(Icons.Default.Timer, contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        },
+                        supportingContent = {
+                            Text(
+                                stringResource(
+                                    if (liveNotifsEnabled) R.string.settings_live_notifications_on
+                                    else R.string.settings_live_notifications_off
+                                ),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        },
+                        trailingContent  = {
+                            if (liveNotifsEnabled) {
+                                Icon(Icons.Default.Check, contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary)
+                            } else {
+                                TextButton(onClick = {
+                                    haptics.press()
+                                    if (Build.MANUFACTURER.equals("samsung", ignoreCase = true)) {
+                                        showLiveNotifHelpDialog = true
+                                    } else {
+                                        @Suppress("NewApi")
+                                        val launched = try {
+                                            context.startActivity(
+                                                Intent(Settings.ACTION_APP_NOTIFICATION_PROMOTION_SETTINGS).apply {
+                                                    putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                                                }
+                                            ); true
+                                        } catch (_: android.content.ActivityNotFoundException) { false }
+                                        if (!launched) context.startActivity(
+                                            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                                                putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                                            }
+                                        )
+                                    }
+                                }) {
+                                    Text(stringResource(R.string.settings_live_notifications_enable))
+                                }
+                            }
+                        },
+                        content          = { Text(stringResource(R.string.settings_live_notifications)) },
+                    )
+
+                    if (showLiveNotifHelpDialog) {
+                        AlertDialog(
+                            onDismissRequest = { showLiveNotifHelpDialog = false },
+                            title  = { Text(stringResource(R.string.settings_live_notif_dialog_title)) },
+                            text   = { Text(stringResource(R.string.settings_live_notif_dialog_samsung)) },
+                            confirmButton  = {
+                                TextButton(onClick = {
+                                    haptics.confirm()
+                                    context.startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS))
+                                    showLiveNotifHelpDialog = false
+                                }) { Text(stringResource(R.string.settings_live_notif_dialog_open_dev_options)) }
+                            },
+                            dismissButton  = {
+                                TextButton(onClick = { haptics.press(); showLiveNotifHelpDialog = false }) {
+                                    Text(stringResource(R.string.settings_live_notif_dialog_got_it))
+                                }
+                            },
+                        )
+                    }
+                }
+
+                // iLyra mode — appears after unlocking via 5-tap on the version line
+                AnimatedVisibility(
+                    visible = ilyraUnlocked,
+                    enter   = fadeIn(screenTransitionSpec()) + expandVertically(screenTransitionSpec<IntSize>()),
+                    exit    = shrinkVertically(screenTransitionSpec<IntSize>()) + fadeOut(screenTransitionSpec()),
+                ) {
+                    SettingsToggleItem(
+                        icon            = Icons.Default.Album,
+                        title           = stringResource(R.string.settings_ilyra),
+                        subtitle        = stringResource(R.string.settings_ilyra_desc),
+                        checked         = ilyraEnabled,
+                        onCheckedChange = viewModel::setIlyraEnabled,
+                    )
+                }
+
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+
+                // ── Storage ───────────────────────────────────────────────────────
+                SettingsSectionHeader("Storage")
+
+                var showClearCacheDialog by remember { mutableStateOf(false) }
+                ListItem(
+                    leadingContent   = { Icon(Icons.Default.Image, contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                    supportingContent = { Text(formatBytes(imageCacheBytes),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                    trailingContent  = {
+                        TextButton(
+                            onClick  = { haptics.press(); showClearCacheDialog = true },
+                            enabled  = imageCacheBytes > 0L,
+                        ) { Text(stringResource(R.string.settings_clear)) }
+                    },
+                    content          = { Text(stringResource(R.string.settings_image_cache)) },
+                )
+
+                if (showClearCacheDialog) {
                     AlertDialog(
-                        onDismissRequest = { showLiveNotifHelpDialog = false },
-                        title  = { Text(stringResource(R.string.settings_live_notif_dialog_title)) },
-                        text   = { Text(stringResource(R.string.settings_live_notif_dialog_samsung)) },
-                        confirmButton  = {
+                        onDismissRequest = { showClearCacheDialog = false },
+                        title            = { Text(stringResource(R.string.settings_clear_image_cache_title)) },
+                        text             = { Text(stringResource(R.string.settings_clear_image_cache_message)) },
+                        confirmButton    = {
                             TextButton(onClick = {
                                 haptics.confirm()
-                                context.startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS))
-                                showLiveNotifHelpDialog = false
-                            }) { Text(stringResource(R.string.settings_live_notif_dialog_open_dev_options)) }
+                                viewModel.clearImageCache()
+                                showClearCacheDialog = false
+                            }) { Text(stringResource(R.string.settings_clear)) }
                         },
-                        dismissButton  = {
-                            TextButton(onClick = { haptics.press(); showLiveNotifHelpDialog = false }) {
-                                Text(stringResource(R.string.settings_live_notif_dialog_got_it))
-                            }
+                        dismissButton    = {
+                            TextButton(onClick = { haptics.press(); showClearCacheDialog = false }) { Text(stringResource(R.string.action_cancel)) }
                         },
                     )
                 }
-            }
 
-            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-
-            // ── Storage ───────────────────────────────────────────────────────
-            SettingsSectionHeader("Storage")
-
-            var showClearCacheDialog by remember { mutableStateOf(false) }
-            ListItem(
-                leadingContent   = { Icon(Icons.Default.Image, contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant) },
-                headlineContent  = { Text("Image Cache") },
-                supportingContent = { Text(formatBytes(imageCacheBytes),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant) },
-                trailingContent  = {
-                    TextButton(
-                        onClick  = { haptics.press(); showClearCacheDialog = true },
-                        enabled  = imageCacheBytes > 0L,
-                    ) { Text("Clear") }
-                },
-            )
-
-            if (showClearCacheDialog) {
-                AlertDialog(
-                    onDismissRequest = { showClearCacheDialog = false },
-                    title            = { Text("Clear Image Cache?") },
-                    text             = { Text("Playlist artwork will be re-downloaded next time it's needed.") },
-                    confirmButton    = {
-                        TextButton(onClick = {
-                            haptics.confirm()
-                            viewModel.clearImageCache()
-                            showClearCacheDialog = false
-                        }) { Text("Clear") }
+                var showClearLibraryDialog by remember { mutableStateOf(false) }
+                ListItem(
+                    leadingContent   = { Icon(Icons.Default.LibraryMusic, contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+                    supportingContent = { Text(formatBytes(libraryCacheBytes),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                    trailingContent  = {
+                        TextButton(
+                            onClick  = { haptics.press(); showClearLibraryDialog = true },
+                            enabled  = libraryCacheBytes > 0L,
+                        ) { Text(stringResource(R.string.settings_clear)) }
                     },
-                    dismissButton    = {
-                        TextButton(onClick = { haptics.press(); showClearCacheDialog = false }) { Text("Cancel") }
+                    content          = { Text(stringResource(R.string.settings_library_cache)) },
+                )
+
+                if (showClearLibraryDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showClearLibraryDialog = false },
+                        title            = { Text(stringResource(R.string.settings_clear_library_cache_title)) },
+                        text             = { Text(stringResource(R.string.settings_clear_library_cache_message)) },
+                        confirmButton    = {
+                            TextButton(onClick = {
+                                haptics.confirm()
+                                viewModel.clearLibraryCache()
+                                showClearLibraryDialog = false
+                            }) { Text(stringResource(R.string.settings_clear)) }
+                        },
+                        dismissButton    = {
+                            TextButton(onClick = { haptics.press(); showClearLibraryDialog = false }) { Text(stringResource(R.string.action_cancel)) }
+                        },
+                    )
+                }
+
+                // ── About ─────────────────────────────────────────────────────────────
+                AboutSection(
+                    ilyraUnlocked = ilyraUnlocked,
+                    onIlyraUnlocked = {
+                        haptics.confirm()
+                        viewModel.unlockIlyra()
                     },
                 )
-            }
 
-            var showClearLibraryDialog by remember { mutableStateOf(false) }
-            ListItem(
-                leadingContent   = { Icon(Icons.Default.LibraryMusic, contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant) },
-                headlineContent  = { Text("Library Cache") },
-                supportingContent = { Text(formatBytes(libraryCacheBytes),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant) },
-                trailingContent  = {
-                    TextButton(
-                        onClick  = { haptics.press(); showClearLibraryDialog = true },
-                        enabled  = libraryCacheBytes > 0L,
-                    ) { Text("Clear") }
-                },
+                Spacer(Modifier.height(scrimHeight))
+                }
+
+            // The seam under the bar: the background fading out over the first rows, so they
+            // dissolve into the bar instead of sliding past its title — the same strip the Library
+            // browser has under its tab row. Top-anchored, because this Box's own top edge already
+            // tracks the bar's collapse (the bar is a Column sibling whose MEASURED height shrinks).
+            // Composed after the content so it draws over it; no pointer input, so it cannot eat a
+            // tap on the row beneath it.
+            TopBarFade(
+                paneColor = background,
+                modifier  = Modifier.align(Alignment.TopCenter),
             )
 
-            if (showClearLibraryDialog) {
-                AlertDialog(
-                    onDismissRequest = { showClearLibraryDialog = false },
-                    title            = { Text("Clear Library Cache?") },
-                    text             = { Text("Playlist and track data will be re-fetched from Spotify next time you open the library.") },
-                    confirmButton    = {
-                        TextButton(onClick = {
-                            haptics.confirm()
-                            viewModel.clearLibraryCache()
-                            showClearLibraryDialog = false
-                        }) { Text("Clear") }
-                    },
-                    dismissButton    = {
-                        TextButton(onClick = { haptics.press(); showClearLibraryDialog = false }) { Text("Cancel") }
-                    },
-                )
-            }
-
-            // ── About ─────────────────────────────────────────────────────────────
-            AboutSection()
-
-            Spacer(Modifier.height(scrimHeight))
-            }
-
+            // Bottom scrim — inside the weighted Box, so it overlays the scrolling content and
+            // never the bar.
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -351,32 +451,6 @@ fun SettingsScreen(
                     .align(Alignment.BottomCenter)
                     .background(Brush.verticalGradient(listOf(Color.Transparent, background)))
             )
-
-            // Top scrim — fades content under the status bar (mirror of the bottom scrim).
-            TopScrim(
-                color    = background,
-                modifier = Modifier.align(Alignment.TopCenter),
-            )
-
-            // Floating back pill + title pill (fades in once the hero scrolls away) — top-left cluster.
-            Row(
-                modifier              = Modifier
-                    .align(Alignment.TopStart)
-                    .statusBarsPadding()
-                    .padding(start = 16.dp, top = 8.dp),
-                verticalAlignment     = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                TopActionPill {
-                    IconButton(onClick = { haptics.press(); onBack() }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(R.string.nav_back))
-                    }
-                }
-                TitlePill(
-                    text     = stringResource(R.string.settings_title),
-                    modifier = Modifier.graphicsLayer { alpha = titlePillAlpha.value },
-                )
             }
         }
     }
@@ -422,17 +496,17 @@ fun SettingsScreen(
     if (showLogoutDialog) {
         AlertDialog(
             onDismissRequest = { showLogoutDialog = false },
-            title            = { Text("Disconnect Spotify?") },
-            text             = { Text("This will clear your tokens. You'll need to reconnect your Client ID.") },
+            title            = { Text(stringResource(R.string.settings_disconnect_title)) },
+            text             = { Text(stringResource(R.string.settings_disconnect_message)) },
             confirmButton    = {
                 TextButton(onClick = { haptics.confirm(); showLogoutDialog = false; onLogout() },
                            colors  = ButtonDefaults.textButtonColors(
                                contentColor = MaterialTheme.colorScheme.error)) {
-                    Text("Disconnect")
+                    Text(stringResource(R.string.settings_disconnect))
                 }
             },
             dismissButton    = {
-                TextButton(onClick = { haptics.press(); showLogoutDialog = false }) { Text("Cancel") }
+                TextButton(onClick = { haptics.press(); showLogoutDialog = false }) { Text(stringResource(R.string.action_cancel)) }
             },
         )
     }
@@ -472,8 +546,9 @@ private fun ThemeSheet(
                 tint = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.width(12.dp))
             Text(
-                text  = stringResource(R.string.settings_theme_display),
-                style = MaterialTheme.typography.titleLarge,
+                text     = stringResource(R.string.settings_theme_display),
+                style    = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.semantics { heading() },
             )
         }
 
@@ -577,8 +652,9 @@ private fun VisualizerSheet(
                         tint = MaterialTheme.colorScheme.primary)
                     Spacer(Modifier.width(12.dp))
                     Text(
-                        text  = stringResource(R.string.settings_visualizer_advanced),
-                        style = MaterialTheme.typography.titleLarge,
+                        text     = stringResource(R.string.settings_visualizer_advanced),
+                        style    = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.semantics { heading() },
                     )
                 }
 
@@ -699,7 +775,7 @@ private fun VisualizerSectionLabel(text: String) {
         text     = text,
         style    = MaterialTheme.typography.labelLarge,
         color    = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp),
+        modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 4.dp).semantics { heading() },
     )
 }
 
@@ -717,11 +793,14 @@ private fun VisualizerTip(text: String) {
 private fun SyncToggleRow(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
     val haptics = LocalHapticFeedback.current
     Row(
-        modifier          = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 4.dp),
+        modifier          = Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp, top = 4.dp)
+            .toggleable(value = checked, role = Role.Switch, onValueChange = { haptics.toggle(it); onCheckedChange(it) }),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-        Switch(checked = checked, onCheckedChange = { haptics.toggle(it); onCheckedChange(it) })
+        Switch(checked = checked, onCheckedChange = null)
     }
 }
 
@@ -739,7 +818,7 @@ private fun ResolutionSliderRow(prefix: String?, bands: Int, onBands: (Int) -> U
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Slider(
+        ValueSlider(
             value                 = pos,
             onValueChange         = { v -> if (v.roundToInt() != pos.roundToInt()) haptics.tick(); pos = v },
             onValueChangeFinished = { onBands(resolutions[pos.roundToInt()]) },
@@ -763,7 +842,7 @@ private fun GainSliderRow(prefix: String?, offset: Int, onOffset: (Int) -> Unit)
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Slider(
+        ValueSlider(
             value                 = pos,
             onValueChange         = { v -> if (v.roundToInt() != pos.roundToInt()) haptics.tick(); pos = v },
             onValueChangeFinished = { onOffset(pos.roundToInt()) },
@@ -773,46 +852,14 @@ private fun GainSliderRow(prefix: String?, offset: Int, onOffset: (Int) -> Unit)
     }
 }
 
-// ── Connected single-choice picker (M3 Expressive morph) ────────────────────────
-
-/**
- * A connected single-choice picker (theme mode, visualizer style) built on the full M3 Expressive
- * [ButtonGroup]: each `toggleableItem` segment gets the connected leading/middle/trailing shape morph
- * (rounds → squircle on select, squish on press) AND the inter-button press-squeeze — pressing one
- * segment expands it while compressing its neighbours, then springs back. A real overflow indicator
- * is supplied so the measure pass always has a home for an item that can't fit, never the
- * empty-overflow path that mis-measures in genuinely tight layouts. Picking fires a `press` haptic.
- */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
-@Composable
-private fun <T> ConnectedChoiceRow(
-    options : List<Pair<T, String>>,
-    selected: T,
-    onSelect: (T) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val haptics = LocalHapticFeedback.current
-    ButtonGroup(
-        overflowIndicator = { menuState -> ButtonGroupDefaults.OverflowIndicator(menuState) },
-        modifier          = modifier.fillMaxWidth(),
-    ) {
-        options.forEach { (value, label) ->
-            toggleableItem(
-                checked         = selected == value,
-                label           = label,
-                onCheckedChange = { isChecked ->
-                    if (isChecked && selected != value) { haptics.press(); onSelect(value) }
-                },
-                weight          = 1f,
-            )
-        }
-    }
-}
-
 // ── About section ────────────────────────────────────────────────────────────
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun AboutSection() {
+private fun AboutSection(
+    ilyraUnlocked: Boolean,
+    onIlyraUnlocked: () -> Unit,
+) {
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
 
@@ -855,11 +902,31 @@ private fun AboutSection() {
             textAlign = TextAlign.Center,
         )
 
+        // iLyra mode unlock: 5 taps within 2 s each on the version line. Once unlocked, taps
+        // are inert (no haptic) — the toggle in the Lyra section is the activation path.
+        var tapCount by remember { mutableIntStateOf(0) }
+        var lastTapMs by remember { mutableLongStateOf(0L) }
+        val unlockedMsg = stringResource(R.string.settings_ilyra_unlocked)   // configuration-aware, unlike context.getString
         Text(
             text      = stringResource(R.string.settings_version, BuildConfig.VERSION_NAME),
             style     = MaterialTheme.typography.bodySmall,
             color     = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
+            modifier  = Modifier.combinedClickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication        = null,
+                onClick           = {
+                    if (ilyraUnlocked) return@combinedClickable
+                    val now = System.currentTimeMillis()
+                    tapCount = if (now - lastTapMs <= 2_000L) tapCount + 1 else 1
+                    lastTapMs = now
+                    if (tapCount >= 5) {
+                        tapCount = 0
+                        onIlyraUnlocked()
+                        Toast.makeText(context, unlockedMsg, Toast.LENGTH_SHORT).show()
+                    }
+                },
+            ),
         )
 
         Spacer(Modifier.height(20.dp))
@@ -898,6 +965,14 @@ private fun AboutSection() {
                         Text(stringResource(R.string.about_credit_icon), style = MaterialTheme.typography.bodyMedium)
                         Text(stringResource(R.string.about_credit_icon_desc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
+                }
+
+                Spacer(Modifier.height(12.dp))
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Favorite, contentDescription = null, tint = Color(0xFFE91E63), modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Text(stringResource(R.string.about_credit_fonts), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -989,7 +1064,7 @@ private fun SettingsSectionHeader(title: String) {
         text     = title,
         style    = MaterialTheme.typography.labelMedium,
         color    = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(start = 16.dp, top = 20.dp, bottom = 4.dp),
+        modifier = Modifier.padding(start = 16.dp, top = 20.dp, bottom = 4.dp).semantics { heading() },
     )
 }
 
@@ -1007,12 +1082,12 @@ private fun SettingsItem(
 
     ListItem(
         leadingContent   = { Icon(icon, contentDescription = null, tint = iconTint) },
-        headlineContent  = {
+        supportingContent= subtitle?.let { { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) } },
+        modifier         = if (onClick != null) Modifier.clickable { haptics.press(); onClick() } else Modifier,
+        content          = {
             Text(title, color = if (tintError) MaterialTheme.colorScheme.error
                                 else MaterialTheme.colorScheme.onSurface)
         },
-        supportingContent= subtitle?.let { { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) } },
-        modifier         = if (onClick != null) Modifier.clickable { haptics.press(); onClick() } else Modifier,
     )
 }
 
@@ -1029,11 +1104,11 @@ private fun SettingsToggleItem(
     ListItem(
         leadingContent   = { Icon(icon, contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurfaceVariant) },
-        headlineContent  = { Text(title) },
         supportingContent= subtitle?.let { { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) } },
         trailingContent  = {
-            Switch(checked = checked, onCheckedChange = toggleWithHaptic)
+            Switch(checked = checked, onCheckedChange = null)
         },
-        modifier = Modifier.clickable { toggleWithHaptic(!checked) },
+        modifier = Modifier.toggleable(value = checked, role = Role.Switch, onValueChange = toggleWithHaptic),
+        content  = { Text(title) },
     )
 }

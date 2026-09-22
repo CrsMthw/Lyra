@@ -9,6 +9,7 @@ import com.crsmthw.lyra.data.auth.SpotifyAuthManager
 import com.crsmthw.lyra.data.auth.TokenManager
 import com.crsmthw.lyra.data.local.EncryptedPrefs
 import com.crsmthw.lyra.data.local.LibraryCache
+import com.crsmthw.lyra.data.local.LikedSongsIndexer
 import com.crsmthw.lyra.data.local.LyraDataStore
 import com.crsmthw.lyra.BuildConfig
 import com.crsmthw.lyra.data.remote.LrcLibApiService
@@ -72,7 +73,46 @@ class AppContainer(context: Context) {
 
     val lrcLibApiService: LrcLibApiService = lrcLibRetrofit.create(LrcLibApiService::class.java)
 
+    // ── Spotify short-link resolver (spotify.link / *.app.link — Branch) ──────
+    // A DEDICATED plain client. It must never be `okHttpClient`, whose TokenManager interceptor
+    // attaches the user's Spotify bearer token to every request — that token has no business
+    // reaching a third-party link-shortening host.
+    //
+    // Redirects are followed BY HAND (`followRedirects = false`) so the hop count is capped and
+    // every `Location` is inspected; with OkHttp following them itself, `Response.header("Location")`
+    // reads null at every hop. Timeouts are short because a spinner is on screen for all of it.
+    // See ui/screens/deeplink/LinkResolverViewModel.
+    val linkResolverClient: OkHttpClient = OkHttpClient.Builder()
+        .followRedirects(false)
+        .followSslRedirects(false)
+        .addInterceptor { chain ->
+            chain.proceed(
+                chain.request().newBuilder()
+                    .header("User-Agent", "Lyra/${BuildConfig.VERSION_NAME} (github.com/CrsMthw/Lyra)")
+                    .build()
+            )
+        }
+        .connectTimeout(5.seconds)
+        .readTimeout   (5.seconds)
+        .callTimeout   (10.seconds)
+        .build()
+
+    // ── Image client (token-free) ─────────────────────────────────────────────
+    // Album art comes from Spotify's image CDN (i.scdn.co and friends), which needs no bearer
+    // token and is not the Web API. Coil used to fetch through `okHttpClient`, so every art
+    // request carried the user's access token to the CDN, could block on a token refresh inside
+    // TokenManager's synchronized block, and shared the API client's dispatcher and connection
+    // pool with the player poll. A dedicated client keeps the token where it belongs and isolates
+    // a burst of art fetches (the iLyra CoverFlow prefetch) from API latency (2026-09-20).
+    private val imageOkHttpClient = OkHttpClient.Builder()
+        .connectTimeout(15.seconds)
+        .readTimeout   (15.seconds)
+        .build()
+
     // ── Image loader (permanent disk cache in filesDir) ──────────────────────
+    // 500 MB (Cris, 2026-09-21; was 150): the Classic's Cover Flow prefetch warms every liked song's
+    // 640px cover — on the order of 2000 distinct covers, 100+ MB — and at 150 MB that set would
+    // have churned the cache and evicted the rest of the app's art to fit.
     val imageLoader: ImageLoader = ImageLoader.Builder(context)
         .memoryCache {
             MemoryCache.Builder()
@@ -82,10 +122,10 @@ class AppContainer(context: Context) {
         .diskCache {
             DiskCache.Builder()
                 .directory(context.filesDir.resolve("lyra_image_cache").toOkioPath())
-                .maxSizeBytes(150L * 1024 * 1024)
+                .maxSizeBytes(500L * 1024 * 1024)
                 .build()
         }
-        .components { add(OkHttpNetworkFetcherFactory(okHttpClient)) }
+        .components { add(OkHttpNetworkFetcherFactory(imageOkHttpClient)) }
         .build()
 
     // ── Spotify App Remote ───────────────────────────────────────────────────
@@ -101,6 +141,9 @@ class AppContainer(context: Context) {
 
     // ── App-scoped player state ───────────────────────────────────────────────
     val playerStateManager = PlayerStateManager(context, spotifyRepository, remoteManager)
+
+    // ── Liked-songs indexer (shared by the foreground service and the iLyra) ──
+    val likedSongsIndexer = LikedSongsIndexer(libraryCache, spotifyRepository, playerStateManager)
 
     // ── Audio visualizer ─────────────────────────────────────────────────────
     val visualizerManager = VisualizerManager(context)

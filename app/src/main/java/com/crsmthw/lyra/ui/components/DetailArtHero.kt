@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalIconButton
@@ -22,11 +23,15 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -34,16 +39,19 @@ import androidx.compose.ui.unit.dp
 import com.crsmthw.lyra.R
 
 /**
- * The shared OneUI-style detail hero used by the playlist/Liked, album, and artist detail screens
+ * The shared detail hero used by the playlist/Liked, album, artist and show detail screens
  * (single-pane hero, and the two-pane left panel): the art clipped to an M3 square shape
  * (bordered, centred), then a row with the [title] + [subtitle] (+ optional [meta] line) on the
  * left and optional shuffle/play cookie buttons on the right. Pass `onShuffle`/`onPlay` = null to
  * omit that button (the artist screen has neither). [meta] is a second, smaller line under the
  * subtitle (the album screen's `year · type · N songs · playtime`). [artContent] renders the art
- * inside the cookie tile (a `fillMaxSize` `AsyncImage`, or a fallback). The title crossfades into
- * the floating title pill as the hero scrolls away (it's the list's item 0).
+ * inside the square tile (a `fillMaxSize` `AsyncImage`, or a fallback).
+ *
+ * The hero is the list's item 0 and scrolls under the screen's [DetailTopBar]; pass that bar's
+ * [HeroTitleHandoff] as [titleHandoff] and the bar's own title takes over as this [title] goes
+ * under it.
  */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun DetailArtHero(
     title       : String,
@@ -56,14 +64,34 @@ fun DetailArtHero(
     // Carries the single-pane Library container-transform `sharedBounds` onto the art tile; defaults
     // to a no-op so the album / artist / two-pane heroes stay static.
     artModifier : Modifier = Modifier,
+    // Feeds the title's position to the screen's DetailTopBar, which fades its own title in as this
+    // one passes under it. Null (the two-pane hero panes, which carry no bar title) reports nothing.
+    titleHandoff: HeroTitleHandoff? = null,
     artContent  : @Composable BoxScope.() -> Unit,
 ) {
     val shuffleLabel = stringResource(R.string.player_shuffle)
     val playLabel    = stringResource(R.string.player_play)
+    if (titleHandoff != null) {
+        // A lazy list disposes item 0 once it is off screen, and a fling can dispose it before a
+        // final position lands — without this the bar title would be stranded part-faded.
+        DisposableEffect(titleHandoff) {
+            onDispose { titleHandoff.onHeroTitleGone() }
+        }
+    }
     Column(modifier = modifier.fillMaxWidth()) {
-        // Centered cookie art tile.
+        // Centered square art tile. The top padding clears the DetailTopBar laid over this hero:
+        // the status bar plus the bar's OWN collapsed height plus a small gap, so it is expressed in
+        // terms of the thing that is actually above it — plus the app-wide `BarContentGap` that now
+        // sits under every bar in the app (Cris's device pass, 2026-09-16 #12: the detail bars wanted
+        // the same padding-and-fade seam the Library's tab row has). That gap is baked in HERE rather
+        // than added as a list contentPadding top inset, which would double the whole clearance
+        // (docs/UI_PATTERNS.md → Hero clearance). It is a constant, not a fraction of the width, so a
+        // narrower window only shrinks the art around it: the art can never ride up under the bar.
         Box(
-            modifier         = Modifier.fillMaxWidth().statusBarsPadding().padding(top = 40.dp),
+            modifier         = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(top = TopAppBarDefaults.TopAppBarExpandedHeight + 8.dp + BarContentGap),
             contentAlignment = Alignment.Center,
         ) {
             val artTileShape = MaterialShapes.Square.toShape()
@@ -89,6 +117,11 @@ fun DetailArtHero(
                     style    = MaterialTheme.typography.headlineSmall,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
+                    // Root coordinates, reported from layout and read by the bar in its draw phase.
+                    modifier = if (titleHandoff == null) Modifier else Modifier.onGloballyPositioned {
+                        val top = it.positionInRoot().y
+                        titleHandoff.onHeroTitleBounds(top, top + it.size.height)
+                    },
                 )
                 if (!subtitle.isNullOrBlank()) {
                     Text(

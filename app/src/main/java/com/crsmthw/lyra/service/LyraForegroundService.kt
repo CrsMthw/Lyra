@@ -12,18 +12,15 @@ import androidx.core.app.NotificationCompat
 import com.crsmthw.lyra.LyraApplication
 import com.crsmthw.lyra.MainActivity
 import com.crsmthw.lyra.R
-import com.crsmthw.lyra.data.local.LibraryCache
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 class LyraForegroundService : Service() {
 
@@ -40,7 +37,7 @@ class LyraForegroundService : Service() {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK,
         )
         observeState()
-        startLikedSongsFetcher()
+        (application as LyraApplication).container.likedSongsIndexer.setBackgroundDemand(true)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -59,6 +56,7 @@ class LyraForegroundService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        (application as LyraApplication).container.likedSongsIndexer.setBackgroundDemand(false)
         scope.cancel()
         notificationManager.cancel(SLEEP_TIMER_NOTIFICATION_ID)
         (application as LyraApplication).container.playerStateManager.notifyServiceStopped()
@@ -75,7 +73,13 @@ class LyraForegroundService : Service() {
                         NOTIFICATION_ID,
                         buildNotification(
                             trackName         = state.currentTrack?.name,
-                            artistName        = state.currentTrack?.artists?.firstOrNull()?.name,
+                            // A podcast episode has no artists — its show's name is the second
+                            // line. Deliberately not `primaryArtist`, which would substitute
+                            // "Unknown" where this has always passed null.
+                            artistName        = state.currentTrack?.let { item ->
+                                if (item.isEpisode) item.show?.name
+                                else item.artists?.firstOrNull()?.name
+                            },
                             sleepTimerMinutes = state.sleepTimerMinutes,
                         ),
                     )
@@ -92,59 +96,6 @@ class LyraForegroundService : Service() {
                     if (!shouldRun) scheduleStop()
                     else { stopJob?.cancel(); stopJob = null }
                 }
-        }
-    }
-
-    private fun startLikedSongsFetcher() {
-        scope.launch {
-            val container = (application as LyraApplication).container
-            // RAW (pre-filter) offset into Spotify's saved-tracks list, tracked across loop iterations.
-            // Liked-songs items can have a null track (removed from Spotify) which we drop, so the
-            // stored track count lags the raw offset — paginating by the stored size re-fetches the
-            // gap and duplicates rows. We advance the raw offset by the raw page size instead, and
-            // stop once a short/empty page signals the end (re-arming if the cache is reset under us).
-            var rawOffset = -1     // -1 = seed from the cache on first run
-            var prevSize  = -1     // last seen cache size, to detect an external reset (shrink)
-            while (isActive) {
-                delay(30_000L)
-                if (container.playerStateManager.isRateLimited()) continue
-                withContext(Dispatchers.IO) {
-                    val cached = container.libraryCache.loadTrackList(LibraryCache.LIKED_SONGS_KEY)
-                        ?: return@withContext
-                    val total = cached.snapshotId.toIntOrNull() ?: return@withContext
-                    val size  = cached.tracks.size
-                    // Seed on first run; re-seed when the cache shrank under us (a UI-side full
-                    // replace/refresh resets the deep cache) so backfill restarts from the new prefix.
-                    if (rawOffset < 0 || size < prevSize) rawOffset = size
-                    prevSize = size
-                    if (rawOffset >= total) return@withContext  // fully backfilled (re-arms if total grows)
-                    container.spotifyRepository.getLikedSongs(limit = 50, offset = rawOffset).fold(
-                        onSuccess = { resp ->
-                            val rawCount = resp.items?.size ?: 0
-                            if (rawCount == 0) { rawOffset = total; return@fold }  // past the end
-                            rawOffset += rawCount
-                            val newTracks = (resp.items ?: emptyList())
-                                .mapNotNull { it.track }
-                                .filter { it.isPlayable != false }
-                            if (newTracks.isNotEmpty()) {
-                                // distinctBy heals overlap when the seed offset started below the true
-                                // raw position (e.g. cache built by an older build); steady state it's a no-op.
-                                container.libraryCache.saveTrackList(
-                                    LibraryCache.LIKED_SONGS_KEY,
-                                    total.toString(),
-                                    (cached.tracks + newTracks).distinctBy { it.id },
-                                )
-                            }
-                            if (rawCount < 50) rawOffset = total  // short page = last page reached
-                        },
-                        onFailure = { e ->
-                            if (e.message?.contains("429") == true) {
-                                container.playerStateManager.noteRateLimited()
-                            }
-                        },
-                    )
-                }
-            }
         }
     }
 

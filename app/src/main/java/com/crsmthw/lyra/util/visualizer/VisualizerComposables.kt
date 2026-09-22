@@ -25,7 +25,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 
-val LocalFftData: ProvidableCompositionLocal<StateFlow<ByteArray?>> =
+// Each frame carries the sample rate that produced it (see FftFrame) so the painters' bin→Hz
+// mapping is exact on any output mix rate, without a second flow / CompositionLocal to keep in sync.
+val LocalFftData: ProvidableCompositionLocal<StateFlow<FftFrame?>> =
     staticCompositionLocalOf { MutableStateFlow(null) }
 
 // Dynamic (not static) so only FftWaveCanvas readers recompose when color animates
@@ -71,7 +73,7 @@ fun FftWaveCanvas(
         return
     }
 
-    val fftBytes by LocalFftData.current.collectAsStateWithLifecycle(null)
+    val fftFrame by LocalFftData.current.collectAsStateWithLifecycle(null)
     val painter  = remember { FftWavePainter() }
     val cfg = LocalVisualizerConfig.current
     LaunchedEffect(cfg) {
@@ -87,8 +89,8 @@ fun FftWaveCanvas(
     }
     val renderTick = remember { mutableLongStateOf(0L) }
 
-    LaunchedEffect(fftBytes) {
-        fftBytes?.let { painter.setFftData(it) }
+    LaunchedEffect(fftFrame) {
+        fftFrame?.let { painter.setFftData(it.bytes, it.sampleRateHz) }
     }
 
     LaunchedEffect(Unit) {
@@ -116,7 +118,7 @@ fun FftCWaveCanvas(
     alpha    : Float    = 0.35f,
     enabled  : Boolean  = true,
 ) {
-    val fftBytes   by LocalFftData.current.collectAsStateWithLifecycle(null)
+    val fftFrame   by LocalFftData.current.collectAsStateWithLifecycle(null)
     val painter    = remember { FftCWavePainter() }
     val cfg = LocalVisualizerConfig.current
     LaunchedEffect(cfg) {
@@ -133,8 +135,8 @@ fun FftCWaveCanvas(
     val renderTick  = remember { mutableLongStateOf(0L) }
     val enabledState = rememberUpdatedState(enabled)
 
-    LaunchedEffect(fftBytes) {
-        fftBytes?.let { painter.setFftData(it) }
+    LaunchedEffect(fftFrame) {
+        fftFrame?.let { painter.setFftData(it.bytes, it.sampleRateHz) }
     }
 
     LaunchedEffect(Unit) {

@@ -143,10 +143,10 @@ private fun ColumnScope.PlaylistList(
                                 )
                             }
                         },
-                        headlineContent = {
+                        modifier        = Modifier.clickable(onClick = onCreateNew),
+                        content         = {
                             Text(stringResource(R.string.create_playlist_title))
                         },
-                        modifier = Modifier.clickable(onClick = onCreateNew),
                     )
                 }
                 if (pickerState.playlists.isEmpty()) {
@@ -167,20 +167,20 @@ private fun ColumnScope.PlaylistList(
                         val isChecked = playlist.id in pickerState.containingPlaylistIds
                         ListItem(
                             leadingContent  = { PlaylistThumbnail(playlist.thumbnailUrl) },
-                            headlineContent = {
-                                Text(
-                                    text     = playlist.name,
-                                    maxLines = 1,
-                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                                )
-                            },
                             trailingContent = {
                                 Checkbox(
                                     checked         = isChecked,
                                     onCheckedChange = null,
                                 )
                             },
-                            modifier = Modifier.clickable { onSelect(playlist) },
+                            modifier        = Modifier.clickable { onSelect(playlist) },
+                            content         = {
+                                Text(
+                                    text     = playlist.name,
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                )
+                            },
                         )
                     }
                 }
@@ -221,7 +221,7 @@ private fun CreateForm(
             IconButton(onClick = onBack, enabled = !isCreating) {
                 Icon(
                     imageVector        = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Back",
+                    contentDescription = stringResource(R.string.cd_back),
                 )
             }
             Text(
