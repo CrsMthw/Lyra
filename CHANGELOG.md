@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [4.0.0] - 2026-09-22 — Quattro
 
 _A discovery release — Lyra gains a layer that shows you something without being asked: an opt-in "For you" band, saved albums and followed artists in the Library, and a listening-stats screen. Podcasts arrive (a Shows filter, a Shows search tab, show detail and episode playback across every player surface), playlists get multi-select removal with server-confirmed counts, Search moves to tabs with per-type paging and remembers more, the mini player reaches every browse screen, and the pop-out panel gets the circle visualizer. Plus a toolchain upgrade, a warning-free compile, and a motion/touch fix pass that makes back navigation behave consistently everywhere._
 
