@@ -426,7 +426,7 @@ fun PlayerCardContent(
                     )
                 }
                 var lastSeekNotch by remember { mutableIntStateOf(-1) }
-                Slider(
+                ValueSlider(
                     value                 = if (isDragging) dragValue else state.progress,
                     onValueChange         = {
                         isDragging = true; dragValue = it

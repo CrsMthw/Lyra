@@ -27,6 +27,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -144,6 +146,17 @@ class PlayerViewModel(
 
     private val _uiState = MutableStateFlow(PlayerUiState())
     val uiState: StateFlow<PlayerUiState> = _uiState
+
+    // Narrow derived flows for composables that must NOT recompose on every poll tick (the
+    // Library layouts, the panel host). As StateFlows they carry their CURRENT value, so
+    // `collectAsStateWithLifecycle()` seeds the first frame from it — the reason the call sites
+    // used to read `uiState.value` for an initial value (lint StateFlowValueCalledInComposition).
+    val hasCurrentTrack: StateFlow<Boolean> = _uiState.map { it.currentTrack != null }.distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, _uiState.value.currentTrack != null)
+    val currentTrackId: StateFlow<String?> = _uiState.map { it.currentTrack?.id }.distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, _uiState.value.currentTrack?.id)
+    val isPlayingFlow: StateFlow<Boolean> = _uiState.map { it.isPlaying }.distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, _uiState.value.isPlaying)
 
     /** Shared add-to-playlist implementation (the same one the song touch-and-hold menu uses),
      *  targeting the current track. The picker methods below are thin delegations to it. */

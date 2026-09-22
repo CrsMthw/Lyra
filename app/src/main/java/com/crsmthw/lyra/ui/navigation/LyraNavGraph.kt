@@ -31,6 +31,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.IntOffset
@@ -387,6 +388,8 @@ fun LyraNavGraph(
 
             composable(Screen.Library.route) { backStackEntry ->
                 val vm = viewModel<LibraryViewModel>(factory = LibraryViewModelFactory(container))
+                // Resolved in composition (configuration-aware); the effect below only shows it.
+                val unsupportedMsg = stringResource(R.string.deeplink_unsupported)
 
                 // A deep-linked playlist, handed back by the link resolver (see above). Only a
                 // playlist in the user's OWN library can be opened: LibraryViewModel.selectPlaylist
@@ -428,11 +431,7 @@ fun LyraNavGraph(
                     // between the clear and the hand-off.
                     backStackEntry.savedStateHandle[PENDING_PLAYLIST_KEY] = null
                     if (playlist != null) vm.selectPlaylist(playlist)
-                    else Toast.makeText(
-                        context,
-                        context.getString(R.string.deeplink_unsupported),
-                        Toast.LENGTH_LONG,
-                    ).show()
+                    else Toast.makeText(context, unsupportedMsg, Toast.LENGTH_LONG).show()
                 }
 
                 LibraryScreen(

@@ -202,7 +202,7 @@ private fun VolumeControl(
                     contentDescription = stringResource(R.string.player_volume_down),
                 )
             }
-            Slider(
+            ValueSlider(
                 value                 = volume,
                 onValueChange         = {
                     val notch = (it / VOLUME_STEP).toInt()   // tick every 5%

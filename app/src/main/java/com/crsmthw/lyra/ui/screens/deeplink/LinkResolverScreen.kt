@@ -58,6 +58,8 @@ fun LinkResolverScreen(
     onUnsupported   : () -> Unit,
 ) {
     val context     = LocalContext.current
+    // Resolved in composition (configuration-aware), not through the Context inside the effect.
+    val unsupportedMsg = stringResource(R.string.deeplink_unsupported)
     val resolution  by viewModel.state.collectAsStateWithLifecycle()
     var isStartingPlayback by remember { mutableStateOf(false) }
 
@@ -67,11 +69,7 @@ fun LinkResolverScreen(
         when (val outcome = resolution) {
             null -> Unit                       // still resolving
             is LinkResolution.Unsupported -> {
-                Toast.makeText(
-                    context,
-                    context.getString(R.string.deeplink_unsupported),
-                    Toast.LENGTH_LONG,
-                ).show()
+                Toast.makeText(context, unsupportedMsg, Toast.LENGTH_LONG).show()
                 onUnsupported()
             }
             is LinkResolution.Resolved -> when (outcome.link.type) {

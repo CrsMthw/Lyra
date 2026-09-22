@@ -61,8 +61,6 @@ import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 import java.io.File
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
 
 /**
  * Which "mode" the detail bar currently shows — normal (overflow menu), selection (delete), or
@@ -95,12 +93,9 @@ internal fun RightPaneContent(
     // time this pane re-enters composition, so the now-playing row highlight would drop for one
     // frame on each pane swap / screen re-entry. Cosmetic here — but the same shape as the bug
     // that made the search bar→FAB morph stutter, so keep both seeded.
-    val currentTrackId by remember {
-        playerViewModel.uiState.map { it.currentTrack?.id }.distinctUntilChanged()
-    }.collectAsStateWithLifecycle(playerViewModel.uiState.value.currentTrack?.id)
-    val isPlayingState by remember {
-        playerViewModel.uiState.map { it.isPlaying }.distinctUntilChanged()
-    }.collectAsStateWithLifecycle(playerViewModel.uiState.value.isPlaying)
+    // (Both seeds now come from the ViewModel's derived StateFlows' own current values.)
+    val currentTrackId by playerViewModel.currentTrackId.collectAsStateWithLifecycle()
+    val isPlayingState by playerViewModel.isPlayingFlow.collectAsStateWithLifecycle()
     val playlist     = state.currentPlaylist
     val isLikedSongs = playlist == null
     // Owned playlists only (never Liked Songs / followed) get the delete action — and the same
@@ -538,7 +533,9 @@ internal fun RightPaneContent(
                             modifier = Modifier.semantics { heading() },
                         )
                         DetailBarMode.Reorder -> Text(
-                            text     = stringResource(R.string.reorder_songs_title),
+                            text     = stringResource(
+                                if (state.isLoadingReorder) R.string.reorder_loading else R.string.reorder_songs_title,
+                            ),
                             maxLines = 1,
                             modifier = Modifier.semantics { heading() },
                         )
@@ -706,7 +703,8 @@ private fun EditPlaylistDetailsDialog(
                 if (error != null) {
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        text  = error,
+                        // A failure with no API message (the VM stores "") reads as the generic line.
+                        text  = error.ifBlank { stringResource(R.string.edit_playlist_error) },
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall,
                     )

@@ -28,12 +28,17 @@ import kotlin.math.abs
  *
  * `width = Dp.Unspecified` on the `PrimaryIndicator` remains mandatory at the call site so its
  * `requiredWidth` is a pass-through.
+ *
+ * A `Modifier.` extension (lint `ModifierFactoryExtensionFunction`) that takes the [scope] as a
+ * parameter, because `tabIndicatorLayout` is only reachable through a [TabIndicatorScope]; call it
+ * from inside the tab row's `indicator` lambda as `Modifier.pagerTrackingIndicator(this, pagerState)`.
  */
 @ExperimentalMaterial3Api
-fun TabIndicatorScope.pagerTrackingIndicator(
+fun Modifier.pagerTrackingIndicator(
+    scope      : TabIndicatorScope,
     pagerState : PagerState,
     extraWidth : Dp = 0.dp,
-): Modifier = Modifier.tabIndicatorLayout { measurable, constraints, tabPositions ->
+): Modifier = with(scope) { this@pagerTrackingIndicator.tabIndicatorLayout { measurable, constraints, tabPositions ->
     // Stock `TabIndicatorOffsetNode`'s own guard: `TabRowImpl` publishes the tab positions from
     // inside its own measure pass, so a measure that runs before that has nothing to place.
     if (tabPositions.isEmpty()) return@tabIndicatorLayout layout(0, 0) {}
@@ -61,4 +66,4 @@ fun TabIndicatorScope.pagerTrackingIndicator(
     val x = left.roundToPx()
         .let { if (layoutDirection == LayoutDirection.Ltr) it else -it }
     layout(placeable.width, placeable.height) { placeable.place(x, 0) }
-}
+} }

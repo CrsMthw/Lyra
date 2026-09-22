@@ -465,12 +465,13 @@ internal fun LibraryBrowserPane(
             // in the hoisted state when a rotation back re-entered the large branch — over a list
             // this pane may well have scrolled to the top meanwhile.
             //
-            // `remember`, not a `LaunchedEffect`: it runs once per branch entry and BEFORE the bar
-            // composes, so there is no frame of a shifted bar — the same "assign during
-            // composition" idiom as the Library's `PaneStateHolder` (docs/MOTION.md). Keyed on
-            // [barState] so a new hoisted instance re-arms it. Nothing in this branch reads the
-            // hoisted state, so the write cannot invalidate the composition that performs it.
-            remember(barState) {
+            // A `SideEffect`, not a `LaunchedEffect`: it runs in the SAME frame, after this
+            // composition is applied and before measure, so there is no frame of a shifted bar; and
+            // not a `remember { … }` write-during-composition (lint `RememberReturnType`, retired
+            // 2026-09-22 — the same change in `rememberRootTopBarScrollBehavior`). It re-runs on
+            // every recomposition of this branch, which is harmless: nothing in the pinned branch
+            // reads the hoisted state, so the write cannot invalidate the composition performing it.
+            SideEffect {
                 barState.heightOffset  = 0f
                 barState.contentOffset = 0f
             }
@@ -788,7 +789,7 @@ private fun LibraryTabRow(
         // `width = Dp.Unspecified` is mandatory — `PrimaryIndicator`'s default is a 24dp stub.
         indicator        = {
             TabRowDefaults.PrimaryIndicator(
-                modifier = pagerTrackingIndicator(pagerState, extraWidth = LibraryTabIndicatorCompensation),
+                modifier = Modifier.pagerTrackingIndicator(this, pagerState, extraWidth = LibraryTabIndicatorCompensation),
                 width    = Dp.Unspecified,
             )
         },

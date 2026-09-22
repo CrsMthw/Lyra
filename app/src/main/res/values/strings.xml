@@ -342,8 +342,6 @@
     <string name="ilyra_settings_color">Color</string>
     <string name="ilyra_value_silver">Silver</string>
     <string name="ilyra_value_black">Black</string>
-    <string name="ilyra_np_shuffle">Shuffle</string>
-    <string name="ilyra_np_repeat">Repeat</string>
     <string name="ilyra_value_all">All</string>
     <string name="ilyra_value_one">One</string>
     <string name="ilyra_options_title">Options</string>

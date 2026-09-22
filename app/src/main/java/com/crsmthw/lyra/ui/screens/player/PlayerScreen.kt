@@ -73,6 +73,7 @@ import com.crsmthw.lyra.ui.components.DevicePickerSheet
 import com.crsmthw.lyra.ui.components.LocalPlayerArtKey
 import com.crsmthw.lyra.ui.components.PlainLyricsView
 import com.crsmthw.lyra.ui.components.SyncedLyricsView
+import com.crsmthw.lyra.ui.components.ValueSlider
 import androidx.compose.ui.platform.LocalHapticFeedback
 import com.crsmthw.lyra.util.confirm
 import com.crsmthw.lyra.util.loadAlbumArtColors
@@ -942,7 +943,7 @@ private fun PlayerControls(
             )
         }
         var lastSeekNotch by remember { mutableIntStateOf(-1) }
-        Slider(
+        ValueSlider(
             value                 = if (isDragging) dragValue else state.progress,
             onValueChange         = {
                 isDragging = true; dragValue = it

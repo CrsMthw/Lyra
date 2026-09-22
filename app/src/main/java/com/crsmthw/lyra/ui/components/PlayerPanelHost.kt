@@ -39,8 +39,6 @@ import com.crsmthw.lyra.util.NavTransitionMillis
 import com.crsmthw.lyra.util.confirm
 import com.crsmthw.lyra.util.screenTransitionSpec
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlin.coroutines.cancellation.CancellationException
 
@@ -423,9 +421,8 @@ fun PlayerPanelHost(
     // the transition animates over. SEEDED SYNCHRONOUSLY from the StateFlow's current value —
     // `collectAsStateWithLifecycle` bakes its initial value into its own `remember`, and a literal
     // `false` would make the bar animate in from nothing on every Activity recreation.
-    val hasTrack by remember {
-        playerViewModel.uiState.map { it.currentTrack != null }.distinctUntilChanged()
-    }.collectAsStateWithLifecycle(playerViewModel.uiState.value.currentTrack != null)
+    // (The seed comes from the ViewModel's derived StateFlow's own current value.)
+    val hasTrack by playerViewModel.hasCurrentTrack.collectAsStateWithLifecycle()
 
     // ONE expression for which surface is wanted, parameterised by the two things that change
     // between the questions asked of it: the ROUTE gate, and whether the panel still owns this

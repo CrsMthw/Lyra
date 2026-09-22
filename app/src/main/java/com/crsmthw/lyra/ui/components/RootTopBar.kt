@@ -12,7 +12,7 @@ import androidx.compose.material3.TopAppBarState
 import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
@@ -111,21 +111,72 @@ internal val LargeBarMinPaneHeight = 600.dp
  *   renders from it; the small branch only CLEARS it (see below).
  * @return the behaviour whose `nestedScrollConnection` the caller must put on its scroller.
  */
+/** The 600dp height gate, read from the WINDOW (see the KDoc above) — one reading for the bar and its behaviour. */
+@Composable
+private fun rootBarIsLarge(): Boolean {
+    val paneHeightDp = with(LocalDensity.current) {
+        LocalWindowInfo.current.containerSize.height.toDp()
+    }
+    return paneHeightDp >= LargeBarMinPaneHeight
+}
+
+/**
+ * The scroll behaviour a root screen hangs on its own scroller (`Modifier.nestedScroll(
+ * behavior.nestedScrollConnection)`), decided by the same height gate [RootTopBar] uses: an
+ * `exitUntilCollapsed` behaviour over the hoisted [barState] for the large bar, a `pinned` one over
+ * a throwaway state for the small bar. Split out of [RootTopBar] on 2026-09-22 (lint
+ * `ComposableNaming`): a composable that EMITS UI must not also RETURN a value. Call this first,
+ * then pass its result to [RootTopBar] and to the content's `nestedScroll`.
+ *
+ * Separate `if` branches on purpose — they are separate composition groups, so each keeps its own
+ * state. The small branch must NOT inherit the hoisted [barState]: `PinnedScrollBehavior` never
+ * writes `heightOffset` while `SingleRowTopAppBar` still passes `scrolledOffset = { heightOffset }`,
+ * so a collapsed value carried across a portrait → folded landscape rotation would draw the small
+ * bar shifted up and clipped (`adjustHeightOffsetLimit` fixes only the LIMIT, not the offset).
+ *
+ * The small branch is also the ONE bar reset that survives (CLAUDE.md → "a content switch never
+ * resets an app bar"): it clears the hoisted state so that state only ever describes the LARGE bar
+ * — without it a collapse earned in portrait would still be sitting there when a rotation back
+ * re-entered the large branch, over content that may have scrolled to the top meanwhile. A pinned
+ * bar cannot own a collapse, which is why this is the one place a reset belongs. It runs from a
+ * `SideEffect`: same frame, after this composition is applied and before measure, so there is no
+ * frame of a shifted bar; and nothing in this branch READS the hoisted state, so the write cannot
+ * invalidate the composition that performs it. (Until 2026-09-22 it was a `remember(barState) { … }`
+ * write-during-composition, retired by lint `RememberReturnType`.) The large branch has NO entry
+ * reset: the collapse the user last dragged is simply rendered — an entry reset there would fire
+ * on every ordinary re-entry of the screen and undo it.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun rememberRootTopBarScrollBehavior(
+    barState : TopAppBarState = rememberTopAppBarState(),
+): TopAppBarScrollBehavior =
+    if (rootBarIsLarge()) {
+        TopAppBarDefaults.exitUntilCollapsedScrollBehavior(state = barState)
+    } else {
+        SideEffect {
+            barState.heightOffset  = 0f
+            barState.contentOffset = 0f
+        }
+        TopAppBarDefaults.pinnedScrollBehavior(state = rememberTopAppBarState())
+    }
+
+/**
+ * The bar itself. Takes the behaviour [rememberRootTopBarScrollBehavior] returned — the two read
+ * the same height gate, so they always agree on large vs small.
+ */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 internal fun RootTopBar(
     title          : String,
+    scrollBehavior : TopAppBarScrollBehavior,
     modifier       : Modifier = Modifier,
     subtitle       : String? = null,
     navigationIcon : @Composable () -> Unit = {},
     actions        : @Composable RowScope.() -> Unit = {},
     containerColor : Color = MaterialTheme.colorScheme.background,
-    barState       : TopAppBarState = rememberTopAppBarState(),
-): TopAppBarScrollBehavior {
-    val paneHeightDp = with(LocalDensity.current) {
-        LocalWindowInfo.current.containerSize.height.toDp()
-    }
-    val useLargeBar  = paneHeightDp >= LargeBarMinPaneHeight
+) {
+    val useLargeBar  = rootBarIsLarge()
 
     val barColors = TopAppBarDefaults.topAppBarColors(
         containerColor         = containerColor,
@@ -138,17 +189,8 @@ internal fun RootTopBar(
         { Text(text, maxLines = 1, overflow = TextOverflow.Ellipsis) }
     }
 
-    // Separate `if` branches on purpose — they are separate composition groups, so each keeps its
-    // own state. The small branch must NOT inherit the hoisted [barState]: `PinnedScrollBehavior`
-    // never writes `heightOffset` while `SingleRowTopAppBar` still passes
-    // `scrolledOffset = { heightOffset }`, so a collapsed value carried across a portrait → folded
-    // landscape rotation would draw the small bar shifted up and clipped (`adjustHeightOffsetLimit`
-    // fixes only the LIMIT, not the offset).
-    return if (useLargeBar) {
-        // No entry reset. The collapse the user last dragged is simply rendered — see "Nothing
-        // resets the large bar's collapse" above; an entry reset here would fire on every ordinary
-        // re-entry of the screen (every nav round trip) and undo it.
-        val behavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(state = barState)
+    // Two branches, two composition groups — see `rememberRootTopBarScrollBehavior` for why.
+    if (useLargeBar) {
         LargeFlexibleTopAppBar(
             title          = titleSlot,
             modifier       = modifier,
@@ -163,27 +205,9 @@ internal fun RootTopBar(
                 TopAppBarDefaults.LargeFlexibleAppBarWithoutSubtitleExpandedHeight,
             windowInsets   = appBarWindowInsets,
             colors         = barColors,
-            scrollBehavior = behavior,
+            scrollBehavior = scrollBehavior,
         )
-        behavior
     } else {
-        // Clear the hoisted state on entry so it only ever describes the LARGE bar: this branch
-        // renders a pinned bar off its OWN state, and `PinnedScrollBehavior` never writes
-        // `heightOffset`, so without this a collapse earned in portrait would still be sitting in
-        // the hoisted state when a rotation back re-entered the large branch — over content this
-        // screen may well have scrolled to the top meanwhile. A pinned bar cannot own a collapse,
-        // which is why this is the one place a reset belongs.
-        //
-        // `remember`, not a `LaunchedEffect`: it runs once per branch entry and BEFORE the bar
-        // composes, so there is no frame of a shifted bar (the same "assign during composition"
-        // idiom as the Library's `PaneStateHolder`, docs/MOTION.md). Keyed on [barState] so a newly
-        // hoisted instance re-arms it. Nothing in this branch READS the hoisted state, so the write
-        // cannot invalidate the composition that performs it.
-        remember(barState) {
-            barState.heightOffset  = 0f
-            barState.contentOffset = 0f
-        }
-        val behavior = TopAppBarDefaults.pinnedScrollBehavior(state = rememberTopAppBarState())
         // The small bar has no nullable-subtitle overload — the subtitle one takes a non-null slot,
         // so the two cases are two calls. [subtitle] is a screen-level decision, so this `if` never
         // flips under the user.
@@ -196,7 +220,7 @@ internal fun RootTopBar(
                 actions        = actions,
                 windowInsets   = appBarWindowInsets,
                 colors         = barColors,
-                scrollBehavior = behavior,
+                scrollBehavior = scrollBehavior,
             )
         } else {
             TopAppBar(
@@ -206,9 +230,8 @@ internal fun RootTopBar(
                 actions        = actions,
                 windowInsets   = appBarWindowInsets,
                 colors         = barColors,
-                scrollBehavior = behavior,
+                scrollBehavior = scrollBehavior,
             )
         }
-        behavior
     }
 }

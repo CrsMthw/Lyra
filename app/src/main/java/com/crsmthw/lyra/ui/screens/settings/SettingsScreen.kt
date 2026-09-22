@@ -62,8 +62,10 @@ import com.crsmthw.lyra.ui.components.BarContentGap
 import com.crsmthw.lyra.ui.components.CappedModalBottomSheet
 import com.crsmthw.lyra.ui.components.ConnectedChoiceRow
 import com.crsmthw.lyra.ui.components.RootTopBar
+import com.crsmthw.lyra.ui.components.rememberRootTopBarScrollBehavior
 import com.crsmthw.lyra.ui.components.TopBarFade
 import com.crsmthw.lyra.ui.components.sheetTopGap
+import com.crsmthw.lyra.ui.components.ValueSlider
 import com.crsmthw.lyra.ui.theme.ThemeMode
 import com.crsmthw.lyra.util.visualizer.VisualizerStyle
 import kotlin.math.roundToInt
@@ -137,8 +139,10 @@ fun SettingsScreen(
             // the content scrolls and stays small until it is back at the top, or a small pinned bar
             // on a pane under 600dp tall. It replaced the 300dp hero band + TopScrim + back/title
             // pills, so nothing below it needs a status-bar inset any more.
-            val scrollBehavior = RootTopBar(
+            val scrollBehavior = rememberRootTopBarScrollBehavior(barState)
+            RootTopBar(
                 title          = stringResource(R.string.settings_title),
+                scrollBehavior = scrollBehavior,
                 navigationIcon = {
                     IconButton(onClick = { haptics.confirm(); onBack() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack,
@@ -146,7 +150,6 @@ fun SettingsScreen(
                     }
                 },
                 containerColor = background,
-                barState       = barState,
             )
 
             Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
@@ -815,7 +818,7 @@ private fun ResolutionSliderRow(prefix: String?, bands: Int, onBands: (Int) -> U
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Slider(
+        ValueSlider(
             value                 = pos,
             onValueChange         = { v -> if (v.roundToInt() != pos.roundToInt()) haptics.tick(); pos = v },
             onValueChangeFinished = { onBands(resolutions[pos.roundToInt()]) },
@@ -839,7 +842,7 @@ private fun GainSliderRow(prefix: String?, offset: Int, onOffset: (Int) -> Unit)
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Slider(
+        ValueSlider(
             value                 = pos,
             onValueChange         = { v -> if (v.roundToInt() != pos.roundToInt()) haptics.tick(); pos = v },
             onValueChangeFinished = { onOffset(pos.roundToInt()) },
@@ -903,6 +906,7 @@ private fun AboutSection(
         // are inert (no haptic) — the toggle in the Lyra section is the activation path.
         var tapCount by remember { mutableIntStateOf(0) }
         var lastTapMs by remember { mutableLongStateOf(0L) }
+        val unlockedMsg = stringResource(R.string.settings_ilyra_unlocked)   // configuration-aware, unlike context.getString
         Text(
             text      = stringResource(R.string.settings_version, BuildConfig.VERSION_NAME),
             style     = MaterialTheme.typography.bodySmall,
@@ -919,7 +923,7 @@ private fun AboutSection(
                     if (tapCount >= 5) {
                         tapCount = 0
                         onIlyraUnlocked()
-                        Toast.makeText(context, context.getString(R.string.settings_ilyra_unlocked), Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, unlockedMsg, Toast.LENGTH_SHORT).show()
                     }
                 },
             ),

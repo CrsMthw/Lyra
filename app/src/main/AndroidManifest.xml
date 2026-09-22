@@ -63,7 +63,10 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="https" android:host="open.spotify.com" />
+                <!-- One attribute per <data> tag: the filter combines them into one matcher anyway,
+                     and this shape makes that explicit (lint IntentFilterUniqueDataAttributes). -->
+                <data android:scheme="https" />
+                <data android:host="open.spotify.com" />
                 <data android:pathPrefix="/track/" />
                 <data android:pathPrefix="/album/" />
                 <data android:pathPrefix="/artist/" />

@@ -890,7 +890,7 @@ private fun SearchTabRow(
         // `width = Dp.Unspecified` is mandatory — `PrimaryIndicator`'s default is a 24dp stub.
         indicator        = {
             TabRowDefaults.PrimaryIndicator(
-                modifier = pagerTrackingIndicator(pagerState),
+                modifier = Modifier.pagerTrackingIndicator(this, pagerState),
                 width    = Dp.Unspecified,
             )
         },

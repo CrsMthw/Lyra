@@ -491,7 +491,6 @@ class ILyraViewModel(
     override fun onCleared() {
         likedSongsIndexer.setFastDemand(false)
         prefetcher.cancel()
-        super.onCleared()
     }
 
     // ── Wheel event dispatch ──────────────────────────────────────────────────

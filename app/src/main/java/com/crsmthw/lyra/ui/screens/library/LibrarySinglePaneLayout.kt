@@ -47,8 +47,6 @@ import com.crsmthw.lyra.util.rememberSearchBarMorphClip
 import com.crsmthw.lyra.util.visualizer.FftWaveCanvas
 import com.crsmthw.lyra.util.visualizer.LocalVisualizerAccentColor
 import java.io.File
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlin.coroutines.cancellation.CancellationException
 import com.crsmthw.lyra.ui.components.LocalPopOutPanelOpen
@@ -156,9 +154,8 @@ internal fun SinglePaneLayout(
     // with a correct seed a FAB whose target is 90.dp is BORN at 90.dp and the morph is smooth.
     // Springing `fabBottomPadding` stays correct (docs/MOTION.md puts it in the "spring it" column)
     // precisely BECAUSE of this seed.
-    val hasCurrentTrack by remember {
-        playerViewModel.uiState.map { it.currentTrack != null }.distinctUntilChanged()
-    }.collectAsStateWithLifecycle(playerViewModel.uiState.value.currentTrack != null)
+    // (The seed now comes from the ViewModel's derived StateFlow's own current value.)
+    val hasCurrentTrack by playerViewModel.hasCurrentTrack.collectAsStateWithLifecycle()
 
     // ── Predictive back: detail → browser ────────────────────────────────────────────────────
     // Backing out of a playlist / Liked Songs is GESTURE-DRIVEN, so the container transform (the

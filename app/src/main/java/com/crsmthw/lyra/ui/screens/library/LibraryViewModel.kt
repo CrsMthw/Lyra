@@ -655,7 +655,9 @@ class LibraryViewModel(
                 onFailure = { e ->
                     _uiState.update { it.copy(
                         isUpdatingDetails  = false,
-                        updateDetailsError = e.message,
+                        // Never null on failure: null means "no error" and would CLOSE the dialog as
+                        // a success. "" makes the UI show its generic line.
+                        updateDetailsError = e.message ?: "",
                     ) }
                 },
             )

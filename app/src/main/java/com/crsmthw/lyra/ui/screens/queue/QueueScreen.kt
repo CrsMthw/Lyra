@@ -31,6 +31,7 @@ import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.remote.model.SpotifyTrack
 import com.crsmthw.lyra.ui.components.BarContentGap
 import com.crsmthw.lyra.ui.components.RootTopBar
+import com.crsmthw.lyra.ui.components.rememberRootTopBarScrollBehavior
 import com.crsmthw.lyra.ui.components.TopBarFade
 import com.crsmthw.lyra.ui.components.TrackActionsHost
 import com.crsmthw.lyra.ui.components.toTrackActionTarget
@@ -109,8 +110,10 @@ fun QueueScreen(
                 .padding(paddingValues)
                 .horizontalSystemBarsPadding(),
         ) {
-            val scrollBehavior = RootTopBar(
+            val scrollBehavior = rememberRootTopBarScrollBehavior(barState)
+            RootTopBar(
                 title          = stringResource(R.string.queue_title),
+                scrollBehavior = scrollBehavior,
                 navigationIcon = {
                     IconButton(onClick = { haptics.confirm(); onBack() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack,
@@ -118,7 +121,6 @@ fun QueueScreen(
                     }
                 },
                 containerColor = MaterialTheme.colorScheme.background,
-                barState       = barState,
             )
 
             Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
