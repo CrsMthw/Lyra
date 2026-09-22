@@ -438,4 +438,37 @@ class ReorderCalculatorTest {
         c.commitDrag()
         assertFalse(c.isDragging)
     }
+
+    // ── Accessibility path ──────────────────────────────────────────────────────
+    // The a11y "Move up" / "Move down" custom actions call the same three VM functions as a
+    // gesture: beginReorderDrag(row) → reorderTrackLocal(row, row±1) → commitReorderDrag().
+    // This test anchors that contract at the calculator level.
+
+    @Test
+    fun `a11y - beginDrag + one applyLocalMove + commitDrag produces a single-move PUT`() {
+        val c = calc(pt(track("A")), null, pt(track("B")), pt(track("C")))
+        // A11y "Move B (row 1) down one step"
+        c.beginDrag(1)
+        c.applyLocalMove(1, 2)
+        val params = c.commitDrag()
+        assertNotNull(params)
+        // B was at raw pos 2, C at raw pos 3. Moving B after C → insert_before = 3+1 = 4.
+        assertEquals(2, params.rangeStart)
+        assertEquals(4, params.insertBefore)
+        assertEquals(listOf("A", "C", "B"), c.labels())
+    }
+
+    @Test
+    fun `a11y - beginDrag + one applyLocalMove up + commitDrag`() {
+        val c = calc(pt(track("A")), null, pt(track("B")), pt(track("C")))
+        // A11y "Move C (row 2) up one step"
+        c.beginDrag(2)
+        c.applyLocalMove(2, 1)
+        val params = c.commitDrag()
+        assertNotNull(params)
+        // C was at raw pos 3, B at raw pos 2. Moving C before B → insert_before = 2.
+        assertEquals(3, params.rangeStart)
+        assertEquals(2, params.insertBefore)
+        assertEquals(listOf("A", "C", "B"), c.labels())
+    }
 }

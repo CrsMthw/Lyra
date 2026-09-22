@@ -126,7 +126,7 @@ class ReorderCalculator private constructor(
      * - `insertBefore` = where the slot should end up, in the snapshot's position space
      */
     fun commitDrag(): ReorderApiParams? {
-        val snap = snapshot ?: return null
+        snapshot ?: return null
         val slot = draggedSlot ?: return null
         val startPos = dragStartRawPos
         val currentPos = rawPosOfSlot(slot)
@@ -160,33 +160,6 @@ class ReorderCalculator private constructor(
         val snap = snapshot ?: return
         rawList.clear()
         rawList.addAll(snap)
-        snapshot = null
-        draggedSlot = null
-        dragStartRawPos = -1
-    }
-
-    /**
-     * Promotes the current pending list to "confirmed": takes a fresh snapshot so the next drag
-     * starts from the up-to-date state. Called after a successful PUT, when the server's list
-     * matches the pending list.
-     */
-    fun confirmPending() {
-        // No-op on the raw list itself — it's already in the right order.
-        // Just ensure no drag is in progress.
-        snapshot = null
-        draggedSlot = null
-        dragStartRawPos = -1
-    }
-
-    /**
-     * Reverts the pending raw list to the last confirmed (snapshot) state. Used on PUT failure
-     * to restore the display to what the server actually has.
-     */
-    fun revertToConfirmed(confirmedTracks: List<SpotifyTrack>) {
-        // The confirmed tracks are the display we want. We can't simply restore the snapshot
-        // because the snapshot is from the DRAG start, and there may have been prior confirmed
-        // commits. Instead, rely on the caller's confirmed track list.
-        // This is a defensive fallback — normally the snapshot IS the confirmed state.
         snapshot = null
         draggedSlot = null
         dragStartRawPos = -1

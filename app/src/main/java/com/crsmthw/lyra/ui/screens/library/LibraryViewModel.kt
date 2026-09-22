@@ -89,6 +89,7 @@ data class LibraryUiState(
     val reorderMode           : Boolean                = false,
     val isLoadingReorder      : Boolean                = false,  // full list fetch for reorder
     val isCommittingReorder   : Boolean                = false,  // a PUT is in flight (disables Done)
+    val reorderStableIds      : List<Int>?             = null,   // stable LazyColumn keys from the calc
     val reorderResult         : ReorderResult?         = null,   // one-shot; the screen consumes it
     // ── Edit details ──
     val isUpdatingDetails     : Boolean                = false,
@@ -154,6 +155,7 @@ private fun LibraryUiState.modesCleared() =
         reorderMode         = false,
         isLoadingReorder    = false,
         isCommittingReorder = false,
+        reorderStableIds    = null,
     )
 
 /**
@@ -391,6 +393,7 @@ class LibraryViewModel(
                 isLoadingReorder     = false,
                 reorderMode          = true,
                 currentTracks        = calc.confirmedTracks(),
+                reorderStableIds     = calc.visibleTracksWithIds.map { p -> p.first },
                 playlistTracksOffset = calc.totalRawSlots,
                 playlistTracksTotal  = calc.totalRawSlots,
             ) }
@@ -431,13 +434,13 @@ class LibraryViewModel(
             reorderMode          = false,
             isCommittingReorder  = false,
             currentTracks        = tracks,
+            reorderStableIds     = null,
         ) }
-        // Persist the confirmed order to the cache.
-        if (playlist != null) {
+        // Persist the confirmed order to the cache. Skipped when snapshot is null (user entered
+        // and exited without dragging — nothing changed).
+        if (playlist != null && snapshot != null) {
             viewModelScope.launch(Dispatchers.IO) {
-                cache.replacePlaylistTrackOrder(
-                    playlist.id, tracks, snapshot ?: "", calc.totalRawSlots,
-                )
+                cache.replacePlaylistTrackOrder(playlist.id, tracks, snapshot, calc.totalRawSlots)
             }
         }
     }
@@ -449,7 +452,11 @@ class LibraryViewModel(
     fun reorderTrackLocal(fromIndex: Int, toIndex: Int) {
         val calc = reorderCalc ?: return
         if (!calc.applyLocalMove(fromIndex, toIndex)) return
-        _uiState.update { it.copy(currentTracks = calc.visibleTracks.toList()) }
+        val keyed = calc.visibleTracksWithIds
+        _uiState.update { it.copy(
+            currentTracks    = keyed.map { p -> p.second },
+            reorderStableIds = keyed.map { p -> p.first },
+        ) }
     }
 
     /**
@@ -501,17 +508,18 @@ class LibraryViewModel(
                     reorderConfirmedTracks = null
                     _uiState.update { st ->
                         st.copy(
-                            reorderMode         = false,
+                            reorderMode          = false,
                             isCommittingReorder  = false,
                             currentTracks        = confirmed ?: st.currentTracks,
+                            reorderStableIds     = null,
                             reorderResult        = ReorderResult.Failure(e.message),
                         )
                     }
                     // Persist the reverted order — must complete even if the scope is cancelled.
-                    if (confirmed != null) {
+                    if (confirmed != null && snap != null) {
                         withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
                             cache.replacePlaylistTrackOrder(
-                                playlist.id, confirmed, snap ?: "", calc.totalRawSlots,
+                                playlist.id, confirmed, snap, calc.totalRawSlots,
                             )
                         }
                     }
@@ -519,13 +527,6 @@ class LibraryViewModel(
             )
         }
     }
-
-    /**
-     * The current stable-id → track mapping from the calculator, for use as LazyColumn keys in
-     * the UI during reorder mode. Returns null when not reordering. Read from the main thread.
-     */
-    val reorderStableKeys: List<Pair<Int, SpotifyTrack>>?
-        get() = reorderCalc?.visibleTracksWithIds
 
     /** Consumes [LibraryUiState.reorderResult] once the screen has reported it. */
     fun clearReorderResult() {
@@ -781,6 +782,7 @@ class LibraryViewModel(
                         reorderMode         = false,
                         isLoadingReorder    = false,
                         isCommittingReorder = false,
+                        reorderStableIds    = null,
                     ) }
                 }
                 _uiState.update { s ->

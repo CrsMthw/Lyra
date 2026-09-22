@@ -10,6 +10,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -242,7 +243,7 @@ internal fun RightPaneContent(
             onReorderMove     = viewModel::reorderTrackLocal,
             onDragStarted     = viewModel::beginReorderDrag,
             onDragStopped     = viewModel::commitReorderDrag,
-            reorderStableKeys = if (inReorder) viewModel.reorderStableKeys else null,
+            reorderStableIds  = state.reorderStableIds,
             modifier       = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = 100.dp + navBarBottomDp),
             listState      = listState,
@@ -803,10 +804,10 @@ private fun TrackList(
     onReorderMove  : (fromIndex: Int, toIndex: Int) -> Unit = { _, _ -> },
     onDragStarted  : (rowIndex: Int) -> Unit = {},
     onDragStopped  : () -> Unit = {},
-    // Stable keys from the ReorderCalculator — each pair is (stableId, track). When non-null
-    // (reorder mode) the stableId is used as the LazyColumn key; when null (normal mode) the
-    // uri#ordinal scheme is used. This avoids re-keying on every local move.
-    reorderStableKeys: List<Pair<Int, com.crsmthw.lyra.data.remote.model.SpotifyTrack>>? = null,
+    // Stable ids from the calculator, one per visible track in display order. When non-null
+    // (reorder mode) the id is used as the LazyColumn key; when null (normal mode) the
+    // uri#ordinal scheme is used. Written in the same state emission as tracks so they agree.
+    reorderStableIds : List<Int>? = null,
     contentPadding : PaddingValues = PaddingValues(bottom = 100.dp),
     listState      : androidx.compose.foundation.lazy.LazyListState = rememberLazyListState(),
     headerContent  : (@Composable () -> Unit)? = null,
@@ -832,9 +833,9 @@ private fun TrackList(
     // In reorder mode, use the calculator's stable ids so keys never change when rows are
     // swapped — a positional re-key on every local move would lose the drag. In normal mode,
     // keys are uri#ordinal (precomputed once per list to handle duplicate uris).
-    val keyedTracks = remember(tracks, reorderMode, reorderStableKeys) {
-        if (reorderMode && reorderStableKeys != null) {
-            reorderStableKeys.map { (id, t) -> "ro#$id" to t }
+    val keyedTracks = remember(tracks, reorderMode, reorderStableIds) {
+        if (reorderMode && reorderStableIds != null && reorderStableIds.size == tracks.size) {
+            tracks.mapIndexed { i, t -> "ro#${reorderStableIds[i]}" to t }
         } else {
             val seen = HashMap<String, Int>(tracks.size)
             tracks.map { t ->
@@ -876,7 +877,7 @@ private fun TrackList(
         if (tracks.isEmpty() && emptyContent != null) {
             item(key = "empty_state") { emptyContent() }
         }
-        items(keyedTracks, key = { it.first }) { (key, track) ->
+        itemsIndexed(keyedTracks, key = { _, it -> it.first }) { rowIndex, (key, track) ->
             if (reorderMode) {
                 ReorderableItem(
                     state = reorderableState,
@@ -886,8 +887,6 @@ private fun TrackList(
                         targetValue = if (isDragging) 4.dp else 0.dp,
                         label       = "drag_elevation",
                     )
-                    // Track the row index so onDragStarted can report which row.
-                    val rowIndex = keyedTracks.indexOfFirst { it.first == key }
                     Surface(
                         tonalElevation = elevation,
                         shadowElevation = elevation,
@@ -908,7 +907,7 @@ private fun TrackList(
                                     .draggableHandle(
                                         onDragStarted = {
                                             haptics.threshold()
-                                            if (rowIndex >= 0) currentOnDragStarted(rowIndex)
+                                            currentOnDragStarted(rowIndex)
                                         },
                                         onDragStopped = {
                                             haptics.press()
