@@ -259,7 +259,7 @@
     <string name="nav_back">Back</string>
 
     <!-- Search -->
-    <string name="search_placeholder">Songs/Artists/Albums</string>
+    <string name="search_placeholder">Songs/Artists/Albums/Podcasts</string>
     <string name="search_clear">Clear</string>
     <string name="search_recent">Recent</string>
 

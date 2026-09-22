@@ -80,6 +80,11 @@ There is something hidden in Lyra. It is not on any menu, no setting names it, a
 
 Or download the latest APK from the [Releases](../../releases) page and install it directly on your device. You may need to allow installation from unknown sources in your Android settings.
 
+> ⚠️ **Upgrading from 3.x? Reconnect Spotify once.** The APK installs over 3.1.4 in place and everything keeps working on your existing sign-in — except podcast episode progress, which needs one more permission that Spotify grants only on a fresh sign-in. After installing:
+> 1. In Lyra: **Settings → Disconnect Spotify**.
+> 2. On [spotify.com/account/apps](https://www.spotify.com/account/apps/) (*Manage apps*): **Remove access** for Lyra.
+> 3. Open Lyra and sign in again with the **same Client ID**.
+
 Before launching, you need to register the app in the Spotify Developer Dashboard — this is a one-time step and takes about two minutes.
 
 ### 1. Create a Spotify Developer app
