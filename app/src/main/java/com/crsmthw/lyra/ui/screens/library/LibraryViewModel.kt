@@ -409,8 +409,12 @@ class LibraryViewModel(
                 // Check session token after each page — an exit during the sweep invalidates us.
                 if (reorderSession != session) return@launch
             }
-            // Final guard: session still valid AND still the same playlist.
-            if (reorderSession != session) return@launch
+            // Final guard: session still valid, still loading, AND still the same playlist.
+            // isLoadingReorder is the definitive discriminator: only enterReorderMode sets it
+            // true, and every exit door (exitReorderMode, modesCleared, enterSelectionMode,
+            // the trackListChanges collector) clears it — so Done, back, pane change and PTR
+            // all prevent this write without needing a session-token bump in each.
+            if (reorderSession != session || !_uiState.value.isLoadingReorder) return@launch
             if (_uiState.value.currentPlaylist?.id != playlist.id) return@launch
             val calc = ReorderCalculator.fromRawPages(rawPages)
             reorderCalc = calc
@@ -531,19 +535,35 @@ class LibraryViewModel(
             // Playlist-identity guard: if the user switched playlists while the PUT was in
             // flight, skip UI writes but persist a successful result to the cache (the server
             // applied it — dropping the cache write would leave cache and server disagreeing).
+            // On failure, revert currentTracks if we're still showing the same playlist.
             if (_uiState.value.currentPlaylist?.id != playlist.id || reorderSession != session) {
-                result.onSuccess { resp ->
-                    resp.snapshotId?.let { newSnap ->
-                        val confirmed = calc.confirmedTracks()
+                result.fold(
+                    onSuccess = { resp ->
                         calc.adoptConfirmed(params)
                         val postConfirm = calc.confirmedTracks()
-                        withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
-                            cache.replacePlaylistTrackOrder(
-                                playlist.id, postConfirm, newSnap, calc.totalRawSlots,
-                            )
+                        val newSnap = resp.snapshotId
+                        if (newSnap != null) {
+                            withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+                                cache.replacePlaylistTrackOrder(
+                                    playlist.id, postConfirm, newSnap, calc.totalRawSlots,
+                                )
+                            }
                         }
-                    }
-                }
+                    },
+                    onFailure = { e ->
+                        // The server rejected the PUT, so the confirmed order is what it has.
+                        // If we're still showing this playlist, revert and report.
+                        val confirmed = calc.confirmedTracks()
+                        if (_uiState.value.currentPlaylist?.id == playlist.id) {
+                            _uiState.update { st ->
+                                st.copy(
+                                    currentTracks = confirmed,
+                                    reorderResult = ReorderResult.Failure(e.message),
+                                )
+                            }
+                        }
+                    },
+                )
                 // Clean up session state regardless of success/failure.
                 reorderCalc = null
                 reorderSnapshotId = null
@@ -1664,7 +1684,8 @@ class LibraryViewModel(
         // would fetch page 0 and append it onto the just-loaded cached list, doubling it (and
         // persisting the doubled list, so it compounds every open). Don't paginate until the initial
         // load has settled.
-        if (s.isLoadingTracks || s.isLoadingMoreTracks || s.playlistTracksOffset >= s.playlistTracksTotal) return
+        if (s.isLoadingTracks || s.isLoadingMoreTracks || s.reorderMode || s.isLoadingReorder
+            || s.playlistTracksOffset >= s.playlistTracksTotal) return
         _uiState.update { it.copy(isLoadingMoreTracks = true) }
         viewModelScope.launch {
             repository.getPlaylistTracks(playlist.id, limit = 50, offset = s.playlistTracksOffset).fold(

@@ -89,13 +89,13 @@ class ReorderCalculatorTest {
     }
 
     @Test
-    fun `pendingTracks reflects local moves immediately`() {
+    fun `visibleTracks reflects local moves immediately`() {
         val c = calc(pt(track("A")), pt(track("B")))
         c.beginDrag(0)
         c.applyLocalMove(0, 1)
-        assertEquals(listOf("B", "A"), c.pendingTracks().map { it.id })
+        assertEquals(listOf("B", "A"), c.visibleTracks.map { it.id })
         c.commitDrag()
-        assertEquals(listOf("B", "A"), c.pendingTracks().map { it.id })
+        assertEquals(listOf("B", "A"), c.visibleTracks.map { it.id })
     }
 
     // ── Spotify doc examples ────────────────────────────────────────────────────

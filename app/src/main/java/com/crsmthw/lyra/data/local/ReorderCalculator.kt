@@ -177,9 +177,6 @@ class ReorderCalculator private constructor(
         return ReorderApiParams(startPos, insertBefore)
     }
 
-    /** The current (pending) visible tracks — includes uncommitted local moves. */
-    fun pendingTracks(): List<SpotifyTrack> = visibleTracks.toList()
-
     /** Total raw slots — the value to persist as `rawOffset` when caching the finished order. */
     val totalRawSlots: Int get() = rawList.size
 
