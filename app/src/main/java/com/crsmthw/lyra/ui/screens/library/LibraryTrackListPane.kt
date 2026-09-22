@@ -31,6 +31,10 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -515,16 +519,18 @@ internal fun RightPaneContent(
                                 R.plurals.library_selected_count, nSelected, nSelected,
                             ),
                             maxLines = 1,
+                            modifier = Modifier.semantics { heading() },
                         )
                         DetailBarMode.Reorder -> Text(
                             text     = stringResource(R.string.reorder_songs_title),
                             maxLines = 1,
+                            modifier = Modifier.semantics { heading() },
                         )
                         DetailBarMode.Normal -> Text(
                             text     = playlistName,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = titleModifier,
+                            modifier = titleModifier.semantics { heading() },
                         )
                     }
                 }
@@ -658,8 +664,9 @@ private fun EditPlaylistDetailsDialog(
         ) {
             Column(modifier = Modifier.padding(24.dp)) {
                 Text(
-                    text  = stringResource(R.string.edit_playlist_title),
-                    style = MaterialTheme.typography.headlineSmall,
+                    text     = stringResource(R.string.edit_playlist_title),
+                    style    = MaterialTheme.typography.headlineSmall,
+                    modifier = Modifier.semantics { heading() },
                 )
                 Spacer(Modifier.height(16.dp))
                 OutlinedTextField(
@@ -855,6 +862,8 @@ private fun TrackList(
     // reorderable lambda — which is captured once — always calls the latest version.
     val currentOnDragStarted by rememberUpdatedState(onDragStarted)
     val currentOnDragStopped by rememberUpdatedState(onDragStopped)
+    val moveUpLabel   = if (reorderMode) stringResource(R.string.cd_reorder_move_up) else ""
+    val moveDownLabel = if (reorderMode) stringResource(R.string.cd_reorder_move_down) else ""
     val currentTracks by rememberUpdatedState(tracks)
 
     val reorderableState = rememberReorderableLazyListState(listState) { from, to ->
@@ -893,7 +902,23 @@ private fun TrackList(
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier          = Modifier.fillMaxWidth(),
+                            modifier          = Modifier.fillMaxWidth().semantics {
+                                val lastIndex = currentTracks.lastIndex
+                                customActions = buildList {
+                                    if (rowIndex > 0) add(CustomAccessibilityAction(moveUpLabel) {
+                                        currentOnDragStarted(rowIndex)
+                                        onReorderMove(rowIndex, rowIndex - 1)
+                                        currentOnDragStopped()
+                                        true
+                                    })
+                                    if (rowIndex < lastIndex) add(CustomAccessibilityAction(moveDownLabel) {
+                                        currentOnDragStarted(rowIndex)
+                                        onReorderMove(rowIndex, rowIndex + 1)
+                                        currentOnDragStopped()
+                                        true
+                                    })
+                                }
+                            },
                         ) {
                             TrackRow(
                                 track     = track,

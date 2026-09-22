@@ -1,9 +1,10 @@
 package com.crsmthw.lyra.ui.components
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeDown
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
@@ -21,6 +22,9 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.remote.model.SpotifyDevice
@@ -52,7 +56,7 @@ fun DevicePickerSheet(
         Text(
             text     = stringResource(R.string.player_connect_device),
             style    = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp).semantics { heading() },
         )
         HorizontalDivider(modifier = Modifier.padding(top = 8.dp))
 
@@ -84,7 +88,7 @@ fun DevicePickerSheet(
             }
             else -> {
                 // weight(fill = false): scrolls within the capped column when long, wraps when short.
-                LazyColumn(modifier = Modifier.weight(1f, fill = false)) {
+                LazyColumn(modifier = Modifier.weight(1f, fill = false).selectableGroup()) {
                     item(key = "this_device_card") {
                         ElevatedCard(
                             onClick  = onThisDevice,
@@ -230,7 +234,7 @@ private fun DeviceRow(
 ) {
     ListItem(
         modifier        = Modifier
-            .clickable(enabled = enabled, onClick = onClick)
+            .selectable(selected = isActive, enabled = enabled, role = Role.RadioButton, onClick = onClick)
             .alpha(if (enabled) 1f else 0.4f),
         leadingContent  = {
             Icon(

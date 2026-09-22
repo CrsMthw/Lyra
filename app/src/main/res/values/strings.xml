@@ -410,4 +410,25 @@
     <string name="reorder_failed">Couldn\'t reorder songs</string>
     <string name="cd_drag_handle">Drag to reorder</string>
     <!-- (end playlist-edit) -->
+    <!-- Accessibility (lane: a11y) -->
+    <string name="cd_track_actions">Song actions</string>
+    <string name="cd_state_on">On</string>
+    <string name="cd_state_off">Off</string>
+    <string name="cd_state_liked">Liked</string>
+    <string name="cd_state_not_liked">Not liked</string>
+    <string name="cd_repeat_off">Off</string>
+    <string name="cd_repeat_context">All</string>
+    <string name="cd_repeat_track">One</string>
+    <string name="cd_dismiss_panel">Close player panel</string>
+    <string name="cd_reorder_move_up">Move up</string>
+    <string name="cd_reorder_move_down">Move down</string>
+    <string name="widget_cd_now_playing">%1$s by %2$s</string>
+    <string name="ilyra_cd_action_menu">Menu</string>
+    <string name="ilyra_cd_action_select">Select</string>
+    <string name="ilyra_cd_action_play_pause">Play or pause</string>
+    <string name="ilyra_cd_action_next">Next</string>
+    <string name="ilyra_cd_action_previous">Previous</string>
+    <string name="ilyra_cd_action_scroll_forward">Scroll forward</string>
+    <string name="ilyra_cd_action_scroll_back">Scroll back</string>
+    <!-- (end a11y) -->
 </resources>

@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material3.ButtonGroup
 import androidx.compose.material3.ButtonGroupDefaults
@@ -118,7 +119,7 @@ fun <T> ConnectedChoiceRow(
     Box(modifier = modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         ButtonGroup(
             overflowIndicator = { menuState -> ButtonGroupDefaults.OverflowIndicator(menuState) },
-            modifier          = Modifier.widthIn(max = maxWidth).fillMaxWidth(),
+            modifier          = Modifier.widthIn(max = maxWidth).fillMaxWidth().selectableGroup(),
         ) {
             options.forEach { (value, label) ->
                 val checked = selected == value
