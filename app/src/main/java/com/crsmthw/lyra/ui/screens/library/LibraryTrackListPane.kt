@@ -238,8 +238,11 @@ internal fun RightPaneContent(
                 }
             },
             selectedUris   = if (inSelection) state.selectedUris else null,
-            reorderMode    = inReorder,
-            onReorderMove  = viewModel::reorderTrack,
+            reorderMode       = inReorder,
+            onReorderMove     = viewModel::reorderTrackLocal,
+            onDragStarted     = viewModel::beginReorderDrag,
+            onDragStopped     = viewModel::commitReorderDrag,
+            reorderStableKeys = if (inReorder) viewModel.reorderStableKeys else null,
             modifier       = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = 100.dp + navBarBottomDp),
             listState      = listState,
@@ -373,7 +376,7 @@ internal fun RightPaneContent(
                             }
                             DetailBarMode.Reorder -> IconButton(
                                 onClick = { haptics.press(); viewModel.exitReorderMode() },
-                                enabled = live,
+                                enabled = live && !state.isCommittingReorder,
                             ) {
                                 Icon(Icons.Default.Close,
                                     contentDescription = stringResource(R.string.library_selection_cancel))
@@ -405,7 +408,7 @@ internal fun RightPaneContent(
                             }
                             DetailBarMode.Reorder -> IconButton(
                                 onClick = { haptics.press(); viewModel.exitReorderMode() },
-                                enabled = live,
+                                enabled = live && !state.isCommittingReorder,
                             ) {
                                 Icon(Icons.Default.Close,
                                     contentDescription = stringResource(R.string.library_selection_cancel))
@@ -431,12 +434,19 @@ internal fun RightPaneContent(
                             }
                         }
                         DetailBarMode.Reorder -> {
-                            IconButton(
-                                onClick = { haptics.confirm(); viewModel.exitReorderMode() },
-                                enabled = live,
-                            ) {
-                                Icon(Icons.Default.Check,
-                                    contentDescription = stringResource(R.string.reorder_done))
+                            if (state.isCommittingReorder) {
+                                CircularProgressIndicator(
+                                    modifier    = Modifier.padding(12.dp).size(24.dp),
+                                    strokeWidth = 2.dp,
+                                )
+                            } else {
+                                IconButton(
+                                    onClick = { haptics.confirm(); viewModel.exitReorderMode() },
+                                    enabled = live,
+                                ) {
+                                    Icon(Icons.Default.Check,
+                                        contentDescription = stringResource(R.string.reorder_done))
+                                }
                             }
                         }
                         DetailBarMode.Normal -> if (canDelete) {
@@ -605,8 +615,9 @@ internal fun RightPaneContent(
         state.reorderResult?.let { result ->
             LaunchedEffect(result) {
                 when (result) {
-                    is ReorderResult.Success -> haptics.confirm()
-                    is ReorderResult.Failure -> haptics.reject()
+                    is ReorderResult.Success     -> haptics.confirm()
+                    is ReorderResult.Failure     -> haptics.reject()
+                    is ReorderResult.LoadFailure -> haptics.reject()
                 }
                 viewModel.clearReorderResult()
             }
@@ -790,6 +801,12 @@ private fun TrackList(
     selectedUris   : Set<String>? = null,
     reorderMode    : Boolean = false,
     onReorderMove  : (fromIndex: Int, toIndex: Int) -> Unit = { _, _ -> },
+    onDragStarted  : (rowIndex: Int) -> Unit = {},
+    onDragStopped  : () -> Unit = {},
+    // Stable keys from the ReorderCalculator — each pair is (stableId, track). When non-null
+    // (reorder mode) the stableId is used as the LazyColumn key; when null (normal mode) the
+    // uri#ordinal scheme is used. This avoids re-keying on every local move.
+    reorderStableKeys: List<Pair<Int, com.crsmthw.lyra.data.remote.model.SpotifyTrack>>? = null,
     contentPadding : PaddingValues = PaddingValues(bottom = 100.dp),
     listState      : androidx.compose.foundation.lazy.LazyListState = rememberLazyListState(),
     headerContent  : (@Composable () -> Unit)? = null,
@@ -812,13 +829,12 @@ private fun TrackList(
 
     val haptics = LocalHapticFeedback.current
 
-    // In reorder mode, assign each row a synthetic stable id that never changes when rows are
-    // swapped — moving a duplicated track past the other would reassign which row is #0 under the
-    // standard uri#ordinal scheme, potentially dropping a drag. The id is "ro#<initialIndex>",
-    // stable for the life of the mode because it's computed once.
-    val keyedTracks = remember(tracks, reorderMode) {
-        if (reorderMode) {
-            tracks.mapIndexed { idx, t -> "ro#$idx" to t }
+    // In reorder mode, use the calculator's stable ids so keys never change when rows are
+    // swapped — a positional re-key on every local move would lose the drag. In normal mode,
+    // keys are uri#ordinal (precomputed once per list to handle duplicate uris).
+    val keyedTracks = remember(tracks, reorderMode, reorderStableKeys) {
+        if (reorderMode && reorderStableKeys != null) {
+            reorderStableKeys.map { (id, t) -> "ro#$id" to t }
         } else {
             val seen = HashMap<String, Int>(tracks.size)
             tracks.map { t ->
@@ -834,10 +850,16 @@ private fun TrackList(
     // (the empty-state placeholder) are never shown in reorder mode.
     val headerCount = if (headerContent != null) 1 else 0
 
+    // Capture the current onDragStarted/onDragStopped with rememberUpdatedState so the
+    // reorderable lambda — which is captured once — always calls the latest version.
+    val currentOnDragStarted by rememberUpdatedState(onDragStarted)
+    val currentOnDragStopped by rememberUpdatedState(onDragStopped)
+    val currentTracks by rememberUpdatedState(tracks)
+
     val reorderableState = rememberReorderableLazyListState(listState) { from, to ->
         val fromIdx = from.index - headerCount
         val toIdx   = to.index - headerCount
-        if (fromIdx >= 0 && toIdx >= 0 && fromIdx < tracks.size && toIdx < tracks.size) {
+        if (fromIdx >= 0 && toIdx >= 0 && fromIdx < currentTracks.size && toIdx < currentTracks.size) {
             onReorderMove(fromIdx, toIdx)
             haptics.tick()
         }
@@ -864,6 +886,8 @@ private fun TrackList(
                         targetValue = if (isDragging) 4.dp else 0.dp,
                         label       = "drag_elevation",
                     )
+                    // Track the row index so onDragStarted can report which row.
+                    val rowIndex = keyedTracks.indexOfFirst { it.first == key }
                     Surface(
                         tonalElevation = elevation,
                         shadowElevation = elevation,
@@ -882,8 +906,14 @@ private fun TrackList(
                                 onClick  = {},
                                 modifier = Modifier
                                     .draggableHandle(
-                                        onDragStarted = { haptics.threshold() },
-                                        onDragStopped = { haptics.press() },
+                                        onDragStarted = {
+                                            haptics.threshold()
+                                            if (rowIndex >= 0) currentOnDragStarted(rowIndex)
+                                        },
+                                        onDragStopped = {
+                                            haptics.press()
+                                            currentOnDragStopped()
+                                        },
                                     ),
                             ) {
                                 Icon(
