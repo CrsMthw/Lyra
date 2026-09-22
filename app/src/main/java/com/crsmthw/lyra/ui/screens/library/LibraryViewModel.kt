@@ -503,10 +503,11 @@ class LibraryViewModel(
      * Called when a drag starts (from onDragStarted or programmatically). Records the dragged
      * row's position so [commitReorderDrag] can compute the net move.
      */
-    fun beginReorderDrag(rowIndex: Int) {
+    fun beginReorderDrag(stableId: Int) {
         val calc = reorderCalc ?: return
-        if (calc.isDragging) return  // already in a drag
-        calc.beginDrag(rowIndex)
+        // Keyed by the row's stable id, never its index: the drag handle's pointer lambda captures
+        // its arguments once per item, so a just-moved row would report its OLD index (A6, 2026-09-22).
+        calc.beginDragById(stableId)
     }
 
     /**

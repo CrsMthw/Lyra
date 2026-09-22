@@ -192,6 +192,40 @@ fun LibraryScreen(
             },
         )
     }
+
+    // Outcome of a reorder — same one-shot shape, same single reporter. A failure HOLDS the result
+    // until the dialog is dismissed: the first cut fired the reject buzz and cleared it in the same
+    // effect, so an offline drop reverted the list with no visible explanation (device report
+    // 2026-09-22, A9).
+    val reorderResult = state.reorderResult
+    LaunchedEffect(reorderResult) {
+        when (reorderResult) {
+            is ReorderResult.Success     -> { haptics.confirm(); viewModel.clearReorderResult() }
+            is ReorderResult.Failure     -> haptics.reject()   // the dialog below holds it
+            is ReorderResult.LoadFailure -> haptics.reject()   // the dialog below holds it
+            null                         -> Unit
+        }
+    }
+    if (reorderResult is ReorderResult.Failure || reorderResult is ReorderResult.LoadFailure) {
+        AlertDialog(
+            onDismissRequest = viewModel::clearReorderResult,
+            icon    = { Icon(Icons.Default.Warning, null, tint = MaterialTheme.colorScheme.error) },
+            title   = { Text(stringResource(R.string.reorder_failed)) },
+            text    = {
+                Text(
+                    when (reorderResult) {
+                        is ReorderResult.Failure -> reorderResult.message ?: stringResource(R.string.error_generic)
+                        else                     -> stringResource(R.string.reorder_error)
+                    },
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = viewModel::clearReorderResult) {
+                    Text(stringResource(R.string.action_ok))
+                }
+            },
+        )
+    }
 }
 
 /** Fires a one-shot threshold haptic each time a pull-to-refresh drag crosses the trigger point. */

@@ -402,6 +402,7 @@
     <string name="edit_playlist_description_label">Description (optional)</string>
     <string name="edit_playlist_save">Save</string>
     <string name="edit_playlist_error">Couldn\'t update playlist details</string>
+    <string name="edit_playlist_description_cannot_clear">Spotify doesn\'t let an app remove a description — replace it instead.</string>
     <string name="reorder_songs">Reorder songs</string>
     <string name="reorder_songs_title">Reorder songs</string>
     <string name="reorder_done">Done</string>

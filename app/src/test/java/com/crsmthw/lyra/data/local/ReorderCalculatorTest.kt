@@ -562,4 +562,58 @@ class ReorderCalculatorTest {
 
         assertEquals(oracleVisible, calcConfirmed)
     }
+
+    // ── Drags keyed by stable id (device report 2026-09-22, A6) ─────────────────
+
+    /** The id of the visible row whose track id is [label]. */
+    private fun ReorderCalculator.idOf(label: String): Int =
+        visibleTracksWithIds.first { it.second.id == label }.first
+
+    @Test
+    fun `a second drag of the same song is keyed by its id, not by the row it used to sit on`() {
+        val c = calc(pt(track("a")), pt(track("b")), pt(track("c")), pt(track("d")), pt(track("e")), pt(track("f")))
+        val idA = c.idOf("a")
+        // Drag 1: a from row 0 to the last row; the server confirms.
+        assertTrue(c.beginDragById(idA))
+        for (r in 0 until 5) c.applyLocalMove(r, r + 1)
+        val p1 = c.commitDrag()!!
+        assertEquals(ReorderApiParams(0, 6), p1)
+        c.adoptConfirmed(p1)
+        assertEquals(listOf("b", "c", "d", "e", "f", "a"), c.labels())
+        // Drag 2 on the SAME song, now at row 5, back to row 0.
+        assertTrue(c.beginDragById(idA))
+        for (r in 5 downTo 1) c.applyLocalMove(r, r - 1)
+        val p2 = c.commitDrag()!!
+        assertEquals(ReorderApiParams(5, 0), p2)
+        c.adoptConfirmed(p2)
+        assertEquals(listOf("a", "b", "c", "d", "e", "f"), c.labels())
+        assertEquals(c.labels(), c.confirmedTracks().map { it.id })
+    }
+
+    @Test
+    fun `the stale row index the drag handle used to report drags the WRONG slot`() {
+        // Documents the defect the id-keyed API exists for: after drag 1 the song sits at row 5,
+        // but the handle's captured lambda still says row 0 — which is now a different song.
+        val c = calc(pt(track("a")), pt(track("b")), pt(track("c")), pt(track("d")), pt(track("e")), pt(track("f")))
+        c.beginDragById(c.idOf("a"))
+        for (r in 0 until 5) c.applyLocalMove(r, r + 1)
+        c.adoptConfirmed(c.commitDrag()!!)
+        c.beginDrag(0)                                   // stale: row 0 is "b" now
+        for (r in 5 downTo 1) c.applyLocalMove(r, r - 1) // the finger really moved "a" to the top
+        val wrong = c.commitDrag()!!
+        assertEquals(ReorderApiParams(0, 2), wrong)      // …but the PUT would move "b" instead
+    }
+
+    @Test
+    fun `rowIndexOf counts visible rows only and beginDragById rejects unknown ids`() {
+        val c = calc(pt(track("a")), null, pt(unplayableTrack("x")), pt(track("b")))
+        assertEquals(0, c.rowIndexOf(c.idOf("a")))
+        assertEquals(1, c.rowIndexOf(c.idOf("b")))
+        assertEquals(-1, c.rowIndexOf(999))
+        assertFalse(c.beginDragById(999))
+        assertFalse(c.isDragging)
+        assertTrue(c.beginDragById(c.idOf("b")))
+        assertFalse(c.beginDragById(c.idOf("a")))       // a drag is already in progress
+        assertTrue(c.isDragging)
+    }
 }

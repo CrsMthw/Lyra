@@ -110,6 +110,35 @@ class ReorderCalculator private constructor(
     /** True while a drag is in progress (between [beginDrag] and [commitDrag]). */
     val isDragging: Boolean get() = snapshot != null
 
+    /** Display-row index of the visible slot carrying [stableId], or -1 when there is none. */
+    fun rowIndexOf(stableId: Int): Int {
+        var row = -1
+        for (slot in rawList) {
+            if (slot is RawSlot.Visible) {
+                row++
+                if (slot.stableId == stableId) return row
+            }
+        }
+        return -1
+    }
+
+    /**
+     * [beginDrag] keyed by the row's STABLE ID rather than its row index. A stable id never changes
+     * for the life of the session; a row index changes with every move — and the drag handle's
+     * pointer lambda captures its arguments ONCE per item (the library's `draggableHandle` is a
+     * `composed` `pointerInput` keyed on the item, with no `rememberUpdatedState`), so a row that
+     * was just moved would start its next drag under its OLD index and this calculator would drag
+     * the wrong slot (device report 2026-09-22, A6: "5 back to 0 … stayed in 5"). Returns false
+     * when the id is unknown or a drag is already in progress.
+     */
+    fun beginDragById(stableId: Int): Boolean {
+        if (snapshot != null) return false
+        val row = rowIndexOf(stableId)
+        if (row < 0) return false
+        beginDrag(row)
+        return true
+    }
+
     /**
      * Begins a drag on the visible row at [rowIndex]. Snapshots the raw list and records the
      * dragged slot so [commitDrag] can compute the net move later.

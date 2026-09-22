@@ -110,6 +110,10 @@ internal fun RightPaneContent(
     val canDelete    = playlist != null && playlist.owner?.id == state.user?.id
     val inSelection  = canDelete && state.selectionMode
     val inReorder    = canDelete && state.reorderMode
+    // The BAR takes the Reorder form the moment the mode is requested — the full-list load that
+    // precedes it is a few seconds of network with nothing else on screen to show for it (device
+    // report 2026-09-22, A2: "seems unresponsive"). The ROWS follow only once the list is loaded.
+    val reorderBar   = inReorder || (canDelete && state.isLoadingReorder)
     val nSelected    = state.selectedUris.size
     val haptics      = LocalHapticFeedback.current
     var showOverflowMenu  by remember { mutableStateOf(false) }
@@ -150,6 +154,7 @@ internal fun RightPaneContent(
 
     val density          = LocalDensity.current
     val navBarBottomDp   = with(density) { WindowInsets.navigationBars.getBottom(this).toDp() }
+    val statusBarTopDp   = with(density) { WindowInsets.statusBars.getTop(this).toDp() }
     val listState        = rememberLazyListState()
     // The bar title takes over from the hero title over the ~35dp that title needs to slide under
     // the bar (M3's own `TopTitleAlphaEasing` hand-off, see `HeroTitleHandoff`) — not over the whole
@@ -248,6 +253,15 @@ internal fun RightPaneContent(
             onDragStarted     = viewModel::beginReorderDrag,
             onDragStopped     = viewModel::commitReorderDrag,
             reorderStableIds  = state.reorderStableIds,
+            // The list runs UNDER the overlay bar at the top and under the mini player at the
+            // bottom, so the drag library's auto-scroll zones must start inside those covers, not
+            // at the list's edges (device report 2026-09-22, A3: had to drag into the status bar /
+            // past the mini player before the list scrolled). Top = the bar's clearance, bottom =
+            // the list's own bottom padding.
+            scrollThresholdPadding = PaddingValues(
+                top    = statusBarTopDp + TopAppBarDefaults.TopAppBarExpandedHeight + 8.dp,
+                bottom = 100.dp + navBarBottomDp,
+            ),
             modifier       = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(bottom = 100.dp + navBarBottomDp),
             listState      = listState,
@@ -360,7 +374,7 @@ internal fun RightPaneContent(
         // Select row on the way in, the selection `BackHandler` on the way out.
         val barMode = when {
             inSelection -> DetailBarMode.Selection
-            inReorder   -> DetailBarMode.Reorder
+            reorderBar  -> DetailBarMode.Reorder
             else        -> DetailBarMode.Normal
         }
         val barTransition = updateTransition(barMode, label = "detail_bar")
@@ -439,7 +453,9 @@ internal fun RightPaneContent(
                             }
                         }
                         DetailBarMode.Reorder -> {
-                            if (state.isCommittingReorder) {
+                            // A ring while the full list loads AND while a drop's write is in
+                            // flight; ✓ Done only when the mode is idle.
+                            if (state.isCommittingReorder || state.isLoadingReorder) {
                                 CircularProgressIndicator(
                                     modifier    = Modifier.padding(12.dp).size(24.dp),
                                     strokeWidth = 2.dp,
@@ -610,7 +626,9 @@ internal fun RightPaneContent(
                 },
                 onSave             = { newName, newDesc ->
                     val nameChanged = newName != playlist.name
-                    val descChanged = newDesc != (playlist.description ?: "")
+                    // Spotify's API ignores an emptied description (200, nothing changes — device-
+                    // confirmed 2026-09-22, B19), so a blank is never sent and never written locally.
+                    val descChanged = newDesc.isNotBlank() && newDesc != (playlist.description ?: "")
                     viewModel.updatePlaylistDetails(
                         name        = if (nameChanged) newName else null,
                         description = if (descChanged) newDesc else null,
@@ -618,17 +636,8 @@ internal fun RightPaneContent(
                 },
             )
         }
-        // ── Reorder result haptics (one-shot, same pattern as removeResult) ─────
-        state.reorderResult?.let { result ->
-            LaunchedEffect(result) {
-                when (result) {
-                    is ReorderResult.Success     -> haptics.confirm()
-                    is ReorderResult.Failure     -> haptics.reject()
-                    is ReorderResult.LoadFailure -> haptics.reject()
-                }
-                viewModel.clearReorderResult()
-            }
-        }
+        // The reorder result (haptic + failure dialog) is reported ONCE at screen level in
+        // LibraryScreen, exactly like removeResult — this pane can be composed twice mid pane-swap.
     }
 }
 
@@ -649,7 +658,12 @@ private fun EditPlaylistDetailsDialog(
     var name by remember { mutableStateOf(initialName) }
     var desc by remember { mutableStateOf(initialDescription) }
     val nameBlank  = name.isBlank()
-    val unchanged  = name == initialName && desc == initialDescription
+    // Spotify's API cannot REMOVE a description — an emptied one is accepted and ignored (device-
+    // confirmed 2026-09-22) — so clearing the field is not a change: Save stays off and the field
+    // says why. Replacing the text is the only edit the server honours.
+    val descCleared = desc.isBlank() && initialDescription.isNotBlank()
+    val descChanged = !descCleared && desc.trim() != initialDescription
+    val unchanged  = name.trim() == initialName && !descChanged
     val canSave    = !nameBlank && !unchanged && !isUpdating
 
     BasicAlertDialog(
@@ -682,6 +696,9 @@ private fun EditPlaylistDetailsDialog(
                     value         = desc,
                     onValueChange = { desc = it },
                     label         = { Text(stringResource(R.string.edit_playlist_description_label)) },
+                    supportingText = if (descCleared) {
+                        { Text(stringResource(R.string.edit_playlist_description_cannot_clear)) }
+                    } else null,
                     minLines      = 2,
                     maxLines      = 4,
                     modifier      = Modifier.fillMaxWidth(),
@@ -809,8 +826,12 @@ private fun TrackList(
     selectedUris   : Set<String>? = null,
     reorderMode    : Boolean = false,
     onReorderMove  : (fromIndex: Int, toIndex: Int) -> Unit = { _, _ -> },
-    onDragStarted  : (rowIndex: Int) -> Unit = {},
+    // Keyed by the row's STABLE ID (see the note at the drag handle), never its index.
+    onDragStarted  : (stableId: Int) -> Unit = {},
     onDragStopped  : () -> Unit = {},
+    // Insets the drag library's auto-scroll zones from the list's edges — the covers the list
+    // scrolls under (the overlay bar, the mini player).
+    scrollThresholdPadding : PaddingValues = PaddingValues(0.dp),
     // Stable ids from the calculator, one per visible track in display order. When non-null
     // (reorder mode) the id is used as the LazyColumn key; when null (normal mode) the
     // uri#ordinal scheme is used. Written in the same state emission as tracks so they agree.
@@ -866,7 +887,12 @@ private fun TrackList(
     val moveDownLabel = if (reorderMode) stringResource(R.string.cd_reorder_move_down) else ""
     val currentTracks by rememberUpdatedState(tracks)
 
-    val reorderableState = rememberReorderableLazyListState(listState) { from, to ->
+    val currentStableIds by rememberUpdatedState(reorderStableIds)
+
+    val reorderableState = rememberReorderableLazyListState(
+        lazyListState          = listState,
+        scrollThresholdPadding = scrollThresholdPadding,
+    ) { from, to ->
         val fromIdx = from.index - headerCount
         val toIdx   = to.index - headerCount
         if (fromIdx >= 0 && toIdx >= 0 && fromIdx < currentTracks.size && toIdx < currentTracks.size) {
@@ -888,6 +914,13 @@ private fun TrackList(
         }
         itemsIndexed(keyedTracks, key = { _, it -> it.first }) { rowIndex, (key, track) ->
             if (reorderMode) {
+                // The row's stable id, recovered from its key. The key is the item's identity and
+                // never changes; `rowIndex` does with every move — and the drag handle's pointer
+                // lambda is captured ONCE per item (the library's draggableHandle is a `composed`
+                // pointerInput keyed on the item, with no rememberUpdatedState), so a row that was
+                // just moved would start its next drag under its OLD index and the calculator would
+                // drag the wrong slot: device report 2026-09-22, A6 ("5 back to 0 … stayed in 5").
+                val stableId = key.removePrefix("ro#").toIntOrNull()
                 ReorderableItem(
                     state = reorderableState,
                     key   = key,
@@ -904,16 +937,24 @@ private fun TrackList(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier          = Modifier.fillMaxWidth().semantics {
                                 val lastIndex = currentTracks.lastIndex
+                                // Each action re-derives the row from the stable id when it fires.
                                 customActions = buildList {
                                     if (rowIndex > 0) add(CustomAccessibilityAction(moveUpLabel) {
-                                        currentOnDragStarted(rowIndex)
-                                        onReorderMove(rowIndex, rowIndex - 1)
+                                        val id  = stableId ?: return@CustomAccessibilityAction false
+                                        val row = currentStableIds?.indexOf(id) ?: rowIndex
+                                        if (row <= 0) return@CustomAccessibilityAction false
+                                        currentOnDragStarted(id)
+                                        onReorderMove(row, row - 1)
                                         currentOnDragStopped()
                                         true
                                     })
                                     if (rowIndex < lastIndex) add(CustomAccessibilityAction(moveDownLabel) {
-                                        currentOnDragStarted(rowIndex)
-                                        onReorderMove(rowIndex, rowIndex + 1)
+                                        val id  = stableId ?: return@CustomAccessibilityAction false
+                                        val row = currentStableIds?.indexOf(id) ?: rowIndex
+                                        val last = currentStableIds?.lastIndex ?: lastIndex
+                                        if (row < 0 || row >= last) return@CustomAccessibilityAction false
+                                        currentOnDragStarted(id)
+                                        onReorderMove(row, row + 1)
                                         currentOnDragStopped()
                                         true
                                     })
@@ -932,7 +973,7 @@ private fun TrackList(
                                     .draggableHandle(
                                         onDragStarted = {
                                             haptics.threshold()
-                                            currentOnDragStarted(rowIndex)
+                                            stableId?.let { currentOnDragStarted(it) }
                                         },
                                         onDragStopped = {
                                             haptics.press()
