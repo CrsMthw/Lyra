@@ -88,6 +88,8 @@ data class LibraryUiState(
     // ── Reorder mode (owned playlists only) ──
     val reorderMode           : Boolean                = false,
     val isLoadingReorder      : Boolean                = false,  // full list fetch for reorder
+    val isCommittingReorder   : Boolean                = false,  // a PUT is in flight (disables Done)
+    val reorderStableIds      : List<Int>?             = null,   // stable LazyColumn keys from the calc
     val reorderResult         : ReorderResult?         = null,   // one-shot; the screen consumes it
     // ── Edit details ──
     val isUpdatingDetails     : Boolean                = false,
@@ -106,12 +108,16 @@ sealed interface RemoveSelectionResult {
 }
 
 /**
- * Outcome of a single reorder PUT, consumed once by `LibraryScreen` — it fires the confirm/reject
+ * Outcome of a reorder operation, consumed once by `LibraryScreen` — it fires the confirm/reject
  * haptic. Same one-shot pattern as [RemoveSelectionResult].
  */
 sealed interface ReorderResult {
+    /** The PUT (or batch of chained PUTs) succeeded. */
     data object Success : ReorderResult
+    /** The PUT failed — [message] is the API error text. */
     data class  Failure(val message: String?) : ReorderResult
+    /** The full-list fetch at mode entry failed. The UI resolves R.string.reorder_error. */
+    data object LoadFailure : ReorderResult
 }
 
 /**
@@ -142,12 +148,14 @@ val LibraryUiState.detailKey: String?
  * (never as an extra one mid-transition).
  */
 private fun LibraryUiState.modesCleared() =
-    if (!selectionMode && selectedUris.isEmpty() && !reorderMode && !isLoadingReorder) this
+    if (!selectionMode && selectedUris.isEmpty() && !reorderMode && !isLoadingReorder && !isCommittingReorder) this
     else copy(
-        selectionMode    = false,
-        selectedUris     = emptySet(),
-        reorderMode      = false,
-        isLoadingReorder = false,
+        selectionMode       = false,
+        selectedUris        = emptySet(),
+        reorderMode         = false,
+        isLoadingReorder    = false,
+        isCommittingReorder = false,
+        reorderStableIds    = null,
     )
 
 /**
@@ -308,6 +316,10 @@ class LibraryViewModel(
     // ── Reorder mode (owned playlists) ──────────────────────────────────────────────────────────
     // One mode at a time: entering reorder exits selection and vice versa. The calculator holds the
     // raw list and translates row-index moves into the API's positions.
+    //
+    // Drag lifecycle: during a drag, each onMove fires reorderTrackLocal (UI-only swap in the
+    // calculator); on drop, commitReorderDrag sends ONE PUT with the net move. Consecutive drops
+    // are serialised (second drop waits for first PUT to complete) so snapshot ids chain correctly.
 
     /**
      * The [ReorderCalculator] for the current reorder session, built by [enterReorderMode]'s
@@ -316,8 +328,11 @@ class LibraryViewModel(
     private var reorderCalc: ReorderCalculator? = null
 
     /**
-     * The latest server-confirmed snapshot id for the current reorder session. Each successful
-     * PUT advances it; the initial value comes from the first page's response.
+     * The latest server-confirmed snapshot id for the current reorder session. Null until the
+     * first successful PUT returns one — the first PUT omits snapshot_id (= "apply against
+     * current"), because the me/playlists metadata snapshot can be stale and the raw positions
+     * we just paged ARE the current arrangement. Each subsequent PUT chains the id returned by
+     * its predecessor.
      */
     private var reorderSnapshotId: String? = null
 
@@ -349,17 +364,21 @@ class LibraryViewModel(
         viewModelScope.launch {
             val rawPages = mutableListOf<List<PlaylistTrack?>>()
             var offset = 0
-            var latestSnapshotId: String? = null
             while (true) {
                 val resp = repository.getPlaylistTracks(playlist.id, limit = 50, offset = offset)
                     .getOrNull()
                 if (resp == null || _uiState.value.currentPlaylist?.id != playlist.id) {
                     // Fetch failed or a different playlist was opened — abort.
-                    _uiState.update { it.copy(isLoadingReorder = false, refreshError = resp?.let { null } ?: _uiState.value.refreshError) }
-                    if (resp == null) _uiState.update { it.copy(refreshError = "Couldn't load all songs for reordering") }
+                    if (resp == null) {
+                        _uiState.update { it.copy(
+                            isLoadingReorder = false,
+                            reorderResult    = ReorderResult.LoadFailure,
+                        ) }
+                    } else {
+                        _uiState.update { it.copy(isLoadingReorder = false) }
+                    }
                     return@launch
                 }
-                if (latestSnapshotId == null) latestSnapshotId = resp.rawItems?.firstOrNull()?.let { playlist.snapshotId }
                 rawPages += resp.rawItems.orEmpty()
                 offset += resp.rawCount
                 if (resp.rawCount == 0 || resp.next == null) break
@@ -367,38 +386,58 @@ class LibraryViewModel(
             if (_uiState.value.currentPlaylist?.id != playlist.id) return@launch
             val calc = ReorderCalculator.fromRawPages(rawPages)
             reorderCalc = calc
-            reorderSnapshotId = playlist.snapshotId
+            // Snapshot id is null: the first PUT omits it (= "apply against current").
+            reorderSnapshotId = null
             reorderConfirmedTracks = calc.confirmedTracks()
             _uiState.update { it.copy(
                 isLoadingReorder     = false,
                 reorderMode          = true,
                 currentTracks        = calc.confirmedTracks(),
+                reorderStableIds     = calc.visibleTracksWithIds.map { p -> p.first },
                 playlistTracksOffset = calc.totalRawSlots,
                 playlistTracksTotal  = calc.totalRawSlots,
             ) }
         }
     }
 
-    /** Exits reorder mode and persists the confirmed order to the cache. */
+    /**
+     * Exits reorder mode. If a commit is in flight, waits for it to complete so a PUT the server
+     * applies is not discarded locally. Persists the confirmed order to the cache.
+     */
     fun exitReorderMode() {
-        val calc   = reorderCalc ?: run {
+        val calc = reorderCalc ?: run {
             _uiState.update { it.copy(reorderMode = false, isLoadingReorder = false) }
             return
         }
-        val s = _uiState.value
-        val playlist = s.currentPlaylist
-        reorderJob?.cancel()
+        val pendingJob = reorderJob
+        if (pendingJob != null && pendingJob.isActive) {
+            // A commit is in flight — show progress and wait for it to finish.
+            _uiState.update { it.copy(isCommittingReorder = true) }
+            viewModelScope.launch {
+                pendingJob.join()
+                finishExitReorderMode(calc)
+            }
+        } else {
+            finishExitReorderMode(calc)
+        }
+    }
+
+    private fun finishExitReorderMode(calc: ReorderCalculator) {
+        val playlist = _uiState.value.currentPlaylist
         reorderJob = null
         reorderCalc = null
-        val tracks   = reorderConfirmedTracks ?: calc.confirmedTracks()
+        val tracks = reorderConfirmedTracks ?: calc.confirmedTracks()
         val snapshot = reorderSnapshotId
         reorderSnapshotId = null
         reorderConfirmedTracks = null
         _uiState.update { it.copy(
-            reorderMode  = false,
-            currentTracks = tracks,
+            reorderMode          = false,
+            isCommittingReorder  = false,
+            currentTracks        = tracks,
+            reorderStableIds     = null,
         ) }
-        // Persist the confirmed order to the cache.
+        // Persist the confirmed order to the cache. Skipped when snapshot is null (user entered
+        // and exited without dragging — nothing changed).
         if (playlist != null && snapshot != null) {
             viewModelScope.launch(Dispatchers.IO) {
                 cache.replacePlaylistTrackOrder(playlist.id, tracks, snapshot, calc.totalRawSlots)
@@ -407,22 +446,44 @@ class LibraryViewModel(
     }
 
     /**
-     * Called by the drag-and-drop callback when a row is moved. Applies the move to the UI
-     * immediately (optimistic) and queues the API PUT. Moves are serialised: one in flight at a
-     * time, each using the snapshot_id the previous one returned. On ANY failure the list reverts
-     * to the last server-confirmed order and the mode is exited.
+     * Called by the reorderable library's onMove callback during a drag. Applies the swap to the
+     * calculator's pending list and updates the UI so rows track the finger. NO API call.
      */
-    fun reorderTrack(fromIndex: Int, toIndex: Int) {
+    fun reorderTrackLocal(fromIndex: Int, toIndex: Int) {
         val calc = reorderCalc ?: return
-        val params = calc.applyMove(fromIndex, toIndex) ?: return
-        // Optimistic UI update.
-        _uiState.update { it.copy(currentTracks = calc.visibleTracks.toList()) }
-        // Queue the PUT.
+        if (!calc.applyLocalMove(fromIndex, toIndex)) return
+        val keyed = calc.visibleTracksWithIds
+        _uiState.update { it.copy(
+            currentTracks    = keyed.map { p -> p.second },
+            reorderStableIds = keyed.map { p -> p.first },
+        ) }
+    }
+
+    /**
+     * Called when a drag starts (from onDragStarted or programmatically). Records the dragged
+     * row's position so [commitReorderDrag] can compute the net move.
+     */
+    fun beginReorderDrag(rowIndex: Int) {
+        val calc = reorderCalc ?: return
+        if (calc.isDragging) return  // already in a drag
+        calc.beginDrag(rowIndex)
+    }
+
+    /**
+     * Called when a drag ends (from onDragStopped or programmatically). Computes the single API
+     * move from drag-start to the current position and queues it. If there was no net movement,
+     * no PUT is sent. Consecutive drops are serialised: a second drop waits for the first PUT
+     * to complete, using the chained snapshot id.
+     */
+    fun commitReorderDrag() {
+        val calc = reorderCalc ?: return
+        val params = calc.commitDrag() ?: return  // no net move, or no drag in progress
         val prevJob = reorderJob
         val playlist = _uiState.value.currentPlaylist ?: return
+        _uiState.update { it.copy(isCommittingReorder = true) }
         reorderJob = viewModelScope.launch {
-            prevJob?.join()  // serialise
-            if (!_uiState.value.reorderMode) return@launch  // mode was exited while waiting
+            prevJob?.join()  // serialise — wait for any prior PUT
+            if (!_uiState.value.reorderMode) return@launch
             val snapshot = reorderSnapshotId
             repository.reorderPlaylistItems(
                 playlistId   = playlist.id,
@@ -433,28 +494,33 @@ class LibraryViewModel(
                 onSuccess = { resp ->
                     resp.snapshotId?.let { reorderSnapshotId = it }
                     reorderConfirmedTracks = calc.confirmedTracks()
-                    _uiState.update { it.copy(reorderResult = ReorderResult.Success) }
+                    _uiState.update { it.copy(
+                        isCommittingReorder = false,
+                        reorderResult       = ReorderResult.Success,
+                    ) }
                 },
                 onFailure = { e ->
                     // Revert to the last server-confirmed order and exit the mode.
                     val confirmed = reorderConfirmedTracks
                     reorderCalc = null
-                    reorderJob?.cancel()
-                    reorderJob = null
-                    _uiState.update { st ->
-                        st.copy(
-                            reorderMode   = false,
-                            currentTracks = confirmed ?: st.currentTracks,
-                            reorderResult = ReorderResult.Failure(e.message),
-                        )
-                    }
-                    // Persist the reverted order.
                     val snap = reorderSnapshotId
                     reorderSnapshotId = null
                     reorderConfirmedTracks = null
+                    _uiState.update { st ->
+                        st.copy(
+                            reorderMode          = false,
+                            isCommittingReorder  = false,
+                            currentTracks        = confirmed ?: st.currentTracks,
+                            reorderStableIds     = null,
+                            reorderResult        = ReorderResult.Failure(e.message),
+                        )
+                    }
+                    // Persist the reverted order — must complete even if the scope is cancelled.
                     if (confirmed != null && snap != null) {
-                        withContext(Dispatchers.IO) {
-                            cache.replacePlaylistTrackOrder(playlist.id, confirmed, snap, calc.totalRawSlots)
+                        withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+                            cache.replacePlaylistTrackOrder(
+                                playlist.id, confirmed, snap, calc.totalRawSlots,
+                            )
                         }
                     }
                 },
@@ -712,7 +778,12 @@ class LibraryViewModel(
                     reorderJob = null
                     reorderSnapshotId = null
                     reorderConfirmedTracks = null
-                    _uiState.update { it.copy(reorderMode = false, isLoadingReorder = false) }
+                    _uiState.update { it.copy(
+                        reorderMode         = false,
+                        isLoadingReorder    = false,
+                        isCommittingReorder = false,
+                        reorderStableIds    = null,
+                    ) }
                 }
                 _uiState.update { s ->
                     if (s.currentPlaylist?.id != change.playlistId) return@update s
