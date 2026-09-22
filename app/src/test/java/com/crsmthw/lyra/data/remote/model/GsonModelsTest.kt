@@ -28,29 +28,55 @@ class GsonModelsTest {
                 "owner": null, "items": {"total": 5, "href": null}
             }
         """.trimIndent()
-        val playlist = gson.fromJson(json, SpotifyPlaylist::class.java)
-        assertNull(playlist.owner)
-        // These must not throw
-        playlist.hashCode()
-        playlist.equals(playlist)
-        playlist.toString()
+        val a = gson.fromJson(json, SpotifyPlaylist::class.java)
+        val b = gson.fromJson(json, SpotifyPlaylist::class.java)
+        assertNull(a.owner)
+        // Field-level equality across distinct instances — exercises the generated equals
+        // past the reference-identity short-circuit (a === b is false).
+        assertEquals(a, b)
+        assertEquals(a.hashCode(), b.hashCode())
+        a.toString()
     }
 
     @Test
     fun `SpotifyPlaylist with owner having null id does not NPE`() {
-        val json = """
+        val jsonNullId = """
             {
                 "id": "p2", "name": "Test", "uri": "spotify:playlist:p2",
                 "owner": {"id": null, "display_name": "Someone"},
                 "items": {"total": 3, "href": null}
             }
         """.trimIndent()
-        val playlist = gson.fromJson(json, SpotifyPlaylist::class.java)
-        val owner = assertNotNull(playlist.owner)
+        val a = gson.fromJson(jsonNullId, SpotifyPlaylist::class.java)
+        val b = gson.fromJson(jsonNullId, SpotifyPlaylist::class.java)
+        val owner = assertNotNull(a.owner)
         assertNull(owner.id)
-        // Must not throw
-        playlist.hashCode()
-        playlist.equals(playlist)
+        // Field-level equality across distinct instances.
+        assertEquals(a, b)
+        assertEquals(a.hashCode(), b.hashCode())
+    }
+
+    @Test
+    fun `SpotifyPlaylist absent owner vs null-id owner are not equal`() {
+        val jsonAbsent = """
+            {
+                "id": "p6", "name": "Test", "uri": "spotify:playlist:p6",
+                "items": {"total": 1, "href": null}
+            }
+        """.trimIndent()
+        val jsonNullId = """
+            {
+                "id": "p6", "name": "Test", "uri": "spotify:playlist:p6",
+                "owner": {"id": null, "display_name": "Someone"},
+                "items": {"total": 1, "href": null}
+            }
+        """.trimIndent()
+        val absent = gson.fromJson(jsonAbsent, SpotifyPlaylist::class.java)
+        val nullId = gson.fromJson(jsonNullId, SpotifyPlaylist::class.java)
+        // Must not throw, and must not be equal (owner null vs owner non-null).
+        assertFalse(absent == nullId)
+        absent.hashCode()
+        nullId.hashCode()
     }
 
     @Test

@@ -173,7 +173,7 @@ internal fun RightPaneContent(
             // Belt to the VM's braces: refreshCurrentTracks clears the selection anyway, for the
             // case where the mode is entered from the song menu while a refresh is already in
             // flight (nothing gates that on isRefreshing).
-            enabled      = !inSelection && !inReorder,
+            enabled      = !inSelection && !inReorder && !state.isLoadingReorder,
             modifier     = Modifier.fillMaxSize(),
             // Both indicators clear the app bar laid over this list: the PTR box still spans the
             // whole pane (the bar is an overlay, not a Column sibling), so an indicator that only

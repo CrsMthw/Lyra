@@ -234,9 +234,17 @@ class LibraryViewModel(
     /** Enters selection mode, with [uri] pre-checked when it came from the song menu. */
     fun enterSelectionMode(uri: String? = null) {
         if (_uiState.value.currentPlaylist == null) return     // Liked Songs isn't editable
+        // Mutually exclusive with reorder mode. Cancel the sweep (GETs only, safe to cancel)
+        // and invalidate the session so an in-flight PUT's post-await continuation can't stomp
+        // selection state. The PUT itself is never cancelled — only its UI writes are gated.
+        invalidateReorderSession()
         _uiState.update { it.copy(
-            selectionMode = true,
-            selectedUris  = if (uri != null) setOf(uri) else emptySet(),
+            selectionMode       = true,
+            selectedUris        = if (uri != null) setOf(uri) else emptySet(),
+            reorderMode         = false,
+            isLoadingReorder    = false,
+            isCommittingReorder = false,
+            reorderStableIds    = null,
         ) }
     }
 
@@ -323,7 +331,9 @@ class LibraryViewModel(
 
     /**
      * The [ReorderCalculator] for the current reorder session, built by [enterReorderMode]'s
-     * full-list sweep. Null when not reordering. Accessed only from the main thread.
+     * full-list sweep. Null when not reordering. Accessed only from the main thread. The
+     * calculator owns the confirmed baseline (the order the server has) — see
+     * [ReorderCalculator.confirmedTracks] and [ReorderCalculator.adoptConfirmed].
      */
     private var reorderCalc: ReorderCalculator? = null
 
@@ -336,13 +346,28 @@ class LibraryViewModel(
      */
     private var reorderSnapshotId: String? = null
 
-    /**
-     * The last server-confirmed order of visible tracks, for reverting on failure.
-     */
-    private var reorderConfirmedTracks: List<SpotifyTrack>? = null
-
-    /** Serialises reorder PUTs — one at a time, queued in order. */
+    /** Serialises reorder PUTs — one at a time, queued in order. Never cancel: a PUT the
+     *  server applies but we discard leaves cache and server disagreeing. */
     private var reorderJob: Job? = null
+
+    /** The sweep coroutine (GETs only, freely cancellable). Separate from [reorderJob]. */
+    private var reorderLoadJob: Job? = null
+
+    /**
+     * Monotonically increasing token identifying the current reorder session. Bumped on every
+     * entry and every exit (modesCleared, enterSelectionMode, collector). Post-await continuations
+     * compare their captured token against this to detect that their session ended.
+     */
+    private var reorderSession: Int = 0
+
+    /** Invalidates the current reorder session — all captured tokens become stale. */
+    private fun invalidateReorderSession() {
+        reorderSession++
+        reorderLoadJob?.cancel()
+        reorderLoadJob = null
+        reorderCalc = null
+        reorderSnapshotId = null
+    }
 
     /** Enters reorder mode for the open playlist. Fetches the FULL list from the API. */
     fun enterReorderMode() {
@@ -350,20 +375,18 @@ class LibraryViewModel(
         val playlist = s.currentPlaylist ?: return
         if (s.reorderMode || s.isLoadingReorder) return
         // Mutually exclusive with selection mode.
+        invalidateReorderSession()
+        val session = reorderSession
         _uiState.update { it.copy(
             selectionMode    = false,
             selectedUris     = emptySet(),
             isLoadingReorder = true,
             reorderResult    = null,
         ) }
-        reorderJob?.cancel()
-        reorderJob = null
-        reorderCalc = null
-        reorderSnapshotId = null
-        reorderConfirmedTracks = null
-        viewModelScope.launch {
+        reorderLoadJob = viewModelScope.launch {
             val rawPages = mutableListOf<List<PlaylistTrack?>>()
             var offset = 0
+            var lastTotal = 0
             while (true) {
                 val resp = repository.getPlaylistTracks(playlist.id, limit = 50, offset = offset)
                     .getOrNull()
@@ -381,21 +404,32 @@ class LibraryViewModel(
                 }
                 rawPages += resp.rawItems.orEmpty()
                 offset += resp.rawCount
+                lastTotal = resp.total
                 if (resp.rawCount == 0 || resp.next == null) break
+                // Check session token after each page — an exit during the sweep invalidates us.
+                if (reorderSession != session) return@launch
             }
+            // Final guard: session still valid, still loading, AND still the same playlist.
+            // isLoadingReorder is the definitive discriminator: only enterReorderMode sets it
+            // true, and every exit door (exitReorderMode, modesCleared, enterSelectionMode,
+            // the trackListChanges collector) clears it — so Done, back, pane change and PTR
+            // all prevent this write without needing a session-token bump in each.
+            if (reorderSession != session || !_uiState.value.isLoadingReorder) return@launch
             if (_uiState.value.currentPlaylist?.id != playlist.id) return@launch
             val calc = ReorderCalculator.fromRawPages(rawPages)
             reorderCalc = calc
             // Snapshot id is null: the first PUT omits it (= "apply against current").
             reorderSnapshotId = null
-            reorderConfirmedTracks = calc.confirmedTracks()
+            // Use the API's own total (CLAUDE.md: counts come from the server). Fall back to the
+            // accumulated raw slot count if the API total is absent (Gson Unsafe → 0).
+            val serverTotal = lastTotal.takeIf { it > 0 } ?: calc.totalRawSlots
             _uiState.update { it.copy(
                 isLoadingReorder     = false,
                 reorderMode          = true,
                 currentTracks        = calc.confirmedTracks(),
                 reorderStableIds     = calc.visibleTracksWithIds.map { p -> p.first },
                 playlistTracksOffset = calc.totalRawSlots,
-                playlistTracksTotal  = calc.totalRawSlots,
+                playlistTracksTotal  = serverTotal,
             ) }
         }
     }
@@ -405,6 +439,8 @@ class LibraryViewModel(
      * applies is not discarded locally. Persists the confirmed order to the cache.
      */
     fun exitReorderMode() {
+        reorderLoadJob?.cancel()
+        reorderLoadJob = null
         val calc = reorderCalc ?: run {
             _uiState.update { it.copy(reorderMode = false, isLoadingReorder = false) }
             return
@@ -423,13 +459,17 @@ class LibraryViewModel(
     }
 
     private fun finishExitReorderMode(calc: ReorderCalculator) {
+        // If reorderCalc is already null, the failure path ran and cleaned up — skip.
+        if (reorderCalc == null) {
+            reorderJob = null
+            return
+        }
         val playlist = _uiState.value.currentPlaylist
         reorderJob = null
         reorderCalc = null
-        val tracks = reorderConfirmedTracks ?: calc.confirmedTracks()
+        val tracks = calc.confirmedTracks()
         val snapshot = reorderSnapshotId
         reorderSnapshotId = null
-        reorderConfirmedTracks = null
         _uiState.update { it.copy(
             reorderMode          = false,
             isCommittingReorder  = false,
@@ -480,20 +520,61 @@ class LibraryViewModel(
         val params = calc.commitDrag() ?: return  // no net move, or no drag in progress
         val prevJob = reorderJob
         val playlist = _uiState.value.currentPlaylist ?: return
+        val session = reorderSession
         _uiState.update { it.copy(isCommittingReorder = true) }
         reorderJob = viewModelScope.launch {
             prevJob?.join()  // serialise — wait for any prior PUT
-            if (!_uiState.value.reorderMode) return@launch
+            if (!_uiState.value.reorderMode || reorderSession != session) return@launch
             val snapshot = reorderSnapshotId
-            repository.reorderPlaylistItems(
+            val result = repository.reorderPlaylistItems(
                 playlistId   = playlist.id,
                 rangeStart   = params.rangeStart,
                 insertBefore = params.insertBefore,
                 snapshotId   = snapshot,
-            ).fold(
+            )
+            // Playlist-identity guard: if the user switched playlists while the PUT was in
+            // flight, skip UI writes but persist a successful result to the cache (the server
+            // applied it — dropping the cache write would leave cache and server disagreeing).
+            // On failure, revert currentTracks if we're still showing the same playlist.
+            if (_uiState.value.currentPlaylist?.id != playlist.id || reorderSession != session) {
+                result.fold(
+                    onSuccess = { resp ->
+                        calc.adoptConfirmed(params)
+                        val postConfirm = calc.confirmedTracks()
+                        val newSnap = resp.snapshotId
+                        if (newSnap != null) {
+                            withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+                                cache.replacePlaylistTrackOrder(
+                                    playlist.id, postConfirm, newSnap, calc.totalRawSlots,
+                                )
+                            }
+                        }
+                    },
+                    onFailure = { e ->
+                        // The server rejected the PUT, so the confirmed order is what it has.
+                        // If we're still showing this playlist, revert and report.
+                        val confirmed = calc.confirmedTracks()
+                        if (_uiState.value.currentPlaylist?.id == playlist.id) {
+                            _uiState.update { st ->
+                                st.copy(
+                                    currentTracks = confirmed,
+                                    reorderResult = ReorderResult.Failure(e.message),
+                                )
+                            }
+                        }
+                    },
+                )
+                // Clean up session state regardless of success/failure.
+                reorderCalc = null
+                reorderSnapshotId = null
+                _uiState.update { it.copy(isCommittingReorder = false) }
+                return@launch
+            }
+            result.fold(
                 onSuccess = { resp ->
                     resp.snapshotId?.let { reorderSnapshotId = it }
-                    reorderConfirmedTracks = calc.confirmedTracks()
+                    // Advance the calculator's confirmed baseline by the move we just sent.
+                    calc.adoptConfirmed(params)
                     _uiState.update { it.copy(
                         isCommittingReorder = false,
                         reorderResult       = ReorderResult.Success,
@@ -501,22 +582,21 @@ class LibraryViewModel(
                 },
                 onFailure = { e ->
                     // Revert to the last server-confirmed order and exit the mode.
-                    val confirmed = reorderConfirmedTracks
+                    val confirmed = calc.confirmedTracks()
                     reorderCalc = null
                     val snap = reorderSnapshotId
                     reorderSnapshotId = null
-                    reorderConfirmedTracks = null
                     _uiState.update { st ->
                         st.copy(
                             reorderMode          = false,
                             isCommittingReorder  = false,
-                            currentTracks        = confirmed ?: st.currentTracks,
+                            currentTracks        = confirmed,
                             reorderStableIds     = null,
                             reorderResult        = ReorderResult.Failure(e.message),
                         )
                     }
                     // Persist the reverted order — must complete even if the scope is cancelled.
-                    if (confirmed != null && snap != null) {
+                    if (snap != null) {
                         withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
                             cache.replacePlaylistTrackOrder(
                                 playlist.id, confirmed, snap, calc.totalRawSlots,
@@ -772,18 +852,31 @@ class LibraryViewModel(
                 if (_uiState.value.currentPlaylist?.id != change.playlistId) return@collect
                 // An external mutation while reordering: the raw-position map is stale, so exit
                 // the mode cleanly (same reasoning as pull-to-refresh for selection mode).
+                // Never cancel reorderJob — a PUT the server already applied must land locally.
+                // Join it instead, showing isCommittingReorder while we wait. The sweep is safe
+                // to cancel (GETs only).
                 if (_uiState.value.reorderMode || _uiState.value.isLoadingReorder) {
-                    reorderCalc = null
-                    reorderJob?.cancel()
-                    reorderJob = null
-                    reorderSnapshotId = null
-                    reorderConfirmedTracks = null
-                    _uiState.update { it.copy(
-                        reorderMode         = false,
-                        isLoadingReorder    = false,
-                        isCommittingReorder = false,
-                        reorderStableIds    = null,
-                    ) }
+                    invalidateReorderSession()
+                    val pendingPut = reorderJob
+                    if (pendingPut != null && pendingPut.isActive) {
+                        _uiState.update { it.copy(
+                            reorderMode         = false,
+                            isLoadingReorder    = false,
+                            isCommittingReorder = true,
+                            reorderStableIds    = null,
+                        ) }
+                        pendingPut.join()
+                        reorderJob = null
+                        _uiState.update { it.copy(isCommittingReorder = false) }
+                    } else {
+                        reorderJob = null
+                        _uiState.update { it.copy(
+                            reorderMode         = false,
+                            isLoadingReorder    = false,
+                            isCommittingReorder = false,
+                            reorderStableIds    = null,
+                        ) }
+                    }
                 }
                 _uiState.update { s ->
                     if (s.currentPlaylist?.id != change.playlistId) return@update s
@@ -1591,7 +1684,8 @@ class LibraryViewModel(
         // would fetch page 0 and append it onto the just-loaded cached list, doubling it (and
         // persisting the doubled list, so it compounds every open). Don't paginate until the initial
         // load has settled.
-        if (s.isLoadingTracks || s.isLoadingMoreTracks || s.playlistTracksOffset >= s.playlistTracksTotal) return
+        if (s.isLoadingTracks || s.isLoadingMoreTracks || s.reorderMode || s.isLoadingReorder
+            || s.playlistTracksOffset >= s.playlistTracksTotal) return
         _uiState.update { it.copy(isLoadingMoreTracks = true) }
         viewModelScope.launch {
             repository.getPlaylistTracks(playlist.id, limit = 50, offset = s.playlistTracksOffset).fold(
