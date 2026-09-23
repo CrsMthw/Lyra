@@ -105,12 +105,14 @@ fun SettingsScreen(
     val forYouEnabled       by viewModel.forYouEnabled.collectAsStateWithLifecycle()
     val ilyraUnlocked        by viewModel.ilyraUnlocked.collectAsStateWithLifecycle()
     val ilyraEnabled         by viewModel.ilyraEnabled.collectAsStateWithLifecycle()
+    val cassetteSettings     by viewModel.cassetteSettings.collectAsStateWithLifecycle()
     val haptics              = LocalHapticFeedback.current
     val imageCacheBytes        by viewModel.imageCacheBytes.collectAsStateWithLifecycle()
     val libraryCacheBytes      by viewModel.libraryCacheBytes.collectAsStateWithLifecycle()
     var showLogoutDialog  by remember { mutableStateOf(false) }
     var showThemeSheet    by remember { mutableStateOf(false) }
     var showVisualizerSheet by remember { mutableStateOf(false) }
+    var showCassetteSheet   by remember { mutableStateOf(false) }
     // Hoisted at screen level (`rememberTopAppBarState` is `rememberSaveable`) so the bar's collapse
     // survives navigating away and back.
     val barState = rememberTopAppBarState()
@@ -253,6 +255,32 @@ fun SettingsScreen(
                         title    = stringResource(R.string.settings_visualizer_advanced),
                         subtitle = stringResource(R.string.settings_visualizer_advanced_desc),
                         onClick  = { showVisualizerSheet = true },
+                    )
+                }
+
+                // Cassette idle screen (docs/CASSETTE.md) — off by default; the player shows it after
+                // 7 s idle while music plays with the visualizer off. The glyph is Material's
+                // Voicemail: two tape reels joined — there is no cassette icon, and Album is iLyra's.
+                SettingsToggleItem(
+                    icon            = Icons.Default.Voicemail,
+                    title           = stringResource(R.string.settings_cassette),
+                    subtitle        = stringResource(R.string.settings_cassette_desc),
+                    checked         = cassetteSettings.enabled,
+                    onCheckedChange = viewModel::setCassetteEnabled,
+                )
+
+                // Cassette options — revealed only while the cassette is on, exactly like the
+                // visualizer's Advanced row above.
+                AnimatedVisibility(
+                    visible = cassetteSettings.enabled,
+                    enter   = fadeIn(screenTransitionSpec()) + expandVertically(screenTransitionSpec<IntSize>()),
+                    exit    = shrinkVertically(screenTransitionSpec<IntSize>()) + fadeOut(screenTransitionSpec()),
+                ) {
+                    SettingsItem(
+                        icon     = Icons.Default.Tune,
+                        title    = stringResource(R.string.settings_cassette_options),
+                        subtitle = stringResource(R.string.settings_cassette_options_desc),
+                        onClick  = { showCassetteSheet = true },
                     )
                 }
 
@@ -489,6 +517,19 @@ fun SettingsScreen(
             onDramatic         = viewModel::setVisualizerDramatic,
             onReset            = viewModel::resetVisualizerSettings,
             onDismiss          = { showVisualizerSheet = false },
+        )
+    }
+
+    // ── Cassette options modal sheet (CassetteSheet.kt) ───────────────────────
+    if (showCassetteSheet) {
+        CassetteSheet(
+            settings        = cassetteSettings,
+            onKeepScreenOn  = viewModel::setCassetteKeepScreenOn,
+            onDim           = viewModel::setCassetteDim,
+            onColorSource   = viewModel::setCassetteColorSource,
+            onCustomColor   = viewModel::setCassetteCustomColor,
+            onShowExitHint  = viewModel::setCassetteShowExitHint,
+            onDismiss       = { showCassetteSheet = false },
         )
     }
 
@@ -770,7 +811,7 @@ private fun VisualizerSheet(
 }
 
 @Composable
-private fun VisualizerSectionLabel(text: String) {
+internal fun VisualizerSectionLabel(text: String) {
     Text(
         text     = text,
         style    = MaterialTheme.typography.labelLarge,
@@ -780,7 +821,7 @@ private fun VisualizerSectionLabel(text: String) {
 }
 
 @Composable
-private fun VisualizerTip(text: String) {
+internal fun VisualizerTip(text: String) {
     Text(
         text     = text,
         style    = MaterialTheme.typography.bodySmall,
