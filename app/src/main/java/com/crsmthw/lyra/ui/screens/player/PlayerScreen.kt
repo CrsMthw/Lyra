@@ -356,9 +356,20 @@ fun PlayerScreen(
     }
     // Exits the overlay cannot see itself. PAUSING is deliberately not one: the cassette stays up
     // with frozen hubs (Cris, 2026-09-23).
-    val cassetteMustExit = !cassetteSettings.enabled || state.currentTrack == null || docked
+    val cassetteMustExit = !cassetteSettings.enabled || docked
     LaunchedEffect(cassetteVisible, cassetteMustExit) {
         if (cassetteVisible && cassetteMustExit) exitCassette()
+    }
+    // "Nothing playing any more" exits too, but only once it PERSISTS past a poll: a single 200
+    // with `item: null` (a transfer started from another Spotify client, an ad, an unsupported
+    // item) nulls the track for one 3 s poll while `isPlaying` stays true, and ejecting the cassette
+    // for that — only for it to come back 7 s later — reads as a glitch. The overlay holds the last
+    // label and key meanwhile, so the stage neither blanks nor flips.
+    val cassetteItemGone = state.currentTrack == null
+    LaunchedEffect(cassetteVisible, cassetteItemGone) {
+        if (!cassetteVisible || !cassetteItemGone) return@LaunchedEffect
+        delay(CassetteNullItemGraceMs)
+        exitCassette()
     }
     // One seed → the whole palette (CassettePalette.from, inside the overlay, which slides it).
     val systemDynamicPrimary = remember(context) { dynamicDarkColorScheme(context).primary }
@@ -1399,6 +1410,12 @@ private fun SleepTimerDialog(
         dismissButton = { TextButton(onClick = { haptics.press(); onDismiss() }) { Text(stringResource(R.string.action_cancel)) } },
     )
 }
+
+/**
+ * How long the now-playing item may stay null before the cassette exits: one 3 s poll
+ * (PlayerStateManager) plus room for that poll's own network latency.
+ */
+private const val CassetteNullItemGraceMs = 5_000L
 
 /**
  * The cassette's idle clock: the last pointer event on the player and whether a finger is still

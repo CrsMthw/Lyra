@@ -31,6 +31,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -221,6 +222,18 @@ fun CassetteOverlay(
             }
         }
 
+        // A transient null item (PlayerScreen waits one poll before it exits for that) keeps the
+        // last label and key, so the stage neither blanks its label nor plays a flip / eject for
+        // "no track" and another one back. Plain fields written after each composition: read only
+        // on a pass where the incoming value is null, i.e. the pass that change itself caused.
+        val held = remember { HeldItem() }
+        SideEffect {
+            if (label != null) held.label = label
+            if (trackKey != null) held.trackKey = trackKey
+        }
+        val shownLabel    = label ?: held.label
+        val shownTrackKey = trackKey ?: held.trackKey
+
         val animatedSeed by animateColorAsState(seed, tween(800), label = "cassetteSeed")
         val palette = remember(animatedSeed) { CassettePalette.from(animatedSeed) }
 
@@ -266,8 +279,8 @@ fun CassetteOverlay(
         ) {
             CassetteStage(
                 palette  = palette,
-                label    = label ?: EmptyLabel,
-                trackKey = trackKey,
+                label    = shownLabel ?: EmptyLabel,
+                trackKey = shownTrackKey,
                 forward  = forward,
                 progress = progress,
                 spinning = isPlaying,
@@ -294,6 +307,12 @@ fun CassetteOverlay(
             }
         }
     }
+}
+
+/** The last non-null label and track key of this cassette session. NOT snapshot state (see use). */
+private class HeldItem {
+    var label   : CassetteLabel? = null
+    var trackKey: String?        = null
 }
 
 /**
