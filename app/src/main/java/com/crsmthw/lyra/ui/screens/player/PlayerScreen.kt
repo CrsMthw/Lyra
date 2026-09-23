@@ -123,6 +123,10 @@ fun PlayerScreen(
     var showPlaylistPicker   by rememberSaveable { mutableStateOf(false) }
     var showDevicePicker     by remember { mutableStateOf(false) }
     var showMediaMenu        by remember { mutableStateOf(false) }
+    // The controls' ButtonGroup overflow menu. Its state is internal to the ButtonGroup and the
+    // menu is its own popup window (touches there never reach the idle clock), so PlayerControls
+    // reports it up for the cassette gate's "no menu open" term.
+    var controlsMenuOpen     by remember { mutableStateOf(false) }
     // When docked as a third pane the column is narrow-and-tall (≈380dp wide), so always use the
     // portrait art-over-controls layout regardless of the (landscape) device orientation.
     val isLandscape = !docked && LocalConfiguration.current.let { it.screenWidthDp > it.screenHeightDp }
@@ -313,7 +317,8 @@ fun PlayerScreen(
         visualizerEnabled = state.visualizerEnabled,
         lyricsShowing     = cassetteLyricsShowing,
         docked            = docked,
-        overlayOpen       = showMediaMenu || showSleepTimerDialog || showPlaylistPicker || showDevicePicker,
+        overlayOpen       = showMediaMenu || showSleepTimerDialog || showPlaylistPicker || showDevicePicker ||
+                            controlsMenuOpen,
         hasTrack          = state.currentTrack != null,
         windowFocused     = windowFocused,
         touchExploring    = touchExploring,
@@ -663,6 +668,7 @@ fun PlayerScreen(
                                 },
                                 onAddToPlaylist    = { viewModel.loadOwnedPlaylists(); showPlaylistPicker = true },
                                 onOpenDevicePicker = { viewModel.loadAvailableDevices(); showDevicePicker = true },
+                                onOverflowMenuShowing = { controlsMenuOpen = it },
                                 spacingLarge       = spacingLarge,
                                 spacingSmall       = spacingSmall,
                             )
@@ -827,6 +833,7 @@ fun PlayerScreen(
                             },
                             onAddToPlaylist    = { viewModel.loadOwnedPlaylists(); showPlaylistPicker = true },
                             onOpenDevicePicker = { viewModel.loadAvailableDevices(); showDevicePicker = true },
+                            onOverflowMenuShowing = { controlsMenuOpen = it },
                         )
                     }
                 }
@@ -923,6 +930,8 @@ private fun PlayerControls(
     onShare            : () -> Unit,
     onAddToPlaylist    : () -> Unit,
     onOpenDevicePicker : () -> Unit,
+    /** The ButtonGroup's overflow menu opened (true) or closed / left composition (false). */
+    onOverflowMenuShowing: (Boolean) -> Unit,
     spacingLarge       : Dp = 16.dp,
     spacingSmall       : Dp = 12.dp,
 ) {
@@ -1252,6 +1261,13 @@ private fun PlayerControls(
         val addInteraction   = remember { MutableInteractionSource() }
         ButtonGroup(
             overflowIndicator = { menuState ->
+                // Reported up for the cassette's idle gate (see `controlsMenuOpen`). `isShowing` is
+                // snapshot state; the dispose arm covers the indicator leaving composition while its
+                // menu is up (a fold or rotation re-lays the group out).
+                val menuShowing = menuState.isShowing
+                val reportMenuShowing by rememberUpdatedState(onOverflowMenuShowing)
+                LaunchedEffect(menuShowing) { reportMenuShowing(menuShowing) }
+                DisposableEffect(Unit) { onDispose { reportMenuShowing(false) } }
                 ButtonGroupDefaults.OverflowIndicator(
                     menuState = menuState,
                     modifier  = Modifier.size(40.dp),
