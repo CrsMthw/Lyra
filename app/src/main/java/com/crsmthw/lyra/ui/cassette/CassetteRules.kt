@@ -12,7 +12,15 @@ import com.crsmthw.lyra.data.remote.model.SpotifyTrack
 /**
  * May the idle timer run on the full player? All of: the feature on, the visualizer OFF, music
  * PLAYING, lyrics not showing, not the docked ≥1200dp pane (its expand button pushes the real
- * route, where the cassette does trigger), no menu / sheet / dialog open, and something to show.
+ * route, where the cassette does trigger), no menu / sheet / dialog open, something to show, and
+ * Lyra's window FOCUSED — in split-screen or a pop-up window both apps are RESUMED, and a user
+ * working only in the other app never touches Lyra, so without this the cassette (and its
+ * keep-on and whole-display dim) would come up under them. A focusable popup or dialog of our own
+ * (the ButtonGroup overflow menu, a sheet) also takes focus, so this backs up [overlayOpen] too.
+ *
+ * Never while TalkBack's touch exploration is on: its swipes and double-taps arrive as
+ * accessibility actions, not pointer events, so the idle clock would never be stamped and the
+ * cassette would keep covering a player the user is actively navigating.
  *
  * Only the ENTRY is gated by this. Once the cassette is up, pausing keeps it up with frozen hubs
  * (Cris, 2026-09-23); the overlay's own exits are listed on PlayerScreen's gate.
@@ -25,8 +33,10 @@ internal fun cassetteEligible(
     docked           : Boolean,
     overlayOpen      : Boolean,
     hasTrack         : Boolean,
+    windowFocused    : Boolean,
+    touchExploring   : Boolean,
 ): Boolean = settings.enabled && !visualizerEnabled && isPlaying && !lyricsShowing &&
-    !docked && !overlayOpen && hasTrack
+    !docked && !overlayOpen && hasTrack && windowFocused && !touchExploring
 
 /** What a back press does while the cassette is up. */
 internal enum class CassetteBackAction { EXIT, REVEAL_BARS }

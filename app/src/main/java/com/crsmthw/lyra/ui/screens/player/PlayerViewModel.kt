@@ -201,6 +201,21 @@ class PlayerViewModel(
     }.distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
+    private val _cassetteOwnsBack = MutableStateFlow(false)
+    /**
+     * True while the full player's cassette overlay is up, i.e. while ITS back handler — not
+     * NavHost's pop — owns the back gesture. `LyraNavGraph` reads it: `PlayerPanelHost` watches
+     * every predictive back gesture passively (whichever handler won it) and would otherwise seek
+     * the mini bar in over the cassette for a pop that never happens, then unwind an abandoned
+     * seek. Written only by the ROUTE PlayerScreen (never the docked pane, which has no cassette).
+     */
+    val cassetteOwnsBack: StateFlow<Boolean> = _cassetteOwnsBack
+
+    /** PlayerScreen mirrors its local `cassetteVisible` here; see [cassetteOwnsBack]. */
+    fun setCassetteOwnsBack(owns: Boolean) {
+        _cassetteOwnsBack.value = owns
+    }
+
     /** Shared add-to-playlist implementation (the same one the song touch-and-hold menu uses),
      *  targeting the current track. The picker methods below are thin delegations to it. */
     val trackActions = TrackActionsController(repository, libraryCache, viewModelScope)
