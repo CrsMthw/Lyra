@@ -42,6 +42,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -125,6 +126,45 @@ internal fun cassetteHueSat(argb: Int): CassetteHueSat {
     )
 }
 
+/**
+ * The custom colours this sheet has itself sent to DataStore and not yet seen come back.
+ *
+ * The sliders must NOT be re-seeded from the sheet's own write landing: the stored ARGB reads back
+ * through `toHsl()`, whose hue is in [0, 360) — a Hue released at the right end (exactly 360, red
+ * with green == blue) would come back as 0 and snap the thumb across the track — and a drag begun
+ * before the echo lands would be reset under the finger. So every write (a slider release AND a
+ * swatch tap, which re-seeds the sliders itself at the tap) is [record]ed, and an emission is
+ * treated as an outside change only when [isEcho] says it is not one of ours.
+ *
+ * A plain queue rather than a single "last written" value: two quick releases (Hue, then
+ * Saturation) send A then B, and if A's emission arrives on its own it must still count as ours.
+ * Not snapshot state — it is read and written only from callbacks and effects.
+ */
+internal class CassetteOwnWrites {
+    private val pending = ArrayDeque<Int>()
+
+    /** Call BEFORE handing [argb] to the persister. */
+    fun record(argb: Int) { pending.addLast(argb) }
+
+    /**
+     * Whether a persisted [argb] is the echo of one of our writes. The OLDEST matching write is
+     * consumed together with every write older than it (those were conflated away, or never emitted
+     * because they equalled the stored value) — oldest, so writes A, B, A arriving in order are all
+     * recognised. A miss is an outside change, which supersedes everything we had in flight, so the
+     * queue is cleared.
+     */
+    fun isEcho(argb: Int): Boolean {
+        val at = pending.indexOf(argb)
+        return if (at >= 0) {
+            repeat(at + 1) { pending.removeFirst() }
+            true
+        } else {
+            pending.clear()
+            false
+        }
+    }
+}
+
 /** One preset swatch: its ARGB and the name TalkBack reads. */
 internal data class CassetteSwatch(val argb: Int, @param:StringRes val nameRes: Int)
 
@@ -168,16 +208,37 @@ internal fun CassetteSheet(
     val materialYouSeed = remember(context) { dynamicDarkColorScheme(context).primary }
 
     // Custom picker: the in-drag values live here so the preview follows the finger; they are
-    // persisted on release only. Keyed on the persisted colour, so a swatch tap (or the release's
-    // own write landing) re-seeds both sliders from the stored colour.
-    val stored = remember(settings.customColor) { cassetteHueSat(settings.customColor) }
-    var hue     by remember(settings.customColor) { mutableFloatStateOf(stored.hue) }
-    var sat     by remember(settings.customColor) { mutableFloatStateOf(stored.saturation) }
+    // persisted on release only. They are re-seeded from the stored colour ONLY on an outside change
+    // (the first real value landing over the flow's default, say) — never by the sheet's own write
+    // coming back (see CassetteOwnWrites). A swatch tap re-seeds them itself, at the tap.
+    val ownWrites = remember { CassetteOwnWrites() }
+    var hue     by remember { mutableFloatStateOf(cassetteHueSat(settings.customColor).hue) }
+    var sat     by remember { mutableFloatStateOf(cassetteHueSat(settings.customColor).saturation) }
     // Until a slider moves, the preview shows the STORED colour exactly (a swatch's own ARGB, not
     // its re-derived hsl(h, s, 0.56)); after, it shows the sliders.
-    var dragged by remember(settings.customColor) { mutableStateOf(false) }
+    var dragged by remember { mutableStateOf(false) }
+    LaunchedEffect(settings.customColor) {
+        if (!ownWrites.isEcho(settings.customColor)) {
+            val stored = cassetteHueSat(settings.customColor)
+            hue     = stored.hue
+            sat     = stored.saturation
+            dragged = false
+        }
+    }
     val customSeed = if (dragged) cassetteSeedColor(hue, sat) else Color(settings.customColor)
-    val persistCustom = { onCustomColor(cassetteSeedColor(hue, sat).toArgb()) }
+    val persistCustom = {
+        val argb = cassetteSeedColor(hue, sat).toArgb()
+        ownWrites.record(argb)
+        onCustomColor(argb)
+    }
+    val pickSwatch = { argb: Int ->
+        val picked = cassetteHueSat(argb)
+        hue     = picked.hue
+        sat     = picked.saturation
+        dragged = false
+        ownWrites.record(argb)
+        onCustomColor(argb)
+    }
 
     val seed = when (settings.colorSource) {
         CassetteColorSource.ALBUM_ART    -> albumStandIn
@@ -266,21 +327,24 @@ internal fun CassetteSheet(
                 }
                 RevealSection(visible = settings.colorSource == CassetteColorSource.CUSTOM) {
                     Column {
-                        // Preset swatches — a radio group; a tap persists at once.
+                        // Preset swatches — a radio group; a tap persists at once. Each target is
+                        // 48dp around a 36dp circle, so the targets abut (a 12dp gap between the
+                        // circles) and the padding is trimmed by the 6dp margin to keep the first
+                        // circle on the 16dp content edge.
                         Row(
                             modifier              = Modifier
                                 .fillMaxWidth()
                                 .selectableGroup()
                                 .horizontalScroll(rememberScrollState())
-                                .padding(horizontal = 16.dp, vertical = 12.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(0.dp),
                         ) {
                             CassetteSwatches.forEach { swatch ->
                                 SwatchCircle(
                                     color    = Color(swatch.argb),
                                     name     = stringResource(swatch.nameRes),
                                     selected = swatch.argb == settings.customColor,
-                                    onClick  = { haptics.tick(); onCustomColor(swatch.argb) },
+                                    onClick  = { haptics.tick(); pickSwatch(swatch.argb) },
                                 )
                             }
                         }
@@ -395,20 +459,29 @@ internal fun TwoLineToggleRow(
     }
 }
 
-/** A 36dp preset circle; the selected one is ringed in `onSurface` with a gap. */
+/**
+ * A 36dp preset circle centred in a 48dp touch target (the app's minimum); the selected one is
+ * ringed in `onSurface` with a gap. The target carries the selectable + its name, one focus node.
+ */
 @Composable
 private fun SwatchCircle(color: Color, name: String, selected: Boolean, onClick: () -> Unit) {
     val ring = MaterialTheme.colorScheme.onSurface
     Box(
-        modifier = Modifier
-            .size(36.dp)
+        modifier         = Modifier
+            .size(48.dp)
             .clip(CircleShape)
             .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
-            .semantics { contentDescription = name }
-            .then(if (selected) Modifier.border(2.dp, ring, CircleShape).padding(5.dp) else Modifier)
-            .clip(CircleShape)
-            .background(color),
-    )
+            .semantics { contentDescription = name },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .then(if (selected) Modifier.border(2.dp, ring, CircleShape).padding(5.dp) else Modifier)
+                .clip(CircleShape)
+                .background(color),
+        )
+    }
 }
 
 /** "Hue" / "Saturation": the label above, the current seed as a dot at the start of the slider. */
