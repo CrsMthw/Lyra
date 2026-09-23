@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Cassette idle screen** (off by default, Settings → Lyra → Cassette) — leave the full player untouched for seven seconds with the visualizer off and a compact cassette slides over it, edge to edge on black with the system bars hidden: hubs turning at tape speed, the tape pack moving from the supply reel to the take-up reel with playback, the title and artist on a graph-paper label with SIDE A/B, STEREO and the album's copyright line. The colours come from the album art, the system's Material You palette or a custom colour you pick. Every second song flips the shell to side B; the one after ejects it and slides in a fresh cassette. Double-tap to exit (a single tap shows the hint, which you can turn off); back reveals the bars first in gesture navigation. Optional keep-screen-on with a 20-second dim against OLED burn-in.
+
 ## [4.0.0] - 2026-09-22 — Quattro
 
 _A discovery release — Lyra gains a layer that shows you something without being asked: an opt-in "For you" band, saved albums and followed artists in the Library, and a listening-stats screen. Podcasts arrive (a Shows filter, a Shows search tab, show detail and episode playback across every player surface), playlists get multi-select removal with server-confirmed counts, Search moves to tabs with per-type paging and remembers more, the mini player reaches every browse screen, and the pop-out panel gets the circle visualizer. Plus a toolchain upgrade, a warning-free compile, and a motion/touch fix pass that makes back navigation behave consistently everywhere._

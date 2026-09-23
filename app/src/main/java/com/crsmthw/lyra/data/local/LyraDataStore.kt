@@ -8,9 +8,13 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.crsmthw.lyra.ui.cassette.CASSETTE_DEFAULT_CUSTOM_COLOR
+import com.crsmthw.lyra.ui.cassette.CassetteColorSource
+import com.crsmthw.lyra.ui.cassette.CassetteSettings
 import com.crsmthw.lyra.ui.theme.ThemeMode
 import com.crsmthw.lyra.util.visualizer.VisualizerStyle
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 
 // Top-level delegate – DataStore is a singleton per name
@@ -112,6 +116,23 @@ class LyraDataStore(private val context: Context) {
         prefs[Keys.ILYRA_BODY_COLOR] ?: 0
     }
 
+    /**
+     * The cassette idle screen — every preference in ONE snapshot so the player collects one flow.
+     * Defaults: off, no keep-awake, no dim, album-art colour, the ad's purple, hint shown.
+     */
+    val cassetteSettings: Flow<CassetteSettings> = context.dataStore.data.map { prefs ->
+        CassetteSettings(
+            enabled       = prefs[Keys.CASSETTE_ENABLED] ?: false,
+            keepScreenOn  = prefs[Keys.CASSETTE_KEEP_SCREEN_ON] ?: false,
+            dimAfterDelay = prefs[Keys.CASSETTE_DIM] ?: false,
+            colorSource   = prefs[Keys.CASSETTE_COLOR_SOURCE]
+                ?.let { raw -> runCatching { CassetteColorSource.valueOf(raw) }.getOrNull() }
+                ?: CassetteColorSource.ALBUM_ART,
+            customColor   = prefs[Keys.CASSETTE_CUSTOM_COLOR] ?: CASSETTE_DEFAULT_CUSTOM_COLOR,
+            showExitHint  = prefs[Keys.CASSETTE_SHOW_EXIT_HINT] ?: true,
+        )
+    }.distinctUntilChanged()
+
     // ── Writes ──────────────────────────────────────────────────────────────
 
     suspend fun setThemeMode(mode: ThemeMode) {
@@ -194,6 +215,31 @@ class LyraDataStore(private val context: Context) {
         context.dataStore.edit { it[Keys.ILYRA_BODY_COLOR] = ordinal }
     }
 
+    suspend fun setCassetteEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.CASSETTE_ENABLED] = enabled }
+    }
+
+    suspend fun setCassetteKeepScreenOn(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.CASSETTE_KEEP_SCREEN_ON] = enabled }
+    }
+
+    suspend fun setCassetteDim(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.CASSETTE_DIM] = enabled }
+    }
+
+    suspend fun setCassetteColorSource(source: CassetteColorSource) {
+        context.dataStore.edit { it[Keys.CASSETTE_COLOR_SOURCE] = source.name }
+    }
+
+    /** ARGB. */
+    suspend fun setCassetteCustomColor(argb: Int) {
+        context.dataStore.edit { it[Keys.CASSETTE_CUSTOM_COLOR] = argb }
+    }
+
+    suspend fun setCassetteShowExitHint(show: Boolean) {
+        context.dataStore.edit { it[Keys.CASSETTE_SHOW_EXIT_HINT] = show }
+    }
+
     // ── Keys ────────────────────────────────────────────────────────────────
 
     private object Keys {
@@ -218,5 +264,11 @@ class LyraDataStore(private val context: Context) {
         val ILYRA_CLICK_VOLUME   = intPreferencesKey("ilyra_click_volume")
         val ILYRA_CLICK_PITCH    = intPreferencesKey("ilyra_click_pitch")
         val ILYRA_BODY_COLOR     = intPreferencesKey("ilyra_body_color")
+        val CASSETTE_ENABLED         = booleanPreferencesKey("cassette_enabled")
+        val CASSETTE_KEEP_SCREEN_ON  = booleanPreferencesKey("cassette_keep_screen_on")
+        val CASSETTE_DIM             = booleanPreferencesKey("cassette_dim")
+        val CASSETTE_COLOR_SOURCE    = stringPreferencesKey("cassette_color_source")
+        val CASSETTE_CUSTOM_COLOR    = intPreferencesKey("cassette_custom_color")
+        val CASSETTE_SHOW_EXIT_HINT  = booleanPreferencesKey("cassette_show_exit_hint")
     }
 }

@@ -1,6 +1,8 @@
 package com.crsmthw.lyra.data.repository
 
 import com.crsmthw.lyra.data.local.LyraDataStore
+import com.crsmthw.lyra.ui.cassette.CassetteColorSource
+import com.crsmthw.lyra.ui.cassette.CassetteSettings
 import com.crsmthw.lyra.ui.theme.ThemeMode
 import com.crsmthw.lyra.util.visualizer.VisualizerStyle
 import kotlinx.coroutines.flow.Flow
@@ -28,6 +30,8 @@ class SettingsRepository(private val dataStore: LyraDataStore) {
     val ilyraClickVolume  : Flow<Int>            = dataStore.ilyraClickVolume
     val ilyraClickPitch   : Flow<Int>            = dataStore.ilyraClickPitch
     val ilyraBodyColor    : Flow<Int>            = dataStore.ilyraBodyColor
+    /** The cassette idle screen, all six preferences in one snapshot. */
+    val cassetteSettings  : Flow<CassetteSettings> = dataStore.cassetteSettings
 
     suspend fun setThemeMode        (mode   : ThemeMode)      = dataStore.setThemeMode(mode)
     suspend fun setAmoledBlack      (enabled: Boolean)        = dataStore.setAmoledBlack(enabled)
@@ -50,4 +54,10 @@ class SettingsRepository(private val dataStore: LyraDataStore) {
     suspend fun setIlyraClickVolume  (percent: Int)            = dataStore.setIlyraClickVolume(percent)
     suspend fun setIlyraClickPitch   (ordinal: Int)            = dataStore.setIlyraClickPitch(ordinal)
     suspend fun setIlyraBodyColor    (ordinal: Int)            = dataStore.setIlyraBodyColor(ordinal)
+    suspend fun setCassetteEnabled      (enabled: Boolean)             = dataStore.setCassetteEnabled(enabled)
+    suspend fun setCassetteKeepScreenOn (enabled: Boolean)             = dataStore.setCassetteKeepScreenOn(enabled)
+    suspend fun setCassetteDim          (enabled: Boolean)             = dataStore.setCassetteDim(enabled)
+    suspend fun setCassetteColorSource  (source : CassetteColorSource) = dataStore.setCassetteColorSource(source)
+    suspend fun setCassetteCustomColor  (argb   : Int)                 = dataStore.setCassetteCustomColor(argb)
+    suspend fun setCassetteShowExitHint (show   : Boolean)             = dataStore.setCassetteShowExitHint(show)
 }

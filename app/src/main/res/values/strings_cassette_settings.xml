@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Cassette idle screen — Settings strings. Owned by the SETTINGS lane; nothing else edits this file. -->
+<resources>
+    <string name="settings_cassette">Cassette</string>
+    <string name="settings_cassette_desc">Idle cassette animation on the player screen when no visualizer is active</string>
+    <string name="settings_cassette_options">Cassette options</string>
+    <string name="settings_cassette_options_desc">Colours, screen and the exit hint</string>
+</resources>
