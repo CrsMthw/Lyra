@@ -82,6 +82,11 @@ class CassetteSheetHelpersTest {
         // …and inside it the look does move.
         val inside = CassettePalette.from(Color.hsl(200f, 0.6f, 0.56f))
         assertTrue(!sameColor(inside.hub, atMin.hub) && !sameColor(inside.hub, atMax.hub))
+        // A NARROWED palette clamp would put a dead zone just inside each end — the look must move there too.
+        val nearMin = CassettePalette.from(Color.hsl(200f, CASSETTE_SAT_MIN + 0.03f, 0.56f))
+        val nearMax = CassettePalette.from(Color.hsl(200f, CASSETTE_SAT_MAX - 0.03f, 0.56f))
+        assertTrue(!sameColor(nearMin.hub, atMin.hub), "${nearMin.hub} vs ${atMin.hub}")
+        assertTrue(!sameColor(nearMax.hub, atMax.hub), "${nearMax.hub} vs ${atMax.hub}")
     }
 
     @Test
