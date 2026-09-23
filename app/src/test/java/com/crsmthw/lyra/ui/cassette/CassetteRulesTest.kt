@@ -31,7 +31,10 @@ class CassetteRulesTest {
         docked: Boolean = false,
         overlayOpen: Boolean = false,
         hasTrack: Boolean = true,
-    ) = cassetteEligible(settings, isPlaying, visualizerEnabled, lyricsShowing, docked, overlayOpen, hasTrack)
+        windowFocused: Boolean = true,
+        touchExploring: Boolean = false,
+    ) = cassetteEligible(settings, isPlaying, visualizerEnabled, lyricsShowing, docked, overlayOpen, hasTrack,
+        windowFocused, touchExploring)
 
     @Test fun `eligible when every condition holds`() = assertTrue(eligible())
     @Test fun `setting off is never eligible`() = assertFalse(eligible(settings = CassetteSettings()))
@@ -41,6 +44,11 @@ class CassetteRulesTest {
     @Test fun `never on the docked pane`() = assertFalse(eligible(docked = true))
     @Test fun `an open menu or sheet suppresses it`() = assertFalse(eligible(overlayOpen = true))
     @Test fun `nothing playing is not eligible`() = assertFalse(eligible(hasTrack = false))
+    @Test fun `an unfocused window (split-screen, the other app in use) is not eligible`() =
+        assertFalse(eligible(windowFocused = false))
+    @Test fun `never while TalkBack touch exploration is on`() = assertFalse(eligible(touchExploring = true))
+    @Test fun `touch exploration wins even when everything else holds`() =
+        assertFalse(eligible(settings = on.copy(keepScreenOn = true), windowFocused = true, touchExploring = true))
 
     @Test
     fun `the other settings do not affect eligibility`() {

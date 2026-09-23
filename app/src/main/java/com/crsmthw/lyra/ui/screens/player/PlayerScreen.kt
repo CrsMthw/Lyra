@@ -56,6 +56,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.core.content.ContextCompat
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
@@ -77,6 +78,7 @@ import com.crsmthw.lyra.ui.cassette.CassetteColorSource
 import com.crsmthw.lyra.ui.cassette.CassetteOverlay
 import com.crsmthw.lyra.ui.cassette.CassetteTiming
 import com.crsmthw.lyra.ui.cassette.cassetteEligible
+import com.crsmthw.lyra.ui.cassette.rememberTouchExplorationEnabled
 import com.crsmthw.lyra.ui.components.AddToPlaylistSheet
 import com.crsmthw.lyra.ui.components.DevicePickerSheet
 import com.crsmthw.lyra.ui.components.LocalPlayerArtKey
@@ -302,6 +304,9 @@ fun PlayerScreen(
     val idleClock = remember { CassetteIdleClock() }
     val cassetteLyricsShowing = state.lyricsMode &&
         (state.lyricsState is LyricsState.Synced || state.lyricsState is LyricsState.Plain)
+    // Split-screen / pop-up window: both apps are RESUMED, so focus is the "is the user here" term.
+    val windowFocused  = LocalWindowInfo.current.isWindowFocused
+    val touchExploring = rememberTouchExplorationEnabled()
     val cassetteEligibleNow = !cassetteVisible && cassetteEligible(
         settings          = cassetteSettings,
         isPlaying         = state.isPlaying,
@@ -310,6 +315,8 @@ fun PlayerScreen(
         docked            = docked,
         overlayOpen       = showMediaMenu || showSleepTimerDialog || showPlaylistPicker || showDevicePicker,
         hasTrack          = state.currentTrack != null,
+        windowFocused     = windowFocused,
+        touchExploring    = touchExploring,
     )
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     LaunchedEffect(cassetteEligibleNow, lifecycle) {

@@ -2,6 +2,7 @@ package com.crsmthw.lyra.ui.cassette
 
 import android.content.Context
 import android.provider.Settings
+import android.view.accessibility.AccessibilityManager
 import android.view.Window
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
@@ -33,6 +34,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
@@ -44,6 +46,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onClick
@@ -139,15 +142,23 @@ fun CassetteOverlay(
     val currentBarsVisible by rememberUpdatedState(barsVisible)
     LaunchedEffect(visible) { barsRevealed = false }
 
+    // Lyra's window has focus. Lost in split-screen / a pop-up window while the user works in the
+    // other app, and when the notification shade is pulled down. It is NOT an exit (pulling the
+    // shade down must not eject the cassette), but both window-wide holds below need it: a visible
+    // window's keep-on holds the WHOLE display awake, and WindowManager takes the screen-brightness
+    // override from any visible window, so an unfocused cassette would dim the other app too.
+    val focused = LocalWindowInfo.current.isWindowFocused
+
     // ── Keep screen on: only while up AND music is playing (a paused cassette may time out) ──
-    val keepOn = visible && settings.keepScreenOn && isPlaying
+    val keepOn = visible && focused && settings.keepScreenOn && isPlaying
     DisposableEffect(view, keepOn) {
         view.keepScreenOn = keepOn
         onDispose { view.keepScreenOn = false }
     }
 
     // ── Dim: sub-setting of keep-screen-on. Every touch undims and restarts the countdown ────
-    val dimEnabled = visible && settings.keepScreenOn && settings.dimAfterDelay
+    // Losing focus restores the brightness at once; regaining it restarts the full countdown.
+    val dimEnabled = visible && focused && settings.keepScreenOn && settings.dimAfterDelay
     var touchGeneration by remember { mutableIntStateOf(0) }
     val dimState = remember { DimState() }
     LaunchedEffect(dimEnabled, touchGeneration, window) {
@@ -324,4 +335,22 @@ private fun readNavigationMode(context: Context): Int? = try {
     null
 } catch (_: SecurityException) {
     null
+}
+
+/**
+ * Is TalkBack's touch exploration on — OBSERVED, so turning TalkBack on or off while the player is
+ * up is seen at once. The idle gate never arms while it is (see [cassetteEligible]).
+ */
+@Composable
+internal fun rememberTouchExplorationEnabled(): Boolean {
+    val context = LocalContext.current
+    val manager = remember(context) { context.getSystemService(AccessibilityManager::class.java) }
+    return produceState(initialValue = manager?.isTouchExplorationEnabled == true, manager) {
+        if (manager == null) return@produceState
+        val listener = AccessibilityManager.TouchExplorationStateChangeListener { value = it }
+        manager.addTouchExplorationStateChangeListener(listener)
+        // Re-read after registering: a change between the seed and the listener is not lost.
+        value = manager.isTouchExplorationEnabled
+        awaitDispose { manager.removeTouchExplorationStateChangeListener(listener) }
+    }.value
 }
