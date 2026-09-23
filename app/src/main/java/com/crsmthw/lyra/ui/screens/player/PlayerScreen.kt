@@ -60,6 +60,7 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
@@ -395,266 +396,442 @@ fun PlayerScreen(
                 }
             },
     ) {
-        // ── Gradient background overlay (rendered outside Scaffold so it fills everything) ──
+        // The player itself. While the cassette is up it is removed from the accessibility tree:
+        // the overlay (below, drawn over it) must be the only thing a screen reader, Switch Access
+        // or Voice Access can reach — its description + "return to the player" action. Compose
+        // already skips semantics nodes covered by a later full-size sibling, so this is belt and
+        // braces; it sits on its own wrapper node, never on the album-art shared-element chain.
         Box(
-            modifier = Modifier
+            Modifier
                 .fillMaxSize()
-                .background(Brush.verticalGradient(colors = listOf(gradientTop, surfaceBg)))
-        )
+                .then(if (cassetteVisible) Modifier.clearAndSetSemantics { } else Modifier),
+        ) {
+            // ── Gradient background overlay (rendered outside Scaffold so it fills everything) ──
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Brush.verticalGradient(colors = listOf(gradientTop, surfaceBg)))
+            )
 
-        Scaffold(
-            contentWindowInsets = WindowInsets(0),
-            containerColor      = Color.Transparent,
-            topBar = {
-                TopAppBar(
-                    modifier     = Modifier
-                        .statusBarsPadding()
-                        .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal)),
-                    windowInsets = WindowInsets(0),
-                    title = {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier            = Modifier.fillMaxWidth(),
-                        ) {
-                            Text(stringResource(R.string.player_now_playing_label),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = topContentColor)
-                        }
-                    },
-                    navigationIcon = {
-                        if (docked) {
-                            // Docked pane has no "close": put the full-screen expand button on the left
-                            // (where the chevron would be), so the right side carries only the options menu.
-                            if (onFullScreen != null) {
-                                IconButton(onClick = onFullScreen) {
-                                    Icon(Icons.Default.OpenInFull, contentDescription = stringResource(R.string.cd_full_screen),
+            Scaffold(
+                contentWindowInsets = WindowInsets(0),
+                containerColor      = Color.Transparent,
+                topBar = {
+                    TopAppBar(
+                        modifier     = Modifier
+                            .statusBarsPadding()
+                            .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal)),
+                        windowInsets = WindowInsets(0),
+                        title = {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier            = Modifier.fillMaxWidth(),
+                            ) {
+                                Text(stringResource(R.string.player_now_playing_label),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = topContentColor)
+                            }
+                        },
+                        navigationIcon = {
+                            if (docked) {
+                                // Docked pane has no "close": put the full-screen expand button on the left
+                                // (where the chevron would be), so the right side carries only the options menu.
+                                if (onFullScreen != null) {
+                                    IconButton(onClick = onFullScreen) {
+                                        Icon(Icons.Default.OpenInFull, contentDescription = stringResource(R.string.cd_full_screen),
+                                            tint = topContentColor)
+                                    }
+                                }
+                            } else {
+                                IconButton(onClick = { haptics.confirm(); onBack() }) {
+                                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = stringResource(R.string.cd_close),
                                         tint = topContentColor)
                                 }
                             }
-                        } else {
-                            IconButton(onClick = { haptics.confirm(); onBack() }) {
-                                Icon(Icons.Default.KeyboardArrowDown, contentDescription = stringResource(R.string.cd_close),
-                                    tint = topContentColor)
-                            }
-                        }
-                    },
-                    actions = {
-                        Box {
-                            IconButton(onClick = { haptics.press(); showMediaMenu = true }) {
-                                Icon(Icons.Default.Tune,
-                                    contentDescription = stringResource(R.string.player_options),
-                                    tint = topContentColor)
-                            }
-                            DropdownMenu(
-                                expanded         = showMediaMenu,
-                                onDismissRequest  = { showMediaMenu = false },
-                                containerColor   = Color.Transparent,
-                                shadowElevation  = 0.dp,
-                            ) {
-                                val lyricsAvailable = state.lyricsState is LyricsState.Synced || state.lyricsState is LyricsState.Plain
-                                val lyricsShowing   = state.lyricsMode && lyricsAvailable
-                                val lyricsLoading   = state.lyricsState is LyricsState.Loading
-                                DropdownMenuGroup(shapes = MenuDefaults.groupShapes()) {
-                                    CheckableDropdownMenuItem(
-                                        checked       = lyricsShowing,
-                                        onCheckedChange = {
-                                            haptics.toggle(!lyricsShowing)
-                                            viewModel.toggleLyricsMode()
-                                        },
-                                        text          = { Text(stringResource(R.string.player_lyrics)) },
-                                        shapes        = MenuDefaults.itemShape(0, 2),
-                                        leadingIcon   = {
-                                            Icon(if (lyricsShowing) Icons.Default.Check else Icons.Default.Lyrics, contentDescription = null)
-                                        },
-                                        supportingText = if (lyricsLoading) {
-                                            { Text(stringResource(R.string.player_lyrics_searching)) }
-                                        } else null,
-                                        enabled       = lyricsAvailable,
-                                        colors        = MenuDefaults.selectableItemColors(
-                                            selectedContainerColor = surfaceAccentColor.copy(alpha = 0.15f),
-                                        ),
-                                    )
-                                    CheckableDropdownMenuItem(
-                                        checked       = state.visualizerEnabled,
-                                        onCheckedChange = { enable ->
-                                            haptics.toggle(enable)
-                                            if (enable) {
-                                                val hasPermission = ContextCompat.checkSelfPermission(
-                                                    context, Manifest.permission.RECORD_AUDIO
-                                                ) == PackageManager.PERMISSION_GRANTED
-                                                if (hasPermission) viewModel.onRecordAudioGranted()
-                                                else recordAudioLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                                            } else {
-                                                viewModel.setVisualizerEnabled(false)
-                                            }
-                                        },
-                                        text          = { Text(stringResource(R.string.player_visualizer)) },
-                                        shapes        = MenuDefaults.itemShape(1, 2),
-                                        leadingIcon   = {
-                                            Icon(if (state.visualizerEnabled) Icons.Default.Check else Icons.Default.Equalizer, contentDescription = null)
-                                        },
-                                        colors        = MenuDefaults.selectableItemColors(
-                                            selectedContainerColor = surfaceAccentColor.copy(alpha = 0.15f),
-                                        ),
-                                    )
+                        },
+                        actions = {
+                            Box {
+                                IconButton(onClick = { haptics.press(); showMediaMenu = true }) {
+                                    Icon(Icons.Default.Tune,
+                                        contentDescription = stringResource(R.string.player_options),
+                                        tint = topContentColor)
                                 }
-                                Spacer(Modifier.height(MenuDefaults.GroupSpacing))
-                                DropdownMenuGroup(shapes = MenuDefaults.groupShapes()) {
-                                    DropdownMenuItem(
-                                        onClick        = { haptics.press(); showMediaMenu = false; showSleepTimerDialog = true },
-                                        text           = { Text(stringResource(R.string.player_sleep_timer)) },
-                                        shape          = MenuDefaults.standaloneItemShape,
-                                        leadingIcon    = { Icon(Icons.Default.Timer, contentDescription = null) },
-                                        supportingText = if (state.sleepTimerMinutes > 0) {
-                                            { Text(stringResource(R.string.player_timer_remaining, state.sleepTimerMinutes)) }
-                                        } else null,
-                                    )
-                                }
-                            }
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
-                )
-            },
-        ) { paddingValues ->
-
-            if (isLandscape) {
-                // ── Landscape: art left, controls right ───────────────────────────
-                Row(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(paddingValues)
-                        .navigationBarsPadding(),
-                ) {
-                    // Left: album art / lyrics — square, constrained by available height
-                    BoxWithConstraints(
-                        modifier         = Modifier
-                            .weight(0.45f)
-                            .fillMaxHeight()
-                            .padding(start = 16.dp, end = 8.dp, bottom = 16.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        val side = minOf(maxWidth, maxHeight * 0.82f)
-                        val displaySide = side * artScale
-
-                        // The shared-element modifier. `LocalPlayerArtKey` carries a generation the
-                        // host advances after an ABANDONED seek and at no other settle, so a morph
-                        // that follows a cancelled gesture has no state from it to inherit. A
-                        // generation is a fresh ELEMENT only — recreating the LayoutNode that carries
-                        // this modifier was tried and changed nothing on device. See
-                        // `LocalPlayerArtKey` in PlayerPanelHost.
-                        val artMod = if (sharedTransitionScope != null && animatedContentScope != null) {
-                            with(sharedTransitionScope) {
-                                val artState = rememberSharedContentState(LocalPlayerArtKey.current)
-                                Modifier.sharedElement(
-                                    sharedContentState      = artState,
-                                    animatedVisibilityScope = animatedContentScope,
-                                    boundsTransform         = rememberArtBoundsTransform(),
-                                )
-                            }
-                        } else Modifier
-
-                        val lyricsContentMod = Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp))
-
-                        Box(Modifier.size(side)) {
-                            if (circleVisible) {
-                                FftCWaveCanvas(
-                                    modifier = Modifier.fillMaxSize(),
-                                    color    = surfaceAccentColor,
-                                    alpha    = 0.40f,
-                                    enabled  = true,
-                                )
-                            }
-                            AnimatedContent(
-                                targetState  = state,
-                                contentKey   = { s ->
-                                    val avail = s.lyricsState is LyricsState.Synced || s.lyricsState is LyricsState.Plain
-                                    s.lyricsMode && avail
-                                },
-                                transitionSpec = { fadeIn(tween(300)) togetherWith fadeOut(tween(300)) },
-                                modifier     = Modifier.fillMaxSize(),
-                                label        = "art-lyrics-landscape",
-                            ) { snapshot ->
-                                val snapAvail   = snapshot.lyricsState is LyricsState.Synced || snapshot.lyricsState is LyricsState.Plain
-                                val snapShowing = snapshot.lyricsMode && snapAvail
-                                if (snapShowing) {
-                                    when (val ls = snapshot.lyricsState) {
-                                        is LyricsState.Synced -> SyncedLyricsView(
-                                            lines            = ls.lines,
-                                            currentLineIndex = snapshot.currentLyricLineIndex,
-                                            textColor        = lyricsTextColor,
-                                            modifier         = lyricsContentMod,
+                                DropdownMenu(
+                                    expanded         = showMediaMenu,
+                                    onDismissRequest  = { showMediaMenu = false },
+                                    containerColor   = Color.Transparent,
+                                    shadowElevation  = 0.dp,
+                                ) {
+                                    val lyricsAvailable = state.lyricsState is LyricsState.Synced || state.lyricsState is LyricsState.Plain
+                                    val lyricsShowing   = state.lyricsMode && lyricsAvailable
+                                    val lyricsLoading   = state.lyricsState is LyricsState.Loading
+                                    DropdownMenuGroup(shapes = MenuDefaults.groupShapes()) {
+                                        CheckableDropdownMenuItem(
+                                            checked       = lyricsShowing,
+                                            onCheckedChange = {
+                                                haptics.toggle(!lyricsShowing)
+                                                viewModel.toggleLyricsMode()
+                                            },
+                                            text          = { Text(stringResource(R.string.player_lyrics)) },
+                                            shapes        = MenuDefaults.itemShape(0, 2),
+                                            leadingIcon   = {
+                                                Icon(if (lyricsShowing) Icons.Default.Check else Icons.Default.Lyrics, contentDescription = null)
+                                            },
+                                            supportingText = if (lyricsLoading) {
+                                                { Text(stringResource(R.string.player_lyrics_searching)) }
+                                            } else null,
+                                            enabled       = lyricsAvailable,
+                                            colors        = MenuDefaults.selectableItemColors(
+                                                selectedContainerColor = surfaceAccentColor.copy(alpha = 0.15f),
+                                            ),
                                         )
-                                        is LyricsState.Plain  -> PlainLyricsView(
-                                            text      = ls.text,
-                                            textColor = lyricsTextColor,
-                                            modifier  = lyricsContentMod,
-                                        )
-                                    }
-                                } else {
-                                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                        AsyncImage(
-                                            model              = artImageModel,
-                                            contentDescription = stringResource(R.string.cd_album_art),
-                                            contentScale       = ContentScale.Crop,
-                                            modifier           = artMod
-                                                .size(displaySide)
-                                                .clip(RoundedCornerShape(16.dp))
-                                                .graphicsLayer {
-                                                    translationX = (artDragX * 0.3f).coerceIn(-80f, 80f) + artOffsetX.value
+                                        CheckableDropdownMenuItem(
+                                            checked       = state.visualizerEnabled,
+                                            onCheckedChange = { enable ->
+                                                haptics.toggle(enable)
+                                                if (enable) {
+                                                    val hasPermission = ContextCompat.checkSelfPermission(
+                                                        context, Manifest.permission.RECORD_AUDIO
+                                                    ) == PackageManager.PERMISSION_GRANTED
+                                                    if (hasPermission) viewModel.onRecordAudioGranted()
+                                                    else recordAudioLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                                } else {
+                                                    viewModel.setVisualizerEnabled(false)
                                                 }
-                                                .pointerInput(Unit) {
-                                                    detectHorizontalDragGestures(
-                                                        onDragStart      = { artDragX = 0f },
-                                                        onDragEnd        = {
-                                                            when {
-                                                                artDragX < -swipeThresholdPx -> {
-                                                                    val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
-                                                                    artDragX = 0f; skipDirection = 1
-                                                                    scope.launch {
-                                                                        artOffsetX.snapTo(s)
-                                                                        artOffsetX.animateTo(-1500f, tween(250, easing = FastOutLinearInEasing))
-                                                                    }
-                                                                    haptics.press()
-                                                                    viewModel.skipNext()
-                                                                }
-                                                                artDragX > swipeThresholdPx -> {
-                                                                    val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
-                                                                    artDragX = 0f; skipDirection = -1
-                                                                    scope.launch {
-                                                                        artOffsetX.snapTo(s)
-                                                                        artOffsetX.animateTo(1500f, tween(250, easing = FastOutLinearInEasing))
-                                                                    }
-                                                                    haptics.press()
-                                                                    viewModel.skipPrevious()
-                                                                }
-                                                                else -> artDragX = 0f
-                                                            }
-                                                        },
-                                                        onDragCancel     = { artDragX = 0f },
-                                                        onHorizontalDrag = { _, amount -> artDragX += amount },
-                                                    )
-                                                },
+                                            },
+                                            text          = { Text(stringResource(R.string.player_visualizer)) },
+                                            shapes        = MenuDefaults.itemShape(1, 2),
+                                            leadingIcon   = {
+                                                Icon(if (state.visualizerEnabled) Icons.Default.Check else Icons.Default.Equalizer, contentDescription = null)
+                                            },
+                                            colors        = MenuDefaults.selectableItemColors(
+                                                selectedContainerColor = surfaceAccentColor.copy(alpha = 0.15f),
+                                            ),
+                                        )
+                                    }
+                                    Spacer(Modifier.height(MenuDefaults.GroupSpacing))
+                                    DropdownMenuGroup(shapes = MenuDefaults.groupShapes()) {
+                                        DropdownMenuItem(
+                                            onClick        = { haptics.press(); showMediaMenu = false; showSleepTimerDialog = true },
+                                            text           = { Text(stringResource(R.string.player_sleep_timer)) },
+                                            shape          = MenuDefaults.standaloneItemShape,
+                                            leadingIcon    = { Icon(Icons.Default.Timer, contentDescription = null) },
+                                            supportingText = if (state.sleepTimerMinutes > 0) {
+                                                { Text(stringResource(R.string.player_timer_remaining, state.sleepTimerMinutes)) }
+                                            } else null,
                                         )
                                     }
                                 }
+                            }
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+                    )
+                },
+            ) { paddingValues ->
+
+                if (isLandscape) {
+                    // ── Landscape: art left, controls right ───────────────────────────
+                    Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(paddingValues)
+                            .navigationBarsPadding(),
+                    ) {
+                        // Left: album art / lyrics — square, constrained by available height
+                        BoxWithConstraints(
+                            modifier         = Modifier
+                                .weight(0.45f)
+                                .fillMaxHeight()
+                                .padding(start = 16.dp, end = 8.dp, bottom = 16.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            val side = minOf(maxWidth, maxHeight * 0.82f)
+                            val displaySide = side * artScale
+
+                            // The shared-element modifier. `LocalPlayerArtKey` carries a generation the
+                            // host advances after an ABANDONED seek and at no other settle, so a morph
+                            // that follows a cancelled gesture has no state from it to inherit. A
+                            // generation is a fresh ELEMENT only — recreating the LayoutNode that carries
+                            // this modifier was tried and changed nothing on device. See
+                            // `LocalPlayerArtKey` in PlayerPanelHost.
+                            val artMod = if (sharedTransitionScope != null && animatedContentScope != null) {
+                                with(sharedTransitionScope) {
+                                    val artState = rememberSharedContentState(LocalPlayerArtKey.current)
+                                    Modifier.sharedElement(
+                                        sharedContentState      = artState,
+                                        animatedVisibilityScope = animatedContentScope,
+                                        boundsTransform         = rememberArtBoundsTransform(),
+                                    )
+                                }
+                            } else Modifier
+
+                            val lyricsContentMod = Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp))
+
+                            Box(Modifier.size(side)) {
+                                if (circleVisible) {
+                                    FftCWaveCanvas(
+                                        modifier = Modifier.fillMaxSize(),
+                                        color    = surfaceAccentColor,
+                                        alpha    = 0.40f,
+                                        enabled  = true,
+                                    )
+                                }
+                                AnimatedContent(
+                                    targetState  = state,
+                                    contentKey   = { s ->
+                                        val avail = s.lyricsState is LyricsState.Synced || s.lyricsState is LyricsState.Plain
+                                        s.lyricsMode && avail
+                                    },
+                                    transitionSpec = { fadeIn(tween(300)) togetherWith fadeOut(tween(300)) },
+                                    modifier     = Modifier.fillMaxSize(),
+                                    label        = "art-lyrics-landscape",
+                                ) { snapshot ->
+                                    val snapAvail   = snapshot.lyricsState is LyricsState.Synced || snapshot.lyricsState is LyricsState.Plain
+                                    val snapShowing = snapshot.lyricsMode && snapAvail
+                                    if (snapShowing) {
+                                        when (val ls = snapshot.lyricsState) {
+                                            is LyricsState.Synced -> SyncedLyricsView(
+                                                lines            = ls.lines,
+                                                currentLineIndex = snapshot.currentLyricLineIndex,
+                                                textColor        = lyricsTextColor,
+                                                modifier         = lyricsContentMod,
+                                            )
+                                            is LyricsState.Plain  -> PlainLyricsView(
+                                                text      = ls.text,
+                                                textColor = lyricsTextColor,
+                                                modifier  = lyricsContentMod,
+                                            )
+                                        }
+                                    } else {
+                                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                            AsyncImage(
+                                                model              = artImageModel,
+                                                contentDescription = stringResource(R.string.cd_album_art),
+                                                contentScale       = ContentScale.Crop,
+                                                modifier           = artMod
+                                                    .size(displaySide)
+                                                    .clip(RoundedCornerShape(16.dp))
+                                                    .graphicsLayer {
+                                                        translationX = (artDragX * 0.3f).coerceIn(-80f, 80f) + artOffsetX.value
+                                                    }
+                                                    .pointerInput(Unit) {
+                                                        detectHorizontalDragGestures(
+                                                            onDragStart      = { artDragX = 0f },
+                                                            onDragEnd        = {
+                                                                when {
+                                                                    artDragX < -swipeThresholdPx -> {
+                                                                        val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
+                                                                        artDragX = 0f; skipDirection = 1
+                                                                        scope.launch {
+                                                                            artOffsetX.snapTo(s)
+                                                                            artOffsetX.animateTo(-1500f, tween(250, easing = FastOutLinearInEasing))
+                                                                        }
+                                                                        haptics.press()
+                                                                        viewModel.skipNext()
+                                                                    }
+                                                                    artDragX > swipeThresholdPx -> {
+                                                                        val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
+                                                                        artDragX = 0f; skipDirection = -1
+                                                                        scope.launch {
+                                                                            artOffsetX.snapTo(s)
+                                                                            artOffsetX.animateTo(1500f, tween(250, easing = FastOutLinearInEasing))
+                                                                        }
+                                                                        haptics.press()
+                                                                        viewModel.skipPrevious()
+                                                                    }
+                                                                    else -> artDragX = 0f
+                                                                }
+                                                            },
+                                                            onDragCancel     = { artDragX = 0f },
+                                                            onHorizontalDrag = { _, amount -> artDragX += amount },
+                                                        )
+                                                    },
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Right: controls — BoxWithConstraints for proportional spacing in short landscape
+                        BoxWithConstraints(
+                            modifier         = Modifier
+                                .weight(0.55f)
+                                .fillMaxHeight()
+                                .padding(horizontal = 24.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            val spacingLarge = (maxHeight * 0.04f).coerceIn(6.dp, 16.dp)
+                            val spacingSmall = (maxHeight * 0.03f).coerceIn(4.dp, 12.dp)
+                            Column(
+                                modifier            = Modifier.fillMaxWidth(),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                PlayerControls(
+                                    state              = state,
+                                    accentColor        = accentColor,
+                                    onAccentColor      = onAccentColor,
+                                    surfaceAccentColor = surfaceAccentColor,
+                                    squigglyShape      = squigglyShape,
+                                    onSkipPrev         = onSkipPrev,
+                                    onSkipNext         = onSkipNext,
+                                    onPlayPause        = viewModel::playPause,
+                                    onToggleLike       = viewModel::toggleLike,
+                                    onToggleShuffle    = viewModel::toggleShuffle,
+                                    onCycleRepeat      = viewModel::cycleRepeat,
+                                    onSeek             = viewModel::seekTo,
+                                    onOpenQueue        = onOpenQueue,
+                                    onOpenAlbum        = onOpenAlbum,
+                                    onOpenArtist       = onOpenArtist,
+                                    // Nothing to share for an item with no open.spotify.com page (a local
+                                    // file) — `shareUrl` is null there and the button stays inert.
+                                    onShare            = {
+                                        state.currentTrack?.shareUrl?.let { url ->
+                                            context.startActivity(Intent.createChooser(
+                                                Intent(Intent.ACTION_SEND).apply {
+                                                    putExtra(Intent.EXTRA_TEXT, url)
+                                                    type = "text/plain"
+                                                }, null
+                                            ))
+                                        }
+                                    },
+                                    onAddToPlaylist    = { viewModel.loadOwnedPlaylists(); showPlaylistPicker = true },
+                                    onOpenDevicePicker = { viewModel.loadAvailableDevices(); showDevicePicker = true },
+                                    onOverflowMenuShowing = { controlsMenuOpen = it },
+                                    spacingLarge       = spacingLarge,
+                                    spacingSmall       = spacingSmall,
+                                )
                             }
                         }
                     }
-
-                    // Right: controls — BoxWithConstraints for proportional spacing in short landscape
-                    BoxWithConstraints(
-                        modifier         = Modifier
-                            .weight(0.55f)
-                            .fillMaxHeight()
-                            .padding(horizontal = 24.dp),
-                        contentAlignment = Alignment.Center,
+                } else {
+                    // ── Portrait: art top, controls bottom ────────────────────────────
+                    Column(
+                        modifier            = Modifier
+                            .fillMaxSize()
+                            .padding(paddingValues)
+                            .navigationBarsPadding(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        val spacingLarge = (maxHeight * 0.04f).coerceIn(6.dp, 16.dp)
-                        val spacingSmall = (maxHeight * 0.03f).coerceIn(4.dp, 12.dp)
+                        // Album art / lyrics
+                        BoxWithConstraints(
+                            modifier         = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .padding(horizontal = 24.dp, vertical = 12.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            val side = minOf(maxWidth, maxHeight)
+                            val displaySide = side * artScale
+
+                            // Shared-element modifier (keyed on `LocalPlayerArtKey` — a fresh element per
+                            // abandoned seek, and nothing at an ordinary settle) — see the landscape
+                            // branch above, and `LocalPlayerArtKey` in PlayerPanelHost.
+                            val artMod = if (sharedTransitionScope != null && animatedContentScope != null) {
+                                with(sharedTransitionScope) {
+                                    val artState = rememberSharedContentState(LocalPlayerArtKey.current)
+                                    Modifier.sharedElement(
+                                        sharedContentState      = artState,
+                                        animatedVisibilityScope = animatedContentScope,
+                                        boundsTransform         = rememberArtBoundsTransform(),
+                                    )
+                                }
+                            } else Modifier
+
+                            val lyricsContentMod = Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp))
+
+                            Box(Modifier.size(side)) {
+                                if (circleVisible) {
+                                    FftCWaveCanvas(
+                                        modifier = Modifier.fillMaxSize(),
+                                        color    = surfaceAccentColor,
+                                        alpha    = 0.40f,
+                                        enabled  = true,
+                                    )
+                                }
+                                AnimatedContent(
+                                    targetState  = state,
+                                    contentKey   = { s ->
+                                        val avail = s.lyricsState is LyricsState.Synced || s.lyricsState is LyricsState.Plain
+                                        s.lyricsMode && avail
+                                    },
+                                    transitionSpec = { fadeIn(tween(300)) togetherWith fadeOut(tween(300)) },
+                                    modifier     = Modifier.fillMaxSize(),
+                                    label        = "art-lyrics-portrait",
+                                ) { snapshot ->
+                                    val snapAvail   = snapshot.lyricsState is LyricsState.Synced || snapshot.lyricsState is LyricsState.Plain
+                                    val snapShowing = snapshot.lyricsMode && snapAvail
+                                    if (snapShowing) {
+                                        when (val ls = snapshot.lyricsState) {
+                                            is LyricsState.Synced -> SyncedLyricsView(
+                                                lines            = ls.lines,
+                                                currentLineIndex = snapshot.currentLyricLineIndex,
+                                                textColor        = lyricsTextColor,
+                                                modifier         = lyricsContentMod,
+                                            )
+                                            is LyricsState.Plain  -> PlainLyricsView(
+                                                text      = ls.text,
+                                                textColor = lyricsTextColor,
+                                                modifier  = lyricsContentMod,
+                                            )
+                                        }
+                                    } else {
+                                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                            AsyncImage(
+                                                model              = artImageModel,
+                                                contentDescription = stringResource(R.string.cd_album_art),
+                                                contentScale       = ContentScale.Crop,
+                                                modifier           = artMod
+                                                    .size(displaySide)
+                                                    .clip(RoundedCornerShape(16.dp))
+                                                    .graphicsLayer {
+                                                        translationX = (artDragX * 0.3f).coerceIn(-80f, 80f) + artOffsetX.value
+                                                    }
+                                                    .pointerInput(Unit) {
+                                                        detectHorizontalDragGestures(
+                                                            onDragStart      = { artDragX = 0f },
+                                                            onDragEnd        = {
+                                                                when {
+                                                                    artDragX < -swipeThresholdPx -> {
+                                                                        val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
+                                                                        artDragX = 0f; skipDirection = 1
+                                                                        scope.launch {
+                                                                            artOffsetX.snapTo(s)
+                                                                            artOffsetX.animateTo(-1500f, tween(250, easing = FastOutLinearInEasing))
+                                                                        }
+                                                                        haptics.press()
+                                                                        viewModel.skipNext()
+                                                                    }
+                                                                    artDragX > swipeThresholdPx -> {
+                                                                        val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
+                                                                        artDragX = 0f; skipDirection = -1
+                                                                        scope.launch {
+                                                                            artOffsetX.snapTo(s)
+                                                                            artOffsetX.animateTo(1500f, tween(250, easing = FastOutLinearInEasing))
+                                                                        }
+                                                                        haptics.press()
+                                                                        viewModel.skipPrevious()
+                                                                    }
+                                                                    else -> artDragX = 0f
+                                                                }
+                                                            },
+                                                            onDragCancel     = { artDragX = 0f },
+                                                            onHorizontalDrag = { _, amount -> artDragX += amount },
+                                                        )
+                                                    },
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Controls
                         Column(
-                            modifier            = Modifier.fillMaxWidth(),
-                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 32.dp)
+                                .padding(bottom = 12.dp),
                         ) {
                             PlayerControls(
                                 state              = state,
@@ -672,8 +849,7 @@ fun PlayerScreen(
                                 onOpenQueue        = onOpenQueue,
                                 onOpenAlbum        = onOpenAlbum,
                                 onOpenArtist       = onOpenArtist,
-                                // Nothing to share for an item with no open.spotify.com page (a local
-                                // file) — `shareUrl` is null there and the button stays inert.
+                                // Same null-skip as the landscape layout above.
                                 onShare            = {
                                     state.currentTrack?.shareUrl?.let { url ->
                                         context.startActivity(Intent.createChooser(
@@ -687,226 +863,62 @@ fun PlayerScreen(
                                 onAddToPlaylist    = { viewModel.loadOwnedPlaylists(); showPlaylistPicker = true },
                                 onOpenDevicePicker = { viewModel.loadAvailableDevices(); showDevicePicker = true },
                                 onOverflowMenuShowing = { controlsMenuOpen = it },
-                                spacingLarge       = spacingLarge,
-                                spacingSmall       = spacingSmall,
                             )
                         }
                     }
                 }
-            } else {
-                // ── Portrait: art top, controls bottom ────────────────────────────
-                Column(
-                    modifier            = Modifier
-                        .fillMaxSize()
-                        .padding(paddingValues)
-                        .navigationBarsPadding(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    // Album art / lyrics
-                    BoxWithConstraints(
-                        modifier         = Modifier
-                            .weight(1f)
-                            .fillMaxWidth()
-                            .padding(horizontal = 24.dp, vertical = 12.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        val side = minOf(maxWidth, maxHeight)
-                        val displaySide = side * artScale
-
-                        // Shared-element modifier (keyed on `LocalPlayerArtKey` — a fresh element per
-                        // abandoned seek, and nothing at an ordinary settle) — see the landscape
-                        // branch above, and `LocalPlayerArtKey` in PlayerPanelHost.
-                        val artMod = if (sharedTransitionScope != null && animatedContentScope != null) {
-                            with(sharedTransitionScope) {
-                                val artState = rememberSharedContentState(LocalPlayerArtKey.current)
-                                Modifier.sharedElement(
-                                    sharedContentState      = artState,
-                                    animatedVisibilityScope = animatedContentScope,
-                                    boundsTransform         = rememberArtBoundsTransform(),
-                                )
-                            }
-                        } else Modifier
-
-                        val lyricsContentMod = Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp))
-
-                        Box(Modifier.size(side)) {
-                            if (circleVisible) {
-                                FftCWaveCanvas(
-                                    modifier = Modifier.fillMaxSize(),
-                                    color    = surfaceAccentColor,
-                                    alpha    = 0.40f,
-                                    enabled  = true,
-                                )
-                            }
-                            AnimatedContent(
-                                targetState  = state,
-                                contentKey   = { s ->
-                                    val avail = s.lyricsState is LyricsState.Synced || s.lyricsState is LyricsState.Plain
-                                    s.lyricsMode && avail
-                                },
-                                transitionSpec = { fadeIn(tween(300)) togetherWith fadeOut(tween(300)) },
-                                modifier     = Modifier.fillMaxSize(),
-                                label        = "art-lyrics-portrait",
-                            ) { snapshot ->
-                                val snapAvail   = snapshot.lyricsState is LyricsState.Synced || snapshot.lyricsState is LyricsState.Plain
-                                val snapShowing = snapshot.lyricsMode && snapAvail
-                                if (snapShowing) {
-                                    when (val ls = snapshot.lyricsState) {
-                                        is LyricsState.Synced -> SyncedLyricsView(
-                                            lines            = ls.lines,
-                                            currentLineIndex = snapshot.currentLyricLineIndex,
-                                            textColor        = lyricsTextColor,
-                                            modifier         = lyricsContentMod,
-                                        )
-                                        is LyricsState.Plain  -> PlainLyricsView(
-                                            text      = ls.text,
-                                            textColor = lyricsTextColor,
-                                            modifier  = lyricsContentMod,
-                                        )
-                                    }
-                                } else {
-                                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                        AsyncImage(
-                                            model              = artImageModel,
-                                            contentDescription = stringResource(R.string.cd_album_art),
-                                            contentScale       = ContentScale.Crop,
-                                            modifier           = artMod
-                                                .size(displaySide)
-                                                .clip(RoundedCornerShape(16.dp))
-                                                .graphicsLayer {
-                                                    translationX = (artDragX * 0.3f).coerceIn(-80f, 80f) + artOffsetX.value
-                                                }
-                                                .pointerInput(Unit) {
-                                                    detectHorizontalDragGestures(
-                                                        onDragStart      = { artDragX = 0f },
-                                                        onDragEnd        = {
-                                                            when {
-                                                                artDragX < -swipeThresholdPx -> {
-                                                                    val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
-                                                                    artDragX = 0f; skipDirection = 1
-                                                                    scope.launch {
-                                                                        artOffsetX.snapTo(s)
-                                                                        artOffsetX.animateTo(-1500f, tween(250, easing = FastOutLinearInEasing))
-                                                                    }
-                                                                    haptics.press()
-                                                                    viewModel.skipNext()
-                                                                }
-                                                                artDragX > swipeThresholdPx -> {
-                                                                    val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
-                                                                    artDragX = 0f; skipDirection = -1
-                                                                    scope.launch {
-                                                                        artOffsetX.snapTo(s)
-                                                                        artOffsetX.animateTo(1500f, tween(250, easing = FastOutLinearInEasing))
-                                                                    }
-                                                                    haptics.press()
-                                                                    viewModel.skipPrevious()
-                                                                }
-                                                                else -> artDragX = 0f
-                                                            }
-                                                        },
-                                                        onDragCancel     = { artDragX = 0f },
-                                                        onHorizontalDrag = { _, amount -> artDragX += amount },
-                                                    )
-                                                },
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Controls
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 32.dp)
-                            .padding(bottom = 12.dp),
-                    ) {
-                        PlayerControls(
-                            state              = state,
-                            accentColor        = accentColor,
-                            onAccentColor      = onAccentColor,
-                            surfaceAccentColor = surfaceAccentColor,
-                            squigglyShape      = squigglyShape,
-                            onSkipPrev         = onSkipPrev,
-                            onSkipNext         = onSkipNext,
-                            onPlayPause        = viewModel::playPause,
-                            onToggleLike       = viewModel::toggleLike,
-                            onToggleShuffle    = viewModel::toggleShuffle,
-                            onCycleRepeat      = viewModel::cycleRepeat,
-                            onSeek             = viewModel::seekTo,
-                            onOpenQueue        = onOpenQueue,
-                            onOpenAlbum        = onOpenAlbum,
-                            onOpenArtist       = onOpenArtist,
-                            // Same null-skip as the landscape layout above.
-                            onShare            = {
-                                state.currentTrack?.shareUrl?.let { url ->
-                                    context.startActivity(Intent.createChooser(
-                                        Intent(Intent.ACTION_SEND).apply {
-                                            putExtra(Intent.EXTRA_TEXT, url)
-                                            type = "text/plain"
-                                        }, null
-                                    ))
-                                }
-                            },
-                            onAddToPlaylist    = { viewModel.loadOwnedPlaylists(); showPlaylistPicker = true },
-                            onOpenDevicePicker = { viewModel.loadAvailableDevices(); showDevicePicker = true },
-                            onOverflowMenuShowing = { controlsMenuOpen = it },
-                        )
-                    }
-                }
             }
-        }
 
-        // ── Bottom wave overlay ───────────────────────────────────────────────────
-        val waveNavBarDp = with(LocalDensity.current) { WindowInsets.navigationBars.getBottom(this).toDp() }
-        Box(Modifier.fillMaxSize()) {
-            FftWaveCanvas(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(waveNavBarDp + 48.dp)
-                    .align(Alignment.BottomCenter),
-                color    = surfaceAccentColor,
-                alpha    = 0.20f,
-            )
-        }
+            // ── Bottom wave overlay ───────────────────────────────────────────────────
+            val waveNavBarDp = with(LocalDensity.current) { WindowInsets.navigationBars.getBottom(this).toDp() }
+            Box(Modifier.fillMaxSize()) {
+                FftWaveCanvas(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(waveNavBarDp + 48.dp)
+                        .align(Alignment.BottomCenter),
+                    color    = surfaceAccentColor,
+                    alpha    = 0.20f,
+                )
+            }
 
-        if (showPlaylistPicker) {
-            AddToPlaylistSheet(
-                pickerState = pickerState,
-                onSelect    = viewModel::togglePlaylistTrack,
-                onCreateNew = viewModel::createPlaylist,
-                onDismiss   = { showPlaylistPicker = false },
-            )
-        }
+            if (showPlaylistPicker) {
+                AddToPlaylistSheet(
+                    pickerState = pickerState,
+                    onSelect    = viewModel::togglePlaylistTrack,
+                    onCreateNew = viewModel::createPlaylist,
+                    onDismiss   = { showPlaylistPicker = false },
+                )
+            }
 
-        if (showDevicePicker) {
-            DevicePickerSheet(
-                isLoading      = state.devicePickerLoading,
-                devices        = state.availableDevices,
-                error          = state.devicePickerError,
-                onSelectDevice = { deviceId ->
-                    showDevicePicker = false
-                    haptics.confirm()
-                    viewModel.transferToDevice(deviceId)
-                },
-                onThisDevice   = {
-                    showDevicePicker = false
-                    haptics.confirm()
-                    viewModel.transferToThisDevice()
-                },
-                onDismiss      = { showDevicePicker = false },
-                onRetry        = { viewModel.loadAvailableDevices() },
-                onSetVolume    = viewModel::setVolume,
-            )
-        }
+            if (showDevicePicker) {
+                DevicePickerSheet(
+                    isLoading      = state.devicePickerLoading,
+                    devices        = state.availableDevices,
+                    error          = state.devicePickerError,
+                    onSelectDevice = { deviceId ->
+                        showDevicePicker = false
+                        haptics.confirm()
+                        viewModel.transferToDevice(deviceId)
+                    },
+                    onThisDevice   = {
+                        showDevicePicker = false
+                        haptics.confirm()
+                        viewModel.transferToThisDevice()
+                    },
+                    onDismiss      = { showDevicePicker = false },
+                    onRetry        = { viewModel.loadAvailableDevices() },
+                    onSetVolume    = viewModel::setVolume,
+                )
+            }
 
-        if (showSleepTimerDialog) {
-            SleepTimerDialog(
-                currentMinutes = state.sleepTimerMinutes,
-                onSelect       = { minutes -> haptics.confirm(); viewModel.setSleepTimer(minutes); showSleepTimerDialog = false },
-                onDismiss      = { showSleepTimerDialog = false },
-            )
+            if (showSleepTimerDialog) {
+                SleepTimerDialog(
+                    currentMinutes = state.sleepTimerMinutes,
+                    onSelect       = { minutes -> haptics.confirm(); viewModel.setSleepTimer(minutes); showSleepTimerDialog = false },
+                    onDismiss      = { showSleepTimerDialog = false },
+                )
+            }
         }
 
         if (!docked) {
