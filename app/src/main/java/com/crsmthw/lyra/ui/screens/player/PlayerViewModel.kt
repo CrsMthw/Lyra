@@ -14,6 +14,12 @@ import com.crsmthw.lyra.data.repository.LyricsRepository
 import com.crsmthw.lyra.data.repository.LyricsState
 import com.crsmthw.lyra.data.repository.SettingsRepository
 import com.crsmthw.lyra.data.repository.SpotifyRepository
+import com.crsmthw.lyra.ui.cassette.CassetteAlbumMeta
+import com.crsmthw.lyra.ui.cassette.CassetteLabel
+import com.crsmthw.lyra.ui.cassette.CassetteSettings
+import com.crsmthw.lyra.ui.cassette.cassetteAlbumIdFor
+import com.crsmthw.lyra.ui.cassette.cassetteAlbumMetaFrom
+import com.crsmthw.lyra.ui.cassette.cassetteLabelFor
 import com.crsmthw.lyra.ui.components.TrackActionsController
 import com.crsmthw.lyra.ui.components.toTrackActionTarget
 import com.crsmthw.lyra.util.LyricLine
@@ -21,9 +27,12 @@ import com.crsmthw.lyra.util.visualizer.VisualizerManager
 import com.crsmthw.lyra.util.visualizer.VisualizerStyle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -51,6 +60,9 @@ private const val SDK_SEEK_SETTLE_MS = 1_200L
  * picked at random (the exact bug the user reports). Tunable on device.
  */
 private const val REMOTE_SHUFFLE_SETTLE_MS = 300L
+
+/** How many albums' cassette fine print the player keeps (one small entry per album id). */
+private const val CASSETTE_META_CACHE_SIZE = 24
 
 /**
  * "No active device" — `me/player/play` answers 404 when Spotify is not running anywhere. It is the
@@ -157,6 +169,37 @@ class PlayerViewModel(
         .stateIn(viewModelScope, SharingStarted.Eagerly, _uiState.value.currentTrack?.id)
     val isPlayingFlow: StateFlow<Boolean> = _uiState.map { it.isPlaying }.distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.Eagerly, _uiState.value.isPlaying)
+
+    // ── Cassette idle screen (docs/CASSETTE.md) ──────────────────────────────
+    /** Every cassette preference, Eagerly so the no-argument collect seeds from the live value. */
+    val cassetteSettings: StateFlow<CassetteSettings> = settingsRepository.cassetteSettings
+        .stateIn(viewModelScope, SharingStarted.Eagerly, CassetteSettings())
+
+    /**
+     * The album fine print (copyright line + record label) by album id — ONE `GET albums/{id}` per
+     * album, LRU-bounded. Only SUCCESSES are cached (a lookup whose album simply has no copyright
+     * caches as a meta of nulls); a failure is not, so it is retried when that album comes back —
+     * but never per poll tick, because the fetch below is driven by a `distinctUntilChanged` album
+     * id, not by the 3 s poll. Touched only on the main dispatcher (viewModelScope).
+     */
+    private val cassetteAlbumMeta = object : LinkedHashMap<String, CassetteAlbumMeta>(32, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, CassetteAlbumMeta>?) =
+            size > CASSETTE_META_CACHE_SIZE
+    }
+    /** Bumped whenever [cassetteAlbumMeta] gains an entry, so [cassetteLabel] re-reads it. */
+    private val cassetteMetaVersion = MutableStateFlow(0)
+
+    /**
+     * What the cassette's label prints for the current item: emitted WITHOUT the fine print at once
+     * and again when the album lookup lands. Null while nothing is playing.
+     */
+    val cassetteLabel: StateFlow<CassetteLabel?> = combine(
+        _uiState.map { it.currentTrack }.distinctUntilChanged(),
+        cassetteMetaVersion,
+    ) { track, _ ->
+        track?.let { t -> cassetteLabelFor(t, cassetteAlbumIdFor(t)?.let { cassetteAlbumMeta[it] }) }
+    }.distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     /** Shared add-to-playlist implementation (the same one the song touch-and-hold menu uses),
      *  targeting the current track. The picker methods below are thin delegations to it. */
@@ -272,6 +315,36 @@ class PlayerViewModel(
         }
         playerStateManager.onWakeOperationComplete = {
             viewModelScope.launch { clearIsWakingUp() }
+        }
+        // The cassette's album fine print. Anti-bloat: NO album call while the feature is off —
+        // the id is null then, and flipping the feature ON with a track playing emits that track's
+        // album id, which fetches it. Episodes and local files have no id (cassetteAlbumIdFor).
+        // `collectLatest` drops an in-flight lookup the moment the album changes.
+        viewModelScope.launch {
+            combine(
+                cassetteSettings.map { it.enabled }.distinctUntilChanged(),
+                _uiState.map { ui -> ui.currentTrack?.let(::cassetteAlbumIdFor) }.distinctUntilChanged(),
+            ) { enabled, albumId -> if (enabled) albumId else null }
+                .distinctUntilChanged()
+                .collectLatest { albumId ->
+                    if (albumId == null || cassetteAlbumMeta.containsKey(albumId)) return@collectLatest
+                    // Inside the app-wide 429 penalty window the call would only be refused again;
+                    // the label prints its boilerplate, and the album is retried when it comes back.
+                    if (playerStateManager.isRateLimited()) return@collectLatest
+                    val result = repository.getAlbum(albumId)
+                    // safeCall's runCatching turns a cancellation into a failure: stop here if so.
+                    currentCoroutineContext().ensureActive()
+                    result.fold(
+                        onSuccess = { album ->
+                            cassetteAlbumMeta[albumId] = cassetteAlbumMetaFrom(album)
+                            cassetteMetaVersion.update { it + 1 }
+                        },
+                        onFailure = { e ->
+                            if (e.isRateLimited()) playerStateManager.noteRateLimited()
+                            Log.w(TAG, "cassette album meta for $albumId failed: ${e.message}")
+                        },
+                    )
+                }
         }
         remoteManager.connect(onConnected = { }, onFailure = { })
     }
