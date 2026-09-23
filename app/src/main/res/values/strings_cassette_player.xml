@@ -2,5 +2,7 @@
 <!-- Cassette idle screen — player overlay strings. Owned by the PLAYER lane; nothing else edits this file. -->
 <resources>
     <string name="cassette_exit_hint">Double-tap to exit</string>
+    <!-- TalkBack's name for the overlay's activate action ("Double-tap to return to the player"). -->
+    <string name="cassette_exit_action">Return to the player</string>
     <string name="cd_cassette_overlay">Cassette. Double-tap to return to the player</string>
 </resources>
