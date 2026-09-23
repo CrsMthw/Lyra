@@ -343,6 +343,13 @@ fun PlayerScreen(
             cassetteVisible = true
         }
     }
+    // Tell the app-wide PlayerPanelHost (via LyraNavGraph) that back belongs to the cassette while
+    // it is up, so a gesture-nav back over it seeks no mini bar in (PlayerViewModel.cassetteOwnsBack).
+    // The docked pane never writes: its dispose must not clear the route player's `true`.
+    DisposableEffect(cassetteVisible, docked) {
+        if (!docked) viewModel.setCassetteOwnsBack(cassetteVisible)
+        onDispose { if (!docked) viewModel.setCassetteOwnsBack(false) }
+    }
     val exitCassette: () -> Unit = {
         cassetteVisible = false
         idleClock.lastTouch = SystemClock.uptimeMillis()   // back on the player: the 7 s start over
