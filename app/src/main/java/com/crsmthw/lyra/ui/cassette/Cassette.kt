@@ -309,7 +309,7 @@ internal fun CassetteStageImpl(
                                 val t = anim.value
                                 when (move) {
                                     CassetteMove.FLIP -> {
-                                        cameraDistance = FlipCameraDistance * density
+                                        cameraDistance = flipCameraDistance(size.height)
                                         val a = flipAngleAt(t, flipForward)
                                         rotationX = flipFaceRotation(a, incoming)
                                         alpha = if (flipShowsIncoming(a) == incoming) 1f else 0f
@@ -329,5 +329,13 @@ internal fun CassetteStageImpl(
     }
 }
 
-/** The flip's camera distance, in multiples of the density (the platform's card-flip idiom). */
-internal const val FlipCameraDistance = 12f
+/**
+ * The flip's camera distance for a shell whose SHORT side is `shortSidePx`: 12 half-short-sides
+ * away, so the near edge grows at most ~8 % at 65° whatever the screen. The layer's camera
+ * distance is in the platform camera's units of 72 px (the usual `12 × density` idiom was
+ * measured on the emulator: it put the camera ~2 400 px from a 1 248 px-wide shell, and the near
+ * edge ran off the cover screen by a third).
+ */
+internal fun flipCameraDistance(shortSidePx: Float): Float = FlipCameraHalfHeights * (shortSidePx / 2f) / 72f
+
+internal const val FlipCameraHalfHeights = 12f

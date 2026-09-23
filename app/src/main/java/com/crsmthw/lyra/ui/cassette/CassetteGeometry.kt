@@ -151,6 +151,19 @@ internal fun chooseFontSize(sizes: List<Float>, maxWidth: Float, widthAt: (Float
 }
 
 /**
+ * The sizes worth trying once the text has been measured at the LARGEST size: a width with
+ * em-proportional tracking scales ~linearly with the size, so everything above the estimated fit
+ * (+3 % for hinting) is skipped, and [chooseFontSize] usually verifies one or two sizes instead of
+ * walking the whole list. Always keeps the floor, so the ellipsis case is still reached.
+ */
+internal fun candidateSizes(sizes: List<Float>, widthAtFirst: Float, maxWidth: Float): List<Float> {
+    if (widthAtFirst <= maxWidth || widthAtFirst <= 0f) return sizes.take(1)
+    val estimate = sizes.first() * maxWidth / widthAtFirst * 1.03f
+    val kept = sizes.drop(1).filter { it <= estimate }
+    return kept.ifEmpty { listOf(sizes.last()) }
+}
+
+/**
  * The fine print is always set as two balanced lines (as the ad prints it): it is laid out at 60 %
  * of its one-line width — so a balanced line breaker splits it near the middle — never wider than
  * the label allows, never narrower than `minWidth`.

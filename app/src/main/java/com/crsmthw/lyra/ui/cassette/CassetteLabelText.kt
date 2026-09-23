@@ -88,7 +88,12 @@ internal fun measureCassetteText(
 
     /** The auto-shrink: the largest size whose one-line width fits, the floor + ellipsis past it. */
     fun fitted(text: String, sizes: List<Float>, spacingEm: Float, boxUnits: Float): TextLayoutResult {
-        val fit = chooseFontSize(sizes, boxUnits * u) { s -> line(text, style(CassetteSerif, s, spacingEm)).size.width.toFloat() }
+        val max = boxUnits * u
+        val first = line(text, style(CassetteSerif, sizes.first(), spacingEm))
+        if (first.size.width <= max) return first
+        val fit = chooseFontSize(candidateSizes(sizes, first.size.width.toFloat(), max), max) { s ->
+            line(text, style(CassetteSerif, s, spacingEm)).size.width.toFloat()
+        }
         val st = style(CassetteSerif, fit.size, spacingEm)
         return if (fit.ellipsize) line(text, st, boxUnits) else line(text, st)
     }

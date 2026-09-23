@@ -246,9 +246,11 @@ internal fun DrawScope.drawWindowGlass(p: CassettePalette, kit: CassetteArtKit) 
             startY = G.WinTop, endY = G.WinBottom), Offset(G.WinLeft, G.WinTop), Size(w, h))
         drawRect(Brush.verticalGradient(0f to p.shade(0.75f), 1f to p.shade(0f), startY = G.WinTop, endY = G.WinTop + 34f),
             Offset(G.WinLeft, G.WinTop), Size(w, 34f))
+        // The gradient runs exactly ACROSS the band (61.4 units, perpendicular to its edges) so
+        // both edges fade to 0 — the SVG's longer axis left a hard line on the band's right edge.
         drawPath(polygon(560f, G.WinTop, 640f, G.WinTop, 470f, G.WinBottom, 390f, G.WinBottom),
             Brush.linearGradient(0f to p.hi(0f), 0.5f to p.hi(0.10f), 1f to p.hi(0f),
-                start = Offset(560f, G.WinTop), end = Offset(640f, G.WinTop + 64f)))
+                start = Offset(560f, G.WinTop), end = Offset(607.2f, G.WinTop + 39.3f)))
         rr(G.WinLeft + 0.5f, G.WinTop + 0.5f, w - 1f, h - 1f, G.WinRadius - 0.5f, p.hi(0.16f), stroke(1f))
     }
 }

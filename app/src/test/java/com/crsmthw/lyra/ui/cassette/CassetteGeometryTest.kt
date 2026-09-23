@@ -130,6 +130,22 @@ class CassetteLabelTextTest {
     }
 
     @Test
+    fun `candidate sizes skip everything above the linear estimate and keep the floor`() {
+        val sizes = descendingSizes(46f, 24f, 2f)
+        assertEquals(listOf(46f), candidateSizes(sizes, widthAtFirst = 500f, maxWidth = 656f))
+        // 920 wide at 46 → ~32.8 fits → try 32 first (34 is above 32.8 × 1.03 = 33.8)
+        assertEquals(32f, candidateSizes(sizes, widthAtFirst = 920f, maxWidth = 656f).first())
+        assertEquals(24f, candidateSizes(sizes, widthAtFirst = 920f, maxWidth = 656f).last())
+        // hopeless: only the floor is left, and the chooser ellipsises it
+        val hopeless = candidateSizes(sizes, widthAtFirst = 5000f, maxWidth = 656f)
+        assertEquals(listOf(24f), hopeless)
+        assertEquals(FittedSize(24f, true), chooseFontSize(hopeless, 656f) { it * 108f })
+        // the estimate agrees with the full walk for a linear width
+        val w = { s: Float -> s * 20f }
+        assertEquals(chooseFontSize(sizes, 656f, w), chooseFontSize(candidateSizes(sizes, w(46f), 656f), 656f, w))
+    }
+
+    @Test
     fun `meta line prints album and year, either half, or nothing`() {
         val join = { a: String, y: String -> "$a · $y" }
         assertEquals("Mass · 2026", cassetteMetaLine("Mass", "2026", join))
