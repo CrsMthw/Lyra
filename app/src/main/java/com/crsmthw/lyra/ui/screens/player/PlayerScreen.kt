@@ -44,6 +44,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.layout.ContentScale
 import android.Manifest
@@ -394,6 +395,13 @@ fun PlayerScreen(
                         idleClock.pressed   = event.changes.any { it.pressed }
                     }
                 }
+            }
+            // Hardware keyboard / D-pad navigation is user activity too, but no pointer event. The
+            // preview pass reaches this ancestor of every focused control first; `false` passes the
+            // key on untouched.
+            .onPreviewKeyEvent {
+                idleClock.lastTouch = SystemClock.uptimeMillis()
+                false
             },
     ) {
         // The player itself. While the cassette is up it is removed from the accessibility tree:
