@@ -58,8 +58,10 @@ data class CassettePalette(
                 hubTeeth       = Color.hsl(h, s * 0.45f, 0.94f),
                 tape           = Color.hsl(h, s * 0.85f, 0.19f),
                 tapeSheen      = Color.hsl(h, s * 0.75f, 0.30f),
-                labelPaper     = Color.hsl(h, (s * 0.55f).coerceIn(0.20f, 0.50f), 0.915f),
-                labelGrid      = Color.hsl(h, s * 0.50f, 0.82f),
+                // The ad's label is a clear lavender (measured l 0.80, s 0.30), not near-white:
+                // 0.88 keeps it the brightest thing on the face without glaring in a dark room.
+                labelPaper     = Color.hsl(h, (s * 0.60f).coerceIn(0.22f, 0.52f), 0.88f),
+                labelGrid      = Color.hsl(h, s * 0.50f, 0.79f),
                 ink            = Color.hsl(h, s * 0.40f, 0.14f),
                 inkSoft        = Color.hsl(h, s * 0.30f, 0.36f),
                 shell          = Color(0xFF2B292F),

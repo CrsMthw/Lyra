@@ -1,9 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Cassette idle screen — words printed ON the cassette artwork. Owned by the PAINTER lane; nothing else edits this file. -->
 <resources>
-    <string name="cassette_side_a">SIDE A</string>
-    <string name="cassette_side_b">SIDE B</string>
+    <!-- The side tag is printed as two lines, as on the ad: a small spaced word over a big letter. -->
+    <string name="cassette_side">SIDE</string>
+    <string name="cassette_side_letter_a">A</string>
+    <string name="cassette_side_letter_b">B</string>
     <string name="cassette_stereo">STEREO</string>
     <string name="cassette_brand">Lyra</string>
+    <!-- Joins the album and the year on the label's small line: "Album · 2026". -->
+    <string name="cassette_meta_separator">" · "</string>
     <string name="cassette_fine_print_boilerplate">ALL RIGHTS RESERVED. UNAUTHORIZED COPYING, HIRING, LENDING, PUBLIC PERFORMANCE AND BROADCASTING OF THIS RECORDING PROHIBITED.</string>
 </resources>
