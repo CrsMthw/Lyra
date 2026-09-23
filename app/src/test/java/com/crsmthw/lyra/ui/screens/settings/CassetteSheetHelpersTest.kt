@@ -8,6 +8,7 @@ import com.crsmthw.lyra.ui.cassette.toHsl
 import kotlin.math.abs
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class CassetteSheetHelpersTest {
@@ -95,5 +96,57 @@ class CassetteSheetHelpersTest {
         assertEquals(CASSETTE_DEFAULT_CUSTOM_COLOR, CassetteSwatches.first().argb)
         assertEquals(10, CassetteSwatches.map { it.argb }.toSet().size)
         assertEquals(10, CassetteSwatches.map { it.nameRes }.toSet().size)
+    }
+
+    // ── CassetteOwnWrites: the sheet must not re-seed its sliders from its own write's echo ──
+
+    @Test
+    fun `an own write's echo is recognised, an outside value is not`() {
+        val own = CassetteOwnWrites()
+        own.record(1)
+        assertTrue(own.isEcho(1))
+        assertFalse(own.isEcho(1), "consumed: the same value again is an outside change")
+        assertFalse(own.isEcho(2))
+    }
+
+    @Test
+    fun `two quick writes arriving one by one are both echoes`() {
+        val own = CassetteOwnWrites()
+        own.record(10); own.record(20)
+        assertTrue(own.isEcho(10))
+        assertTrue(own.isEcho(20))
+    }
+
+    @Test
+    fun `a conflated older write is dropped with the newer echo`() {
+        val own = CassetteOwnWrites()
+        own.record(10); own.record(20)
+        assertTrue(own.isEcho(20))
+        assertFalse(own.isEcho(10), "10 was superseded; seeing it now is an outside change")
+    }
+
+    @Test
+    fun `a repeated value arriving in order is recognised every time`() {
+        val own = CassetteOwnWrites()
+        own.record(10); own.record(20); own.record(10)
+        assertTrue(own.isEcho(10))
+        assertTrue(own.isEcho(20))
+        assertTrue(own.isEcho(10))
+    }
+
+    @Test
+    fun `an outside change clears what was in flight`() {
+        val own = CassetteOwnWrites()
+        own.record(10)
+        assertFalse(own.isEcho(99))
+        assertFalse(own.isEcho(10))
+    }
+
+    @Test
+    fun `a hue released at the right end is stored as hue 0`() {
+        // Why the echo must never re-seed the Hue slider: 360 and 0 are one colour, and toHsl reads 0.
+        val argb = cassetteSeedColor(360f, 0.6f).toArgb()
+        assertEquals(argb, cassetteSeedColor(0f, 0.6f).toArgb())
+        assertTrue(cassetteHueSat(argb).hue < 1f)
     }
 }
