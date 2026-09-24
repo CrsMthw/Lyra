@@ -72,7 +72,7 @@ class SettingsViewModel(
     val ilyraEnabled: StateFlow<Boolean> = settingsRepo.ilyraEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
-    /** The cassette idle screen — all six preferences as one snapshot (docs/CASSETTE.md). */
+    /** The cassette idle screen — all seven preferences as one snapshot (docs/CASSETTE.md). */
     val cassetteSettings: StateFlow<CassetteSettings> = settingsRepo.cassetteSettings
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), CassetteSettings())
 
@@ -106,6 +106,7 @@ class SettingsViewModel(
     fun setCassetteColorSource  (source : CassetteColorSource) { viewModelScope.launch { settingsRepo.setCassetteColorSource(source)   } }
     fun setCassetteCustomColor  (argb   : Int)                 { viewModelScope.launch { settingsRepo.setCassetteCustomColor(argb)     } }
     fun setCassetteShowExitHint (show   : Boolean)             { viewModelScope.launch { settingsRepo.setCassetteShowExitHint(show)    } }
+    fun setCassetteIdleSeconds  (seconds: Int)                 { viewModelScope.launch { settingsRepo.setCassetteIdleSeconds(seconds)  } }
 
     /** Reset every visualizer setting to its default (surfaces=Both, 24 bands, gain 0, synced, mean). */
     fun resetVisualizerSettings() {
