@@ -988,42 +988,16 @@ private fun AboutSection(
                 )
                 Spacer(Modifier.height(12.dp))
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Favorite, contentDescription = null, tint = Color(0xFFE91E63), modifier = Modifier.size(20.dp))
-                    Spacer(Modifier.width(12.dp))
-                    Column {
-                        Text(stringResource(R.string.about_credit_app), style = MaterialTheme.typography.bodyMedium)
-                        Text(stringResource(R.string.about_credit_app_desc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-
+                // Four rows of ONE shape — a title over a licence/role line — so the sizes never drift.
+                CreditRow(stringResource(R.string.about_credit_app),  stringResource(R.string.about_credit_app_desc))
                 Spacer(Modifier.height(12.dp))
-
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Favorite, contentDescription = null, tint = Color(0xFFE91E63), modifier = Modifier.size(20.dp))
-                    Spacer(Modifier.width(12.dp))
-                    Column {
-                        Text(stringResource(R.string.about_credit_icon), style = MaterialTheme.typography.bodyMedium)
-                        Text(stringResource(R.string.about_credit_icon_desc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-
+                CreditRow(stringResource(R.string.about_credit_icon), stringResource(R.string.about_credit_icon_desc))
                 Spacer(Modifier.height(12.dp))
-
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Favorite, contentDescription = null, tint = Color(0xFFE91E63), modifier = Modifier.size(20.dp))
-                    Spacer(Modifier.width(12.dp))
-                    Text(stringResource(R.string.about_credit_fonts), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-
+                // Bundled fonts (SIL OFL 1.1; licence texts in assets/fonts/): iLyra's LCD face and the
+                // cassette label's serif (ui/cassette/CassetteFont.kt).
+                CreditRow(stringResource(R.string.about_credit_font_liberation), stringResource(R.string.about_credit_font_liberation_desc))
                 Spacer(Modifier.height(12.dp))
-
-                // The cassette label's serif (ui/cassette/CassetteFont.kt); licence in assets/fonts/.
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Favorite, contentDescription = null, tint = Color(0xFFE91E63), modifier = Modifier.size(20.dp))
-                    Spacer(Modifier.width(12.dp))
-                    Text(stringResource(R.string.about_credit_fonts_playfair), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
+                CreditRow(stringResource(R.string.about_credit_font_playfair),   stringResource(R.string.about_credit_font_playfair_desc))
             }
         }
 
@@ -1107,6 +1081,19 @@ private fun formatBytes(bytes: Long): String = when {
 }
 
 // ── Helper composables ────────────────────────────────────────────────────────
+
+/** One About-card credit: a heart, a `bodyMedium` title and a `bodySmall` secondary line. */
+@Composable
+private fun CreditRow(title: String, subtitle: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Default.Favorite, contentDescription = null, tint = Color(0xFFE91E63), modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(12.dp))
+        Column {
+            Text(title, style = MaterialTheme.typography.bodyMedium)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
 
 @Composable
 private fun SettingsSectionHeader(title: String) {
