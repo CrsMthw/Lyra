@@ -64,6 +64,10 @@ import kotlin.math.min
  *                    turn about the screen's horizontal axis. Camera: 12 half-LONG-sides away;
  *                    the face is scaled by 12 / (12 + |sin θ|) so the near end, which perspective
  *                    grows up to 12/11, never outgrows the full-bleed short side (clipped before)
+ *   eject            translationY −shift × travel — out through the TITLE edge (natural −y, the
+ *                    edge opposite the head: LEFT in portrait, UP in landscape), and the fresh
+ *                    shell back in through the same edge, in both directions. travel = the short
+ *                    side × 1.04 + the letterbox band on that side, so the shell clears the stage
  *   head edge        trapezoid 168..832 from y 486; capstans (367|633, 573); pinch rollers
  *                    (272|728, 590) r 27; guide rollers (122|878, 557) r 46; head recess 418..582
  *
@@ -298,6 +302,13 @@ internal fun CassetteStageImpl(
         contentAlignment = Alignment.Center,
     ) {
         val fit = cassetteFit(maxWidth.value, maxHeight.value)
+        // The eject must clear the STAGE (it clips), letterbox included — in px, the unit of the
+        // face layer's own size.height (= the shell's short side) that the travel is built from.
+        val ejectBandPx = run {
+            val w = constraints.maxWidth.toFloat()
+            val h = constraints.maxHeight.toFloat()
+            ejectBand(w, h, cassetteFit(w, h).short, fit.portrait)
+        }
         // (long × short) in the natural frame; in portrait the SAME box turned −90° about its
         // centre, overflowing its slot on purpose (requiredSize, centred, nothing clips it).
         Box(
@@ -331,8 +342,11 @@ internal fun CassetteStageImpl(
                                         alpha = if (flipShowsIncoming(a) == incoming) 1f else 0f
                                     }
                                     CassetteMove.EJECT -> {
+                                        // out through the TITLE edge (natural −y: LEFT in
+                                        // portrait, UP in landscape), back in through the same
                                         val e = ejectFrameAt(t)
-                                        translationX = (if (incoming) e.incomingShift else e.outgoingShift) * size.width
+                                        val travel = ejectTravel(size.height, ejectBandPx)
+                                        translationY = -(if (incoming) e.incomingShift else e.outgoingShift) * travel
                                         if (incoming) { scaleX = e.incomingScale; scaleY = e.incomingScale }
                                     }
                                     null -> Unit

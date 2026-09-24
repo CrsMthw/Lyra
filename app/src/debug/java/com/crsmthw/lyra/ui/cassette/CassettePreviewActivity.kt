@@ -34,7 +34,8 @@ import kotlinx.coroutines.delay
  * Extras: title / artist / album / year / copyright (strings), seed (ARGB int), progress (float),
  * spinning, demo (every 5 s a new track — alternating a 40-character and a short title — so the
  * flip and the eject play; progress sweeps 0 → 1 over 60 s), sideB (one flip at start),
- * flipAt / ejectAt (freeze that move at a fraction of its timeline), backward (moves go back).
+ * flipAt / ejectAt (freeze that move at a fraction of its timeline), backward (moves go back;
+ * with ejectAt the one backward change from side A is the frozen eject).
  */
 class CassettePreviewActivity : ComponentActivity() {
 
@@ -124,7 +125,9 @@ private fun CassettePreview(a: PreviewArgs) {
     LaunchedEffect(Unit) {
         when {
             a.sideB || a.flipAt != null -> { delay(900); step = 1 }
-            a.ejectAt != null           -> { delay(900); step = 1; delay(1300); step = 2 }
+            // forward: a flip to B first, then the eject; backward: from a fresh side A the
+            // FIRST change is already an eject (the previous shell comes back)
+            a.ejectAt != null           -> { delay(900); step = 1; if (!a.backward) { delay(1300); step = 2 } }
             a.demo -> {
                 val start = System.nanoTime()
                 var next = 5_000L

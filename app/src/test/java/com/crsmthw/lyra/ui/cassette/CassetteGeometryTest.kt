@@ -224,20 +224,52 @@ class CassetteChoreographyTimelineTest {
         val total = EjectTotalMs.toFloat()
         assertEquals(CassetteTiming.EjectOutMs + CassetteTiming.EjectGapMs + CassetteTiming.InsertMs, EjectTotalMs)
         val start = ejectFrameAt(0f)
-        assertEquals(0f, start.outgoingShift); assertEquals(EjectTravel, start.incomingShift)
+        assertEquals(0f, start.outgoingShift); assertEquals(1f, start.incomingShift)
         val gap = ejectFrameAt(CassetteTiming.EjectOutMs + CassetteTiming.EjectGapMs / 2f)
-        assertEquals(EjectTravel, gap.outgoingShift); assertEquals(EjectTravel, gap.incomingShift)
+        assertEquals(1f, gap.outgoingShift); assertEquals(1f, gap.incomingShift)
         val end = ejectFrameAt(total)
-        assertEquals(EjectTravel, end.outgoingShift)
+        assertEquals(1f, end.outgoingShift)
         assertEquals(0f, end.incomingShift); assertEquals(1f, end.incomingScale)
         assertTrue(close(ejectFrameAt(0f).incomingScale, 0.98f))
-        // the outgoing shell is fully gone before the new one starts moving
-        assertTrue(EjectTravel > 1f)
-        var last = EjectTravel
+        // the incoming shell only ever approaches, the outgoing one only ever leaves
+        var lastIn = 1f
+        var lastOut = 0f
         for (i in 0..40) {
             val f = ejectFrameAt(total * i / 40f)
-            assertTrue(f.incomingShift <= last + 1e-4f); last = f.incomingShift
+            assertTrue(f.incomingShift <= lastIn + 1e-4f); lastIn = f.incomingShift
+            assertTrue(f.outgoingShift >= lastOut - 1e-4f); lastOut = f.outgoingShift
         }
+        // the new shell does not start moving until the old one is all the way out
+        for (i in 0..40) {
+            val f = ejectFrameAt(total * i / 40f)
+            if (f.incomingShift < 1f) assertEquals(1f, f.outgoingShift, "at ${total * i / 40f} ms")
+        }
+    }
+
+    @Test
+    fun `eject travel is the short side plus the band plus a 4 percent margin`() {
+        assertTrue(close(ejectTravel(1000f, 0f), 1040f))
+        assertTrue(close(ejectTravel(1000f, 150f), 1190f))
+        assertTrue(close(ejectTravel(1000f, -5f), 1040f), "a negative band reads as 0")
+    }
+
+    @Test
+    fun `the eject band is the letterbox on the side the shell leaves through`() {
+        // Fold 8 cover, portrait 1248 × 1972: full bleed on the width → no band
+        val cover = cassetteFit(1248f, 1972f)
+        assertTrue(close(ejectBand(1248f, 1972f, cover.short, cover.portrait), 0f, 0.5f))
+        // the cover in landscape (user_rotation 1): full bleed on the height
+        val coverLand = cassetteFit(1972f, 1248f)
+        assertTrue(close(ejectBand(1972f, 1248f, coverLand.short, coverLand.portrait), 0f, 0.5f))
+        // unfolded 2448 × 1848: the shell is 1562 tall → ~143 px above and below
+        val unfolded = cassetteFit(2448f, 1848f)
+        val band = ejectBand(2448f, 1848f, unfolded.short, unfolded.portrait)
+        assertTrue(close(band, (1848f - unfolded.short) / 2f, 1e-3f) && band > 140f, "$band")
+        // and there the shell clears the top of the stage entirely: its bottom edge, which rests
+        // band + short below the top, ends above it
+        val travel = ejectTravel(unfolded.short, band)
+        val bottom = band + unfolded.short - travel
+        assertTrue(bottom < -0.04f * unfolded.short + 1e-2f, "bottom edge at $bottom")
     }
 }
 
@@ -250,14 +282,15 @@ class CassetteStageOrientationTest {
     fun `landscape is the natural orientation`() {
         assertEquals(0f, stageRotationZ(portrait = false))
         assertTrue(near(naturalToScreen(0f, 1f, portrait = false), 0f, 1f))   // head edge down
-        assertTrue(near(naturalToScreen(1f, 0f, portrait = false), 1f, 0f))   // eject to the right
+        assertTrue(near(naturalToScreen(0f, -1f, portrait = false), 0f, -1f)) // eject through the TOP
     }
 
     @Test
-    fun `portrait turns anticlockwise - head edge right, label reads upward, eject goes up`() {
+    fun `portrait turns anticlockwise - head edge right, label reads upward, eject goes left`() {
         assertEquals(-90f, stageRotationZ(portrait = true))
         assertTrue(near(naturalToScreen(0f, 1f, portrait = true), 1f, 0f), "head edge on the RIGHT")
-        assertTrue(near(naturalToScreen(1f, 0f, portrait = true), 0f, -1f), "reads bottom-to-top / ejects UP")
+        assertTrue(near(naturalToScreen(1f, 0f, portrait = true), 0f, -1f), "reads bottom-to-top")
+        assertTrue(near(naturalToScreen(0f, -1f, portrait = true), -1f, 0f), "ejects through the title edge, LEFT")
     }
 
     @Test
