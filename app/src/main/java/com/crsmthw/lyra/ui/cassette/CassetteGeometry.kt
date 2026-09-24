@@ -103,17 +103,25 @@ internal fun packRadii(progress: Float): PackRadii {
 }
 
 /**
- * A hub's angular speed (degrees per second, clockwise-positive) for the pack radius it carries:
- * `ω = v / r` — constant linear tape speed means the small pack spins fast and the full one slow.
+ * A hub's angular SPEED (degrees per second, a magnitude — the direction is [advanceHubAngle]'s)
+ * for the pack radius it carries: `ω = v / r` — constant linear tape speed means the small pack
+ * spins fast and the full one slow.
  */
 internal fun hubDegreesPerSecond(packRadius: Float, tapeSpeed: Float = CassetteGeometry.TapeSpeed): Float =
     (tapeSpeed / max(packRadius, 1f)) * (180f / PI.toFloat())
 
-/** Advances a hub angle by one frame, wrapped into [0, 360). `dtSeconds` is capped at 0.1 s so a
- *  hitch or the first frame after a resume never jumps the teeth. */
+/**
+ * Advances a hub angle by one frame, wrapped into [0, 360). BOTH hubs turn ANTICLOCKWISE (natural
+ * frame, head edge at the bottom): the tape leaves the supply (left) pack and winds onto the
+ * take-up (right) pack along the HEAD side, so the bottom of each pack moves toward the reel that
+ * is filling — left to right — and a circle whose bottom moves right turns anticlockwise. A rigid
+ * rotation keeps handedness, so the portrait screen sees anticlockwise too. The angle is fed to
+ * DrawScope `rotate`, which is CLOCKWISE-positive on screen (y down), so it DECREASES over time.
+ * `dtSeconds` is capped at 0.1 s so a hitch or the first frame after a resume never jumps the teeth.
+ */
 internal fun advanceHubAngle(angle: Float, packRadius: Float, dtSeconds: Float): Float {
     val dt = dtSeconds.coerceIn(0f, 0.1f)
-    val next = angle + hubDegreesPerSecond(packRadius) * dt
+    val next = angle - hubDegreesPerSecond(packRadius) * dt
     return ((next % 360f) + 360f) % 360f
 }
 

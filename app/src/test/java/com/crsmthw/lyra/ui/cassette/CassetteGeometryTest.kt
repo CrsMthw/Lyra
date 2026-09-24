@@ -58,10 +58,23 @@ class CassetteReelGeometryTest {
     }
 
     @Test
-    fun `hub angle advances clockwise, wraps and caps a long frame`() {
-        val step = advanceHubAngle(0f, g.RMin, 0.1f)
-        assertTrue(close(step, 30f, 0.01f), "$step")          // 300°/s × 0.1 s
-        assertTrue(close(advanceHubAngle(350f, g.RMin, 0.1f), 20f, 0.01f))
+    fun `hub angle advances ANTICLOCKWISE (falls), wraps into 0 to 360 and caps a long frame`() {
+        // DrawScope rotate is clockwise-positive on screen, so an anticlockwise hub's angle falls
+        val step = advanceHubAngle(100f, g.RMin, 0.1f)
+        assertTrue(close(step, 70f, 0.01f), "$step")          // 300°/s × 0.1 s, backwards
+        assertTrue(close(advanceHubAngle(0f, g.RMin, 0.1f), 330f, 0.01f), "wraps below 0")
+        assertTrue(close(advanceHubAngle(20f, g.RMin, 0.1f), 350f, 0.01f))
+        // both hubs, at every pack size, turn the same way
+        for (r in listOf(g.RMin, 160f, g.RMax)) {
+            val a = advanceHubAngle(180f, r, 0.05f)
+            assertTrue(a < 180f && a >= 0f && a < 360f, "r $r → $a")
+        }
+        // many small frames stay inside [0, 360)
+        var angle = 5f
+        repeat(200) {
+            angle = advanceHubAngle(angle, g.RMin, 1f / 60f)
+            assertTrue(angle >= 0f && angle < 360f, "$angle")
+        }
         assertEquals(advanceHubAngle(0f, g.RMin, 0.1f), advanceHubAngle(0f, g.RMin, 5f))
         assertEquals(12f, advanceHubAngle(12f, g.RMin, 0f))
         assertEquals(12f, advanceHubAngle(12f, g.RMin, -1f))

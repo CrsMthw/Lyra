@@ -49,6 +49,9 @@ import kotlin.math.min
  *   tape pack        Rmin = 102 (bare hub + 4), Rmax = 221 — packs CLIPPED by the window as in the ad;
  *                    supply = Rmax − (Rmax − Rmin)·p, take-up = Rmin + (Rmax − Rmin)·p;
  *                    Rmin + Rmax = 323 < 420, so the packs never touch (constant 97 gap)
+ *   hub direction    BOTH hubs ANTICLOCKWISE (natural frame, and so on the portrait screen too):
+ *                    the tape runs supply → take-up along the HEAD edge, so each pack's bottom
+ *                    moves left → right; the angle fed to `rotate` (clockwise-positive) falls
  *   tape strands     the internal tangent between the packs (the ad's diagonal) + a run at y 410
  *                    along the window's flat bottom, under the packs
  *   title box        x 172..828 (656), baseline 118, Playfair 46 → floor 24 (then ellipsis),
@@ -64,7 +67,8 @@ import kotlin.math.min
  * colour is applied at draw time), and the hub frame loop runs only while `spinning`.
  */
 
-/** The hub angles (degrees, clockwise) and the pack radii the draw last used. The angles are
+/** The hub angles (degrees as DrawScope `rotate` takes them — clockwise-positive, so the hubs'
+ *  anticlockwise turn makes them fall; see [advanceHubAngle]) and the pack radii the draw last used. The angles are
  *  snapshot state read ONLY in the draw phase (one redraw per frame, no recomposition); the
  *  radii are plain fields the draw writes and the frame loop reads, so `progress` is only ever
  *  called inside the draw block. */
@@ -104,7 +108,7 @@ fun Cassette(
     val measurer = rememberTextMeasurer()
     val spin = remember { HubSpin() }
 
-    // Hubs: ω = v / r per hub, both clockwise. Frozen exactly where they are when `spinning`
+    // Hubs: ω = v / r per hub, both ANTICLOCKWISE (the tape runs left → right along the head edge). Frozen exactly where they are when `spinning`
     // goes false; on resume the first frame only stamps the clock, so nothing snaps.
     LaunchedEffect(spinning) {
         if (!spinning) return@LaunchedEffect
