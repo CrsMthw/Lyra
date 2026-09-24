@@ -202,9 +202,20 @@ internal class CassetteOwnWrites {
 /** The longest accepted delay has three digits (600), so the field never holds more. */
 internal val CASSETTE_IDLE_MAX_DIGITS: Int = CASSETTE_IDLE_MAX_SECONDS.toString().length
 
-/** What the field keeps of an edit: ASCII digits only, at most [CASSETTE_IDLE_MAX_DIGITS] of them. */
-internal fun cassetteIdleDigits(raw: String): String =
-    raw.filter { it in '0'..'9' }.take(CASSETTE_IDLE_MAX_DIGITS)
+/**
+ * What the field keeps of an edit, or null to REJECT it (the field keeps its previous text and
+ * nothing is saved). ASCII digits only, leading zeros dropped (a lone "0" stays, so a typed zero is
+ * visible and shows the range error). An edit with more than [CASSETTE_IDLE_MAX_DIGITS] significant
+ * digits is rejected, never truncated: cutting it would keep the FIRST three digits wherever the new
+ * one was inserted ("1" typed before "600" → "160"), an in-range number the user never typed, and
+ * the field saves an in-range value on the keystroke. Dropping leading zeros is what lets "0700"
+ * reach 700 (the range error, clamped to 600 on Done) instead of stopping at "070" = 70 s.
+ */
+internal fun cassetteIdleDigits(raw: String): String? {
+    val digits = raw.filter { it in '0'..'9' }
+    val significant = digits.trimStart('0').ifEmpty { if (digits.isEmpty()) "" else "0" }
+    return significant.takeIf { it.length <= CASSETTE_IDLE_MAX_DIGITS }
+}
 
 /** The typed delay if it is already acceptable (persisted at once), else null (the field shows an error). */
 internal fun cassetteIdleTyped(text: String): Int? =
@@ -535,7 +546,8 @@ private fun CassetteIdleDelayField(stored: Int, onIdleSeconds: (Int) -> Unit) {
     OutlinedTextField(
         value           = text,
         onValueChange   = { raw ->
-            val digits = cassetteIdleDigits(raw)
+            // An over-length edit is rejected whole: the text stays as it was and nothing is saved.
+            val digits = cassetteIdleDigits(raw) ?: return@OutlinedTextField
             text = digits
             cassetteIdleTyped(digits)?.let(persist)
         },
