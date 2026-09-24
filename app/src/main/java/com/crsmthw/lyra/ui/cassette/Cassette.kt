@@ -79,8 +79,8 @@ import kotlin.math.min
  */
 
 /** The hub angles (degrees as DrawScope `rotate` takes them — clockwise-positive, so the hubs'
- *  anticlockwise turn makes them fall; see [advanceHubAngle]) and the pack radii the draw last used. The angles are
- *  snapshot state read ONLY in the draw phase (one redraw per frame, no recomposition); the
+ *  anticlockwise turn makes them fall; see [advanceHubAngle]) and the pack radii the draw last
+ *  used. The angles are snapshot state read ONLY in the draw phase (one redraw per frame, no recomposition); the
  *  radii are plain fields the draw writes and the frame loop reads, so `progress` is only ever
  *  called inside the draw block. */
 @Stable
@@ -119,8 +119,9 @@ fun Cassette(
     val measurer = rememberTextMeasurer()
     val spin = remember { HubSpin() }
 
-    // Hubs: ω = v / r per hub, both ANTICLOCKWISE (the tape runs left → right along the head edge). Frozen exactly where they are when `spinning`
-    // goes false; on resume the first frame only stamps the clock, so nothing snaps.
+    // Hubs: ω = v / r per hub, both ANTICLOCKWISE (the tape runs left → right along the head
+    // edge). Frozen exactly where they are when `spinning` goes false; on resume the first frame
+    // only stamps the clock, so nothing snaps.
     LaunchedEffect(spinning) {
         if (!spinning) return@LaunchedEffect
         var last = -1L
