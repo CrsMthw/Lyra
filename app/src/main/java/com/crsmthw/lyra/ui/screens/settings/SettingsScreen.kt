@@ -105,12 +105,14 @@ fun SettingsScreen(
     val forYouEnabled       by viewModel.forYouEnabled.collectAsStateWithLifecycle()
     val ilyraUnlocked        by viewModel.ilyraUnlocked.collectAsStateWithLifecycle()
     val ilyraEnabled         by viewModel.ilyraEnabled.collectAsStateWithLifecycle()
+    val cassetteSettings     by viewModel.cassetteSettings.collectAsStateWithLifecycle()
     val haptics              = LocalHapticFeedback.current
     val imageCacheBytes        by viewModel.imageCacheBytes.collectAsStateWithLifecycle()
     val libraryCacheBytes      by viewModel.libraryCacheBytes.collectAsStateWithLifecycle()
     var showLogoutDialog  by remember { mutableStateOf(false) }
     var showThemeSheet    by remember { mutableStateOf(false) }
     var showVisualizerSheet by remember { mutableStateOf(false) }
+    var showCassetteSheet   by remember { mutableStateOf(false) }
     // Hoisted at screen level (`rememberTopAppBarState` is `rememberSaveable`) so the bar's collapse
     // survives navigating away and back.
     val barState = rememberTopAppBarState()
@@ -253,6 +255,33 @@ fun SettingsScreen(
                         title    = stringResource(R.string.settings_visualizer_advanced),
                         subtitle = stringResource(R.string.settings_visualizer_advanced_desc),
                         onClick  = { showVisualizerSheet = true },
+                    )
+                }
+
+                // Cassette idle screen (docs/CASSETTE.md) — off by default; the player shows it after
+                // the idle delay (a setting in the sheet, 7 s by default) while music plays with the
+                // visualizer and lyrics off. The glyph is Material's Voicemail: two tape reels
+                // joined — there is no cassette icon, and Album is iLyra's.
+                SettingsToggleItem(
+                    icon            = Icons.Default.Voicemail,
+                    title           = stringResource(R.string.settings_cassette),
+                    subtitle        = stringResource(R.string.settings_cassette_desc),
+                    checked         = cassetteSettings.enabled,
+                    onCheckedChange = viewModel::setCassetteEnabled,
+                )
+
+                // Cassette options — revealed only while the cassette is on, exactly like the
+                // visualizer's Advanced row above.
+                AnimatedVisibility(
+                    visible = cassetteSettings.enabled,
+                    enter   = fadeIn(screenTransitionSpec()) + expandVertically(screenTransitionSpec<IntSize>()),
+                    exit    = shrinkVertically(screenTransitionSpec<IntSize>()) + fadeOut(screenTransitionSpec()),
+                ) {
+                    SettingsItem(
+                        icon     = Icons.Default.Tune,
+                        title    = stringResource(R.string.settings_cassette_options),
+                        subtitle = stringResource(R.string.settings_cassette_options_desc),
+                        onClick  = { showCassetteSheet = true },
                     )
                 }
 
@@ -489,6 +518,20 @@ fun SettingsScreen(
             onDramatic         = viewModel::setVisualizerDramatic,
             onReset            = viewModel::resetVisualizerSettings,
             onDismiss          = { showVisualizerSheet = false },
+        )
+    }
+
+    // ── Cassette options modal sheet (CassetteSheet.kt) ───────────────────────
+    if (showCassetteSheet) {
+        CassetteSheet(
+            settings        = cassetteSettings,
+            onKeepScreenOn  = viewModel::setCassetteKeepScreenOn,
+            onDim           = viewModel::setCassetteDim,
+            onColorSource   = viewModel::setCassetteColorSource,
+            onCustomColor   = viewModel::setCassetteCustomColor,
+            onShowExitHint  = viewModel::setCassetteShowExitHint,
+            onIdleSeconds   = viewModel::setCassetteIdleSeconds,
+            onDismiss       = { showCassetteSheet = false },
         )
     }
 
@@ -770,7 +813,7 @@ private fun VisualizerSheet(
 }
 
 @Composable
-private fun VisualizerSectionLabel(text: String) {
+internal fun VisualizerSectionLabel(text: String) {
     Text(
         text     = text,
         style    = MaterialTheme.typography.labelLarge,
@@ -780,7 +823,7 @@ private fun VisualizerSectionLabel(text: String) {
 }
 
 @Composable
-private fun VisualizerTip(text: String) {
+internal fun VisualizerTip(text: String) {
     Text(
         text     = text,
         style    = MaterialTheme.typography.bodySmall,
@@ -947,33 +990,16 @@ private fun AboutSection(
                 )
                 Spacer(Modifier.height(12.dp))
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Favorite, contentDescription = null, tint = Color(0xFFE91E63), modifier = Modifier.size(20.dp))
-                    Spacer(Modifier.width(12.dp))
-                    Column {
-                        Text(stringResource(R.string.about_credit_app), style = MaterialTheme.typography.bodyMedium)
-                        Text(stringResource(R.string.about_credit_app_desc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-
+                // Four rows of ONE shape — a title over a licence/role line — so the sizes never drift.
+                CreditRow(stringResource(R.string.about_credit_app),  stringResource(R.string.about_credit_app_desc))
                 Spacer(Modifier.height(12.dp))
-
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Favorite, contentDescription = null, tint = Color(0xFFE91E63), modifier = Modifier.size(20.dp))
-                    Spacer(Modifier.width(12.dp))
-                    Column {
-                        Text(stringResource(R.string.about_credit_icon), style = MaterialTheme.typography.bodyMedium)
-                        Text(stringResource(R.string.about_credit_icon_desc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-
+                CreditRow(stringResource(R.string.about_credit_icon), stringResource(R.string.about_credit_icon_desc))
                 Spacer(Modifier.height(12.dp))
-
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Favorite, contentDescription = null, tint = Color(0xFFE91E63), modifier = Modifier.size(20.dp))
-                    Spacer(Modifier.width(12.dp))
-                    Text(stringResource(R.string.about_credit_fonts), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
+                // Bundled fonts (SIL OFL 1.1; licence texts in assets/fonts/): iLyra's LCD face and the
+                // cassette label's serif (ui/cassette/CassetteFont.kt).
+                CreditRow(stringResource(R.string.about_credit_font_liberation), stringResource(R.string.about_credit_font_liberation_desc))
+                Spacer(Modifier.height(12.dp))
+                CreditRow(stringResource(R.string.about_credit_font_playfair),   stringResource(R.string.about_credit_font_playfair_desc))
             }
         }
 
@@ -1057,6 +1083,19 @@ private fun formatBytes(bytes: Long): String = when {
 }
 
 // ── Helper composables ────────────────────────────────────────────────────────
+
+/** One About-card credit: a heart, a `bodyMedium` title and a `bodySmall` secondary line. */
+@Composable
+private fun CreditRow(title: String, subtitle: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Default.Favorite, contentDescription = null, tint = Color(0xFFE91E63), modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(12.dp))
+        Column {
+            Text(title, style = MaterialTheme.typography.bodyMedium)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
 
 @Composable
 private fun SettingsSectionHeader(title: String) {

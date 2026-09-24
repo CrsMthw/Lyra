@@ -44,8 +44,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.layout.ContentScale
 import android.Manifest
+import android.os.SystemClock
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.widget.Toast
@@ -54,20 +57,29 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.core.content.ContextCompat
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.crossfade
 import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.repository.LyricsState
+import com.crsmthw.lyra.ui.cassette.CassetteColorSource
+import com.crsmthw.lyra.ui.cassette.CassetteOverlay
+import com.crsmthw.lyra.ui.cassette.cassetteEligible
+import com.crsmthw.lyra.ui.cassette.rememberTouchExplorationEnabled
 import com.crsmthw.lyra.ui.components.AddToPlaylistSheet
 import com.crsmthw.lyra.ui.components.DevicePickerSheet
 import com.crsmthw.lyra.ui.components.LocalPlayerArtKey
@@ -85,6 +97,7 @@ import com.crsmthw.lyra.util.toTimeString
 import com.crsmthw.lyra.util.toggle
 import com.crsmthw.lyra.util.visualizer.FftCWaveCanvas
 import com.crsmthw.lyra.util.visualizer.FftWaveCanvas
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @OptIn(
@@ -111,6 +124,10 @@ fun PlayerScreen(
     var showPlaylistPicker   by rememberSaveable { mutableStateOf(false) }
     var showDevicePicker     by remember { mutableStateOf(false) }
     var showMediaMenu        by remember { mutableStateOf(false) }
+    // The controls' ButtonGroup overflow menu. Its state is internal to the ButtonGroup and the
+    // menu is its own popup window (touches there never reach the idle clock), so PlayerControls
+    // reports it up for the cassette gate's "no menu open" term.
+    var controlsMenuOpen     by remember { mutableStateOf(false) }
     // When docked as a third pane the column is narrow-and-tall (≈380dp wide), so always use the
     // portrait art-over-controls layout regardless of the (landscape) device orientation.
     val isLandscape = !docked && LocalConfiguration.current.let { it.screenWidthDp > it.screenHeightDp }
@@ -280,516 +297,653 @@ fun PlayerScreen(
     // ── Play/pause button shape (M3 Expressive cookie) ───────────────────────
     val squigglyShape = MaterialShapes.Cookie12Sided.toShape()
 
-    // ── Gradient background overlay (rendered outside Scaffold so it fills everything) ──
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Brush.verticalGradient(colors = listOf(gradientTop, surfaceBg)))
+    // ── Cassette idle screen (docs/CASSETTE.md) ───────────────────────────────
+    // The idle gate: with the feature on, the visualizer off, music playing, lyrics hidden and no
+    // menu/sheet/dialog open, the idle delay (a setting, 5..600 s) without a touch slides the
+    // cassette over the player.
+    val cassetteSettings by viewModel.cassetteSettings.collectAsStateWithLifecycle()
+    val cassetteLabel    by viewModel.cassetteLabel.collectAsStateWithLifecycle()
+    var cassetteVisible  by remember { mutableStateOf(false) }
+    // Last touch + "a finger is down", stamped by the outer Box's Initial-pass observer on EVERY
+    // pointer event. Deliberately not snapshot state: composition never reads it (the countdown
+    // re-reads it), so a drag does not recompose this screen at the pointer rate.
+    val idleClock = remember { CassetteIdleClock() }
+    val cassetteLyricsShowing = state.lyricsMode &&
+        (state.lyricsState is LyricsState.Synced || state.lyricsState is LyricsState.Plain)
+    // Split-screen / pop-up window: both apps are RESUMED, so focus is the "is the user here" term.
+    val windowFocused  = LocalWindowInfo.current.isWindowFocused
+    val touchExploring = rememberTouchExplorationEnabled()
+    val cassetteEligibleNow = !cassetteVisible && cassetteEligible(
+        settings          = cassetteSettings,
+        isPlaying         = state.isPlaying,
+        visualizerEnabled = state.visualizerEnabled,
+        lyricsShowing     = cassetteLyricsShowing,
+        docked            = docked,
+        overlayOpen       = showMediaMenu || showSleepTimerDialog || showPlaylistPicker || showDevicePicker ||
+                            controlsMenuOpen,
+        hasTrack          = state.currentTrack != null,
+        windowFocused     = windowFocused,
+        touchExploring    = touchExploring,
     )
-
-    Scaffold(
-        contentWindowInsets = WindowInsets(0),
-        containerColor      = Color.Transparent,
-        topBar = {
-            TopAppBar(
-                modifier     = Modifier
-                    .statusBarsPadding()
-                    .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal)),
-                windowInsets = WindowInsets(0),
-                title = {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier            = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(stringResource(R.string.player_now_playing_label),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = topContentColor)
-                    }
-                },
-                navigationIcon = {
-                    if (docked) {
-                        // Docked pane has no "close": put the full-screen expand button on the left
-                        // (where the chevron would be), so the right side carries only the options menu.
-                        if (onFullScreen != null) {
-                            IconButton(onClick = onFullScreen) {
-                                Icon(Icons.Default.OpenInFull, contentDescription = stringResource(R.string.cd_full_screen),
-                                    tint = topContentColor)
-                            }
-                        }
-                    } else {
-                        IconButton(onClick = { haptics.confirm(); onBack() }) {
-                            Icon(Icons.Default.KeyboardArrowDown, contentDescription = stringResource(R.string.cd_close),
-                                tint = topContentColor)
-                        }
-                    }
-                },
-                actions = {
-                    Box {
-                        IconButton(onClick = { haptics.press(); showMediaMenu = true }) {
-                            Icon(Icons.Default.Tune,
-                                contentDescription = stringResource(R.string.player_options),
-                                tint = topContentColor)
-                        }
-                        DropdownMenu(
-                            expanded         = showMediaMenu,
-                            onDismissRequest  = { showMediaMenu = false },
-                            containerColor   = Color.Transparent,
-                            shadowElevation  = 0.dp,
-                        ) {
-                            val lyricsAvailable = state.lyricsState is LyricsState.Synced || state.lyricsState is LyricsState.Plain
-                            val lyricsShowing   = state.lyricsMode && lyricsAvailable
-                            val lyricsLoading   = state.lyricsState is LyricsState.Loading
-                            DropdownMenuGroup(shapes = MenuDefaults.groupShapes()) {
-                                CheckableDropdownMenuItem(
-                                    checked       = lyricsShowing,
-                                    onCheckedChange = {
-                                        haptics.toggle(!lyricsShowing)
-                                        viewModel.toggleLyricsMode()
-                                    },
-                                    text          = { Text(stringResource(R.string.player_lyrics)) },
-                                    shapes        = MenuDefaults.itemShape(0, 2),
-                                    leadingIcon   = {
-                                        Icon(if (lyricsShowing) Icons.Default.Check else Icons.Default.Lyrics, contentDescription = null)
-                                    },
-                                    supportingText = if (lyricsLoading) {
-                                        { Text(stringResource(R.string.player_lyrics_searching)) }
-                                    } else null,
-                                    enabled       = lyricsAvailable,
-                                    colors        = MenuDefaults.selectableItemColors(
-                                        selectedContainerColor = surfaceAccentColor.copy(alpha = 0.15f),
-                                    ),
-                                )
-                                CheckableDropdownMenuItem(
-                                    checked       = state.visualizerEnabled,
-                                    onCheckedChange = { enable ->
-                                        haptics.toggle(enable)
-                                        if (enable) {
-                                            val hasPermission = ContextCompat.checkSelfPermission(
-                                                context, Manifest.permission.RECORD_AUDIO
-                                            ) == PackageManager.PERMISSION_GRANTED
-                                            if (hasPermission) viewModel.onRecordAudioGranted()
-                                            else recordAudioLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                                        } else {
-                                            viewModel.setVisualizerEnabled(false)
-                                        }
-                                    },
-                                    text          = { Text(stringResource(R.string.player_visualizer)) },
-                                    shapes        = MenuDefaults.itemShape(1, 2),
-                                    leadingIcon   = {
-                                        Icon(if (state.visualizerEnabled) Icons.Default.Check else Icons.Default.Equalizer, contentDescription = null)
-                                    },
-                                    colors        = MenuDefaults.selectableItemColors(
-                                        selectedContainerColor = surfaceAccentColor.copy(alpha = 0.15f),
-                                    ),
-                                )
-                            }
-                            Spacer(Modifier.height(MenuDefaults.GroupSpacing))
-                            DropdownMenuGroup(shapes = MenuDefaults.groupShapes()) {
-                                DropdownMenuItem(
-                                    onClick        = { haptics.press(); showMediaMenu = false; showSleepTimerDialog = true },
-                                    text           = { Text(stringResource(R.string.player_sleep_timer)) },
-                                    shape          = MenuDefaults.standaloneItemShape,
-                                    leadingIcon    = { Icon(Icons.Default.Timer, contentDescription = null) },
-                                    supportingText = if (state.sleepTimerMinutes > 0) {
-                                        { Text(stringResource(R.string.player_timer_remaining, state.sleepTimerMinutes)) }
-                                    } else null,
-                                )
-                            }
-                        }
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
-            )
-        },
-    ) { paddingValues ->
-
-        if (isLandscape) {
-            // ── Landscape: art left, controls right ───────────────────────────
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues)
-                    .navigationBarsPadding(),
-            ) {
-                // Left: album art / lyrics — square, constrained by available height
-                BoxWithConstraints(
-                    modifier         = Modifier
-                        .weight(0.45f)
-                        .fillMaxHeight()
-                        .padding(start = 16.dp, end = 8.dp, bottom = 16.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    val side = minOf(maxWidth, maxHeight * 0.82f)
-                    val displaySide = side * artScale
-
-                    // The shared-element modifier. `LocalPlayerArtKey` carries a generation the
-                    // host advances after an ABANDONED seek and at no other settle, so a morph
-                    // that follows a cancelled gesture has no state from it to inherit. A
-                    // generation is a fresh ELEMENT only — recreating the LayoutNode that carries
-                    // this modifier was tried and changed nothing on device. See
-                    // `LocalPlayerArtKey` in PlayerPanelHost.
-                    val artMod = if (sharedTransitionScope != null && animatedContentScope != null) {
-                        with(sharedTransitionScope) {
-                            val artState = rememberSharedContentState(LocalPlayerArtKey.current)
-                            Modifier.sharedElement(
-                                sharedContentState      = artState,
-                                animatedVisibilityScope = animatedContentScope,
-                                boundsTransform         = rememberArtBoundsTransform(),
-                            )
-                        }
-                    } else Modifier
-
-                    val lyricsContentMod = Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp))
-
-                    Box(Modifier.size(side)) {
-                        if (circleVisible) {
-                            FftCWaveCanvas(
-                                modifier = Modifier.fillMaxSize(),
-                                color    = surfaceAccentColor,
-                                alpha    = 0.40f,
-                                enabled  = true,
-                            )
-                        }
-                        AnimatedContent(
-                            targetState  = state,
-                            contentKey   = { s ->
-                                val avail = s.lyricsState is LyricsState.Synced || s.lyricsState is LyricsState.Plain
-                                s.lyricsMode && avail
-                            },
-                            transitionSpec = { fadeIn(tween(300)) togetherWith fadeOut(tween(300)) },
-                            modifier     = Modifier.fillMaxSize(),
-                            label        = "art-lyrics-landscape",
-                        ) { snapshot ->
-                            val snapAvail   = snapshot.lyricsState is LyricsState.Synced || snapshot.lyricsState is LyricsState.Plain
-                            val snapShowing = snapshot.lyricsMode && snapAvail
-                            if (snapShowing) {
-                                when (val ls = snapshot.lyricsState) {
-                                    is LyricsState.Synced -> SyncedLyricsView(
-                                        lines            = ls.lines,
-                                        currentLineIndex = snapshot.currentLyricLineIndex,
-                                        textColor        = lyricsTextColor,
-                                        modifier         = lyricsContentMod,
-                                    )
-                                    is LyricsState.Plain  -> PlainLyricsView(
-                                        text      = ls.text,
-                                        textColor = lyricsTextColor,
-                                        modifier  = lyricsContentMod,
-                                    )
-                                }
-                            } else {
-                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    AsyncImage(
-                                        model              = artImageModel,
-                                        contentDescription = stringResource(R.string.cd_album_art),
-                                        contentScale       = ContentScale.Crop,
-                                        modifier           = artMod
-                                            .size(displaySide)
-                                            .clip(RoundedCornerShape(16.dp))
-                                            .graphicsLayer {
-                                                translationX = (artDragX * 0.3f).coerceIn(-80f, 80f) + artOffsetX.value
-                                            }
-                                            .pointerInput(Unit) {
-                                                detectHorizontalDragGestures(
-                                                    onDragStart      = { artDragX = 0f },
-                                                    onDragEnd        = {
-                                                        when {
-                                                            artDragX < -swipeThresholdPx -> {
-                                                                val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
-                                                                artDragX = 0f; skipDirection = 1
-                                                                scope.launch {
-                                                                    artOffsetX.snapTo(s)
-                                                                    artOffsetX.animateTo(-1500f, tween(250, easing = FastOutLinearInEasing))
-                                                                }
-                                                                haptics.press()
-                                                                viewModel.skipNext()
-                                                            }
-                                                            artDragX > swipeThresholdPx -> {
-                                                                val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
-                                                                artDragX = 0f; skipDirection = -1
-                                                                scope.launch {
-                                                                    artOffsetX.snapTo(s)
-                                                                    artOffsetX.animateTo(1500f, tween(250, easing = FastOutLinearInEasing))
-                                                                }
-                                                                haptics.press()
-                                                                viewModel.skipPrevious()
-                                                            }
-                                                            else -> artDragX = 0f
-                                                        }
-                                                    },
-                                                    onDragCancel     = { artDragX = 0f },
-                                                    onHorizontalDrag = { _, amount -> artDragX += amount },
-                                                )
-                                            },
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Right: controls — BoxWithConstraints for proportional spacing in short landscape
-                BoxWithConstraints(
-                    modifier         = Modifier
-                        .weight(0.55f)
-                        .fillMaxHeight()
-                        .padding(horizontal = 24.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    val spacingLarge = (maxHeight * 0.04f).coerceIn(6.dp, 16.dp)
-                    val spacingSmall = (maxHeight * 0.03f).coerceIn(4.dp, 12.dp)
-                    Column(
-                        modifier            = Modifier.fillMaxWidth(),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        PlayerControls(
-                            state              = state,
-                            accentColor        = accentColor,
-                            onAccentColor      = onAccentColor,
-                            surfaceAccentColor = surfaceAccentColor,
-                            squigglyShape      = squigglyShape,
-                            onSkipPrev         = onSkipPrev,
-                            onSkipNext         = onSkipNext,
-                            onPlayPause        = viewModel::playPause,
-                            onToggleLike       = viewModel::toggleLike,
-                            onToggleShuffle    = viewModel::toggleShuffle,
-                            onCycleRepeat      = viewModel::cycleRepeat,
-                            onSeek             = viewModel::seekTo,
-                            onOpenQueue        = onOpenQueue,
-                            onOpenAlbum        = onOpenAlbum,
-                            onOpenArtist       = onOpenArtist,
-                            // Nothing to share for an item with no open.spotify.com page (a local
-                            // file) — `shareUrl` is null there and the button stays inert.
-                            onShare            = {
-                                state.currentTrack?.shareUrl?.let { url ->
-                                    context.startActivity(Intent.createChooser(
-                                        Intent(Intent.ACTION_SEND).apply {
-                                            putExtra(Intent.EXTRA_TEXT, url)
-                                            type = "text/plain"
-                                        }, null
-                                    ))
-                                }
-                            },
-                            onAddToPlaylist    = { viewModel.loadOwnedPlaylists(); showPlaylistPicker = true },
-                            onOpenDevicePicker = { viewModel.loadAvailableDevices(); showDevicePicker = true },
-                            spacingLarge       = spacingLarge,
-                            spacingSmall       = spacingSmall,
-                        )
-                    }
-                }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    // Keyed on the delay too: a changed setting re-arms the countdown, the full new delay counted
+    // from the change.
+    val cassetteIdleDelayMs = cassetteSettings.idleDelayMs
+    LaunchedEffect(cassetteEligibleNow, cassetteIdleDelayMs, lifecycle) {
+        if (!cassetteEligibleNow) return@LaunchedEffect
+        // Only while this entry is RESUMED: the countdown is cancelled in the background and starts
+        // over on return, so the cassette is never already up when the user comes back.
+        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            // The full delay runs from the LATER of the last touch and the moment the player became
+            // eligible: a menu, sheet or dialog is its own window (its touches never reach the
+            // observer), so leaving one must not summon the cassette at once.
+            val eligibleSince = SystemClock.uptimeMillis()
+            while (true) {
+                val now = SystemClock.uptimeMillis()
+                if (idleClock.pressed) idleClock.lastTouch = now   // a finger resting on the slider
+                val deadline = maxOf(idleClock.lastTouch, eligibleSince) + cassetteIdleDelayMs
+                if (now >= deadline) break
+                delay(deadline - now)
             }
-        } else {
-            // ── Portrait: art top, controls bottom ────────────────────────────
-            Column(
-                modifier            = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues)
-                    .navigationBarsPadding(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                // Album art / lyrics
-                BoxWithConstraints(
-                    modifier         = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                        .padding(horizontal = 24.dp, vertical = 12.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    val side = minOf(maxWidth, maxHeight)
-                    val displaySide = side * artScale
-
-                    // Shared-element modifier (keyed on `LocalPlayerArtKey` — a fresh element per
-                    // abandoned seek, and nothing at an ordinary settle) — see the landscape
-                    // branch above, and `LocalPlayerArtKey` in PlayerPanelHost.
-                    val artMod = if (sharedTransitionScope != null && animatedContentScope != null) {
-                        with(sharedTransitionScope) {
-                            val artState = rememberSharedContentState(LocalPlayerArtKey.current)
-                            Modifier.sharedElement(
-                                sharedContentState      = artState,
-                                animatedVisibilityScope = animatedContentScope,
-                                boundsTransform         = rememberArtBoundsTransform(),
-                            )
-                        }
-                    } else Modifier
-
-                    val lyricsContentMod = Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp))
-
-                    Box(Modifier.size(side)) {
-                        if (circleVisible) {
-                            FftCWaveCanvas(
-                                modifier = Modifier.fillMaxSize(),
-                                color    = surfaceAccentColor,
-                                alpha    = 0.40f,
-                                enabled  = true,
-                            )
-                        }
-                        AnimatedContent(
-                            targetState  = state,
-                            contentKey   = { s ->
-                                val avail = s.lyricsState is LyricsState.Synced || s.lyricsState is LyricsState.Plain
-                                s.lyricsMode && avail
-                            },
-                            transitionSpec = { fadeIn(tween(300)) togetherWith fadeOut(tween(300)) },
-                            modifier     = Modifier.fillMaxSize(),
-                            label        = "art-lyrics-portrait",
-                        ) { snapshot ->
-                            val snapAvail   = snapshot.lyricsState is LyricsState.Synced || snapshot.lyricsState is LyricsState.Plain
-                            val snapShowing = snapshot.lyricsMode && snapAvail
-                            if (snapShowing) {
-                                when (val ls = snapshot.lyricsState) {
-                                    is LyricsState.Synced -> SyncedLyricsView(
-                                        lines            = ls.lines,
-                                        currentLineIndex = snapshot.currentLyricLineIndex,
-                                        textColor        = lyricsTextColor,
-                                        modifier         = lyricsContentMod,
-                                    )
-                                    is LyricsState.Plain  -> PlainLyricsView(
-                                        text      = ls.text,
-                                        textColor = lyricsTextColor,
-                                        modifier  = lyricsContentMod,
-                                    )
-                                }
-                            } else {
-                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    AsyncImage(
-                                        model              = artImageModel,
-                                        contentDescription = stringResource(R.string.cd_album_art),
-                                        contentScale       = ContentScale.Crop,
-                                        modifier           = artMod
-                                            .size(displaySide)
-                                            .clip(RoundedCornerShape(16.dp))
-                                            .graphicsLayer {
-                                                translationX = (artDragX * 0.3f).coerceIn(-80f, 80f) + artOffsetX.value
-                                            }
-                                            .pointerInput(Unit) {
-                                                detectHorizontalDragGestures(
-                                                    onDragStart      = { artDragX = 0f },
-                                                    onDragEnd        = {
-                                                        when {
-                                                            artDragX < -swipeThresholdPx -> {
-                                                                val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
-                                                                artDragX = 0f; skipDirection = 1
-                                                                scope.launch {
-                                                                    artOffsetX.snapTo(s)
-                                                                    artOffsetX.animateTo(-1500f, tween(250, easing = FastOutLinearInEasing))
-                                                                }
-                                                                haptics.press()
-                                                                viewModel.skipNext()
-                                                            }
-                                                            artDragX > swipeThresholdPx -> {
-                                                                val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
-                                                                artDragX = 0f; skipDirection = -1
-                                                                scope.launch {
-                                                                    artOffsetX.snapTo(s)
-                                                                    artOffsetX.animateTo(1500f, tween(250, easing = FastOutLinearInEasing))
-                                                                }
-                                                                haptics.press()
-                                                                viewModel.skipPrevious()
-                                                            }
-                                                            else -> artDragX = 0f
-                                                        }
-                                                    },
-                                                    onDragCancel     = { artDragX = 0f },
-                                                    onHorizontalDrag = { _, amount -> artDragX += amount },
-                                                )
-                                            },
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Controls
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 32.dp)
-                        .padding(bottom = 12.dp),
-                ) {
-                    PlayerControls(
-                        state              = state,
-                        accentColor        = accentColor,
-                        onAccentColor      = onAccentColor,
-                        surfaceAccentColor = surfaceAccentColor,
-                        squigglyShape      = squigglyShape,
-                        onSkipPrev         = onSkipPrev,
-                        onSkipNext         = onSkipNext,
-                        onPlayPause        = viewModel::playPause,
-                        onToggleLike       = viewModel::toggleLike,
-                        onToggleShuffle    = viewModel::toggleShuffle,
-                        onCycleRepeat      = viewModel::cycleRepeat,
-                        onSeek             = viewModel::seekTo,
-                        onOpenQueue        = onOpenQueue,
-                        onOpenAlbum        = onOpenAlbum,
-                        onOpenArtist       = onOpenArtist,
-                        // Same null-skip as the landscape layout above.
-                        onShare            = {
-                            state.currentTrack?.shareUrl?.let { url ->
-                                context.startActivity(Intent.createChooser(
-                                    Intent(Intent.ACTION_SEND).apply {
-                                        putExtra(Intent.EXTRA_TEXT, url)
-                                        type = "text/plain"
-                                    }, null
-                                ))
-                            }
-                        },
-                        onAddToPlaylist    = { viewModel.loadOwnedPlaylists(); showPlaylistPicker = true },
-                        onOpenDevicePicker = { viewModel.loadAvailableDevices(); showDevicePicker = true },
-                    )
-                }
-            }
+            cassetteVisible = true
         }
     }
-
-    // ── Bottom wave overlay ───────────────────────────────────────────────────
-    val waveNavBarDp = with(LocalDensity.current) { WindowInsets.navigationBars.getBottom(this).toDp() }
-    Box(Modifier.fillMaxSize()) {
-        FftWaveCanvas(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(waveNavBarDp + 48.dp)
-                .align(Alignment.BottomCenter),
-            color    = surfaceAccentColor,
-            alpha    = 0.20f,
-        )
+    // Tell the app-wide PlayerPanelHost (via LyraNavGraph) that back belongs to the cassette while
+    // it is up, so a gesture-nav back over it seeks no mini bar in (PlayerViewModel.cassetteOwnsBack).
+    // The docked pane never writes: its dispose must not clear the route player's `true`.
+    DisposableEffect(cassetteVisible, docked) {
+        if (!docked) viewModel.setCassetteOwnsBack(cassetteVisible)
+        onDispose { if (!docked) viewModel.setCassetteOwnsBack(false) }
+    }
+    val exitCassette: () -> Unit = {
+        cassetteVisible = false
+        idleClock.lastTouch = SystemClock.uptimeMillis()   // back on the player: the idle delay starts over
+    }
+    // Exits the overlay cannot see itself. PAUSING is deliberately not one: the cassette stays up
+    // with frozen hubs (Cris, 2026-09-23).
+    val cassetteMustExit = !cassetteSettings.enabled || docked
+    LaunchedEffect(cassetteVisible, cassetteMustExit) {
+        if (cassetteVisible && cassetteMustExit) exitCassette()
+    }
+    // "Nothing playing any more" exits too, but only once it PERSISTS past a poll: a single 200
+    // with `item: null` (a transfer started from another Spotify client, an ad, an unsupported
+    // item) nulls the track for one 3 s poll while `isPlaying` stays true, and ejecting the cassette
+    // for that — only for it to come back one idle delay later — reads as a glitch. The overlay
+    // holds the last label and key meanwhile, so the stage neither blanks nor flips.
+    val cassetteItemGone = state.currentTrack == null
+    LaunchedEffect(cassetteVisible, cassetteItemGone) {
+        if (!cassetteVisible || !cassetteItemGone) return@LaunchedEffect
+        delay(CassetteNullItemGraceMs)
+        exitCassette()
+    }
+    // One seed → the whole palette (CassettePalette.from, inside the overlay, which slides it).
+    val systemDynamicPrimary = remember(context) { dynamicDarkColorScheme(context).primary }
+    val cassetteSeed = when (cassetteSettings.colorSource) {
+        CassetteColorSource.ALBUM_ART    -> rawDominantColor ?: primary
+        CassetteColorSource.MATERIAL_YOU -> systemDynamicPrimary
+        CassetteColorSource.CUSTOM       -> Color(cassetteSettings.customColor)
     }
 
-    if (showPlaylistPicker) {
-        AddToPlaylistSheet(
-            pickerState = pickerState,
-            onSelect    = viewModel::togglePlaylistTrack,
-            onCreateNew = viewModel::createPlaylist,
-            onDismiss   = { showPlaylistPicker = false },
-        )
-    }
-
-    if (showDevicePicker) {
-        DevicePickerSheet(
-            isLoading      = state.devicePickerLoading,
-            devices        = state.availableDevices,
-            error          = state.devicePickerError,
-            onSelectDevice = { deviceId ->
-                showDevicePicker = false
-                haptics.confirm()
-                viewModel.transferToDevice(deviceId)
+    // ONE outer Box around the whole screen. Its Initial-pass observer sees every pointer event
+    // before any child and consumes nothing, so no existing gesture changes; it only stamps the
+    // idle clock. The cassette overlay is its LAST child, over the wave overlay and everything else.
+    Box(
+        Modifier
+            .fillMaxSize()
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        idleClock.lastTouch = SystemClock.uptimeMillis()
+                        idleClock.pressed   = event.changes.any { it.pressed }
+                    }
+                }
+            }
+            // Hardware keyboard / D-pad navigation is user activity too, but no pointer event. The
+            // preview pass reaches this ancestor of every focused control first; `false` passes the
+            // key on untouched.
+            .onPreviewKeyEvent {
+                idleClock.lastTouch = SystemClock.uptimeMillis()
+                false
             },
-            onThisDevice   = {
-                showDevicePicker = false
-                haptics.confirm()
-                viewModel.transferToThisDevice()
-            },
-            onDismiss      = { showDevicePicker = false },
-            onRetry        = { viewModel.loadAvailableDevices() },
-            onSetVolume    = viewModel::setVolume,
-        )
-    }
+    ) {
+        // The player itself. While the cassette is up it is removed from the accessibility tree:
+        // the overlay (below, drawn over it) must be the only thing a screen reader, Switch Access
+        // or Voice Access can reach — its description + "return to the player" action. Compose
+        // already skips semantics nodes covered by a later full-size sibling, so this is belt and
+        // braces; it sits on its own wrapper node, never on the album-art shared-element chain.
+        Box(
+            Modifier
+                .fillMaxSize()
+                .then(if (cassetteVisible) Modifier.clearAndSetSemantics { } else Modifier),
+        ) {
+            // ── Gradient background overlay (rendered outside Scaffold so it fills everything) ──
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Brush.verticalGradient(colors = listOf(gradientTop, surfaceBg)))
+            )
 
-    if (showSleepTimerDialog) {
-        SleepTimerDialog(
-            currentMinutes = state.sleepTimerMinutes,
-            onSelect       = { minutes -> haptics.confirm(); viewModel.setSleepTimer(minutes); showSleepTimerDialog = false },
-            onDismiss      = { showSleepTimerDialog = false },
-        )
+            Scaffold(
+                contentWindowInsets = WindowInsets(0),
+                containerColor      = Color.Transparent,
+                topBar = {
+                    TopAppBar(
+                        modifier     = Modifier
+                            .statusBarsPadding()
+                            .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal)),
+                        windowInsets = WindowInsets(0),
+                        title = {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier            = Modifier.fillMaxWidth(),
+                            ) {
+                                Text(stringResource(R.string.player_now_playing_label),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = topContentColor)
+                            }
+                        },
+                        navigationIcon = {
+                            if (docked) {
+                                // Docked pane has no "close": put the full-screen expand button on the left
+                                // (where the chevron would be), so the right side carries only the options menu.
+                                if (onFullScreen != null) {
+                                    IconButton(onClick = onFullScreen) {
+                                        Icon(Icons.Default.OpenInFull, contentDescription = stringResource(R.string.cd_full_screen),
+                                            tint = topContentColor)
+                                    }
+                                }
+                            } else {
+                                IconButton(onClick = { haptics.confirm(); onBack() }) {
+                                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = stringResource(R.string.cd_close),
+                                        tint = topContentColor)
+                                }
+                            }
+                        },
+                        actions = {
+                            Box {
+                                IconButton(onClick = { haptics.press(); showMediaMenu = true }) {
+                                    Icon(Icons.Default.Tune,
+                                        contentDescription = stringResource(R.string.player_options),
+                                        tint = topContentColor)
+                                }
+                                DropdownMenu(
+                                    expanded         = showMediaMenu,
+                                    onDismissRequest  = { showMediaMenu = false },
+                                    containerColor   = Color.Transparent,
+                                    shadowElevation  = 0.dp,
+                                ) {
+                                    val lyricsAvailable = state.lyricsState is LyricsState.Synced || state.lyricsState is LyricsState.Plain
+                                    val lyricsShowing   = state.lyricsMode && lyricsAvailable
+                                    val lyricsLoading   = state.lyricsState is LyricsState.Loading
+                                    DropdownMenuGroup(shapes = MenuDefaults.groupShapes()) {
+                                        CheckableDropdownMenuItem(
+                                            checked       = lyricsShowing,
+                                            onCheckedChange = {
+                                                haptics.toggle(!lyricsShowing)
+                                                viewModel.toggleLyricsMode()
+                                            },
+                                            text          = { Text(stringResource(R.string.player_lyrics)) },
+                                            shapes        = MenuDefaults.itemShape(0, 2),
+                                            leadingIcon   = {
+                                                Icon(if (lyricsShowing) Icons.Default.Check else Icons.Default.Lyrics, contentDescription = null)
+                                            },
+                                            supportingText = if (lyricsLoading) {
+                                                { Text(stringResource(R.string.player_lyrics_searching)) }
+                                            } else null,
+                                            enabled       = lyricsAvailable,
+                                            colors        = MenuDefaults.selectableItemColors(
+                                                selectedContainerColor = surfaceAccentColor.copy(alpha = 0.15f),
+                                            ),
+                                        )
+                                        CheckableDropdownMenuItem(
+                                            checked       = state.visualizerEnabled,
+                                            onCheckedChange = { enable ->
+                                                haptics.toggle(enable)
+                                                if (enable) {
+                                                    val hasPermission = ContextCompat.checkSelfPermission(
+                                                        context, Manifest.permission.RECORD_AUDIO
+                                                    ) == PackageManager.PERMISSION_GRANTED
+                                                    if (hasPermission) viewModel.onRecordAudioGranted()
+                                                    else recordAudioLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                                } else {
+                                                    viewModel.setVisualizerEnabled(false)
+                                                }
+                                            },
+                                            text          = { Text(stringResource(R.string.player_visualizer)) },
+                                            shapes        = MenuDefaults.itemShape(1, 2),
+                                            leadingIcon   = {
+                                                Icon(if (state.visualizerEnabled) Icons.Default.Check else Icons.Default.Equalizer, contentDescription = null)
+                                            },
+                                            colors        = MenuDefaults.selectableItemColors(
+                                                selectedContainerColor = surfaceAccentColor.copy(alpha = 0.15f),
+                                            ),
+                                        )
+                                    }
+                                    Spacer(Modifier.height(MenuDefaults.GroupSpacing))
+                                    DropdownMenuGroup(shapes = MenuDefaults.groupShapes()) {
+                                        DropdownMenuItem(
+                                            onClick        = { haptics.press(); showMediaMenu = false; showSleepTimerDialog = true },
+                                            text           = { Text(stringResource(R.string.player_sleep_timer)) },
+                                            shape          = MenuDefaults.standaloneItemShape,
+                                            leadingIcon    = { Icon(Icons.Default.Timer, contentDescription = null) },
+                                            supportingText = if (state.sleepTimerMinutes > 0) {
+                                                { Text(stringResource(R.string.player_timer_remaining, state.sleepTimerMinutes)) }
+                                            } else null,
+                                        )
+                                    }
+                                }
+                            }
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+                    )
+                },
+            ) { paddingValues ->
+
+                if (isLandscape) {
+                    // ── Landscape: art left, controls right ───────────────────────────
+                    Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(paddingValues)
+                            .navigationBarsPadding(),
+                    ) {
+                        // Left: album art / lyrics — square, constrained by available height
+                        BoxWithConstraints(
+                            modifier         = Modifier
+                                .weight(0.45f)
+                                .fillMaxHeight()
+                                .padding(start = 16.dp, end = 8.dp, bottom = 16.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            val side = minOf(maxWidth, maxHeight * 0.82f)
+                            val displaySide = side * artScale
+
+                            // The shared-element modifier. `LocalPlayerArtKey` carries a generation the
+                            // host advances after an ABANDONED seek and at no other settle, so a morph
+                            // that follows a cancelled gesture has no state from it to inherit. A
+                            // generation is a fresh ELEMENT only — recreating the LayoutNode that carries
+                            // this modifier was tried and changed nothing on device. See
+                            // `LocalPlayerArtKey` in PlayerPanelHost.
+                            val artMod = if (sharedTransitionScope != null && animatedContentScope != null) {
+                                with(sharedTransitionScope) {
+                                    val artState = rememberSharedContentState(LocalPlayerArtKey.current)
+                                    Modifier.sharedElement(
+                                        sharedContentState      = artState,
+                                        animatedVisibilityScope = animatedContentScope,
+                                        boundsTransform         = rememberArtBoundsTransform(),
+                                    )
+                                }
+                            } else Modifier
+
+                            val lyricsContentMod = Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp))
+
+                            Box(Modifier.size(side)) {
+                                if (circleVisible) {
+                                    FftCWaveCanvas(
+                                        modifier = Modifier.fillMaxSize(),
+                                        color    = surfaceAccentColor,
+                                        alpha    = 0.40f,
+                                        enabled  = true,
+                                    )
+                                }
+                                AnimatedContent(
+                                    targetState  = state,
+                                    contentKey   = { s ->
+                                        val avail = s.lyricsState is LyricsState.Synced || s.lyricsState is LyricsState.Plain
+                                        s.lyricsMode && avail
+                                    },
+                                    transitionSpec = { fadeIn(tween(300)) togetherWith fadeOut(tween(300)) },
+                                    modifier     = Modifier.fillMaxSize(),
+                                    label        = "art-lyrics-landscape",
+                                ) { snapshot ->
+                                    val snapAvail   = snapshot.lyricsState is LyricsState.Synced || snapshot.lyricsState is LyricsState.Plain
+                                    val snapShowing = snapshot.lyricsMode && snapAvail
+                                    if (snapShowing) {
+                                        when (val ls = snapshot.lyricsState) {
+                                            is LyricsState.Synced -> SyncedLyricsView(
+                                                lines            = ls.lines,
+                                                currentLineIndex = snapshot.currentLyricLineIndex,
+                                                textColor        = lyricsTextColor,
+                                                modifier         = lyricsContentMod,
+                                            )
+                                            is LyricsState.Plain  -> PlainLyricsView(
+                                                text      = ls.text,
+                                                textColor = lyricsTextColor,
+                                                modifier  = lyricsContentMod,
+                                            )
+                                        }
+                                    } else {
+                                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                            AsyncImage(
+                                                model              = artImageModel,
+                                                contentDescription = stringResource(R.string.cd_album_art),
+                                                contentScale       = ContentScale.Crop,
+                                                modifier           = artMod
+                                                    .size(displaySide)
+                                                    .clip(RoundedCornerShape(16.dp))
+                                                    .graphicsLayer {
+                                                        translationX = (artDragX * 0.3f).coerceIn(-80f, 80f) + artOffsetX.value
+                                                    }
+                                                    .pointerInput(Unit) {
+                                                        detectHorizontalDragGestures(
+                                                            onDragStart      = { artDragX = 0f },
+                                                            onDragEnd        = {
+                                                                when {
+                                                                    artDragX < -swipeThresholdPx -> {
+                                                                        val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
+                                                                        artDragX = 0f; skipDirection = 1
+                                                                        scope.launch {
+                                                                            artOffsetX.snapTo(s)
+                                                                            artOffsetX.animateTo(-1500f, tween(250, easing = FastOutLinearInEasing))
+                                                                        }
+                                                                        haptics.press()
+                                                                        viewModel.skipNext()
+                                                                    }
+                                                                    artDragX > swipeThresholdPx -> {
+                                                                        val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
+                                                                        artDragX = 0f; skipDirection = -1
+                                                                        scope.launch {
+                                                                            artOffsetX.snapTo(s)
+                                                                            artOffsetX.animateTo(1500f, tween(250, easing = FastOutLinearInEasing))
+                                                                        }
+                                                                        haptics.press()
+                                                                        viewModel.skipPrevious()
+                                                                    }
+                                                                    else -> artDragX = 0f
+                                                                }
+                                                            },
+                                                            onDragCancel     = { artDragX = 0f },
+                                                            onHorizontalDrag = { _, amount -> artDragX += amount },
+                                                        )
+                                                    },
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Right: controls — BoxWithConstraints for proportional spacing in short landscape
+                        BoxWithConstraints(
+                            modifier         = Modifier
+                                .weight(0.55f)
+                                .fillMaxHeight()
+                                .padding(horizontal = 24.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            val spacingLarge = (maxHeight * 0.04f).coerceIn(6.dp, 16.dp)
+                            val spacingSmall = (maxHeight * 0.03f).coerceIn(4.dp, 12.dp)
+                            Column(
+                                modifier            = Modifier.fillMaxWidth(),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                PlayerControls(
+                                    state              = state,
+                                    accentColor        = accentColor,
+                                    onAccentColor      = onAccentColor,
+                                    surfaceAccentColor = surfaceAccentColor,
+                                    squigglyShape      = squigglyShape,
+                                    onSkipPrev         = onSkipPrev,
+                                    onSkipNext         = onSkipNext,
+                                    onPlayPause        = viewModel::playPause,
+                                    onToggleLike       = viewModel::toggleLike,
+                                    onToggleShuffle    = viewModel::toggleShuffle,
+                                    onCycleRepeat      = viewModel::cycleRepeat,
+                                    onSeek             = viewModel::seekTo,
+                                    onOpenQueue        = onOpenQueue,
+                                    onOpenAlbum        = onOpenAlbum,
+                                    onOpenArtist       = onOpenArtist,
+                                    // Nothing to share for an item with no open.spotify.com page (a local
+                                    // file) — `shareUrl` is null there and the button stays inert.
+                                    onShare            = {
+                                        state.currentTrack?.shareUrl?.let { url ->
+                                            context.startActivity(Intent.createChooser(
+                                                Intent(Intent.ACTION_SEND).apply {
+                                                    putExtra(Intent.EXTRA_TEXT, url)
+                                                    type = "text/plain"
+                                                }, null
+                                            ))
+                                        }
+                                    },
+                                    onAddToPlaylist    = { viewModel.loadOwnedPlaylists(); showPlaylistPicker = true },
+                                    onOpenDevicePicker = { viewModel.loadAvailableDevices(); showDevicePicker = true },
+                                    onOverflowMenuShowing = { controlsMenuOpen = it },
+                                    spacingLarge       = spacingLarge,
+                                    spacingSmall       = spacingSmall,
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    // ── Portrait: art top, controls bottom ────────────────────────────
+                    Column(
+                        modifier            = Modifier
+                            .fillMaxSize()
+                            .padding(paddingValues)
+                            .navigationBarsPadding(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        // Album art / lyrics
+                        BoxWithConstraints(
+                            modifier         = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .padding(horizontal = 24.dp, vertical = 12.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            val side = minOf(maxWidth, maxHeight)
+                            val displaySide = side * artScale
+
+                            // Shared-element modifier (keyed on `LocalPlayerArtKey` — a fresh element per
+                            // abandoned seek, and nothing at an ordinary settle) — see the landscape
+                            // branch above, and `LocalPlayerArtKey` in PlayerPanelHost.
+                            val artMod = if (sharedTransitionScope != null && animatedContentScope != null) {
+                                with(sharedTransitionScope) {
+                                    val artState = rememberSharedContentState(LocalPlayerArtKey.current)
+                                    Modifier.sharedElement(
+                                        sharedContentState      = artState,
+                                        animatedVisibilityScope = animatedContentScope,
+                                        boundsTransform         = rememberArtBoundsTransform(),
+                                    )
+                                }
+                            } else Modifier
+
+                            val lyricsContentMod = Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp))
+
+                            Box(Modifier.size(side)) {
+                                if (circleVisible) {
+                                    FftCWaveCanvas(
+                                        modifier = Modifier.fillMaxSize(),
+                                        color    = surfaceAccentColor,
+                                        alpha    = 0.40f,
+                                        enabled  = true,
+                                    )
+                                }
+                                AnimatedContent(
+                                    targetState  = state,
+                                    contentKey   = { s ->
+                                        val avail = s.lyricsState is LyricsState.Synced || s.lyricsState is LyricsState.Plain
+                                        s.lyricsMode && avail
+                                    },
+                                    transitionSpec = { fadeIn(tween(300)) togetherWith fadeOut(tween(300)) },
+                                    modifier     = Modifier.fillMaxSize(),
+                                    label        = "art-lyrics-portrait",
+                                ) { snapshot ->
+                                    val snapAvail   = snapshot.lyricsState is LyricsState.Synced || snapshot.lyricsState is LyricsState.Plain
+                                    val snapShowing = snapshot.lyricsMode && snapAvail
+                                    if (snapShowing) {
+                                        when (val ls = snapshot.lyricsState) {
+                                            is LyricsState.Synced -> SyncedLyricsView(
+                                                lines            = ls.lines,
+                                                currentLineIndex = snapshot.currentLyricLineIndex,
+                                                textColor        = lyricsTextColor,
+                                                modifier         = lyricsContentMod,
+                                            )
+                                            is LyricsState.Plain  -> PlainLyricsView(
+                                                text      = ls.text,
+                                                textColor = lyricsTextColor,
+                                                modifier  = lyricsContentMod,
+                                            )
+                                        }
+                                    } else {
+                                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                            AsyncImage(
+                                                model              = artImageModel,
+                                                contentDescription = stringResource(R.string.cd_album_art),
+                                                contentScale       = ContentScale.Crop,
+                                                modifier           = artMod
+                                                    .size(displaySide)
+                                                    .clip(RoundedCornerShape(16.dp))
+                                                    .graphicsLayer {
+                                                        translationX = (artDragX * 0.3f).coerceIn(-80f, 80f) + artOffsetX.value
+                                                    }
+                                                    .pointerInput(Unit) {
+                                                        detectHorizontalDragGestures(
+                                                            onDragStart      = { artDragX = 0f },
+                                                            onDragEnd        = {
+                                                                when {
+                                                                    artDragX < -swipeThresholdPx -> {
+                                                                        val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
+                                                                        artDragX = 0f; skipDirection = 1
+                                                                        scope.launch {
+                                                                            artOffsetX.snapTo(s)
+                                                                            artOffsetX.animateTo(-1500f, tween(250, easing = FastOutLinearInEasing))
+                                                                        }
+                                                                        haptics.press()
+                                                                        viewModel.skipNext()
+                                                                    }
+                                                                    artDragX > swipeThresholdPx -> {
+                                                                        val s = (artDragX * 0.3f).coerceIn(-80f, 80f)
+                                                                        artDragX = 0f; skipDirection = -1
+                                                                        scope.launch {
+                                                                            artOffsetX.snapTo(s)
+                                                                            artOffsetX.animateTo(1500f, tween(250, easing = FastOutLinearInEasing))
+                                                                        }
+                                                                        haptics.press()
+                                                                        viewModel.skipPrevious()
+                                                                    }
+                                                                    else -> artDragX = 0f
+                                                                }
+                                                            },
+                                                            onDragCancel     = { artDragX = 0f },
+                                                            onHorizontalDrag = { _, amount -> artDragX += amount },
+                                                        )
+                                                    },
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Controls
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 32.dp)
+                                .padding(bottom = 12.dp),
+                        ) {
+                            PlayerControls(
+                                state              = state,
+                                accentColor        = accentColor,
+                                onAccentColor      = onAccentColor,
+                                surfaceAccentColor = surfaceAccentColor,
+                                squigglyShape      = squigglyShape,
+                                onSkipPrev         = onSkipPrev,
+                                onSkipNext         = onSkipNext,
+                                onPlayPause        = viewModel::playPause,
+                                onToggleLike       = viewModel::toggleLike,
+                                onToggleShuffle    = viewModel::toggleShuffle,
+                                onCycleRepeat      = viewModel::cycleRepeat,
+                                onSeek             = viewModel::seekTo,
+                                onOpenQueue        = onOpenQueue,
+                                onOpenAlbum        = onOpenAlbum,
+                                onOpenArtist       = onOpenArtist,
+                                // Same null-skip as the landscape layout above.
+                                onShare            = {
+                                    state.currentTrack?.shareUrl?.let { url ->
+                                        context.startActivity(Intent.createChooser(
+                                            Intent(Intent.ACTION_SEND).apply {
+                                                putExtra(Intent.EXTRA_TEXT, url)
+                                                type = "text/plain"
+                                            }, null
+                                        ))
+                                    }
+                                },
+                                onAddToPlaylist    = { viewModel.loadOwnedPlaylists(); showPlaylistPicker = true },
+                                onOpenDevicePicker = { viewModel.loadAvailableDevices(); showDevicePicker = true },
+                                onOverflowMenuShowing = { controlsMenuOpen = it },
+                            )
+                        }
+                    }
+                }
+            }
+
+            // ── Bottom wave overlay ───────────────────────────────────────────────────
+            val waveNavBarDp = with(LocalDensity.current) { WindowInsets.navigationBars.getBottom(this).toDp() }
+            Box(Modifier.fillMaxSize()) {
+                FftWaveCanvas(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(waveNavBarDp + 48.dp)
+                        .align(Alignment.BottomCenter),
+                    color    = surfaceAccentColor,
+                    alpha    = 0.20f,
+                )
+            }
+
+            if (showPlaylistPicker) {
+                AddToPlaylistSheet(
+                    pickerState = pickerState,
+                    onSelect    = viewModel::togglePlaylistTrack,
+                    onCreateNew = viewModel::createPlaylist,
+                    onDismiss   = { showPlaylistPicker = false },
+                )
+            }
+
+            if (showDevicePicker) {
+                DevicePickerSheet(
+                    isLoading      = state.devicePickerLoading,
+                    devices        = state.availableDevices,
+                    error          = state.devicePickerError,
+                    onSelectDevice = { deviceId ->
+                        showDevicePicker = false
+                        haptics.confirm()
+                        viewModel.transferToDevice(deviceId)
+                    },
+                    onThisDevice   = {
+                        showDevicePicker = false
+                        haptics.confirm()
+                        viewModel.transferToThisDevice()
+                    },
+                    onDismiss      = { showDevicePicker = false },
+                    onRetry        = { viewModel.loadAvailableDevices() },
+                    onSetVolume    = viewModel::setVolume,
+                )
+            }
+
+            if (showSleepTimerDialog) {
+                SleepTimerDialog(
+                    currentMinutes = state.sleepTimerMinutes,
+                    onSelect       = { minutes -> haptics.confirm(); viewModel.setSleepTimer(minutes); showSleepTimerDialog = false },
+                    onDismiss      = { showSleepTimerDialog = false },
+                )
+            }
+        }
+
+        if (!docked) {
+            CassetteOverlay(
+                visible   = cassetteVisible,
+                settings  = cassetteSettings,
+                seed      = cassetteSeed,
+                label     = cassetteLabel,
+                trackKey  = state.currentTrack?.id,
+                progress  = { state.progress },
+                isPlaying = state.isPlaying,
+                onExit    = exitCassette,
+            )
+        }
     }
 }
 
@@ -816,6 +970,8 @@ private fun PlayerControls(
     onShare            : () -> Unit,
     onAddToPlaylist    : () -> Unit,
     onOpenDevicePicker : () -> Unit,
+    /** The ButtonGroup's overflow menu opened (true) or closed / left composition (false). */
+    onOverflowMenuShowing: (Boolean) -> Unit,
     spacingLarge       : Dp = 16.dp,
     spacingSmall       : Dp = 12.dp,
 ) {
@@ -1145,6 +1301,13 @@ private fun PlayerControls(
         val addInteraction   = remember { MutableInteractionSource() }
         ButtonGroup(
             overflowIndicator = { menuState ->
+                // Reported up for the cassette's idle gate (see `controlsMenuOpen`). `isShowing` is
+                // snapshot state; the dispose arm covers the indicator leaving composition while its
+                // menu is up (a fold or rotation re-lays the group out).
+                val menuShowing = menuState.isShowing
+                val reportMenuShowing by rememberUpdatedState(onOverflowMenuShowing)
+                LaunchedEffect(menuShowing) { reportMenuShowing(menuShowing) }
+                DisposableEffect(Unit) { onDispose { reportMenuShowing(false) } }
                 ButtonGroupDefaults.OverflowIndicator(
                     menuState = menuState,
                     modifier  = Modifier.size(40.dp),
@@ -1268,4 +1431,20 @@ private fun SleepTimerDialog(
         confirmButton = {},
         dismissButton = { TextButton(onClick = { haptics.press(); onDismiss() }) { Text(stringResource(R.string.action_cancel)) } },
     )
+}
+
+/**
+ * How long the now-playing item may stay null before the cassette exits: one 3 s poll
+ * (PlayerStateManager) plus room for that poll's own network latency.
+ */
+private const val CassetteNullItemGraceMs = 5_000L
+
+/**
+ * The cassette's idle clock: the last pointer event on the player and whether a finger is still
+ * down. Plain fields, NOT snapshot state — written at the pointer rate, read only by the idle
+ * countdown, never by composition.
+ */
+private class CassetteIdleClock {
+    var lastTouch: Long    = SystemClock.uptimeMillis()
+    var pressed  : Boolean = false
 }
