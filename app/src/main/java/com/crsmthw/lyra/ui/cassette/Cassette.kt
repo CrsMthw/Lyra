@@ -61,7 +61,9 @@ import kotlin.math.min
  *   flip (A ↔ B)     rotationY — about the SHORT axis (natural y), as a real shell is turned over:
  *                    the head edge stays at the bottom (portrait: on the RIGHT) and the reel that
  *                    was on the right lands on the left; in portrait the outer −90° makes it a
- *                    turn about the screen's horizontal axis. Camera: 12 half-LONG-sides away;
+ *                    turn about the screen's horizontal axis, the phone's TOP end coming toward
+ *                    you on a forward flip (the right end in landscape; backward: the other end).
+ *                    Camera: 12 half-LONG-sides away;
  *                    the face is scaled by 12 / (12 + |sin θ|) so the near end, which perspective
  *                    grows up to 12/11, never outgrows the full-bleed short side (clipped before)
  *   eject            translationY −shift × travel — out through the TITLE edge (natural −y, the
@@ -311,7 +313,8 @@ internal fun CassetteStageImpl(
             ejectBand(w, h, cassetteFit(w, h).short, fit.portrait)
         }
         // (long × short) in the natural frame; in portrait the SAME box turned −90° about its
-        // centre, overflowing its slot on purpose (requiredSize, centred, nothing clips it).
+        // centre, overflowing its slot on purpose (requiredSize, centred; only the stage's own
+        // bounds clip it).
         Box(
             Modifier
                 .requiredSize(fit.long.dp, fit.short.dp)
@@ -333,10 +336,14 @@ internal fun CassetteStageImpl(
                                 when (move) {
                                     CassetteMove.FLIP -> {
                                         // about the SHORT axis (natural y): the head edge stays
-                                        // at the bottom and the right reel lands on the left
+                                        // at the bottom and the right reel lands on the left.
+                                        // Negated: a positive rotationY brings the natural −x
+                                        // (supply) end toward the viewer (emulator-measured); a
+                                        // forward flip brings the +x end — the TOP of the portrait
+                                        // phone, the right end in landscape — toward you instead
                                         cameraDistance = flipCameraDistance(size.width)
                                         val a = flipAngleAt(t, flipForward)
-                                        rotationY = flipFaceRotation(a, incoming)
+                                        rotationY = -flipFaceRotation(a, incoming)
                                         // the near end would outgrow a full-bleed short side
                                         val k = flipNearEdgeScale(a)
                                         scaleX = k; scaleY = k
