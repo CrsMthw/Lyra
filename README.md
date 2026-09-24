@@ -230,7 +230,7 @@ app/src/test/        JVM unit tests (171)
 - **Visualizer** — visual style inspired by [Nier-Visualizer](https://github.com/bogerchan/Nier-Visualizer) and [NextGenVisualizer](https://github.com/jeffshee/NextGenVisualizer)
 - **Visualizer audio analysis** — [projectM](https://github.com/projectM-visualizer/projectm), an open-source music visualizer whose per-band normalization + logarithmic-equalize approach Lyra's analysis is modeled on (reimplemented in Kotlin; no projectM code is used)
 - **Drag-to-reorder lists** — [Reorderable](https://github.com/Calvin-LL/Reorderable) by Calvin Liang
-- **Fonts** — Liberation Sans (SIL Open Font License, see `app/src/main/assets/fonts/`)
+- **Fonts** — Liberation Sans and Playfair Display (SIL Open Font License, see `app/src/main/assets/fonts/`)
 - **App icon** — idea by BambiD, drawn up digitally by Shubbu
 
 ---

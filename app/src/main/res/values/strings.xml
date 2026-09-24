@@ -369,6 +369,7 @@
     <string name="ilyra_exit_no">No</string>
     <string name="ilyra_portrait_hint">iLyra mode works best in portrait</string>
     <string name="about_credit_fonts">Liberation Sans font © Red Hat, Inc. — SIL Open Font License 1.1</string>
+    <string name="about_credit_fonts_playfair">Playfair Display font © The Playfair Display Project Authors — SIL Open Font License 1.1</string>
     <!-- (end shell) -->
 
 

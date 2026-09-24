@@ -1015,6 +1015,15 @@ private fun AboutSection(
                     Spacer(Modifier.width(12.dp))
                     Text(stringResource(R.string.about_credit_fonts), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+
+                Spacer(Modifier.height(12.dp))
+
+                // The cassette label's serif (ui/cassette/CassetteFont.kt); licence in assets/fonts/.
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Favorite, contentDescription = null, tint = Color(0xFFE91E63), modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(12.dp))
+                    Text(stringResource(R.string.about_credit_fonts_playfair), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
         }
 
