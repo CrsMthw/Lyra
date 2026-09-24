@@ -60,7 +60,7 @@ class CassetteReelGeometryTest {
     fun `hub angle advances ANTICLOCKWISE (falls), wraps into 0 to 360 and caps a long frame`() {
         // DrawScope rotate is clockwise-positive on screen, so an anticlockwise hub's angle falls
         val step = advanceHubAngle(100f, g.RMin, 0.1f)
-        assertTrue(close(step, 70f, 0.01f), "$step")          // 300°/s × 0.1 s, backwards
+        assertTrue(close(step, 70f, 0.01f), "$step")          // 300°/s × 0.1 s, the angle falling
         assertTrue(close(advanceHubAngle(0f, g.RMin, 0.1f), 330f, 0.01f), "wraps below 0")
         assertTrue(close(advanceHubAngle(20f, g.RMin, 0.1f), 350f, 0.01f))
         // both hubs, at every pack size, turn the same way
@@ -168,17 +168,17 @@ class CassetteLabelTextTest {
 class CassetteChoreographyTimelineTest {
 
     @Test
-    fun `flip runs 0 to 180, eased, and a backward flip turns the other way`() {
-        assertEquals(0f, flipAngleAt(0f, forward = true))
-        assertEquals(180f, flipAngleAt(CassetteTiming.FlipMs.toFloat(), forward = true))
-        assertEquals(180f, flipAngleAt(10_000f, forward = true))
-        assertEquals(-180f, flipAngleAt(CassetteTiming.FlipMs.toFloat(), forward = false))
+    fun `flip always runs 0 to plus 180, eased and monotone`() {
+        assertEquals(0f, flipAngleAt(0f))
+        assertEquals(0f, flipAngleAt(-50f))
+        assertEquals(180f, flipAngleAt(CassetteTiming.FlipMs.toFloat()))
+        assertEquals(180f, flipAngleAt(10_000f))
         // FastOutSlowIn: past the midpoint of the angle before half the time
-        assertTrue(flipAngleAt(CassetteTiming.FlipMs / 2f, forward = true) > 90f)
-        // monotone
-        var last = -1f
+        assertTrue(flipAngleAt(CassetteTiming.FlipMs / 2f) > 90f)
+        // monotone, never negative
+        var last = 0f
         for (i in 0..50) {
-            val a = flipAngleAt(CassetteTiming.FlipMs * i / 50f, forward = true)
+            val a = flipAngleAt(CassetteTiming.FlipMs * i / 50f)
             assertTrue(a >= last); last = a
         }
     }
@@ -186,12 +186,12 @@ class CassetteChoreographyTimelineTest {
     @Test
     fun `flip swaps faces at 90 degrees and the incoming face lands upright`() {
         assertFalse(flipShowsIncoming(89.9f)); assertTrue(flipShowsIncoming(90f))
-        assertFalse(flipShowsIncoming(-89.9f)); assertTrue(flipShowsIncoming(-90f))
         assertEquals(0f, flipFaceRotation(180f, incoming = true))
-        assertEquals(0f, flipFaceRotation(-180f, incoming = true))
         assertEquals(-90f, flipFaceRotation(90f, incoming = true))
-        assertEquals(90f, flipFaceRotation(-90f, incoming = true))
+        assertEquals(-180f, flipFaceRotation(0f, incoming = true))
         assertEquals(45f, flipFaceRotation(45f, incoming = false))
+        // at the swap the two faces are edge-on together (±90° are the same plane)
+        assertEquals(90f, flipFaceRotation(90f, incoming = false))
     }
 
     @Test

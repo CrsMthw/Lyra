@@ -62,7 +62,8 @@ import kotlin.math.min
  *                    the head edge stays at the bottom (portrait: on the RIGHT) and the reel that
  *                    was on the right lands on the left; in portrait the outer −90° makes it a
  *                    turn about the screen's horizontal axis, the phone's TOP end coming toward
- *                    you on a forward flip (the right end in landscape; backward: the other end).
+ *                    you (the right end in landscape) — ALWAYS: a track change has no direction
+ *                    here (previous song plays the same flip / eject as next, Cris 2026-09-24).
  *                    Camera: 12 half-LONG-sides away;
  *                    the face is scaled by 12 / (12 + |sin θ|) so the near end, which perspective
  *                    grows up to 12/11, never outgrows the full-bleed short side (clipped before)
@@ -202,20 +203,19 @@ fun Cassette(
  * Orientation + fit + choreography over [Cassette]. Fills `modifier`'s bounds (the whole window,
  * insets ignored — the caller is immersive), paints [CassettePalette.background] behind, sizes the
  * shell with [cassetteFit] (no margin, never stretched), turns it 90° anticlockwise in portrait,
- * and shows a change of `trackKey` as a FLIP or an EJECT per [CassetteChoreographer] (`forward`
- * is the direction of THAT change, sampled when the key changes). The outgoing face keeps the
- * label it had; the incoming face gets the new one.
+ * and shows a change of `trackKey` as a FLIP or an EJECT per [CassetteChoreographer] — the same
+ * alternation whatever the change's direction. The outgoing face keeps the label it had; the
+ * incoming face gets the new one.
  */
 @Composable
 fun CassetteStage(
     palette : CassettePalette,
     label   : CassetteLabel,
     trackKey: String?,
-    forward : Boolean,
     progress: () -> Float,
     spinning: Boolean,
     modifier: Modifier = Modifier,
-) = CassetteStageImpl(palette, label, trackKey, forward, progress, spinning, modifier, freeze = null)
+) = CassetteStageImpl(palette, label, trackKey, progress, spinning, modifier, freeze = null)
 
 /** DEBUG ONLY (the src/debug preview): hold a [move] at `fraction` of its timeline instead of
  *  playing it, so a screenshot can catch a mid-flip / mid-eject frame. Production passes null. */
@@ -237,7 +237,6 @@ private class StageState(initial: CassetteLabel) {
     var outgoing: StageFace? = null
     var outgoingProgress = 0f
     var move: CassetteMove? = null
-    var forward = true
     var generation = 0
     /** Written by the current face's draw: what the outgoing face freezes at. */
     var lastProgress = 0f
@@ -249,7 +248,6 @@ internal fun CassetteStageImpl(
     palette : CassettePalette,
     label   : CassetteLabel,
     trackKey: String?,
-    forward : Boolean,
     progress: () -> Float,
     spinning: Boolean,
     modifier: Modifier,
@@ -263,14 +261,13 @@ internal fun CassetteStageImpl(
         val previous = state.lastKey
         state.lastKey = trackKey
         if (previous != null && trackKey != null) {
-            val move = choreographer.advance(forward)
+            val move = choreographer.advance()
             // A move still running is snapped to its end: its incoming face becomes the outgoing
             // one at rest, and the new move starts from 0 on a FRESH Animatable (below).
             state.outgoing = state.current
             state.outgoingProgress = state.lastProgress
             state.current = StageFace(state.nextId++, label, choreographer.side)
             state.move = move
-            state.forward = forward
             state.generation++
         } else if (label != state.current.label) {
             state.current = state.current.copy(label = label)
@@ -281,7 +278,6 @@ internal fun CassetteStageImpl(
 
     val generation = state.generation
     val move = state.move
-    val flipForward = state.forward
     val anim = remember(generation) { Animatable(0f) }
     LaunchedEffect(generation) {
         if (move == null) return@LaunchedEffect
@@ -338,11 +334,11 @@ internal fun CassetteStageImpl(
                                         // about the SHORT axis (natural y): the head edge stays
                                         // at the bottom and the right reel lands on the left.
                                         // Negated: a positive rotationY brings the natural −x
-                                        // (supply) end toward the viewer (emulator-measured); a
-                                        // forward flip brings the +x end — the TOP of the portrait
-                                        // phone, the right end in landscape — toward you instead
+                                        // (supply) end toward the viewer (emulator-measured); the
+                                        // flip brings the +x end — the TOP of the portrait phone,
+                                        // the right end in landscape — toward you instead
                                         cameraDistance = flipCameraDistance(size.width)
-                                        val a = flipAngleAt(t, flipForward)
+                                        val a = flipAngleAt(t)
                                         rotationY = -flipFaceRotation(a, incoming)
                                         // the near end would outgrow a full-bleed short side
                                         val k = flipNearEdgeScale(a)

@@ -34,8 +34,8 @@ import kotlinx.coroutines.delay
  * Extras: title / artist / album / year / copyright (strings), seed (ARGB int), progress (float),
  * spinning, demo (every 5 s a new track — alternating a 40-character and a short title — so the
  * flip and the eject play; progress sweeps 0 → 1 over 60 s), sideB (one flip at start),
- * flipAt / ejectAt (freeze that move at a fraction of its timeline), backward (moves go back;
- * with ejectAt the one backward change from side A is the frozen eject).
+ * flipAt / ejectAt (freeze that move at a fraction of its timeline; every change is the same
+ * move, so ejectAt plays the flip to B first and freezes the eject after it).
  */
 class CassettePreviewActivity : ComponentActivity() {
 
@@ -61,7 +61,6 @@ private data class PreviewArgs(
     val sideB   : Boolean,
     val flipAt  : Float?,
     val ejectAt : Float?,
-    val backward: Boolean,
 ) {
     companion object {
         fun from(i: Intent) = PreviewArgs(
@@ -79,7 +78,6 @@ private data class PreviewArgs(
             sideB    = i.getBooleanExtra("sideB", false),
             flipAt   = if (i.hasExtra("flipAt")) i.getFloatExtra("flipAt", 0.5f) else null,
             ejectAt  = if (i.hasExtra("ejectAt")) i.getFloatExtra("ejectAt", 0.5f) else null,
-            backward = i.getBooleanExtra("backward", false),
         )
     }
 }
@@ -125,9 +123,8 @@ private fun CassettePreview(a: PreviewArgs) {
     LaunchedEffect(Unit) {
         when {
             a.sideB || a.flipAt != null -> { delay(900); step = 1 }
-            // forward: a flip to B first, then the eject; backward: from a fresh side A the
-            // FIRST change is already an eject (the previous shell comes back)
-            a.ejectAt != null           -> { delay(900); step = 1; if (!a.backward) { delay(1300); step = 2 } }
+            // a flip to B first, then the eject
+            a.ejectAt != null           -> { delay(900); step = 1; delay(1300); step = 2 }
             a.demo -> {
                 val start = System.nanoTime()
                 var next = 5_000L
@@ -151,7 +148,6 @@ private fun CassettePreview(a: PreviewArgs) {
         palette  = remember(a.seed) { CassettePalette.from(Color(a.seed)) },
         label    = label,
         trackKey = "track-$step",
-        forward  = !a.backward,
         progress = { progress },
         spinning = a.spinning,
         modifier = Modifier.fillMaxSize(),

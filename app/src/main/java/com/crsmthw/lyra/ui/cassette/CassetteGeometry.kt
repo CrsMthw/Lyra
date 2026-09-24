@@ -203,11 +203,11 @@ internal const val EjectTotalMs: Int =
     CassetteTiming.EjectOutMs + CassetteTiming.EjectGapMs + CassetteTiming.InsertMs
 
 /** The flip's rotation about the SHORT axis (the stage's `rotationY`, so the head edge stays at
- *  the bottom) at `tMs`: 0 → ±180°, FastOutSlowIn. A backward change (previous song) turns the
- *  other way. */
-internal fun flipAngleAt(tMs: Float, forward: Boolean): Float {
+ *  the bottom) at `tMs`: 0 → 180°, FastOutSlowIn. Always the same sense — every track change is
+ *  the same move (see [CassetteChoreographer]). */
+internal fun flipAngleAt(tMs: Float): Float {
     val f = FastOutSlowInEasing.transform((tMs / CassetteTiming.FlipMs).coerceIn(0f, 1f))
-    return (if (forward) 180f else -180f) * f
+    return 180f * f
 }
 
 /** How many half-LONG-sides of the shell the flip's camera sits from it (see [flipCameraDistance]). */
@@ -238,10 +238,10 @@ internal fun flipNearEdgeScale(angleDegrees: Float): Float {
 /** Past 90° the viewer sees the INCOMING face. */
 internal fun flipShowsIncoming(angle: Float): Boolean = abs(angle) >= 90f
 
-/** The rotation a face is drawn at for a flip angle: the incoming face is pre-rotated by 180° so
- *  it lands upright (the standard card flip). */
+/** The rotation a face is drawn at for a flip angle (0..180): the incoming face is pre-rotated by
+ *  180° so it lands upright (the standard card flip). */
 internal fun flipFaceRotation(angle: Float, incoming: Boolean): Float =
-    if (!incoming) angle else angle - (if (angle >= 0f) 180f else -180f)
+    if (incoming) angle - 180f else angle
 
 /**
  * One sample of the eject: shifts are along the shell's natural −y, the TITLE edge (opposite the
