@@ -49,6 +49,10 @@ import kotlin.math.min
  *   tape pack        Rmin = 102 (bare hub + 4), Rmax = 221 — packs CLIPPED by the window as in the ad;
  *                    supply = Rmax − (Rmax − Rmin)·p, take-up = Rmin + (Rmax − Rmin)·p;
  *                    Rmin + Rmax = 323 < 420, so the packs never touch (constant 97 gap)
+ *   pack peek        the packs drawn AGAIN in the band y 468.5..500 (under the label's shadow to
+ *                    the head cavity), dimmed by black 0.45 and faded out from y 481: the fuller
+ *                    reel shows through the clear shell below the label, as in the ad (onset at
+ *                    r 149.5 → p ≈ 0.40 take-up / 0.60 supply, so mid-song both peek ~12 units)
  *   hub direction    BOTH hubs ANTICLOCKWISE (natural frame, and so on the portrait screen too):
  *                    the tape runs supply → take-up along the HEAD edge, so each pack's bottom
  *                    moves left → right; the angle fed to `rotate` (clockwise-positive) falls
