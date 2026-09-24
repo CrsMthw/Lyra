@@ -58,6 +58,12 @@ import kotlin.math.min
  *   title box        x 172..828 (656), baseline 118, Playfair 46 → floor 24 (then ellipsis),
  *                    tracking 0.087 em; artist the same box, baseline 154, 27 → 18
  *   meta / SIDE / fine print  baselines 184 / 298 + 332 / 441 + 453.6 (≥ 9.4 units)
+ *   flip (A ↔ B)     rotationY — about the SHORT axis (natural y), as a real shell is turned over:
+ *                    the head edge stays at the bottom (portrait: on the RIGHT) and the reel that
+ *                    was on the right lands on the left; in portrait the outer −90° makes it a
+ *                    turn about the screen's horizontal axis. Camera: 12 half-LONG-sides away;
+ *                    the face is scaled by 12 / (12 + |sin θ|) so the near end, which perspective
+ *                    grows up to 12/11, never outgrows the full-bleed short side (clipped before)
  *   head edge        trapezoid 168..832 from y 486; capstans (367|633, 573); pinch rollers
  *                    (272|728, 590) r 27; guide rollers (122|878, 557) r 46; head recess 418..582
  *
@@ -314,9 +320,14 @@ internal fun CassetteStageImpl(
                                 val t = anim.value
                                 when (move) {
                                     CassetteMove.FLIP -> {
-                                        cameraDistance = flipCameraDistance(size.height)
+                                        // about the SHORT axis (natural y): the head edge stays
+                                        // at the bottom and the right reel lands on the left
+                                        cameraDistance = flipCameraDistance(size.width)
                                         val a = flipAngleAt(t, flipForward)
-                                        rotationX = flipFaceRotation(a, incoming)
+                                        rotationY = flipFaceRotation(a, incoming)
+                                        // the near end would outgrow a full-bleed short side
+                                        val k = flipNearEdgeScale(a)
+                                        scaleX = k; scaleY = k
                                         alpha = if (flipShowsIncoming(a) == incoming) 1f else 0f
                                     }
                                     CassetteMove.EJECT -> {
@@ -333,14 +344,3 @@ internal fun CassetteStageImpl(
         }
     }
 }
-
-/**
- * The flip's camera distance for a shell whose SHORT side is `shortSidePx`: 12 half-short-sides
- * away, so the near edge grows at most ~8 % at 65° whatever the screen. The layer's camera
- * distance is in the platform camera's units of 72 px (the usual `12 × density` idiom was
- * measured on the emulator: it put the camera ~2 400 px from a 1 248 px-wide shell, and the near
- * edge ran off the cover screen by a third).
- */
-internal fun flipCameraDistance(shortSidePx: Float): Float = FlipCameraHalfHeights * (shortSidePx / 2f) / 72f
-
-internal const val FlipCameraHalfHeights = 12f

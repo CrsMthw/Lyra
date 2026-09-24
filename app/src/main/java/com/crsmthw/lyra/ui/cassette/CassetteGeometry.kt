@@ -5,6 +5,7 @@ import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.sin
 
 /*
  * The cassette's geometry and every pure piece of maths the painter and the stage use —
@@ -184,11 +185,37 @@ internal const val EjectTravel = 1.10f
 internal const val EjectTotalMs: Int =
     CassetteTiming.EjectOutMs + CassetteTiming.EjectGapMs + CassetteTiming.InsertMs
 
-/** The flip's rotation about the long axis at `tMs`: 0 → ±180°, FastOutSlowIn. A backward
- *  change (previous song) turns the other way. */
+/** The flip's rotation about the SHORT axis (the stage's `rotationY`, so the head edge stays at
+ *  the bottom) at `tMs`: 0 → ±180°, FastOutSlowIn. A backward change (previous song) turns the
+ *  other way. */
 internal fun flipAngleAt(tMs: Float, forward: Boolean): Float {
     val f = FastOutSlowInEasing.transform((tMs / CassetteTiming.FlipMs).coerceIn(0f, 1f))
     return (if (forward) 180f else -180f) * f
+}
+
+/** How many half-LONG-sides of the shell the flip's camera sits from it (see [flipCameraDistance]). */
+internal const val FlipCameraHalfSides = 12f
+
+/**
+ * The flip's camera distance for a shell whose LONG side is `longSidePx`: the flip turns about
+ * the short axis, so the half-LONG side is what swings toward the camera, and the camera sits
+ * [FlipCameraHalfSides] of those away. The layer's camera distance is in the platform camera's
+ * units of 72 px (the usual `12 × density` idiom was measured on the emulator: it put the camera
+ * ~2 400 px from a 1 248 px shell, and the near edge ran off the cover screen by a third).
+ */
+internal fun flipCameraDistance(longSidePx: Float): Float = FlipCameraHalfSides * (longSidePx / 2f) / 72f
+
+/**
+ * The uniform scale the flipping face is drawn at so its NEAR end never grows past its rest size.
+ * A layer scales before it rotates, so the near end (half-long-side `s·L/2`, brought `s·(L/2)·sin θ`
+ * toward a camera `C·L/2` away) is magnified `C / (C − s·sin θ)`; `s = C / (C + |sin θ|)` makes
+ * that product exactly 1. Without it the near end outgrows a full-bleed short side by up to
+ * 1/C ≈ 9 % at 90° (the cover screen in either orientation) and the stage clips its corners —
+ * measured on the emulator. 1 at rest, 12/13 edge-on.
+ */
+internal fun flipNearEdgeScale(angleDegrees: Float): Float {
+    val s = abs(sin(angleDegrees * (PI.toFloat() / 180f)))
+    return FlipCameraHalfSides / (FlipCameraHalfSides + s)
 }
 
 /** Past 90° the viewer sees the INCOMING face. */

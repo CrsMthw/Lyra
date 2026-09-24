@@ -195,6 +195,31 @@ class CassetteChoreographyTimelineTest {
     }
 
     @Test
+    fun `the flip camera sits 12 half-long-sides away in 72 px units`() {
+        assertTrue(close(flipCameraDistance(1955f), 12f * 977.5f / 72f, 1e-3f))
+        assertTrue(close(flipCameraDistance(2448f), 2 * flipCameraDistance(1224f), 1e-3f))
+    }
+
+    @Test
+    fun `the flip scale keeps the near end at its rest size at every angle`() {
+        val c = FlipCameraHalfSides
+        assertEquals(1f, flipNearEdgeScale(0f))
+        assertTrue(close(flipNearEdgeScale(180f), 1f, 1e-4f))
+        assertTrue(close(flipNearEdgeScale(90f), c / (c + 1f), 1e-5f))
+        assertTrue(close(flipNearEdgeScale(-90f), flipNearEdgeScale(90f), 1e-6f))
+        for (i in 0..36) {
+            val a = i * 5f
+            val s = flipNearEdgeScale(a)
+            val sin = kotlin.math.abs(kotlin.math.sin(Math.toRadians(a.toDouble()))).toFloat()
+            // near end = s × perspective magnification C / (C − s·sin θ): never above 1
+            val near = s * c / (c - s * sin)
+            assertTrue(near <= 1f + 1e-5f && near > 0.999f, "angle $a → near end $near")
+            // the incoming face (pre-rotated 180°) gets the same scale
+            assertTrue(close(flipNearEdgeScale(flipFaceRotation(a, incoming = true)), s, 1e-4f))
+        }
+    }
+
+    @Test
     fun `eject slides out, pauses, slides the new shell in and settles`() {
         val total = EjectTotalMs.toFloat()
         assertEquals(CassetteTiming.EjectOutMs + CassetteTiming.EjectGapMs + CassetteTiming.InsertMs, EjectTotalMs)
