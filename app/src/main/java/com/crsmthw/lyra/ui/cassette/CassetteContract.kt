@@ -74,10 +74,11 @@ data class CassetteLabel(
     val recordLabel: String? = null,
 )
 
-/** Every duration the feature uses, in one place. */
+/**
+ * Every fixed duration the feature uses, in one place. The idle delay is not one of them: it is a
+ * setting, [CassetteSettings.idleSeconds].
+ */
 object CassetteTiming {
-    /** No touch on the player for this long → the cassette slides over it. */
-    const val IdleDelayMs   = 7_000L
     /** With keep-screen-on + dim: no touch on the cassette for this long → window brightness drops. */
     const val DimDelayMs    = 20_000L
     /** The dimmed window brightness (0..1). */
