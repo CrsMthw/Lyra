@@ -1,7 +1,5 @@
 package com.crsmthw.lyra.ui.cassette
 
-import android.content.Context
-import android.provider.Settings
 import android.view.accessibility.AccessibilityManager
 import android.view.Window
 import android.view.WindowManager
@@ -19,9 +17,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.areSystemBarsVisible
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -99,7 +94,6 @@ private const val DriftGlideMs = 1_000
  * @param isPlaying drives the hubs and the keep-screen-on hold (paused = frozen hubs, screen may sleep).
  * @param onExit    called on every exit this overlay detects (double-tap, back, ON_STOP, TalkBack).
  */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun CassetteOverlay(
     visible  : Boolean,
@@ -136,13 +130,6 @@ fun CassetteOverlay(
         }
     }
 
-    // True after a back press revealed the bars (gesture nav) — belt and braces beside the insets'
-    // own visibility, which lags the `show()` call by a frame or two.
-    var barsRevealed by remember { mutableStateOf(false) }
-    val barsVisible = WindowInsets.areSystemBarsVisible || barsRevealed
-    val currentBarsVisible by rememberUpdatedState(barsVisible)
-    LaunchedEffect(visible) { barsRevealed = false }
-
     // Lyra's window has focus. Lost in split-screen / a pop-up window while the user works in the
     // other app, and when the notification shade is pulled down. It is NOT an exit (pulling the
     // shade down must not eject the cassette), but both window-wide holds below need it: a visible
@@ -175,18 +162,10 @@ fun CassetteOverlay(
     if (visible) {
         // Composed only while up, so it is the most recently registered back handler and outranks
         // NavHost's pop (the pop-out host's handler is disabled on this route).
-        BackHandler {
-            val gestureNav = isGestureNavMode(readNavigationMode(context))
-            when (cassetteBackAction(gestureNav, currentBarsVisible)) {
-                CassetteBackAction.EXIT        -> onExit()
-                CassetteBackAction.REVEAL_BARS -> {
-                    window?.let {
-                        WindowInsetsControllerCompat(it, it.decorView).show(WindowInsetsCompat.Type.systemBars())
-                    }
-                    barsRevealed = true
-                }
-            }
-        }
+        // A plain exit: in gesture navigation the SYSTEM consumes the first edge swipe to reveal the
+        // hidden bars (nothing reaches the app), so the back that arrives here is already the second
+        // swipe; in 3-button navigation the bar was revealed to tap it. See CassetteRules.kt.
+        BackHandler { onExit() }
         // Leaving the app or turning the screen off ends the idle session.
         LifecycleEventEffect(Lifecycle.Event.ON_STOP) { onExit() }
     }
@@ -258,16 +237,7 @@ fun CassetteOverlay(
                         }
                         .pointerInput(Unit) {
                             detectTapGestures(
-                                onTap = {
-                                    if (currentBarsVisible) {
-                                        window?.let {
-                                            WindowInsetsControllerCompat(it, it.decorView)
-                                                .hide(WindowInsetsCompat.Type.systemBars())
-                                        }
-                                        barsRevealed = false
-                                    }
-                                    if (currentShowHint) hintGeneration++
-                                },
+                                onTap = { if (currentShowHint) hintGeneration++ },
                                 onDoubleTap = {
                                     haptics.confirm()
                                     currentOnExit()
@@ -338,22 +308,6 @@ private class DimState {
         }
         dimmed = false
     }
-}
-
-/**
- * The system navigation mode — `Settings.Secure.NAVIGATION_MODE` ("navigation_mode", `@Readable`
- * since Android 12, so no SecurityException for a targetSdk-37 app): 0 three-button, 1 two-button,
- * 2 gestural. Null when unreadable. Read at back-press time, so a mode change needs no restart.
- *
- * Not `Resources.getIdentifier("config_navBarInteractionMode", …)`: that API is `@Discouraged`, and
- * lint's DiscouragedApi warning would break the project's 0-errors / 1-warning lint baseline.
- */
-private fun readNavigationMode(context: Context): Int? = try {
-    Settings.Secure.getInt(context.contentResolver, "navigation_mode")
-} catch (_: Settings.SettingNotFoundException) {
-    null
-} catch (_: SecurityException) {
-    null
 }
 
 /**

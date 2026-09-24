@@ -38,27 +38,15 @@ internal fun cassetteEligible(
 ): Boolean = settings.enabled && !visualizerEnabled && isPlaying && !lyricsShowing &&
     !docked && !overlayOpen && hasTrack && windowFocused && !touchExploring
 
-/** What a back press does while the cassette is up. */
-internal enum class CassetteBackAction { EXIT, REVEAL_BARS }
-
-/**
- * The back rule (Cris, 2026-09-23). Gesture navigation: the first back only brings the system
- * bars back, the second exits. Three-button (or two-button) navigation: any back exits — the bar
- * had to be revealed for the user to tap back at all, so the reveal has already happened.
+/*
+ * BACK while the cassette is up: every back that reaches Lyra EXITS — there is no in-app "reveal the
+ * bars first" step. In gesture navigation with the bars hidden (BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE)
+ * the SYSTEM already consumes the first edge swipe to show the bars transiently and dispatches no back
+ * event, so "first swipe reveals, second exits" is the platform's own immersive behaviour; a second
+ * in-app reveal made it THREE swipes on the Fold 8 (Cris, device pass 2026-09-23). In 3-button
+ * navigation the bar had to be revealed to tap back at all. So the overlay's BackHandler is a plain
+ * exit, and no navigation-mode detection exists any more.
  */
-internal fun cassetteBackAction(gestureNav: Boolean, barsVisible: Boolean): CassetteBackAction =
-    when {
-        !gestureNav -> CassetteBackAction.EXIT
-        barsVisible -> CassetteBackAction.EXIT
-        else        -> CassetteBackAction.REVEAL_BARS
-    }
-
-/**
- * `Settings.Secure.NAVIGATION_MODE`'s value → is it gesture navigation? 0 = three-button,
- * 1 = two-button, 2 = fully gestural. Anything unknown (the read failed, an OEM value) is treated
- * as gesture, the safer side: a back then reveals the bars first instead of exiting at once.
- */
-internal fun isGestureNavMode(navigationMode: Int?): Boolean = navigationMode != 0 && navigationMode != 1
 
 /** The two album fields the label prints that the player's item does not carry. */
 internal data class CassetteAlbumMeta(val copyright: String?, val label: String?)

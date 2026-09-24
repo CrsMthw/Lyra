@@ -56,25 +56,6 @@ class CassetteRulesTest {
             colorSource = CassetteColorSource.CUSTOM)))
     }
 
-    // ── Back rule ────────────────────────────────────────────────────────────
-
-    @Test
-    fun `back rule table`() {
-        assertEquals(CassetteBackAction.REVEAL_BARS, cassetteBackAction(gestureNav = true,  barsVisible = false))
-        assertEquals(CassetteBackAction.EXIT,        cassetteBackAction(gestureNav = true,  barsVisible = true))
-        assertEquals(CassetteBackAction.EXIT,        cassetteBackAction(gestureNav = false, barsVisible = false))
-        assertEquals(CassetteBackAction.EXIT,        cassetteBackAction(gestureNav = false, barsVisible = true))
-    }
-
-    @Test
-    fun `navigation mode mapping`() {
-        assertFalse(isGestureNavMode(0))   // three-button
-        assertFalse(isGestureNavMode(1))   // two-button
-        assertTrue(isGestureNavMode(2))    // gestural
-        assertTrue(isGestureNavMode(null)) // unreadable → gesture (reveal first, the safer side)
-        assertTrue(isGestureNavMode(7))
-    }
-
     // ── Label mapping ────────────────────────────────────────────────────────
 
     private val trackJson = """
