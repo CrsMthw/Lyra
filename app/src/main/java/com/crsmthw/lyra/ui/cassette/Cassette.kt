@@ -52,9 +52,9 @@ import kotlin.math.min
  *   hub direction    BOTH hubs ANTICLOCKWISE (natural frame, and so on the portrait screen too):
  *                    the tape runs supply → take-up along the HEAD edge, so each pack's bottom
  *                    moves left → right; the angle fed to `rotate` (clockwise-positive) falls
- *   tape run         ONE run at y 410 along the window's flat bottom, under the packs (the tape
- *                    heading out to the rollers). NO strand between the packs: the ad's diagonal
- *                    is not a real tape path (Cris, 2026-09-23) and was deleted
+ *   between packs    NOTHING but the centre pin: the ad's diagonal strand (Cris, 2026-09-23) and
+ *                    the run along the window's flat bottom (2026-09-24) were both deleted — the
+ *                    tape path is implied by the pinch rollers and the head recess
  *   title box        x 172..828 (656), baseline 118, Playfair 46 → floor 24 (then ellipsis),
  *                    tracking 0.087 em; artist the same box, baseline 154, 27 → 18
  *   meta / SIDE / fine print  baselines 184 / 298 + 332 / 441 + 453.6 (≥ 9.4 units)

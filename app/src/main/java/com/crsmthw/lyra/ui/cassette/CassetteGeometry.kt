@@ -40,9 +40,6 @@ internal object CassetteGeometry {
      *  the window, as in the ad, so each pack edge sweeps ~120 units through the gap. */
     const val RMax      = 221f
 
-    /** The tape run along the window's flat bottom, drawn UNDER the packs. */
-    const val TapeRunY  = 410f
-
     // ── Label card ───────────────────────────────────────────────────────────
     const val LabelLeft   = 56f
     const val LabelTop    = 58f

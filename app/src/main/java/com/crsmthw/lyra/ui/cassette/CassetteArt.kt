@@ -27,7 +27,7 @@ import kotlin.math.sqrt
  * from the [CassettePalette]; white-with-alpha is `shellHighlight` re-alpha'd and shadow is the
  * palette's black `background` re-alpha'd — the SVG used exactly those two plus palette hexes.
  *
- * Only the two hubs, the tape packs and the tape run change per frame ([drawReels]); every
+ * Only the two hubs and the tape packs change per frame ([drawReels]); every
  * other function here is recorded ONCE into a GraphicsLayer per (size, palette, label, side).
  */
 
@@ -64,7 +64,7 @@ private fun polygon(vararg xy: Float): Path = Path().apply {
  * built about the ORIGIN so a hub is drawn as translate(centre) + rotate(angle).
  */
 internal class CassetteArtKit(p: CassettePalette) {
-    /** The window stadium — also THE one clip (packs and the tape run). */
+    /** The window stadium — also the packs' clip inside the window. */
     val window: Path = Path().apply {
         addRoundRect(RoundRect(G.WinLeft, G.WinTop, G.WinRight, G.WinBottom, CornerRadius(G.WinRadius)))
     }
@@ -183,19 +183,16 @@ internal fun DrawScope.drawWindowBack(p: CassettePalette, kit: CassetteArtKit) {
 // ── reels (per frame) ────────────────────────────────────────────────────────────────────────
 
 /**
- * `<g id="reelLeft|reelRight">` + `<g id="tapeRun">`: the packs and the tape run clipped by the
- * window; the hubs (which fit inside it) drawn over them, rotated about their centres. There is
- * NO strand between the packs (the ad's diagonal was an error, Cris 2026-09-23): a real tape
- * leaves each pack toward the head edge — out to the rollers, across the pressure pad, to the
- * other roller and back up to the other hub — which the run along the window bottom stands for.
+ * `<g id="reelLeft|reelRight">`: the packs clipped by the window; the hubs (which fit inside it)
+ * drawn over them, rotated about their centres. NOTHING is drawn between the packs but the centre
+ * pin (Cris: the ad's diagonal strand was deleted 2026-09-23, the run along the window's flat
+ * bottom 2026-09-24): a real tape leaves each pack toward the head edge — out to the rollers,
+ * across the pressure pad and back — which the pinch rollers and the head recess imply.
  */
 internal fun DrawScope.drawReels(
     p: CassettePalette, kit: CassetteArtKit, radii: PackRadii, supplyDeg: Float, takeUpDeg: Float,
 ) {
     clipPath(kit.window) {
-        // the run along the window's flat bottom, UNDER the packs (it leaves from beneath each reel)
-        line(G.WinLeft + G.WinRadius, G.TapeRunY, G.WinRight - G.WinRadius, G.TapeRunY, p.tape, 4f)
-        line(G.WinLeft + G.WinRadius, G.TapeRunY - 1.2f, G.WinRight - G.WinRadius, G.TapeRunY - 1.2f, p.tapeSheen, 1.2f)
         drawPack(p, G.HubLeftX, radii.supply)
         drawPack(p, G.HubRightX, radii.takeUp)
     }

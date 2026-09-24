@@ -84,7 +84,6 @@ class CassetteReelGeometryTest {
         assertTrue(close(g.WinRadius, (g.WinBottom - g.WinTop) / 2f))
         assertTrue(g.HubY - g.HubRadius >= g.WinTop && g.HubY + g.HubRadius <= g.WinBottom)
         assertTrue(g.HubLeftX - g.HubRadius >= g.WinLeft && g.HubRightX + g.HubRadius <= g.WinRight)
-        assertTrue(g.TapeRunY < g.WinBottom && g.TapeRunY > g.HubY)
     }
 }
 
