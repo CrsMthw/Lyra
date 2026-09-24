@@ -89,7 +89,6 @@ private const val DriftGlideMs = 1_000
  * @param seed      the palette seed colour PlayerScreen picked from the colour source. It slides
  *                  (800 ms, like the player's own accent) when the track changes the album colour.
  * @param trackKey  the current item's id — a change is shown as a flip / eject by the stage.
- * @param forward   the direction of the latest track change.
  * @param progress  playback progress 0..1, read in the draw phase only.
  * @param isPlaying drives the hubs and the keep-screen-on hold (paused = frozen hubs, screen may sleep).
  * @param onExit    called on every exit this overlay detects (double-tap, back, ON_STOP, TalkBack).
@@ -101,7 +100,6 @@ fun CassetteOverlay(
     seed     : Color,
     label    : CassetteLabel?,
     trackKey : String?,
-    forward  : Boolean,
     progress : () -> Float,
     isPlaying: Boolean,
     onExit   : () -> Unit,
@@ -251,7 +249,6 @@ fun CassetteOverlay(
                 palette  = palette,
                 label    = shownLabel ?: EmptyLabel,
                 trackKey = shownTrackKey,
-                forward  = forward,
                 progress = progress,
                 spinning = isPlaying,
                 modifier = Modifier

@@ -40,15 +40,28 @@ internal object CassetteGeometry {
      *  the window, as in the ad, so each pack edge sweeps ~120 units through the gap. */
     const val RMax      = 221f
 
-    /** The tape run along the window's flat bottom, drawn UNDER the packs. */
-    const val TapeRunY  = 410f
-
     // ── Label card ───────────────────────────────────────────────────────────
     const val LabelLeft   = 56f
     const val LabelTop    = 58f
     const val LabelRight  = 944f
     const val LabelBottom = 466f
     const val LabelRadius = 9f
+    /** The label's drop shadow, offset 2.5 units under the card. */
+    const val LabelShadowBottom = LabelBottom + 2.5f
+
+    // ── Pack peek: the fuller pack seen through the clear shell BELOW the label ──────────────
+    /** The band's top: just under the label's drop shadow, so the sticker's edge stays intact. */
+    const val PeekTop    = LabelShadowBottom
+    /** The band's bottom: where the head strip's cavity begins (the `cavity` path's top edge in
+     *  `drawHeadEdge`); the trapezoid moulding above it is clear, so the arc shows through it. */
+    const val PeekBottom = 500f
+    /** Below the head strip's step line (y 478..480) the peek FADES to nothing at [PeekBottom]:
+     *  a hard cut at 500 showed as a straight edge on the plain shell beside the trapezoid (the
+     *  full pack still spans x 163..205 there), and the ad's arc dies away the same way. */
+    const val PeekFadeTop = 481f
+    /** The band's sides: the shell's inner moulded wall. */
+    const val PeekLeft   = 18f
+    const val PeekRight  = 982f
 
     // ── Text boxes (units) ───────────────────────────────────────────────────
     const val CentreX         = 500f
@@ -101,6 +114,14 @@ internal fun packRadii(progress: Float): PackRadii {
         takeUp = CassetteGeometry.RMin + span * p,
     )
 }
+
+/** How far (units) a pack of radius `r` reaches past the label into the peek band (0 = hidden);
+ *  the band is [CassetteGeometry.PeekTop]..[CassetteGeometry.PeekBottom]. A pack's edge crosses
+ *  the band's top at r = 149.5, i.e. p ≈ 0.40 for the take-up and ≈ 0.60 for the supply, so at
+ *  mid-song BOTH peek by ~12 units; at either end the fuller one reaches 540, past the band. */
+internal fun packPeekDepth(r: Float): Float =
+    (CassetteGeometry.HubY + r - CassetteGeometry.PeekTop)
+        .coerceIn(0f, CassetteGeometry.PeekBottom - CassetteGeometry.PeekTop)
 
 /**
  * A hub's angular SPEED (degrees per second, a magnitude — the direction is [advanceHubAngle]'s)
@@ -203,11 +224,11 @@ internal const val EjectTotalMs: Int =
     CassetteTiming.EjectOutMs + CassetteTiming.EjectGapMs + CassetteTiming.InsertMs
 
 /** The flip's rotation about the SHORT axis (the stage's `rotationY`, so the head edge stays at
- *  the bottom) at `tMs`: 0 → ±180°, FastOutSlowIn. A backward change (previous song) turns the
- *  other way. */
-internal fun flipAngleAt(tMs: Float, forward: Boolean): Float {
+ *  the bottom) at `tMs`: 0 → 180°, FastOutSlowIn. Always the same sense — every track change is
+ *  the same move (see [CassetteChoreographer]). */
+internal fun flipAngleAt(tMs: Float): Float {
     val f = FastOutSlowInEasing.transform((tMs / CassetteTiming.FlipMs).coerceIn(0f, 1f))
-    return (if (forward) 180f else -180f) * f
+    return 180f * f
 }
 
 /** How many half-LONG-sides of the shell the flip's camera sits from it (see [flipCameraDistance]). */
@@ -238,10 +259,10 @@ internal fun flipNearEdgeScale(angleDegrees: Float): Float {
 /** Past 90° the viewer sees the INCOMING face. */
 internal fun flipShowsIncoming(angle: Float): Boolean = abs(angle) >= 90f
 
-/** The rotation a face is drawn at for a flip angle: the incoming face is pre-rotated by 180° so
- *  it lands upright (the standard card flip). */
+/** The rotation a face is drawn at for a flip angle (0..180): the incoming face is pre-rotated by
+ *  180° so it lands upright (the standard card flip). */
 internal fun flipFaceRotation(angle: Float, incoming: Boolean): Float =
-    if (!incoming) angle else angle - (if (angle >= 0f) 180f else -180f)
+    if (incoming) angle - 180f else angle
 
 /**
  * One sample of the eject: shifts are along the shell's natural −y, the TITLE edge (opposite the

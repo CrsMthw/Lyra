@@ -936,7 +936,6 @@ fun PlayerScreen(
                 seed      = cassetteSeed,
                 label     = cassetteLabel,
                 trackKey  = state.currentTrack?.id,
-                forward   = skipDirection >= 0,
                 progress  = { state.progress },
                 isPlaying = state.isPlaying,
                 onExit    = exitCassette,

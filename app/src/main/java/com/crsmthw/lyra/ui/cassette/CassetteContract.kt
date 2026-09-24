@@ -81,20 +81,18 @@ enum class CassetteMove { FLIP, EJECT }
 
 /**
  * Side A → FLIP → side B → EJECT (a fresh cassette, side A) → FLIP → … A real shell has two sides,
- * so every second song is a new cassette. Going BACK plays the same sequence in reverse: from B a
- * flip returns to A; from A (just inserted) the shell is pulled and the previous one comes back on
- * its side B. The side always toggles; only the MOVE differs. Pure Kotlin, unit-tested.
+ * so every second song is a new cassette. EVERY track change plays this same sequence, whatever
+ * its direction (Cris, 2026-09-24): the player cannot tell a previous-song from a
+ * next-song change it only learns about from the poll, so a previous song flips / ejects exactly
+ * as a next one does. The side always toggles; the move alternates. Pure Kotlin, unit-tested.
  */
 class CassetteChoreographer(initialSide: CassetteSide = CassetteSide.A) {
     var side: CassetteSide = initialSide
         private set
 
-    /** Records a track change and returns how to show it. `forward` = next track (or a natural end). */
-    fun advance(forward: Boolean): CassetteMove {
-        val move = when {
-            forward  -> if (side == CassetteSide.A) CassetteMove.FLIP else CassetteMove.EJECT
-            else     -> if (side == CassetteSide.B) CassetteMove.FLIP else CassetteMove.EJECT
-        }
+    /** Records a track change (any direction) and returns how to show it. */
+    fun advance(): CassetteMove {
+        val move = if (side == CassetteSide.A) CassetteMove.FLIP else CassetteMove.EJECT
         side = if (side == CassetteSide.A) CassetteSide.B else CassetteSide.A
         return move
     }

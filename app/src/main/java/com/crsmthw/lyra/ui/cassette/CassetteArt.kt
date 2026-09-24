@@ -5,14 +5,17 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.DrawStyle
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.translate
 import kotlin.math.cos
@@ -27,7 +30,7 @@ import kotlin.math.sqrt
  * from the [CassettePalette]; white-with-alpha is `shellHighlight` re-alpha'd and shadow is the
  * palette's black `background` re-alpha'd — the SVG used exactly those two plus palette hexes.
  *
- * Only the two hubs, the tape packs and the tape run change per frame ([drawReels]); every
+ * Only the two hubs and the tape packs change per frame ([drawReels]); every
  * other function here is recorded ONCE into a GraphicsLayer per (size, palette, label, side).
  */
 
@@ -64,7 +67,7 @@ private fun polygon(vararg xy: Float): Path = Path().apply {
  * built about the ORIGIN so a hub is drawn as translate(centre) + rotate(angle).
  */
 internal class CassetteArtKit(p: CassettePalette) {
-    /** The window stadium — also THE one clip (packs and the tape run). */
+    /** The window stadium — also the packs' clip inside the window. */
     val window: Path = Path().apply {
         addRoundRect(RoundRect(G.WinLeft, G.WinTop, G.WinRight, G.WinBottom, CornerRadius(G.WinRadius)))
     }
@@ -101,6 +104,13 @@ internal class CassetteArtKit(p: CassettePalette) {
             ))
         }
     }
+
+    /** The pack peek's offscreen layer (see [drawPackPeeks]): its bounds, paint and fade mask. */
+    val peekBounds = Rect(G.PeekLeft, G.PeekTop, G.PeekRight, G.PeekBottom)
+    val peekLayerPaint = Paint()
+    val peekFade: Brush = Brush.verticalGradient(
+        0f to p.background, 1f to p.background.copy(alpha = 0f), startY = G.PeekFadeTop, endY = G.PeekBottom,
+    )
 
     /** The hubs' FIXED lighting (does not rotate): a soft key light from the upper left. */
     val hubLightLeft: Brush = hubLight(p, G.HubLeftX)
@@ -183,25 +193,56 @@ internal fun DrawScope.drawWindowBack(p: CassettePalette, kit: CassetteArtKit) {
 // ── reels (per frame) ────────────────────────────────────────────────────────────────────────
 
 /**
- * `<g id="reelLeft|reelRight">` + `<g id="tapeRun">`: the packs and the tape run clipped by the
- * window; the hubs (which fit inside it) drawn over them, rotated about their centres. There is
- * NO strand between the packs (the ad's diagonal was an error, Cris 2026-09-23): a real tape
- * leaves each pack toward the head edge — out to the rollers, across the pressure pad, to the
- * other roller and back up to the other hub — which the run along the window bottom stands for.
+ * `<g id="reelLeft|reelRight">`: the packs clipped by the window; the hubs (which fit inside it)
+ * drawn over them, rotated about their centres. NOTHING is drawn between the packs but the centre
+ * pin (Cris: the ad's diagonal strand was deleted 2026-09-23, the run along the window's flat
+ * bottom 2026-09-24): a real tape leaves each pack toward the head edge — out to the rollers,
+ * across the pressure pad and back — which the pinch rollers and the head recess imply.
  */
 internal fun DrawScope.drawReels(
     p: CassettePalette, kit: CassetteArtKit, radii: PackRadii, supplyDeg: Float, takeUpDeg: Float,
 ) {
     clipPath(kit.window) {
-        // the run along the window's flat bottom, UNDER the packs (it leaves from beneath each reel)
-        line(G.WinLeft + G.WinRadius, G.TapeRunY, G.WinRight - G.WinRadius, G.TapeRunY, p.tape, 4f)
-        line(G.WinLeft + G.WinRadius, G.TapeRunY - 1.2f, G.WinRight - G.WinRadius, G.TapeRunY - 1.2f, p.tapeSheen, 1.2f)
         drawPack(p, G.HubLeftX, radii.supply)
         drawPack(p, G.HubRightX, radii.takeUp)
     }
     drawHub(p, kit, G.HubLeftX, supplyDeg, kit.hubLightLeft)
     drawHub(p, kit, G.HubRightX, takeUpDeg, kit.hubLightRight)
+    drawPackPeeks(p, kit, radii)
 }
+
+/**
+ * The fuller pack seen through the clear shell BELOW the label (the ad shows it on the fuller
+ * reel; Cris, 2026-09-24): the packs drawn a second time, clipped to the band between the
+ * label's drop shadow and the head strip's cavity ([packPeekDepth]; the band lies inside the
+ * inner moulded wall's straight run, so a rect IS that intersection), then dimmed — the disc
+ * only, never the band — by [PeekDim], as everything seen through the smoky shell is. The
+ * hub-anchored grooves and the edge sheen stay, so the arc visibly grows. Below the step line it
+ * fades out ([CassetteGeometry.PeekFadeTop] → PeekBottom, a DstIn mask in a layer the band's
+ * size) instead of ending on a hard cut. Per frame, but before the cached top layer, so the head
+ * strip's step line, trapezoid moulding and gloss lie OVER it; nothing on the head strip that must
+ * stay clean (rollers, recess, screws) reaches the band (CassetteGeometryTest proves it).
+ */
+private fun DrawScope.drawPackPeeks(p: CassettePalette, kit: CassetteArtKit, radii: PackRadii) {
+    if (packPeekDepth(radii.supply) <= 0f && packPeekDepth(radii.takeUp) <= 0f) return
+    clipRect(G.PeekLeft, G.PeekTop, G.PeekRight, G.PeekBottom) {
+        drawContext.canvas.saveLayer(kit.peekBounds, kit.peekLayerPaint)
+        drawPackPeek(p, G.HubLeftX, radii.supply)
+        drawPackPeek(p, G.HubRightX, radii.takeUp)
+        drawRect(kit.peekFade, Offset(G.PeekLeft, G.PeekFadeTop), Size(G.PeekRight - G.PeekLeft, G.PeekBottom - G.PeekFadeTop),
+            blendMode = BlendMode.DstIn)
+        drawContext.canvas.restore()
+    }
+}
+
+private fun DrawScope.drawPackPeek(p: CassettePalette, cx: Float, r: Float) {
+    if (packPeekDepth(r) <= 0f) return
+    drawPack(p, cx, r)
+    drawCircle(p.shade(PeekDim), r, Offset(cx, G.HubY))
+}
+
+/** How much the smoky shell darkens the peeking pack (the inner wall's own shade is 0.22..0.50). */
+internal const val PeekDim = 0.45f
 
 /** Flat tape + hub-ANCHORED winding rings (inner layers stay put as the pack shrinks or grows —
  *  only the outermost ring appears or goes) + a clearly visible 4-unit sheen at the moving edge. */
@@ -293,7 +334,8 @@ internal fun DrawScope.drawHeadEdge(p: CassettePalette) {
     line(488f, 538f, 318f, 566f, p.hi(0.22f), 1.4f)
     line(512f, 538f, 682f, 566f, p.hi(0.22f), 1.4f)
     line(500f, 486f, 500f, 512f, p.hi(0.2f), 1.2f)
-    disc(500f, 530f, 19f, p.shellEdge.copy(alpha = 0.35f)); ring(500f, 530f, 19f, p.hi(0.25f), 1.2f)
+    // the head screw's boss: a moulded ring kept faint so the (dark) screw reads recessed
+    disc(500f, 530f, 19f, p.shellEdge.copy(alpha = 0.35f)); ring(500f, 530f, 19f, p.hi(0.12f), 1.2f)
     // head-access opening: metal shield, pressure-pad spring + felt, the tape passing in front
     rr(418f, 552f, 164f, 85f, 3f, p.window)
     line(418f, 552f, 418f, 636f, p.hi(0.25f), 1.2f)
@@ -354,19 +396,38 @@ internal fun DrawScope.drawLabelMarks(p: CassettePalette) {
 
 internal const val LogoX = 115f
 
-/** `<g id="screws">`: four corner screws + the head screw, flattened to absolute coordinates. */
+/**
+ * `<g id="screws">`: four corner screws + the head screw, flattened to absolute coordinates.
+ * Dark RECESSED hardware, barely lighter than the shell as in the ad (Cris, 2026-09-24: the
+ * bright `metal` studs stood out far too much): a gunmetal head from the shell's own rim colour
+ * darkened to [ScrewHeadLight]..[ScrewHeadDark], a cross one notch darker, and one faint hairline
+ * catching the key light on the upper-left rim — no full highlight ring.
+ */
 internal fun DrawScope.drawScrews(p: CassettePalette) {
+    val (h, s, _) = p.shellEdge.toHsl()
+    val headLit = Color.hsl(h, s, ScrewHeadLight)
+    val headDark = Color.hsl(h, s, ScrewHeadDark)
+    val slot = Color.hsl(h, s, ScrewSlotLight)
     for ((cx, cy, r) in listOf(Triple(34f, 34f, 14f), Triple(966f, 34f, 14f), Triple(34f, 604f, 14f),
         Triple(966f, 604f, 14f), Triple(500f, 530f, 12f))) {
-        disc(cx, cy, r + 4f, p.shade(0.4f)); ring(cx, cy, r + 4f, p.hi(0.22f), 1f)
-        drawCircle(Brush.radialGradient(0f to p.metal, 1f to p.window, center = Offset(cx - 4f, cy - 5f), radius = r + 4f),
+        disc(cx, cy, r + 4f, p.shade(0.4f))          // the countersink
+        drawCircle(Brush.radialGradient(0f to headLit, 1f to headDark, center = Offset(cx - 4f, cy - 5f), radius = r + 4f),
             r, Offset(cx, cy))
         val k = r * 0.55f
-        line(cx - k, cy, cx + k, cy, p.window, r * 0.2f)
-        line(cx, cy - k, cx, cy + k, p.window, r * 0.2f)
-        ring(cx, cy, r - 0.5f, p.hi(0.25f), 1f)
+        line(cx - k, cy, cx + k, cy, slot, r * 0.2f)
+        line(cx, cy - k, cx, cy + k, slot, r * 0.2f)
+        // the hairline: upper-left quadrant only (180° → 270°, clockwise from +x)
+        drawArc(p.hi(ScrewHairlineAlpha), startAngle = 180f, sweepAngle = 90f, useCenter = false,
+            topLeft = Offset(cx - r + 0.5f, cy - r + 0.5f), size = Size(2f * r - 1f, 2f * r - 1f), style = stroke(1f))
     }
 }
+
+/** The screw head's HSL lightness at its lit centre / its rim, the cross's, and the hairline's
+ *  alpha — the shell rim (`shellEdge`) is ≈ 0.30, the shell body ≈ 0.17. */
+internal const val ScrewHeadLight = 0.24f
+internal const val ScrewHeadDark = 0.20f
+internal const val ScrewSlotLight = 0.14f
+internal const val ScrewHairlineAlpha = 0.15f
 
 /** `<g id="shellGloss">`, drawn last and on PLASTIC ONLY (the label is a paper sticker): one
  *  diagonal band split around the label, and a second one bottom right. */

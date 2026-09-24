@@ -8,33 +8,34 @@ import kotlin.test.assertTrue
 class CassetteChoreographerTest {
 
     @Test
-    fun `forward alternates flip then eject and toggles the side every time`() {
+    fun `every advance alternates flip then eject and toggles the side`() {
         val c = CassetteChoreographer()
         assertEquals(CassetteSide.A, c.side)
-        assertEquals(CassetteMove.FLIP, c.advance(forward = true));  assertEquals(CassetteSide.B, c.side)
-        assertEquals(CassetteMove.EJECT, c.advance(forward = true)); assertEquals(CassetteSide.A, c.side)
-        assertEquals(CassetteMove.FLIP, c.advance(forward = true));  assertEquals(CassetteSide.B, c.side)
-        assertEquals(CassetteMove.EJECT, c.advance(forward = true)); assertEquals(CassetteSide.A, c.side)
+        assertEquals(CassetteMove.FLIP, c.advance());  assertEquals(CassetteSide.B, c.side)
+        assertEquals(CassetteMove.EJECT, c.advance()); assertEquals(CassetteSide.A, c.side)
+        assertEquals(CassetteMove.FLIP, c.advance());  assertEquals(CassetteSide.B, c.side)
+        assertEquals(CassetteMove.EJECT, c.advance()); assertEquals(CassetteSide.A, c.side)
     }
 
     @Test
-    fun `backward undoes the last forward move`() {
+    fun `a long run never breaks the alternation`() {
         val c = CassetteChoreographer()
-        c.advance(forward = true)                                   // A → flip → B
-        assertEquals(CassetteMove.FLIP, c.advance(forward = false)) // B → flip → A
-        assertEquals(CassetteSide.A, c.side)
-        c.advance(forward = true); c.advance(forward = true)        // A→B (flip), B→A (eject)
-        assertEquals(CassetteMove.EJECT, c.advance(forward = false)) // pull the fresh shell, previous one back on B
-        assertEquals(CassetteSide.B, c.side)
-        assertEquals(CassetteMove.FLIP, c.advance(forward = false))
-        assertEquals(CassetteSide.A, c.side)
+        for (i in 0 until 50) {
+            val sideBefore = c.side
+            val move = c.advance()
+            assertEquals(if (i % 2 == 0) CassetteMove.FLIP else CassetteMove.EJECT, move, "change $i")
+            assertEquals(if (sideBefore == CassetteSide.A) CassetteMove.FLIP else CassetteMove.EJECT, move)
+            assertTrue(c.side != sideBefore, "change $i must toggle the side")
+        }
     }
 
     @Test
-    fun `a shell starting on side B ejects first when going forward`() {
+    fun `a shell starting on side B ejects first`() {
         val c = CassetteChoreographer(CassetteSide.B)
-        assertEquals(CassetteMove.EJECT, c.advance(forward = true))
+        assertEquals(CassetteMove.EJECT, c.advance())
         assertEquals(CassetteSide.A, c.side)
+        assertEquals(CassetteMove.FLIP, c.advance())
+        assertEquals(CassetteSide.B, c.side)
     }
 }
 

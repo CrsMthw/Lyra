@@ -60,7 +60,7 @@ class CassetteReelGeometryTest {
     fun `hub angle advances ANTICLOCKWISE (falls), wraps into 0 to 360 and caps a long frame`() {
         // DrawScope rotate is clockwise-positive on screen, so an anticlockwise hub's angle falls
         val step = advanceHubAngle(100f, g.RMin, 0.1f)
-        assertTrue(close(step, 70f, 0.01f), "$step")          // 300°/s × 0.1 s, backwards
+        assertTrue(close(step, 70f, 0.01f), "$step")          // 300°/s × 0.1 s, the angle falling
         assertTrue(close(advanceHubAngle(0f, g.RMin, 0.1f), 330f, 0.01f), "wraps below 0")
         assertTrue(close(advanceHubAngle(20f, g.RMin, 0.1f), 350f, 0.01f))
         // both hubs, at every pack size, turn the same way
@@ -84,7 +84,6 @@ class CassetteReelGeometryTest {
         assertTrue(close(g.WinRadius, (g.WinBottom - g.WinTop) / 2f))
         assertTrue(g.HubY - g.HubRadius >= g.WinTop && g.HubY + g.HubRadius <= g.WinBottom)
         assertTrue(g.HubLeftX - g.HubRadius >= g.WinLeft && g.HubRightX + g.HubRadius <= g.WinRight)
-        assertTrue(g.TapeRunY < g.WinBottom && g.TapeRunY > g.HubY)
     }
 }
 
@@ -168,17 +167,17 @@ class CassetteLabelTextTest {
 class CassetteChoreographyTimelineTest {
 
     @Test
-    fun `flip runs 0 to 180, eased, and a backward flip turns the other way`() {
-        assertEquals(0f, flipAngleAt(0f, forward = true))
-        assertEquals(180f, flipAngleAt(CassetteTiming.FlipMs.toFloat(), forward = true))
-        assertEquals(180f, flipAngleAt(10_000f, forward = true))
-        assertEquals(-180f, flipAngleAt(CassetteTiming.FlipMs.toFloat(), forward = false))
+    fun `flip always runs 0 to plus 180, eased and monotone`() {
+        assertEquals(0f, flipAngleAt(0f))
+        assertEquals(0f, flipAngleAt(-50f))
+        assertEquals(180f, flipAngleAt(CassetteTiming.FlipMs.toFloat()))
+        assertEquals(180f, flipAngleAt(10_000f))
         // FastOutSlowIn: past the midpoint of the angle before half the time
-        assertTrue(flipAngleAt(CassetteTiming.FlipMs / 2f, forward = true) > 90f)
-        // monotone
-        var last = -1f
+        assertTrue(flipAngleAt(CassetteTiming.FlipMs / 2f) > 90f)
+        // monotone, never negative
+        var last = 0f
         for (i in 0..50) {
-            val a = flipAngleAt(CassetteTiming.FlipMs * i / 50f, forward = true)
+            val a = flipAngleAt(CassetteTiming.FlipMs * i / 50f)
             assertTrue(a >= last); last = a
         }
     }
@@ -186,12 +185,12 @@ class CassetteChoreographyTimelineTest {
     @Test
     fun `flip swaps faces at 90 degrees and the incoming face lands upright`() {
         assertFalse(flipShowsIncoming(89.9f)); assertTrue(flipShowsIncoming(90f))
-        assertFalse(flipShowsIncoming(-89.9f)); assertTrue(flipShowsIncoming(-90f))
         assertEquals(0f, flipFaceRotation(180f, incoming = true))
-        assertEquals(0f, flipFaceRotation(-180f, incoming = true))
         assertEquals(-90f, flipFaceRotation(90f, incoming = true))
-        assertEquals(90f, flipFaceRotation(-90f, incoming = true))
+        assertEquals(-180f, flipFaceRotation(0f, incoming = true))
         assertEquals(45f, flipFaceRotation(45f, incoming = false))
+        // at the swap the two faces are edge-on together (±90° are the same plane)
+        assertEquals(90f, flipFaceRotation(90f, incoming = false))
     }
 
     @Test
@@ -304,5 +303,77 @@ class CassetteStageOrientationTest {
         val unfolded = cassetteFit(2448f, 1848f)
         assertFalse(unfolded.portrait)
         assertTrue(close(unfolded.long, 2448f)); assertTrue(unfolded.short < 1848f)
+    }
+}
+
+class CassettePackPeekTest {
+
+    private val g = CassetteGeometry
+
+    @Test
+    fun `the peek band runs from under the label shadow to the head cavity, inside the inner wall`() {
+        assertEquals(g.LabelShadowBottom, g.PeekTop)
+        assertTrue(g.PeekTop > g.LabelBottom)
+        assertTrue(g.PeekFadeTop > g.PeekTop && g.PeekFadeTop < g.PeekBottom)
+        assertEquals(500f, g.PeekBottom)                     // the cavity path's top edge
+        // the inner moulded wall is 18..982 × 18..620 with r 14: the band is on its straight run
+        assertTrue(g.PeekLeft >= 18f && g.PeekRight <= 982f && g.PeekBottom <= 620f - 14f)
+    }
+
+    @Test
+    fun `peek depth is zero until a pack clears the label, then grows, clamped to the band`() {
+        assertEquals(0f, packPeekDepth(g.RMin))
+        assertEquals(0f, packPeekDepth(g.PeekTop - g.HubY))
+        assertEquals(g.PeekBottom - g.PeekTop, packPeekDepth(g.RMax))   // a full pack reaches 540
+        var last = 0f
+        for (i in 0..100) {
+            val d = packPeekDepth(g.RMin + (g.RMax - g.RMin) * i / 100f)
+            assertTrue(d >= last); last = d
+        }
+    }
+
+    @Test
+    fun `the fuller pack peeks at either end of a song and both only barely at the middle`() {
+        val start = packRadii(0f)
+        assertTrue(packPeekDepth(start.supply) > 0f); assertEquals(0f, packPeekDepth(start.takeUp))
+        val end = packRadii(1f)
+        assertEquals(0f, packPeekDepth(end.supply)); assertTrue(packPeekDepth(end.takeUp) > 0f)
+        val mid = packRadii(0.5f)
+        assertTrue(packPeekDepth(mid.supply) in 0f..15f && packPeekDepth(mid.takeUp) in 0f..15f)
+    }
+
+    /** Mirrors CassetteArt's head-edge group and screws: (cx, cy, r) of everything that must never
+     *  have tape drawn over it, and the head recess as a rect. */
+    private val cleanCircles = listOf(
+        Triple(272f, 590f, 27f), Triple(728f, 590f, 27f),     // pinch rollers
+        Triple(122f, 557f, 46f), Triple(878f, 557f, 46f),     // guide rollers
+        Triple(367f, 573f, 28f), Triple(633f, 573f, 28f),     // capstan holes
+        Triple(34f, 604f, 18f), Triple(966f, 604f, 18f),      // bottom corner screws (countersink)
+        Triple(34f, 34f, 18f), Triple(966f, 34f, 18f),        // top corner screws
+        Triple(500f, 530f, 19f),                              // head screw + its boss
+    )
+
+    @Test
+    fun `no peeking tape can land on a roller, the head recess or a screw`() {
+        var sampled = 0
+        var y = g.PeekTop
+        while (y <= g.PeekBottom) {
+            var x = g.PeekLeft
+            while (x <= g.PeekRight) {
+                val inPack = listOf(g.HubLeftX, g.HubRightX).any { hx ->
+                    (x - hx) * (x - hx) + (y - g.HubY) * (y - g.HubY) <= g.RMax * g.RMax
+                }
+                if (inPack) {
+                    sampled++
+                    for ((cx, cy, r) in cleanCircles) {
+                        assertTrue((x - cx) * (x - cx) + (y - cy) * (y - cy) > r * r, "tape at ($x, $y) over ($cx, $cy)")
+                    }
+                    assertFalse(x in 418f..582f && y in 552f..637f, "tape at ($x, $y) over the head recess")
+                }
+                x += 1f
+            }
+            y += 0.5f
+        }
+        assertTrue(sampled > 1000, "the band must actually overlap a full pack ($sampled)")
     }
 }
