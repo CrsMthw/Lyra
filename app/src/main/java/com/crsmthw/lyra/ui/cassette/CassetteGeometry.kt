@@ -46,6 +46,22 @@ internal object CassetteGeometry {
     const val LabelRight  = 944f
     const val LabelBottom = 466f
     const val LabelRadius = 9f
+    /** The label's drop shadow, offset 2.5 units under the card. */
+    const val LabelShadowBottom = LabelBottom + 2.5f
+
+    // ── Pack peek: the fuller pack seen through the clear shell BELOW the label ──────────────
+    /** The band's top: just under the label's drop shadow, so the sticker's edge stays intact. */
+    const val PeekTop    = LabelShadowBottom
+    /** The band's bottom: where the head strip's cavity begins (the `cavity` path's top edge in
+     *  `drawHeadEdge`); the trapezoid moulding above it is clear, so the arc shows through it. */
+    const val PeekBottom = 500f
+    /** Below the head strip's step line (y 478..480) the peek FADES to nothing at [PeekBottom]:
+     *  a hard cut at 500 showed as a straight edge on the plain shell beside the trapezoid (the
+     *  full pack still spans x 163..205 there), and the ad's arc dies away the same way. */
+    const val PeekFadeTop = 481f
+    /** The band's sides: the shell's inner moulded wall. */
+    const val PeekLeft   = 18f
+    const val PeekRight  = 982f
 
     // ── Text boxes (units) ───────────────────────────────────────────────────
     const val CentreX         = 500f
@@ -98,6 +114,14 @@ internal fun packRadii(progress: Float): PackRadii {
         takeUp = CassetteGeometry.RMin + span * p,
     )
 }
+
+/** How far (units) a pack of radius `r` reaches past the label into the peek band (0 = hidden);
+ *  the band is [CassetteGeometry.PeekTop]..[CassetteGeometry.PeekBottom]. A pack's edge crosses
+ *  the band's top at r = 149.5, i.e. p ≈ 0.40 for the take-up and ≈ 0.60 for the supply, so at
+ *  mid-song BOTH peek by ~12 units; at either end the fuller one reaches 540, past the band. */
+internal fun packPeekDepth(r: Float): Float =
+    (CassetteGeometry.HubY + r - CassetteGeometry.PeekTop)
+        .coerceIn(0f, CassetteGeometry.PeekBottom - CassetteGeometry.PeekTop)
 
 /**
  * A hub's angular SPEED (degrees per second, a magnitude — the direction is [advanceHubAngle]'s)

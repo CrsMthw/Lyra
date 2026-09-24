@@ -5,14 +5,17 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.DrawStyle
 import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.translate
 import kotlin.math.cos
@@ -101,6 +104,13 @@ internal class CassetteArtKit(p: CassettePalette) {
             ))
         }
     }
+
+    /** The pack peek's offscreen layer (see [drawPackPeeks]): its bounds, paint and fade mask. */
+    val peekBounds = Rect(G.PeekLeft, G.PeekTop, G.PeekRight, G.PeekBottom)
+    val peekLayerPaint = Paint()
+    val peekFade: Brush = Brush.verticalGradient(
+        0f to p.background, 1f to p.background.copy(alpha = 0f), startY = G.PeekFadeTop, endY = G.PeekBottom,
+    )
 
     /** The hubs' FIXED lighting (does not rotate): a soft key light from the upper left. */
     val hubLightLeft: Brush = hubLight(p, G.HubLeftX)
@@ -198,7 +208,41 @@ internal fun DrawScope.drawReels(
     }
     drawHub(p, kit, G.HubLeftX, supplyDeg, kit.hubLightLeft)
     drawHub(p, kit, G.HubRightX, takeUpDeg, kit.hubLightRight)
+    drawPackPeeks(p, kit, radii)
 }
+
+/**
+ * The fuller pack seen through the clear shell BELOW the label (the ad shows it on the fuller
+ * reel; Cris, 2026-09-24): the packs drawn a second time, clipped to the band between the
+ * label's drop shadow and the head strip's cavity ([packPeekDepth]; the band lies inside the
+ * inner moulded wall's straight run, so a rect IS that intersection), then dimmed — the disc
+ * only, never the band — by [PeekDim], as everything seen through the smoky shell is. The
+ * hub-anchored grooves and the edge sheen stay, so the arc visibly grows. Below the step line it
+ * fades out ([CassetteGeometry.PeekFadeTop] → PeekBottom, a DstIn mask in a layer the band's
+ * size) instead of ending on a hard cut. Per frame, but before the cached top layer, so the head
+ * strip's step line, trapezoid moulding and gloss lie OVER it; nothing on the head strip that must
+ * stay clean (rollers, recess, screws) reaches the band (CassetteGeometryTest proves it).
+ */
+private fun DrawScope.drawPackPeeks(p: CassettePalette, kit: CassetteArtKit, radii: PackRadii) {
+    if (packPeekDepth(radii.supply) <= 0f && packPeekDepth(radii.takeUp) <= 0f) return
+    clipRect(G.PeekLeft, G.PeekTop, G.PeekRight, G.PeekBottom) {
+        drawContext.canvas.saveLayer(kit.peekBounds, kit.peekLayerPaint)
+        drawPackPeek(p, G.HubLeftX, radii.supply)
+        drawPackPeek(p, G.HubRightX, radii.takeUp)
+        drawRect(kit.peekFade, Offset(G.PeekLeft, G.PeekFadeTop), Size(G.PeekRight - G.PeekLeft, G.PeekBottom - G.PeekFadeTop),
+            blendMode = BlendMode.DstIn)
+        drawContext.canvas.restore()
+    }
+}
+
+private fun DrawScope.drawPackPeek(p: CassettePalette, cx: Float, r: Float) {
+    if (packPeekDepth(r) <= 0f) return
+    drawPack(p, cx, r)
+    drawCircle(p.shade(PeekDim), r, Offset(cx, G.HubY))
+}
+
+/** How much the smoky shell darkens the peeking pack (the inner wall's own shade is 0.22..0.50). */
+internal const val PeekDim = 0.45f
 
 /** Flat tape + hub-ANCHORED winding rings (inner layers stay put as the pack shrinks or grows —
  *  only the outermost ring appears or goes) + a clearly visible 4-unit sheen at the moving edge. */
