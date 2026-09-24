@@ -121,3 +121,35 @@ class CassettePaletteTest {
         assertTrue(neon.hub.toHsl().s <= 0.80f + 0.01f)
     }
 }
+
+class CassetteIdleSecondsTest {
+
+    @Test
+    fun `the default is seven seconds and sits inside the range`() {
+        assertEquals(7, CASSETTE_IDLE_DEFAULT_SECONDS)
+        assertEquals(CASSETTE_IDLE_DEFAULT_SECONDS, CassetteSettings().idleSeconds)
+        assertEquals(7_000L, CassetteSettings().idleDelayMs)
+        assertEquals(CASSETTE_IDLE_DEFAULT_SECONDS, clampCassetteIdleSeconds(CASSETTE_IDLE_DEFAULT_SECONDS))
+    }
+
+    @Test
+    fun `the clamp keeps five to six hundred and pins everything else to the nearer end`() {
+        assertEquals(5, CASSETTE_IDLE_MIN_SECONDS)
+        assertEquals(600, CASSETTE_IDLE_MAX_SECONDS)
+        assertEquals(5, clampCassetteIdleSeconds(4))
+        assertEquals(5, clampCassetteIdleSeconds(5))
+        assertEquals(6, clampCassetteIdleSeconds(6))
+        assertEquals(600, clampCassetteIdleSeconds(600))
+        assertEquals(600, clampCassetteIdleSeconds(601))
+        assertEquals(5, clampCassetteIdleSeconds(0))
+        assertEquals(5, clampCassetteIdleSeconds(-30))
+        assertEquals(5, clampCassetteIdleSeconds(Int.MIN_VALUE))
+        assertEquals(600, clampCassetteIdleSeconds(Int.MAX_VALUE))
+    }
+
+    @Test
+    fun `the delay in milliseconds is the seconds times a thousand, without Int overflow`() {
+        assertEquals(5_000L, CassetteSettings(idleSeconds = 5).idleDelayMs)
+        assertEquals(600_000L, CassetteSettings(idleSeconds = 600).idleDelayMs)
+    }
+}

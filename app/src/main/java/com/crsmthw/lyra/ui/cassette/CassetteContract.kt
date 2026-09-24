@@ -25,6 +25,19 @@ const val CASSETTE_DEFAULT_CUSTOM_COLOR: Int = 0xFF8B6BD1.toInt()
 /** Physical compact-cassette shell: 100 mm × 63.8 mm. Every layout fits this ratio, never stretches. */
 const val CASSETTE_ASPECT: Float = 100f / 63.8f
 
+/**
+ * The idle delay's range, in whole seconds (Cris, 2026-09-24): no touch on the player for this long
+ * slides the cassette over it. The floor keeps it from popping up between two taps; the ceiling is
+ * ten minutes. Persisted as `cassette_idle_seconds` and clamped on read AND write.
+ */
+const val CASSETTE_IDLE_MIN_SECONDS     = 5
+const val CASSETTE_IDLE_DEFAULT_SECONDS = 7
+const val CASSETTE_IDLE_MAX_SECONDS     = 600
+
+/** Any stored or typed idle delay → [CASSETTE_IDLE_MIN_SECONDS]..[CASSETTE_IDLE_MAX_SECONDS]. */
+fun clampCassetteIdleSeconds(raw: Int): Int =
+    raw.coerceIn(CASSETTE_IDLE_MIN_SECONDS, CASSETTE_IDLE_MAX_SECONDS)
+
 /** Every cassette preference as ONE immutable snapshot (one DataStore flow, one collect). */
 @Immutable
 data class CassetteSettings(
@@ -38,7 +51,12 @@ data class CassetteSettings(
     val customColor   : Int                 = CASSETTE_DEFAULT_CUSTOM_COLOR,
     /** Show the "Double-tap to exit" hint chip on a single tap. */
     val showExitHint  : Boolean             = true,
-)
+    /** No touch on the player for this many seconds → the cassette appears. LyraDataStore clamps it. */
+    val idleSeconds   : Int                 = CASSETTE_IDLE_DEFAULT_SECONDS,
+) {
+    /** [idleSeconds] as the player's countdown reads it. */
+    val idleDelayMs: Long get() = idleSeconds * 1_000L
+}
 
 /** What the label prints. `side` is NOT here — the stage decides it (see [CassetteChoreographer]). */
 @Immutable
@@ -56,10 +74,11 @@ data class CassetteLabel(
     val recordLabel: String? = null,
 )
 
-/** Every duration the feature uses, in one place. */
+/**
+ * Every fixed duration the feature uses, in one place. The idle delay is not one of them: it is a
+ * setting, [CassetteSettings.idleSeconds].
+ */
 object CassetteTiming {
-    /** No touch on the player for this long → the cassette slides over it. */
-    const val IdleDelayMs   = 7_000L
     /** With keep-screen-on + dim: no touch on the cassette for this long → window brightness drops. */
     const val DimDelayMs    = 20_000L
     /** The dimmed window brightness (0..1). */

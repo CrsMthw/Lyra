@@ -9,8 +9,10 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.crsmthw.lyra.ui.cassette.CASSETTE_DEFAULT_CUSTOM_COLOR
+import com.crsmthw.lyra.ui.cassette.CASSETTE_IDLE_DEFAULT_SECONDS
 import com.crsmthw.lyra.ui.cassette.CassetteColorSource
 import com.crsmthw.lyra.ui.cassette.CassetteSettings
+import com.crsmthw.lyra.ui.cassette.clampCassetteIdleSeconds
 import com.crsmthw.lyra.ui.theme.ThemeMode
 import com.crsmthw.lyra.util.visualizer.VisualizerStyle
 import kotlinx.coroutines.flow.Flow
@@ -118,7 +120,9 @@ class LyraDataStore(private val context: Context) {
 
     /**
      * The cassette idle screen — every preference in ONE snapshot so the player collects one flow.
-     * Defaults: off, no keep-awake, no dim, album-art colour, the ad's purple, hint shown.
+     * Defaults: off, no keep-awake, no dim, album-art colour, the ad's purple, hint shown, 7 s idle.
+     * The idle delay is clamped HERE as well as in its setter, so an old or corrupt value can never
+     * reach the player outside 5..600 s.
      */
     val cassetteSettings: Flow<CassetteSettings> = context.dataStore.data.map { prefs ->
         CassetteSettings(
@@ -130,6 +134,9 @@ class LyraDataStore(private val context: Context) {
                 ?: CassetteColorSource.ALBUM_ART,
             customColor   = prefs[Keys.CASSETTE_CUSTOM_COLOR] ?: CASSETTE_DEFAULT_CUSTOM_COLOR,
             showExitHint  = prefs[Keys.CASSETTE_SHOW_EXIT_HINT] ?: true,
+            idleSeconds   = clampCassetteIdleSeconds(
+                prefs[Keys.CASSETTE_IDLE_SECONDS] ?: CASSETTE_IDLE_DEFAULT_SECONDS,
+            ),
         )
     }.distinctUntilChanged()
 
@@ -240,6 +247,11 @@ class LyraDataStore(private val context: Context) {
         context.dataStore.edit { it[Keys.CASSETTE_SHOW_EXIT_HINT] = show }
     }
 
+    /** Seconds without a touch before the cassette appears; clamped to 5..600 before it is written. */
+    suspend fun setCassetteIdleSeconds(seconds: Int) {
+        context.dataStore.edit { it[Keys.CASSETTE_IDLE_SECONDS] = clampCassetteIdleSeconds(seconds) }
+    }
+
     // ── Keys ────────────────────────────────────────────────────────────────
 
     private object Keys {
@@ -270,5 +282,6 @@ class LyraDataStore(private val context: Context) {
         val CASSETTE_COLOR_SOURCE    = stringPreferencesKey("cassette_color_source")
         val CASSETTE_CUSTOM_COLOR    = intPreferencesKey("cassette_custom_color")
         val CASSETTE_SHOW_EXIT_HINT  = booleanPreferencesKey("cassette_show_exit_hint")
+        val CASSETTE_IDLE_SECONDS    = intPreferencesKey("cassette_idle_seconds")
     }
 }

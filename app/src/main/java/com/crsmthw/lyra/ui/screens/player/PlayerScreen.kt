@@ -78,7 +78,6 @@ import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.repository.LyricsState
 import com.crsmthw.lyra.ui.cassette.CassetteColorSource
 import com.crsmthw.lyra.ui.cassette.CassetteOverlay
-import com.crsmthw.lyra.ui.cassette.CassetteTiming
 import com.crsmthw.lyra.ui.cassette.cassetteEligible
 import com.crsmthw.lyra.ui.cassette.rememberTouchExplorationEnabled
 import com.crsmthw.lyra.ui.components.AddToPlaylistSheet
@@ -300,7 +299,8 @@ fun PlayerScreen(
 
     // ── Cassette idle screen (docs/CASSETTE.md) ───────────────────────────────
     // The idle gate: with the feature on, the visualizer off, music playing, lyrics hidden and no
-    // menu/sheet/dialog open, IdleDelayMs without a touch slides the cassette over the player.
+    // menu/sheet/dialog open, the idle delay (a setting, 5..600 s) without a touch slides the
+    // cassette over the player.
     val cassetteSettings by viewModel.cassetteSettings.collectAsStateWithLifecycle()
     val cassetteLabel    by viewModel.cassetteLabel.collectAsStateWithLifecycle()
     var cassetteVisible  by remember { mutableStateOf(false) }
@@ -326,7 +326,10 @@ fun PlayerScreen(
         touchExploring    = touchExploring,
     )
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    LaunchedEffect(cassetteEligibleNow, lifecycle) {
+    // Keyed on the delay too: a changed setting re-arms the countdown, the full new delay counted
+    // from the change.
+    val cassetteIdleDelayMs = cassetteSettings.idleDelayMs
+    LaunchedEffect(cassetteEligibleNow, cassetteIdleDelayMs, lifecycle) {
         if (!cassetteEligibleNow) return@LaunchedEffect
         // Only while this entry is RESUMED: the countdown is cancelled in the background and starts
         // over on return, so the cassette is never already up when the user comes back.
@@ -338,7 +341,7 @@ fun PlayerScreen(
             while (true) {
                 val now = SystemClock.uptimeMillis()
                 if (idleClock.pressed) idleClock.lastTouch = now   // a finger resting on the slider
-                val deadline = maxOf(idleClock.lastTouch, eligibleSince) + CassetteTiming.IdleDelayMs
+                val deadline = maxOf(idleClock.lastTouch, eligibleSince) + cassetteIdleDelayMs
                 if (now >= deadline) break
                 delay(deadline - now)
             }
@@ -354,7 +357,7 @@ fun PlayerScreen(
     }
     val exitCassette: () -> Unit = {
         cassetteVisible = false
-        idleClock.lastTouch = SystemClock.uptimeMillis()   // back on the player: the 7 s start over
+        idleClock.lastTouch = SystemClock.uptimeMillis()   // back on the player: the idle delay starts over
     }
     // Exits the overlay cannot see itself. PAUSING is deliberately not one: the cassette stays up
     // with frozen hubs (Cris, 2026-09-23).
@@ -365,8 +368,8 @@ fun PlayerScreen(
     // "Nothing playing any more" exits too, but only once it PERSISTS past a poll: a single 200
     // with `item: null` (a transfer started from another Spotify client, an ad, an unsupported
     // item) nulls the track for one 3 s poll while `isPlaying` stays true, and ejecting the cassette
-    // for that — only for it to come back 7 s later — reads as a glitch. The overlay holds the last
-    // label and key meanwhile, so the stage neither blanks nor flips.
+    // for that — only for it to come back one idle delay later — reads as a glitch. The overlay
+    // holds the last label and key meanwhile, so the stage neither blanks nor flips.
     val cassetteItemGone = state.currentTrack == null
     LaunchedEffect(cassetteVisible, cassetteItemGone) {
         if (!cassetteVisible || !cassetteItemGone) return@LaunchedEffect

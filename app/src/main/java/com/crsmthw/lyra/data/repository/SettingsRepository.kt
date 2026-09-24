@@ -30,7 +30,7 @@ class SettingsRepository(private val dataStore: LyraDataStore) {
     val ilyraClickVolume  : Flow<Int>            = dataStore.ilyraClickVolume
     val ilyraClickPitch   : Flow<Int>            = dataStore.ilyraClickPitch
     val ilyraBodyColor    : Flow<Int>            = dataStore.ilyraBodyColor
-    /** The cassette idle screen, all six preferences in one snapshot. */
+    /** The cassette idle screen, all seven preferences in one snapshot. */
     val cassetteSettings  : Flow<CassetteSettings> = dataStore.cassetteSettings
 
     suspend fun setThemeMode        (mode   : ThemeMode)      = dataStore.setThemeMode(mode)
@@ -60,4 +60,5 @@ class SettingsRepository(private val dataStore: LyraDataStore) {
     suspend fun setCassetteColorSource  (source : CassetteColorSource) = dataStore.setCassetteColorSource(source)
     suspend fun setCassetteCustomColor  (argb   : Int)                 = dataStore.setCassetteCustomColor(argb)
     suspend fun setCassetteShowExitHint (show   : Boolean)             = dataStore.setCassetteShowExitHint(show)
+    suspend fun setCassetteIdleSeconds  (seconds: Int)                 = dataStore.setCassetteIdleSeconds(seconds)
 }

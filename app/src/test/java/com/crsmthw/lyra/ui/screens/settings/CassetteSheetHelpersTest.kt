@@ -9,6 +9,7 @@ import kotlin.math.abs
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class CassetteSheetHelpersTest {
@@ -148,5 +149,74 @@ class CassetteSheetHelpersTest {
         val argb = cassetteSeedColor(360f, 0.6f).toArgb()
         assertEquals(argb, cassetteSeedColor(0f, 0.6f).toArgb())
         assertTrue(cassetteHueSat(argb).hue < 1f)
+    }
+
+    // ── Idle delay field ──
+
+    @Test
+    fun `the field keeps ascii digits only, without leading zeros`() {
+        assertEquals(3, CASSETTE_IDLE_MAX_DIGITS)
+        assertEquals("12", cassetteIdleDigits("1-2"))
+        assertEquals("7", cassetteIdleDigits(" 7 s"))
+        assertEquals("600", cassetteIdleDigits("600"))
+        assertEquals("", cassetteIdleDigits(""))
+        assertEquals("", cassetteIdleDigits(".,-"))
+        assertEquals("", cassetteIdleDigits("\u0663"), "an Arabic-Indic three is not an ASCII digit")
+    }
+
+    @Test
+    fun `leading zeros are dropped but a lone zero stays visible`() {
+        assertEquals("0", cassetteIdleDigits("0"))
+        assertEquals("0", cassetteIdleDigits("00"))
+        assertEquals("7", cassetteIdleDigits("007"))
+        // "0700" typed one key at a time reaches 700 (the range error), never a silent 70.
+        assertEquals("7", cassetteIdleDigits("07"))
+        assertEquals("70", cassetteIdleDigits("070"))
+        assertEquals("700", cassetteIdleDigits("0700"))
+    }
+
+    @Test
+    fun `an edit past three significant digits is rejected, never truncated`() {
+        assertNull(cassetteIdleDigits("1000"), "a pasted 1000 must not become 100")
+        assertNull(cassetteIdleDigits("1600"), "a 1 typed before 600 must not become 160")
+        assertNull(cassetteIdleDigits("1520"), "a 5 typed inside 120 must not become 152")
+        assertNull(cassetteIdleDigits("1250"), "a 5 typed between 12 and 0 must not become 125")
+        assertNull(cassetteIdleDigits("0001000"))
+    }
+
+    @Test
+    fun `only a typed number inside five to six hundred is accepted as typed`() {
+        assertNull(cassetteIdleTyped(""))
+        assertNull(cassetteIdleTyped("3"))
+        assertNull(cassetteIdleTyped("4"))
+        assertEquals(5, cassetteIdleTyped("5"))
+        assertEquals(7, cassetteIdleTyped("007"))
+        assertEquals(600, cassetteIdleTyped("600"))
+        assertNull(cassetteIdleTyped("601"))
+        assertNull(cassetteIdleTyped("700"))
+    }
+
+    @Test
+    fun `a commit clamps into range and an empty field falls back to the stored value`() {
+        assertEquals(5, cassetteIdleCommitted("3", stored = 30))
+        assertEquals(600, cassetteIdleCommitted("700", stored = 30))
+        assertEquals(45, cassetteIdleCommitted("45", stored = 30))
+        assertEquals(5, cassetteIdleCommitted("0", stored = 30))
+        assertEquals(30, cassetteIdleCommitted("", stored = 30))
+    }
+
+    @Test
+    fun `expected is the newest in-flight write, else the stored value`() {
+        val own = CassetteOwnWrites()
+        assertEquals(7, own.expected(7))
+        own.record(12); own.record(120)
+        assertEquals(120, own.expected(7), "the store will hold 120 once both land")
+        assertTrue(own.isEcho(12))
+        assertEquals(120, own.expected(12))
+        assertTrue(own.isEcho(120))
+        assertEquals(120, own.expected(120))
+        own.record(60)
+        assertFalse(own.isEcho(99), "an outside change")
+        assertEquals(99, own.expected(99), "clears the in-flight writes")
     }
 }
