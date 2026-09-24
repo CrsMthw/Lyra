@@ -290,7 +290,8 @@ internal fun DrawScope.drawHeadEdge(p: CassettePalette) {
     line(488f, 538f, 318f, 566f, p.hi(0.22f), 1.4f)
     line(512f, 538f, 682f, 566f, p.hi(0.22f), 1.4f)
     line(500f, 486f, 500f, 512f, p.hi(0.2f), 1.2f)
-    disc(500f, 530f, 19f, p.shellEdge.copy(alpha = 0.35f)); ring(500f, 530f, 19f, p.hi(0.25f), 1.2f)
+    // the head screw's boss: a moulded ring kept faint so the (dark) screw reads recessed
+    disc(500f, 530f, 19f, p.shellEdge.copy(alpha = 0.35f)); ring(500f, 530f, 19f, p.hi(0.12f), 1.2f)
     // head-access opening: metal shield, pressure-pad spring + felt, the tape passing in front
     rr(418f, 552f, 164f, 85f, 3f, p.window)
     line(418f, 552f, 418f, 636f, p.hi(0.25f), 1.2f)
@@ -351,19 +352,38 @@ internal fun DrawScope.drawLabelMarks(p: CassettePalette) {
 
 internal const val LogoX = 115f
 
-/** `<g id="screws">`: four corner screws + the head screw, flattened to absolute coordinates. */
+/**
+ * `<g id="screws">`: four corner screws + the head screw, flattened to absolute coordinates.
+ * Dark RECESSED hardware, barely lighter than the shell as in the ad (Cris, 2026-09-24: the
+ * bright `metal` studs stood out far too much): a gunmetal head from the shell's own rim colour
+ * darkened to [ScrewHeadLight]..[ScrewHeadDark], a cross one notch darker, and one faint hairline
+ * catching the key light on the upper-left rim — no full highlight ring.
+ */
 internal fun DrawScope.drawScrews(p: CassettePalette) {
+    val (h, s, _) = p.shellEdge.toHsl()
+    val headLit = Color.hsl(h, s, ScrewHeadLight)
+    val headDark = Color.hsl(h, s, ScrewHeadDark)
+    val slot = Color.hsl(h, s, ScrewSlotLight)
     for ((cx, cy, r) in listOf(Triple(34f, 34f, 14f), Triple(966f, 34f, 14f), Triple(34f, 604f, 14f),
         Triple(966f, 604f, 14f), Triple(500f, 530f, 12f))) {
-        disc(cx, cy, r + 4f, p.shade(0.4f)); ring(cx, cy, r + 4f, p.hi(0.22f), 1f)
-        drawCircle(Brush.radialGradient(0f to p.metal, 1f to p.window, center = Offset(cx - 4f, cy - 5f), radius = r + 4f),
+        disc(cx, cy, r + 4f, p.shade(0.4f))          // the countersink
+        drawCircle(Brush.radialGradient(0f to headLit, 1f to headDark, center = Offset(cx - 4f, cy - 5f), radius = r + 4f),
             r, Offset(cx, cy))
         val k = r * 0.55f
-        line(cx - k, cy, cx + k, cy, p.window, r * 0.2f)
-        line(cx, cy - k, cx, cy + k, p.window, r * 0.2f)
-        ring(cx, cy, r - 0.5f, p.hi(0.25f), 1f)
+        line(cx - k, cy, cx + k, cy, slot, r * 0.2f)
+        line(cx, cy - k, cx, cy + k, slot, r * 0.2f)
+        // the hairline: upper-left quadrant only (180° → 270°, clockwise from +x)
+        drawArc(p.hi(ScrewHairlineAlpha), startAngle = 180f, sweepAngle = 90f, useCenter = false,
+            topLeft = Offset(cx - r + 0.5f, cy - r + 0.5f), size = Size(2f * r - 1f, 2f * r - 1f), style = stroke(1f))
     }
 }
+
+/** The screw head's HSL lightness at its lit centre / its rim, the cross's, and the hairline's
+ *  alpha — the shell rim (`shellEdge`) is ≈ 0.30, the shell body ≈ 0.17. */
+internal const val ScrewHeadLight = 0.24f
+internal const val ScrewHeadDark = 0.20f
+internal const val ScrewSlotLight = 0.14f
+internal const val ScrewHairlineAlpha = 0.15f
 
 /** `<g id="shellGloss">`, drawn last and on PLASTIC ONLY (the label is a paper sticker): one
  *  diagonal band split around the label, and a second one bottom right. */
