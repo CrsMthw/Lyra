@@ -15,7 +15,6 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.translate
-import androidx.compose.ui.graphics.StrokeCap
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
@@ -28,7 +27,7 @@ import kotlin.math.sqrt
  * from the [CassettePalette]; white-with-alpha is `shellHighlight` re-alpha'd and shadow is the
  * palette's black `background` re-alpha'd — the SVG used exactly those two plus palette hexes.
  *
- * Only the two hubs, the tape packs and the tape strands change per frame ([drawReels]); every
+ * Only the two hubs, the tape packs and the tape run change per frame ([drawReels]); every
  * other function here is recorded ONCE into a GraphicsLayer per (size, palette, label, side).
  */
 
@@ -65,7 +64,7 @@ private fun polygon(vararg xy: Float): Path = Path().apply {
  * built about the ORIGIN so a hub is drawn as translate(centre) + rotate(angle).
  */
 internal class CassetteArtKit(p: CassettePalette) {
-    /** The window stadium — also THE one clip (packs and strands). */
+    /** The window stadium — also THE one clip (packs and the tape run). */
     val window: Path = Path().apply {
         addRoundRect(RoundRect(G.WinLeft, G.WinTop, G.WinRight, G.WinBottom, CornerRadius(G.WinRadius)))
     }
@@ -184,8 +183,11 @@ internal fun DrawScope.drawWindowBack(p: CassettePalette, kit: CassetteArtKit) {
 // ── reels (per frame) ────────────────────────────────────────────────────────────────────────
 
 /**
- * `<g id="reelLeft|reelRight">` + `<g id="tapeRun">`: the packs and strands clipped by the
- * window; the hubs (which fit inside it) drawn over them, rotated about their centres.
+ * `<g id="reelLeft|reelRight">` + `<g id="tapeRun">`: the packs and the tape run clipped by the
+ * window; the hubs (which fit inside it) drawn over them, rotated about their centres. There is
+ * NO strand between the packs (the ad's diagonal was an error, Cris 2026-09-23): a real tape
+ * leaves each pack toward the head edge — out to the rollers, across the pressure pad, to the
+ * other roller and back up to the other hub — which the run along the window bottom stands for.
  */
 internal fun DrawScope.drawReels(
     p: CassettePalette, kit: CassetteArtKit, radii: PackRadii, supplyDeg: Float, takeUpDeg: Float,
@@ -196,10 +198,6 @@ internal fun DrawScope.drawReels(
         line(G.WinLeft + G.WinRadius, G.TapeRunY - 1.2f, G.WinRight - G.WinRadius, G.TapeRunY - 1.2f, p.tapeSheen, 1.2f)
         drawPack(p, G.HubLeftX, radii.supply)
         drawPack(p, G.HubRightX, radii.takeUp)
-        // the ad's thin diagonal strand between the packs (their internal tangent)
-        val s = internalTangent(radii.supply, radii.takeUp)
-        drawLine(p.tapeSheen, Offset(s.x1, s.y1), Offset(s.x2, s.y2), strokeWidth = 3f, cap = StrokeCap.Round)
-        drawLine(p.hi(0.35f), Offset(s.x1, s.y1), Offset(s.x2, s.y2), strokeWidth = 1f)
     }
     drawHub(p, kit, G.HubLeftX, supplyDeg, kit.hubLightLeft)
     drawHub(p, kit, G.HubRightX, takeUpDeg, kit.hubLightRight)

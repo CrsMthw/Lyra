@@ -5,7 +5,6 @@ import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
-import kotlin.math.sqrt
 
 /*
  * The cassette's geometry and every pure piece of maths the painter and the stage use —
@@ -123,25 +122,6 @@ internal fun advanceHubAngle(angle: Float, packRadius: Float, dtSeconds: Float):
     val dt = dtSeconds.coerceIn(0f, 0.1f)
     val next = angle - hubDegreesPerSecond(packRadius) * dt
     return ((next % 360f) + 360f) % 360f
-}
-
-/** A straight tape strand between two points (units). */
-internal data class TapeStrand(val x1: Float, val y1: Float, val x2: Float, val y2: Float)
-
-/**
- * The thin diagonal strand the ad shows between the packs: their INTERNAL tangent, leaving the
- * supply pack at its upper right and meeting the take-up pack at its lower left. With `n` the unit
- * normal, `cos φ = (rL + rR) / pitch` — constant, because the radii sum is — so the strand keeps a
- * fixed ~50° slope and only slides as the packs change.
- */
-internal fun internalTangent(supply: Float, takeUp: Float): TapeStrand {
-    val g = CassetteGeometry
-    val c = ((supply + takeUp) / g.HubPitch).coerceIn(-1f, 1f)
-    val s = sqrt(1f - c * c)
-    return TapeStrand(
-        x1 = g.HubLeftX + supply * c,  y1 = g.HubY - supply * s,
-        x2 = g.HubRightX - takeUp * c, y2 = g.HubY + takeUp * s,
-    )
 }
 
 /** A chosen label font size, and whether even the floor overflowed (→ ellipsis). */

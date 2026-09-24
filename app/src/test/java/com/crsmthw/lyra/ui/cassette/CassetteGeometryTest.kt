@@ -1,7 +1,6 @@
 package com.crsmthw.lyra.ui.cassette
 
 import kotlin.math.abs
-import kotlin.math.hypot
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -78,24 +77,6 @@ class CassetteReelGeometryTest {
         assertEquals(advanceHubAngle(0f, g.RMin, 0.1f), advanceHubAngle(0f, g.RMin, 5f))
         assertEquals(12f, advanceHubAngle(12f, g.RMin, 0f))
         assertEquals(12f, advanceHubAngle(12f, g.RMin, -1f))
-    }
-
-    @Test
-    fun `the internal tangent touches both packs and keeps a constant slope`() {
-        var slope: Float? = null
-        for (p in listOf(0f, 0.35f, 1f)) {
-            val r = packRadii(p)
-            val s = internalTangent(r.supply, r.takeUp)
-            assertTrue(close(hypot(s.x1 - g.HubLeftX, s.y1 - g.HubY), r.supply, 0.05f))
-            assertTrue(close(hypot(s.x2 - g.HubRightX, s.y2 - g.HubY), r.takeUp, 0.05f))
-            assertTrue(s.y1 < g.HubY && s.y2 > g.HubY, "upper right of supply → lower left of take-up")
-            val k = (s.y2 - s.y1) / (s.x2 - s.x1)
-            slope?.let { assertTrue(close(it, k, 0.001f)) }
-            slope = k
-        }
-        val mid = internalTangent(179.35f, 143.65f)     // replica's numbers at p = 0.35
-        assertTrue(close(mid.x1, 427.9f, 0.2f) && close(mid.y1, 204.4f, 0.2f), "$mid")
-        assertTrue(close(mid.x2, 599.5f, 0.2f) && close(mid.y2, 410.8f, 0.2f), "$mid")
     }
 
     @Test
