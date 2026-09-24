@@ -30,6 +30,8 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Voicemail
@@ -38,22 +40,29 @@ import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -61,11 +70,16 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.crsmthw.lyra.R
 import com.crsmthw.lyra.ui.cassette.CASSETTE_ASPECT
 import com.crsmthw.lyra.ui.cassette.CASSETTE_DEFAULT_CUSTOM_COLOR
+import com.crsmthw.lyra.ui.cassette.CASSETTE_IDLE_DEFAULT_SECONDS
+import com.crsmthw.lyra.ui.cassette.CASSETTE_IDLE_MAX_SECONDS
+import com.crsmthw.lyra.ui.cassette.CASSETTE_IDLE_MIN_SECONDS
 import com.crsmthw.lyra.ui.cassette.Cassette
 import com.crsmthw.lyra.ui.cassette.CassetteColorSource
 import com.crsmthw.lyra.ui.cassette.CassetteLabel
@@ -73,6 +87,7 @@ import com.crsmthw.lyra.ui.cassette.CassettePalette
 import com.crsmthw.lyra.ui.cassette.CassetteSettings
 import com.crsmthw.lyra.ui.cassette.CassetteSide
 import com.crsmthw.lyra.ui.cassette.CassetteTiming
+import com.crsmthw.lyra.ui.cassette.clampCassetteIdleSeconds
 import com.crsmthw.lyra.ui.cassette.toHsl
 import com.crsmthw.lyra.ui.components.CappedModalBottomSheet
 import com.crsmthw.lyra.ui.components.ConnectedChoiceRow
@@ -87,7 +102,14 @@ import kotlin.math.roundToInt
  * The cassette idle screen's options sheet (docs/CASSETTE.md), opened from Settings → Lyra →
  * Cassette options. Mirrors VisualizerSheet: a CappedModalBottomSheet whose single scrollable child
  * is capped a status-bar height below the screen. Top to bottom: a live preview, the colour source
- * (+ the custom picker), the screen toggles, the exit-hint toggle and a footer tip.
+ * (+ the custom picker), the idle delay field, the screen toggles, the exit-hint toggle and a footer
+ * tip.
+ *
+ * The idle field needs no `imePadding()`: M3's ModalBottomSheet (1.5.0-alpha28) runs in its own
+ * window with SOFT_INPUT_ADJUST_NOTHING and pads its content by `BottomSheetDefaults.modalWindowInsets`
+ * = safeDrawing (IME included) — the sheet itself rises above the keyboard and CONSUMES the IME
+ * inset, so an `imePadding()` below it would add 0. The capped Column's viewport then shrinks by the
+ * keyboard, and the scroller's ContentInViewNode keeps the focused field in view across that shrink.
  */
 
 // ── Custom colour: pure helpers (unit-tested in CassetteSheetHelpersTest) ─────────────────────
@@ -127,7 +149,8 @@ internal fun cassetteHueSat(argb: Int): CassetteHueSat {
 }
 
 /**
- * The custom colours this sheet has itself sent to DataStore and not yet seen come back.
+ * The values this sheet has itself sent to DataStore for ONE preference and not yet seen come back —
+ * one instance for the custom colour (ARGB), one for the idle delay (seconds).
  *
  * The sliders must NOT be re-seeded from the sheet's own write landing: the stored ARGB reads back
  * through `toHsl()`, whose hue is in [0, 360) — a Hue released at the right end (exactly 360, red
@@ -138,6 +161,9 @@ internal fun cassetteHueSat(argb: Int): CassetteHueSat {
  *
  * A plain queue rather than a single "last written" value: two quick releases (Hue, then
  * Saturation) send A then B, and if A's emission arrives on its own it must still count as ours.
+ * The idle field uses it the same way: its own keystroke's echo must not rewrite the text under
+ * the cursor (a "12" typed on the way to "120" echoing back as "12" after the "0").
+ *
  * Not snapshot state — it is read and written only from callbacks and effects.
  */
 internal class CassetteOwnWrites {
@@ -163,7 +189,30 @@ internal class CassetteOwnWrites {
             false
         }
     }
+
+    /**
+     * What the store will hold once our in-flight writes land: the newest pending write, else
+     * [stored]. A composed `stored` lags a write by one echo, so "is this new?" asks this instead.
+     */
+    fun expected(stored: Int): Int = pending.lastOrNull() ?: stored
 }
+
+// ── Idle delay: pure helpers (unit-tested in CassetteSheetHelpersTest) ────────────────────────
+
+/** The longest accepted delay has three digits (600), so the field never holds more. */
+internal val CASSETTE_IDLE_MAX_DIGITS: Int = CASSETTE_IDLE_MAX_SECONDS.toString().length
+
+/** What the field keeps of an edit: ASCII digits only, at most [CASSETTE_IDLE_MAX_DIGITS] of them. */
+internal fun cassetteIdleDigits(raw: String): String =
+    raw.filter { it in '0'..'9' }.take(CASSETTE_IDLE_MAX_DIGITS)
+
+/** The typed delay if it is already acceptable (persisted at once), else null (the field shows an error). */
+internal fun cassetteIdleTyped(text: String): Int? =
+    text.toIntOrNull()?.takeIf { it in CASSETTE_IDLE_MIN_SECONDS..CASSETTE_IDLE_MAX_SECONDS }
+
+/** Done / focus loss: the typed delay clamped into range, or [stored] when the field is empty. */
+internal fun cassetteIdleCommitted(text: String, stored: Int): Int =
+    text.toIntOrNull()?.let(::clampCassetteIdleSeconds) ?: stored
 
 /** One preset swatch: its ARGB and the name TalkBack reads. */
 internal data class CassetteSwatch(val argb: Int, @param:StringRes val nameRes: Int)
@@ -196,6 +245,7 @@ internal fun CassetteSheet(
     onColorSource : (CassetteColorSource) -> Unit,
     onCustomColor : (Int) -> Unit,
     onShowExitHint: (Boolean) -> Unit,
+    onIdleSeconds : (Int) -> Unit,
     onDismiss     : () -> Unit,
 ) {
     val haptics = LocalHapticFeedback.current
@@ -370,6 +420,19 @@ internal fun CassetteSheet(
 
                 HorizontalDivider(modifier = Modifier.padding(16.dp))
 
+                // ── Idle delay ──
+                VisualizerSectionLabel(stringResource(R.string.settings_cassette_idle_section))
+                CassetteIdleDelayField(stored = settings.idleSeconds, onIdleSeconds = onIdleSeconds)
+                VisualizerTip(
+                    pluralStringResource(
+                        R.plurals.settings_cassette_idle_tip,
+                        CASSETTE_IDLE_DEFAULT_SECONDS,
+                        CASSETTE_IDLE_DEFAULT_SECONDS,
+                    ),
+                )
+
+                HorizontalDivider(modifier = Modifier.padding(16.dp))
+
                 // ── Screen ──
                 VisualizerSectionLabel(stringResource(R.string.settings_cassette_screen_section))
                 TwoLineToggleRow(
@@ -405,14 +468,104 @@ internal fun CassetteSheet(
 
                 HorizontalDivider(modifier = Modifier.padding(16.dp))
 
-                val idleSeconds = (CassetteTiming.IdleDelayMs / 1_000L).toInt()
-                VisualizerTip(pluralStringResource(R.plurals.settings_cassette_footer_tip, idleSeconds, idleSeconds))
+                VisualizerTip(
+                    pluralStringResource(
+                        R.plurals.settings_cassette_footer_tip,
+                        settings.idleSeconds,
+                        settings.idleSeconds,
+                    ),
+                )
 
                 Spacer(Modifier.navigationBarsPadding())
                 Spacer(Modifier.height(8.dp))
             }
         }
     }
+}
+
+// ── Idle delay field ──────────────────────────────────────────────────────────────────────────
+
+/**
+ * The idle delay in seconds, typed. A number already inside 5..600 is persisted at each keystroke
+ * (no error); an empty or out-of-range field shows the range as an error and persists NOTHING. On
+ * Done (which only clears focus), on focus loss, and when the sheet goes away with the field still
+ * focused, the text is clamped into range — an empty field falls back to the stored value — then
+ * persisted and written back. The text is re-seeded from the store only on an OUTSIDE change, never
+ * by this field's own write coming back ([CassetteOwnWrites]).
+ */
+@Composable
+private fun CassetteIdleDelayField(stored: Int, onIdleSeconds: (Int) -> Unit) {
+    val focusManager   = LocalFocusManager.current
+    val ownWrites      = remember { CassetteOwnWrites() }
+    val currentStored  by rememberUpdatedState(stored)
+    val currentPersist by rememberUpdatedState(onIdleSeconds)
+    var text           by rememberSaveable { mutableStateOf(stored.toString()) }
+    // The stored value the text last reflected — saveable with the text, so a restored in-progress
+    // entry is not overwritten by the (unchanged) stored value on the first composition.
+    var seenStored     by rememberSaveable { mutableIntStateOf(stored) }
+    LaunchedEffect(stored) {
+        if (stored != seenStored) {
+            seenStored = stored
+            if (!ownWrites.isEcho(stored)) text = stored.toString()
+        }
+    }
+
+    val persist = { seconds: Int ->
+        if (seconds != ownWrites.expected(currentStored)) {
+            ownWrites.record(seconds)
+            currentPersist(seconds)
+        }
+    }
+    val commit = {
+        val committed = cassetteIdleCommitted(text, ownWrites.expected(currentStored))
+        text = committed.toString()
+        persist(committed)
+    }
+    // Focus is tracked outside composition (read only by the callbacks below).
+    val hadFocus = remember { booleanArrayOf(false) }
+    val currentCommit by rememberUpdatedState(commit)
+    DisposableEffect(Unit) {
+        // Dismissed with the field focused (a back after the keyboard went, a scrim tap): the
+        // focus-loss callback is not guaranteed on the way out, so commit here; a second commit is
+        // a no-op (persist skips a value the store will already hold).
+        onDispose { if (hadFocus[0]) currentCommit() }
+    }
+
+    val isError = cassetteIdleTyped(text) == null
+    OutlinedTextField(
+        value           = text,
+        onValueChange   = { raw ->
+            val digits = cassetteIdleDigits(raw)
+            text = digits
+            cassetteIdleTyped(digits)?.let(persist)
+        },
+        label           = { Text(stringResource(R.string.settings_cassette_idle_label)) },
+        suffix          = { Text(stringResource(R.string.settings_cassette_idle_suffix)) },
+        supportingText  = if (isError) {
+            {
+                Text(
+                    pluralStringResource(
+                        R.plurals.settings_cassette_idle_error,
+                        CASSETTE_IDLE_MAX_SECONDS,
+                        CASSETTE_IDLE_MIN_SECONDS,
+                        CASSETTE_IDLE_MAX_SECONDS,
+                    ),
+                )
+            }
+        } else null,
+        isError         = isError,
+        singleLine      = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+        // Done only clears focus; the commit runs once, from the focus-loss path.
+        keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
+        modifier        = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .onFocusChanged { state ->
+                if (hadFocus[0] && !state.hasFocus) commit()
+                hadFocus[0] = state.hasFocus
+            },
+    )
 }
 
 // ── Row helpers ───────────────────────────────────────────────────────────────────────────────

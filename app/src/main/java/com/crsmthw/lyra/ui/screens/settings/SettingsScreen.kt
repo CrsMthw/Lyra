@@ -259,8 +259,9 @@ fun SettingsScreen(
                 }
 
                 // Cassette idle screen (docs/CASSETTE.md) — off by default; the player shows it after
-                // 7 s idle while music plays with the visualizer off. The glyph is Material's
-                // Voicemail: two tape reels joined — there is no cassette icon, and Album is iLyra's.
+                // the idle delay (a setting in the sheet, 7 s by default) while music plays with the
+                // visualizer and lyrics off. The glyph is Material's Voicemail: two tape reels
+                // joined — there is no cassette icon, and Album is iLyra's.
                 SettingsToggleItem(
                     icon            = Icons.Default.Voicemail,
                     title           = stringResource(R.string.settings_cassette),
@@ -529,6 +530,7 @@ fun SettingsScreen(
             onColorSource   = viewModel::setCassetteColorSource,
             onCustomColor   = viewModel::setCassetteCustomColor,
             onShowExitHint  = viewModel::setCassetteShowExitHint,
+            onIdleSeconds   = viewModel::setCassetteIdleSeconds,
             onDismiss       = { showCassetteSheet = false },
         )
     }
