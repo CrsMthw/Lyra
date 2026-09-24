@@ -5,7 +5,7 @@ import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
-import kotlin.math.sqrt
+import kotlin.math.sin
 
 /*
  * The cassette's geometry and every pure piece of maths the painter and the stage use —
@@ -103,37 +103,26 @@ internal fun packRadii(progress: Float): PackRadii {
 }
 
 /**
- * A hub's angular speed (degrees per second, clockwise-positive) for the pack radius it carries:
- * `ω = v / r` — constant linear tape speed means the small pack spins fast and the full one slow.
+ * A hub's angular SPEED (degrees per second, a magnitude — the direction is [advanceHubAngle]'s)
+ * for the pack radius it carries: `ω = v / r` — constant linear tape speed means the small pack
+ * spins fast and the full one slow.
  */
 internal fun hubDegreesPerSecond(packRadius: Float, tapeSpeed: Float = CassetteGeometry.TapeSpeed): Float =
     (tapeSpeed / max(packRadius, 1f)) * (180f / PI.toFloat())
 
-/** Advances a hub angle by one frame, wrapped into [0, 360). `dtSeconds` is capped at 0.1 s so a
- *  hitch or the first frame after a resume never jumps the teeth. */
+/**
+ * Advances a hub angle by one frame, wrapped into [0, 360). BOTH hubs turn ANTICLOCKWISE (natural
+ * frame, head edge at the bottom): the tape leaves the supply (left) pack and winds onto the
+ * take-up (right) pack along the HEAD side, so the bottom of each pack moves toward the reel that
+ * is filling — left to right — and a circle whose bottom moves right turns anticlockwise. A rigid
+ * rotation keeps handedness, so the portrait screen sees anticlockwise too. The angle is fed to
+ * DrawScope `rotate`, which is CLOCKWISE-positive on screen (y down), so it DECREASES over time.
+ * `dtSeconds` is capped at 0.1 s so a hitch or the first frame after a resume never jumps the teeth.
+ */
 internal fun advanceHubAngle(angle: Float, packRadius: Float, dtSeconds: Float): Float {
     val dt = dtSeconds.coerceIn(0f, 0.1f)
-    val next = angle + hubDegreesPerSecond(packRadius) * dt
+    val next = angle - hubDegreesPerSecond(packRadius) * dt
     return ((next % 360f) + 360f) % 360f
-}
-
-/** A straight tape strand between two points (units). */
-internal data class TapeStrand(val x1: Float, val y1: Float, val x2: Float, val y2: Float)
-
-/**
- * The thin diagonal strand the ad shows between the packs: their INTERNAL tangent, leaving the
- * supply pack at its upper right and meeting the take-up pack at its lower left. With `n` the unit
- * normal, `cos φ = (rL + rR) / pitch` — constant, because the radii sum is — so the strand keeps a
- * fixed ~50° slope and only slides as the packs change.
- */
-internal fun internalTangent(supply: Float, takeUp: Float): TapeStrand {
-    val g = CassetteGeometry
-    val c = ((supply + takeUp) / g.HubPitch).coerceIn(-1f, 1f)
-    val s = sqrt(1f - c * c)
-    return TapeStrand(
-        x1 = g.HubLeftX + supply * c,  y1 = g.HubY - supply * s,
-        x2 = g.HubRightX - takeUp * c, y2 = g.HubY + takeUp * s,
-    )
 }
 
 /** A chosen label font size, and whether even the floor overflowed (→ ellipsis). */
@@ -190,17 +179,60 @@ internal fun cassetteFinePrint(copyright: String?, boilerplate: String): String 
 
 // ── Choreography timelines (the stage samples these from one linear Animatable in ms) ──────────
 
-/** How far an ejected shell travels: its own long edge + 10 %, in units of the long edge. */
-internal const val EjectTravel = 1.10f
+/** The eject's clearance past the stage edge, as a fraction of the shell's SHORT side. */
+internal const val EjectMargin = 0.04f
+
+/**
+ * How far an ejected shell travels (any unit — the stage passes px): out through its TITLE edge
+ * (natural −y), so its own SHORT side, plus the `band` of stage between that edge and the stage's
+ * own edge (the letterbox — the stage clips to its bounds, so the shell must cross it too), plus
+ * an [EjectMargin] of the short side. A negative band reads as 0.
+ */
+internal fun ejectTravel(short: Float, band: Float): Float = short * (1f + EjectMargin) + max(band, 0f)
+
+/**
+ * The stage between the shell's title edge and the stage edge it is ejected through: the
+ * letterbox along the SCREEN's short dimension — the stage's height in landscape (the unfolded
+ * screen's bands above and below), its width in portrait (≈ 0 on the cover screen). `fitShort` is
+ * [CassetteFit.short] in the same unit as the stage size. Never negative.
+ */
+internal fun ejectBand(stageWidth: Float, stageHeight: Float, fitShort: Float, portrait: Boolean): Float =
+    max(0f, ((if (portrait) stageWidth else stageHeight) - fitShort) / 2f)
 
 internal const val EjectTotalMs: Int =
     CassetteTiming.EjectOutMs + CassetteTiming.EjectGapMs + CassetteTiming.InsertMs
 
-/** The flip's rotation about the long axis at `tMs`: 0 → ±180°, FastOutSlowIn. A backward
- *  change (previous song) turns the other way. */
+/** The flip's rotation about the SHORT axis (the stage's `rotationY`, so the head edge stays at
+ *  the bottom) at `tMs`: 0 → ±180°, FastOutSlowIn. A backward change (previous song) turns the
+ *  other way. */
 internal fun flipAngleAt(tMs: Float, forward: Boolean): Float {
     val f = FastOutSlowInEasing.transform((tMs / CassetteTiming.FlipMs).coerceIn(0f, 1f))
     return (if (forward) 180f else -180f) * f
+}
+
+/** How many half-LONG-sides of the shell the flip's camera sits from it (see [flipCameraDistance]). */
+internal const val FlipCameraHalfSides = 12f
+
+/**
+ * The flip's camera distance for a shell whose LONG side is `longSidePx`: the flip turns about
+ * the short axis, so the half-LONG side is what swings toward the camera, and the camera sits
+ * [FlipCameraHalfSides] of those away. The layer's camera distance is in the platform camera's
+ * units of 72 px (the usual `12 × density` idiom was measured on the emulator: it put the camera
+ * ~2 400 px from a 1 248 px shell, and the near edge ran off the cover screen by a third).
+ */
+internal fun flipCameraDistance(longSidePx: Float): Float = FlipCameraHalfSides * (longSidePx / 2f) / 72f
+
+/**
+ * The uniform scale the flipping face is drawn at so its NEAR end never grows past its rest size.
+ * A layer scales before it rotates, so the near end (half-long-side `s·L/2`, brought `s·(L/2)·sin θ`
+ * toward a camera `C·L/2` away) is magnified `C / (C − s·sin θ)`; `s = C / (C + |sin θ|)` makes
+ * that product exactly 1. Without it the near end outgrows a full-bleed short side by up to
+ * 1/C ≈ 9 % at 90° (the cover screen in either orientation) and the stage clips its corners —
+ * measured on the emulator. 1 at rest, 12/13 edge-on.
+ */
+internal fun flipNearEdgeScale(angleDegrees: Float): Float {
+    val s = abs(sin(angleDegrees * (PI.toFloat() / 180f)))
+    return FlipCameraHalfSides / (FlipCameraHalfSides + s)
 }
 
 /** Past 90° the viewer sees the INCOMING face. */
@@ -211,7 +243,12 @@ internal fun flipShowsIncoming(angle: Float): Boolean = abs(angle) >= 90f
 internal fun flipFaceRotation(angle: Float, incoming: Boolean): Float =
     if (!incoming) angle else angle - (if (angle >= 0f) 180f else -180f)
 
-/** One sample of the eject: shifts are along the shell's natural +x, in units of its long edge. */
+/**
+ * One sample of the eject: shifts are along the shell's natural −y, the TITLE edge (opposite the
+ * head — out to the screen's LEFT in portrait, through the TOP in landscape), in units of
+ * [ejectTravel]: 0 = at rest, 1 = just clear of the stage. The outgoing shell leaves and the
+ * incoming one arrives through that same edge, in both directions.
+ */
 internal data class EjectFrame(val outgoingShift: Float, val incomingShift: Float, val incomingScale: Float)
 
 /** Out (EjectOutMs) → gap (EjectGapMs) → in (InsertMs), both slides FastOutSlowIn, finite. */
@@ -221,8 +258,8 @@ internal fun ejectFrameAt(tMs: Float): EjectFrame {
     val out = FastOutSlowInEasing.transform((tMs / outMs).coerceIn(0f, 1f))
     val ins = FastOutSlowInEasing.transform(((tMs - inStart) / CassetteTiming.InsertMs).coerceIn(0f, 1f))
     return EjectFrame(
-        outgoingShift = EjectTravel * out,
-        incomingShift = EjectTravel * (1f - ins),
+        outgoingShift = out,
+        incomingShift = 1f - ins,
         incomingScale = 0.98f + 0.02f * ins,
     )
 }
@@ -235,7 +272,8 @@ internal fun stageRotationZ(portrait: Boolean): Float = if (portrait) -90f else 
 /**
  * Where a direction in the shell's natural frame points on screen (y down) after the stage's
  * rotation — rotationZ θ maps (x, y) → (x cos θ − y sin θ, x sin θ + y cos θ). In portrait the head
- * edge (natural +y) lands on the RIGHT and the label's reading direction (natural +x) points UP.
+ * edge (natural +y) lands on the RIGHT, the title edge (natural −y, the eject's way out) on the
+ * LEFT, and the label's reading direction (natural +x) points UP.
  */
 internal fun naturalToScreen(dx: Float, dy: Float, portrait: Boolean): Pair<Float, Float> {
     val rad = stageRotationZ(portrait) * (PI.toFloat() / 180f)

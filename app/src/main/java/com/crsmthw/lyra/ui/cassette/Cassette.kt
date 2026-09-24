@@ -49,11 +49,27 @@ import kotlin.math.min
  *   tape pack        Rmin = 102 (bare hub + 4), Rmax = 221 — packs CLIPPED by the window as in the ad;
  *                    supply = Rmax − (Rmax − Rmin)·p, take-up = Rmin + (Rmax − Rmin)·p;
  *                    Rmin + Rmax = 323 < 420, so the packs never touch (constant 97 gap)
- *   tape strands     the internal tangent between the packs (the ad's diagonal) + a run at y 410
- *                    along the window's flat bottom, under the packs
+ *   hub direction    BOTH hubs ANTICLOCKWISE (natural frame, and so on the portrait screen too):
+ *                    the tape runs supply → take-up along the HEAD edge, so each pack's bottom
+ *                    moves left → right; the angle fed to `rotate` (clockwise-positive) falls
+ *   tape run         ONE run at y 410 along the window's flat bottom, under the packs (the tape
+ *                    heading out to the rollers). NO strand between the packs: the ad's diagonal
+ *                    is not a real tape path (Cris, 2026-09-23) and was deleted
  *   title box        x 172..828 (656), baseline 118, Playfair 46 → floor 24 (then ellipsis),
  *                    tracking 0.087 em; artist the same box, baseline 154, 27 → 18
  *   meta / SIDE / fine print  baselines 184 / 298 + 332 / 441 + 453.6 (≥ 9.4 units)
+ *   flip (A ↔ B)     rotationY — about the SHORT axis (natural y), as a real shell is turned over:
+ *                    the head edge stays at the bottom (portrait: on the RIGHT) and the reel that
+ *                    was on the right lands on the left; in portrait the outer −90° makes it a
+ *                    turn about the screen's horizontal axis, the phone's TOP end coming toward
+ *                    you on a forward flip (the right end in landscape; backward: the other end).
+ *                    Camera: 12 half-LONG-sides away;
+ *                    the face is scaled by 12 / (12 + |sin θ|) so the near end, which perspective
+ *                    grows up to 12/11, never outgrows the full-bleed short side (clipped before)
+ *   eject            translationY −shift × travel — out through the TITLE edge (natural −y, the
+ *                    edge opposite the head: LEFT in portrait, UP in landscape), and the fresh
+ *                    shell back in through the same edge, in both directions. travel = the short
+ *                    side × 1.04 + the letterbox band on that side, so the shell clears the stage
  *   head edge        trapezoid 168..832 from y 486; capstans (367|633, 573); pinch rollers
  *                    (272|728, 590) r 27; guide rollers (122|878, 557) r 46; head recess 418..582
  *
@@ -64,8 +80,9 @@ import kotlin.math.min
  * colour is applied at draw time), and the hub frame loop runs only while `spinning`.
  */
 
-/** The hub angles (degrees, clockwise) and the pack radii the draw last used. The angles are
- *  snapshot state read ONLY in the draw phase (one redraw per frame, no recomposition); the
+/** The hub angles (degrees as DrawScope `rotate` takes them — clockwise-positive, so the hubs'
+ *  anticlockwise turn makes them fall; see [advanceHubAngle]) and the pack radii the draw last
+ *  used. The angles are snapshot state read ONLY in the draw phase (one redraw per frame, no recomposition); the
  *  radii are plain fields the draw writes and the frame loop reads, so `progress` is only ever
  *  called inside the draw block. */
 @Stable
@@ -104,8 +121,9 @@ fun Cassette(
     val measurer = rememberTextMeasurer()
     val spin = remember { HubSpin() }
 
-    // Hubs: ω = v / r per hub, both clockwise. Frozen exactly where they are when `spinning`
-    // goes false; on resume the first frame only stamps the clock, so nothing snaps.
+    // Hubs: ω = v / r per hub, both ANTICLOCKWISE (the tape runs left → right along the head
+    // edge). Frozen exactly where they are when `spinning` goes false; on resume the first frame
+    // only stamps the clock, so nothing snaps.
     LaunchedEffect(spinning) {
         if (!spinning) return@LaunchedEffect
         var last = -1L
@@ -287,8 +305,16 @@ internal fun CassetteStageImpl(
         contentAlignment = Alignment.Center,
     ) {
         val fit = cassetteFit(maxWidth.value, maxHeight.value)
+        // The eject must clear the STAGE (it clips), letterbox included — in px, the unit of the
+        // face layer's own size.height (= the shell's short side) that the travel is built from.
+        val ejectBandPx = run {
+            val w = constraints.maxWidth.toFloat()
+            val h = constraints.maxHeight.toFloat()
+            ejectBand(w, h, cassetteFit(w, h).short, fit.portrait)
+        }
         // (long × short) in the natural frame; in portrait the SAME box turned −90° about its
-        // centre, overflowing its slot on purpose (requiredSize, centred, nothing clips it).
+        // centre, overflowing its slot on purpose (requiredSize, centred; only the stage's own
+        // bounds clip it).
         Box(
             Modifier
                 .requiredSize(fit.long.dp, fit.short.dp)
@@ -309,14 +335,26 @@ internal fun CassetteStageImpl(
                                 val t = anim.value
                                 when (move) {
                                     CassetteMove.FLIP -> {
-                                        cameraDistance = flipCameraDistance(size.height)
+                                        // about the SHORT axis (natural y): the head edge stays
+                                        // at the bottom and the right reel lands on the left.
+                                        // Negated: a positive rotationY brings the natural −x
+                                        // (supply) end toward the viewer (emulator-measured); a
+                                        // forward flip brings the +x end — the TOP of the portrait
+                                        // phone, the right end in landscape — toward you instead
+                                        cameraDistance = flipCameraDistance(size.width)
                                         val a = flipAngleAt(t, flipForward)
-                                        rotationX = flipFaceRotation(a, incoming)
+                                        rotationY = -flipFaceRotation(a, incoming)
+                                        // the near end would outgrow a full-bleed short side
+                                        val k = flipNearEdgeScale(a)
+                                        scaleX = k; scaleY = k
                                         alpha = if (flipShowsIncoming(a) == incoming) 1f else 0f
                                     }
                                     CassetteMove.EJECT -> {
+                                        // out through the TITLE edge (natural −y: LEFT in
+                                        // portrait, UP in landscape), back in through the same
                                         val e = ejectFrameAt(t)
-                                        translationX = (if (incoming) e.incomingShift else e.outgoingShift) * size.width
+                                        val travel = ejectTravel(size.height, ejectBandPx)
+                                        translationY = -(if (incoming) e.incomingShift else e.outgoingShift) * travel
                                         if (incoming) { scaleX = e.incomingScale; scaleY = e.incomingScale }
                                     }
                                     null -> Unit
@@ -328,14 +366,3 @@ internal fun CassetteStageImpl(
         }
     }
 }
-
-/**
- * The flip's camera distance for a shell whose SHORT side is `shortSidePx`: 12 half-short-sides
- * away, so the near edge grows at most ~8 % at 65° whatever the screen. The layer's camera
- * distance is in the platform camera's units of 72 px (the usual `12 × density` idiom was
- * measured on the emulator: it put the camera ~2 400 px from a 1 248 px-wide shell, and the near
- * edge ran off the cover screen by a third).
- */
-internal fun flipCameraDistance(shortSidePx: Float): Float = FlipCameraHalfHeights * (shortSidePx / 2f) / 72f
-
-internal const val FlipCameraHalfHeights = 12f

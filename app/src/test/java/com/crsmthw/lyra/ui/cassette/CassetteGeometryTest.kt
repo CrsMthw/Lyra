@@ -1,7 +1,6 @@
 package com.crsmthw.lyra.ui.cassette
 
 import kotlin.math.abs
-import kotlin.math.hypot
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -58,31 +57,26 @@ class CassetteReelGeometryTest {
     }
 
     @Test
-    fun `hub angle advances clockwise, wraps and caps a long frame`() {
-        val step = advanceHubAngle(0f, g.RMin, 0.1f)
-        assertTrue(close(step, 30f, 0.01f), "$step")          // 300°/s × 0.1 s
-        assertTrue(close(advanceHubAngle(350f, g.RMin, 0.1f), 20f, 0.01f))
+    fun `hub angle advances ANTICLOCKWISE (falls), wraps into 0 to 360 and caps a long frame`() {
+        // DrawScope rotate is clockwise-positive on screen, so an anticlockwise hub's angle falls
+        val step = advanceHubAngle(100f, g.RMin, 0.1f)
+        assertTrue(close(step, 70f, 0.01f), "$step")          // 300°/s × 0.1 s, backwards
+        assertTrue(close(advanceHubAngle(0f, g.RMin, 0.1f), 330f, 0.01f), "wraps below 0")
+        assertTrue(close(advanceHubAngle(20f, g.RMin, 0.1f), 350f, 0.01f))
+        // both hubs, at every pack size, turn the same way
+        for (r in listOf(g.RMin, 160f, g.RMax)) {
+            val a = advanceHubAngle(180f, r, 0.05f)
+            assertTrue(a < 180f && a >= 0f && a < 360f, "r $r → $a")
+        }
+        // many small frames stay inside [0, 360)
+        var angle = 5f
+        repeat(200) {
+            angle = advanceHubAngle(angle, g.RMin, 1f / 60f)
+            assertTrue(angle >= 0f && angle < 360f, "$angle")
+        }
         assertEquals(advanceHubAngle(0f, g.RMin, 0.1f), advanceHubAngle(0f, g.RMin, 5f))
         assertEquals(12f, advanceHubAngle(12f, g.RMin, 0f))
         assertEquals(12f, advanceHubAngle(12f, g.RMin, -1f))
-    }
-
-    @Test
-    fun `the internal tangent touches both packs and keeps a constant slope`() {
-        var slope: Float? = null
-        for (p in listOf(0f, 0.35f, 1f)) {
-            val r = packRadii(p)
-            val s = internalTangent(r.supply, r.takeUp)
-            assertTrue(close(hypot(s.x1 - g.HubLeftX, s.y1 - g.HubY), r.supply, 0.05f))
-            assertTrue(close(hypot(s.x2 - g.HubRightX, s.y2 - g.HubY), r.takeUp, 0.05f))
-            assertTrue(s.y1 < g.HubY && s.y2 > g.HubY, "upper right of supply → lower left of take-up")
-            val k = (s.y2 - s.y1) / (s.x2 - s.x1)
-            slope?.let { assertTrue(close(it, k, 0.001f)) }
-            slope = k
-        }
-        val mid = internalTangent(179.35f, 143.65f)     // replica's numbers at p = 0.35
-        assertTrue(close(mid.x1, 427.9f, 0.2f) && close(mid.y1, 204.4f, 0.2f), "$mid")
-        assertTrue(close(mid.x2, 599.5f, 0.2f) && close(mid.y2, 410.8f, 0.2f), "$mid")
     }
 
     @Test
@@ -201,24 +195,81 @@ class CassetteChoreographyTimelineTest {
     }
 
     @Test
+    fun `the flip camera sits 12 half-long-sides away in 72 px units`() {
+        assertTrue(close(flipCameraDistance(1955f), 12f * 977.5f / 72f, 1e-3f))
+        assertTrue(close(flipCameraDistance(2448f), 2 * flipCameraDistance(1224f), 1e-3f))
+    }
+
+    @Test
+    fun `the flip scale keeps the near end at its rest size at every angle`() {
+        val c = FlipCameraHalfSides
+        assertEquals(1f, flipNearEdgeScale(0f))
+        assertTrue(close(flipNearEdgeScale(180f), 1f, 1e-4f))
+        assertTrue(close(flipNearEdgeScale(90f), c / (c + 1f), 1e-5f))
+        assertTrue(close(flipNearEdgeScale(-90f), flipNearEdgeScale(90f), 1e-6f))
+        for (i in 0..36) {
+            val a = i * 5f
+            val s = flipNearEdgeScale(a)
+            val sin = kotlin.math.abs(kotlin.math.sin(Math.toRadians(a.toDouble()))).toFloat()
+            // near end = s × perspective magnification C / (C − s·sin θ): never above 1
+            val near = s * c / (c - s * sin)
+            assertTrue(near <= 1f + 1e-5f && near > 0.999f, "angle $a → near end $near")
+            // the incoming face (pre-rotated 180°) gets the same scale
+            assertTrue(close(flipNearEdgeScale(flipFaceRotation(a, incoming = true)), s, 1e-4f))
+        }
+    }
+
+    @Test
     fun `eject slides out, pauses, slides the new shell in and settles`() {
         val total = EjectTotalMs.toFloat()
         assertEquals(CassetteTiming.EjectOutMs + CassetteTiming.EjectGapMs + CassetteTiming.InsertMs, EjectTotalMs)
         val start = ejectFrameAt(0f)
-        assertEquals(0f, start.outgoingShift); assertEquals(EjectTravel, start.incomingShift)
+        assertEquals(0f, start.outgoingShift); assertEquals(1f, start.incomingShift)
         val gap = ejectFrameAt(CassetteTiming.EjectOutMs + CassetteTiming.EjectGapMs / 2f)
-        assertEquals(EjectTravel, gap.outgoingShift); assertEquals(EjectTravel, gap.incomingShift)
+        assertEquals(1f, gap.outgoingShift); assertEquals(1f, gap.incomingShift)
         val end = ejectFrameAt(total)
-        assertEquals(EjectTravel, end.outgoingShift)
+        assertEquals(1f, end.outgoingShift)
         assertEquals(0f, end.incomingShift); assertEquals(1f, end.incomingScale)
         assertTrue(close(ejectFrameAt(0f).incomingScale, 0.98f))
-        // the outgoing shell is fully gone before the new one starts moving
-        assertTrue(EjectTravel > 1f)
-        var last = EjectTravel
+        // the incoming shell only ever approaches, the outgoing one only ever leaves
+        var lastIn = 1f
+        var lastOut = 0f
         for (i in 0..40) {
             val f = ejectFrameAt(total * i / 40f)
-            assertTrue(f.incomingShift <= last + 1e-4f); last = f.incomingShift
+            assertTrue(f.incomingShift <= lastIn + 1e-4f); lastIn = f.incomingShift
+            assertTrue(f.outgoingShift >= lastOut - 1e-4f); lastOut = f.outgoingShift
         }
+        // the new shell does not start moving until the old one is all the way out
+        for (i in 0..40) {
+            val f = ejectFrameAt(total * i / 40f)
+            if (f.incomingShift < 1f) assertEquals(1f, f.outgoingShift, "at ${total * i / 40f} ms")
+        }
+    }
+
+    @Test
+    fun `eject travel is the short side plus the band plus a 4 percent margin`() {
+        assertTrue(close(ejectTravel(1000f, 0f), 1040f))
+        assertTrue(close(ejectTravel(1000f, 150f), 1190f))
+        assertTrue(close(ejectTravel(1000f, -5f), 1040f), "a negative band reads as 0")
+    }
+
+    @Test
+    fun `the eject band is the letterbox on the side the shell leaves through`() {
+        // Fold 8 cover, portrait 1248 × 1972: full bleed on the width → no band
+        val cover = cassetteFit(1248f, 1972f)
+        assertTrue(close(ejectBand(1248f, 1972f, cover.short, cover.portrait), 0f, 0.5f))
+        // the cover in landscape (user_rotation 1): full bleed on the height
+        val coverLand = cassetteFit(1972f, 1248f)
+        assertTrue(close(ejectBand(1972f, 1248f, coverLand.short, coverLand.portrait), 0f, 0.5f))
+        // unfolded 2448 × 1848: the shell is 1562 tall → ~143 px above and below
+        val unfolded = cassetteFit(2448f, 1848f)
+        val band = ejectBand(2448f, 1848f, unfolded.short, unfolded.portrait)
+        assertTrue(close(band, (1848f - unfolded.short) / 2f, 1e-3f) && band > 140f, "$band")
+        // and there the shell clears the top of the stage entirely: its bottom edge, which rests
+        // band + short below the top, ends above it
+        val travel = ejectTravel(unfolded.short, band)
+        val bottom = band + unfolded.short - travel
+        assertTrue(bottom < -0.04f * unfolded.short + 1e-2f, "bottom edge at $bottom")
     }
 }
 
@@ -231,14 +282,15 @@ class CassetteStageOrientationTest {
     fun `landscape is the natural orientation`() {
         assertEquals(0f, stageRotationZ(portrait = false))
         assertTrue(near(naturalToScreen(0f, 1f, portrait = false), 0f, 1f))   // head edge down
-        assertTrue(near(naturalToScreen(1f, 0f, portrait = false), 1f, 0f))   // eject to the right
+        assertTrue(near(naturalToScreen(0f, -1f, portrait = false), 0f, -1f)) // eject through the TOP
     }
 
     @Test
-    fun `portrait turns anticlockwise - head edge right, label reads upward, eject goes up`() {
+    fun `portrait turns anticlockwise - head edge right, label reads upward, eject goes left`() {
         assertEquals(-90f, stageRotationZ(portrait = true))
         assertTrue(near(naturalToScreen(0f, 1f, portrait = true), 1f, 0f), "head edge on the RIGHT")
-        assertTrue(near(naturalToScreen(1f, 0f, portrait = true), 0f, -1f), "reads bottom-to-top / ejects UP")
+        assertTrue(near(naturalToScreen(1f, 0f, portrait = true), 0f, -1f), "reads bottom-to-top")
+        assertTrue(near(naturalToScreen(0f, -1f, portrait = true), -1f, 0f), "ejects through the title edge, LEFT")
     }
 
     @Test
