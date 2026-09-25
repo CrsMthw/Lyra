@@ -232,7 +232,7 @@ fun AlbumDetailScreen(
                                             onPlay     = onPlayAll,
                                             onShuffle  = {
                                                 haptics.press()
-                                                playerViewModel.shuffleContext(albumUri)
+                                                playerViewModel.shuffleContext(albumUri, album.tracks?.total?.takeIf { it > 0 } ?: tracks.size)
                                                 onNavigateToPlayer()
                                             },
                                             artContent = albumArt,
@@ -334,7 +334,7 @@ fun AlbumDetailScreen(
                                     onPlay       = onPlayAll,
                                     onShuffle    = {
                                         haptics.press()
-                                        playerViewModel.shuffleContext(albumUri)
+                                        playerViewModel.shuffleContext(albumUri, album.tracks?.total?.takeIf { it > 0 } ?: tracks.size)
                                         onNavigateToPlayer()
                                     },
                                     titleHandoff = heroTitle,

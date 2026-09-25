@@ -49,6 +49,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.random.Random
 
 private const val TAG = "PlayerVM"
 
@@ -1366,9 +1367,16 @@ class PlayerViewModel(
      * says it did not stick. Before 2026-09-25 the Library's own `shufflePlaylist` never set
      * shuffle on the SDK at all, so a cold Shuffle tap played in order and needed a second tap.
      *
+     * [itemCount] (the context's item total, when the caller knows it): the awake play starts at
+     * a RANDOM raw `offset.position` — device pass 2026-09-25 B7 rerun: with shuffle confirmed ON
+     * the context still started at track 1 about half the time (Spotify applies the play, drops
+     * shuffle, and the re-assert only shuffles the REST), so the random start is chosen here, the
+     * way Home Assistant's Spotify integration does it. Never for the Liked `collection`, which
+     * rejects any offset; and not on the cold path, where the SDK plays the context itself.
+     *
      * Rate-limit-gated throughout; a newer play cancels it (it is the current [playbackJob]).
      */
-    fun shuffleContext(contextUri: String) {
+    fun shuffleContext(contextUri: String, itemCount: Int? = null) {
         if (playerStateManager.isRateLimited()) return
         playerStateManager.recordPlayOrigin(PlaybackOrigin.forContext(contextUri))
         playerStateManager.clearShuffleOwed()   // an explicit shuffle-ON play settles a bracket's debt
@@ -1388,8 +1396,10 @@ class PlayerViewModel(
             // The ON must have TAKEN EFFECT before the context play, or the play is applied first
             // and the context starts in order from track 1.
             if (shuffleErr == null) confirmShuffleState(true)
+            val startAt = itemCount?.takeIf { it > 1 && !isCollectionContext(contextUri) }
+                ?.let { Random.nextInt(it) }
 
-            repository.play(contextUri = contextUri).fold(
+            repository.play(contextUri = contextUri, offsetPosition = startAt).fold(
                 onSuccess = {
                     // Re-assert: Spotify sometimes applies the play before the shuffle, so the
                     // first item is in-order. Clear the optimistic lock so fetchOnce reads the

@@ -196,11 +196,14 @@ class SpotifyRepository(
         positionMs : Long?         = null,
         /** Target a LISTED device by id (`?device_id=`); null = the active device, as before. */
         deviceId   : String?       = null,
+        /** Zero-based raw position in [contextUri]; used only when [offsetUri] is null. */
+        offsetPosition: Int?       = null,
     ): Result<Unit> = safeCall {
         when {
             contextUri != null -> api.play(PlayRequest(
                 contextUri = contextUri,
-                offset     = offsetUri?.let { PlayOffset(uri = it) },
+                offset     = offsetUri?.let { PlayOffset(uri = it) }
+                                ?: offsetPosition?.let { PlayOffset(position = it) },
                 positionMs = positionMs,
             ), deviceId)
             uris != null -> api.play(PlayRequest(uris = uris, positionMs = positionMs), deviceId)
