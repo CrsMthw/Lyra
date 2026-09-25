@@ -299,8 +299,8 @@ class SpotifyRepository(
     }
 
     suspend fun pause(): Result<Unit>                          = safeCall { api.pause() }
-    suspend fun skipNext(): Result<Unit>                       = safeCall { api.skipNext() }
-    suspend fun skipPrevious(): Result<Unit>                   = safeCall { api.skipPrevious() }
+    suspend fun skipNext(deviceId: String? = null): Result<Unit>     = safeCall { api.skipNext(deviceId) }
+    suspend fun skipPrevious(deviceId: String? = null): Result<Unit> = safeCall { api.skipPrevious(deviceId) }
     suspend fun seek(positionMs: Long): Result<Unit>           = safeCall { api.seek(positionMs) }
     suspend fun setShuffle(state: Boolean): Result<Unit>       = safeCall { api.setShuffle(state) }
     suspend fun setRepeat(state: String): Result<Unit>         = safeCall { api.setRepeat(state) }

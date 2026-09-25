@@ -98,8 +98,12 @@ class PlayerStateManager(
      * the tap as the base position. Returns false when it could not run at all (the ViewModel is
      * gone), in which case [playPause] falls back to the bare single-uri `connectAndPlay`.
      * It owns clearing the waking state; [onWakeOperationComplete] is not fired when it ran.
+     * `step` is 0 for the play button, +1 / -1 for next / previous while Spotify is dead: the
+     * restore lands on the neighbour (a uris queue Lyra knows the order of) or on the current item
+     * and then skips (a context, whose order Spotify owns) — before 2026-09-25 pm a skip on a dead
+     * Spotify went to the App Remote's skip on an EMPTY player and cleared the spinner on a timer.
      */
-    var onWakeRestore: (suspend (track: SpotifyTrack, pausedProgressMs: Long) -> Boolean)? = null
+    var onWakeRestore: (suspend (track: SpotifyTrack, pausedProgressMs: Long, step: Int) -> Boolean)? = null
 
     // ── Playback origin + play-request generation ─────────────────────────────
 
@@ -331,7 +335,7 @@ class PlayerStateManager(
                             // state clears only once Spotify reports the song playing — the hook
                             // owns that clear. Before 2026-09-25 this was the bare single-uri play
                             // below and nothing else, so a play after Spotify died queued ONE song.
-                            val restored = onWakeRestore?.invoke(track, current.progressMs) == true
+                            val restored = onWakeRestore?.invoke(track, current.progressMs, 0) == true
                             if (!restored) {
                                 _state.update { it.copy(progressMs = 0L) }
                                 remoteManager.connectAndPlay(track.uri)
@@ -363,9 +367,14 @@ class PlayerStateManager(
                 onFailure = { e ->
                     if (e.message?.contains("404") == true) {
                         onWakeOperationStart?.invoke()
-                        remoteManager.skipNext()
-                        fetchUntilTrackChanges(prevId)
-                        onWakeOperationComplete?.invoke()
+                        val track = _state.value.currentTrack
+                        val restored = track != null &&
+                            onWakeRestore?.invoke(track, _state.value.progressMs, +1) == true
+                        if (!restored) {
+                            remoteManager.skipNext()
+                            fetchUntilTrackChanges(prevId)
+                            onWakeOperationComplete?.invoke()
+                        }
                     } else {
                         releasePlayingOptimism()
                     }
@@ -388,9 +397,14 @@ class PlayerStateManager(
                 onFailure = { e ->
                     if (e.message?.contains("404") == true) {
                         onWakeOperationStart?.invoke()
-                        remoteManager.skipPrevious()
-                        fetchUntilTrackChanges(prevId)
-                        onWakeOperationComplete?.invoke()
+                        val track = _state.value.currentTrack
+                        val restored = track != null &&
+                            onWakeRestore?.invoke(track, _state.value.progressMs, -1) == true
+                        if (!restored) {
+                            remoteManager.skipPrevious()
+                            fetchUntilTrackChanges(prevId)
+                            onWakeOperationComplete?.invoke()
+                        }
                     } else {
                         releasePlayingOptimism()
                     }

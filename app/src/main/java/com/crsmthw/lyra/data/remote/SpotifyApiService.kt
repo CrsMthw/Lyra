@@ -133,10 +133,10 @@ interface SpotifyApiService {
     suspend fun pause()
 
     @POST("me/player/next")
-    suspend fun skipNext()
+    suspend fun skipNext(@Query("device_id") deviceId: String? = null)
 
     @POST("me/player/previous")
-    suspend fun skipPrevious()
+    suspend fun skipPrevious(@Query("device_id") deviceId: String? = null)
 
     @PUT("me/player/seek")
     suspend fun seek(@Query("position_ms") positionMs: Long)

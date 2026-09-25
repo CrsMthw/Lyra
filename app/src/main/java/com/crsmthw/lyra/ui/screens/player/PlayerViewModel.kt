@@ -301,8 +301,8 @@ class PlayerViewModel(
     private var wakingOwner = 0L
 
     /** Installed as `PlayerStateManager.onWakeRestore`; kept so [onCleared] removes only its own. */
-    private val wakeRestoreHook: suspend (SpotifyTrack, Long) -> Boolean =
-        { track, pausedProgressMs -> runPlayButtonRestore(track, pausedProgressMs) }
+    private val wakeRestoreHook: suspend (SpotifyTrack, Long, Int) -> Boolean =
+        { track, pausedProgressMs, step -> runPlayButtonRestore(track, pausedProgressMs, step) }
 
     private fun clearIsWakingUp() {
         clearWakingUpJob?.cancel()
@@ -997,6 +997,8 @@ class PlayerViewModel(
         generation     : Long,
         owner          : Long,
         degradeTo      : List<String>?,
+        /** +1 / -1: after the body lands, skip next / previous (a skip on a dead Spotify). */
+        thenSkip       : Int = 0,
     ) {
         fun superseded() = playerStateManager.playGeneration != generation
         fun abandon(stage: String) {
@@ -1049,6 +1051,7 @@ class PlayerViewModel(
             val hints = deviceNameHints()
             var pending = body
             var accepted = false
+            var landedDeviceId: String? = null
             var abandoned = false
             var failed = false
             var bodyFailures = 0
@@ -1085,6 +1088,7 @@ class PlayerViewModel(
                     if (toSend == null) {
                         // Nothing to rebuild — the SDK play IS the playback. Go and confirm it.
                         accepted = true
+                        landedDeviceId = deviceId
                         break
                     }
                     // Last look before the body goes out: the device poll takes real time.
@@ -1095,7 +1099,7 @@ class PlayerViewModel(
                     Log.d(TAG, "wake: body sent ${toSend.describe()} to $deviceId → " +
                                (err?.message ?: "accepted"))
                     when {
-                        err == null -> { accepted = true; break }
+                        err == null -> { accepted = true; landedDeviceId = deviceId; break }
                         err.isRateLimited() -> {
                             // A 429 says nothing about the body; the same body is fine once the
                             // window passes. Arm the shared gate and stop — re-sending inside a
@@ -1152,6 +1156,22 @@ class PlayerViewModel(
                 }
             }
 
+            if (accepted && thenSkip != 0) {
+                if (superseded()) { abandon("before the skip"); return }
+                // A 404 here is "listed but not active yet" — the body was accepted a moment ago,
+                // so a couple of short retries cover it.
+                var skipErr: Throwable? = null
+                repeat(3) { attempt ->
+                    if (attempt > 0) delay(WAKE_CONFIRM_POLL_MS)
+                    val r = if (thenSkip > 0) repository.skipNext(landedDeviceId)
+                            else repository.skipPrevious(landedDeviceId)
+                    skipErr = r.exceptionOrNull()
+                    if (skipErr == null || skipErr?.isNoActiveDevice() != true) return@repeat
+                }
+                if (skipErr?.isRateLimited() == true) playerStateManager.noteRateLimited()
+                Log.d(TAG, "wake: skip ${if (thenSkip > 0) "next" else "previous"} on $landedDeviceId → " +
+                           (skipErr?.message ?: "accepted"))
+            }
             var confirmed = false
             if (accepted) {
                 val confirmDeadline = System.currentTimeMillis() + WAKE_CONFIRM_TIMEOUT_MS
@@ -1161,7 +1181,10 @@ class PlayerViewModel(
                     if (playerStateManager.isRateLimited()) break
                     playerStateManager.lockIsPlaying()
                     val observed = playerStateManager.fetchOnce()
-                    if (observed != null && observed.isPlaying && observed.item?.uri == uri) {
+                    // After a skip the target is whatever Spotify moved to: any OTHER item playing.
+                    val onTarget = if (thenSkip == 0) observed?.item?.uri == uri
+                                   else observed?.item?.uri != null && observed.item.uri != uri
+                    if (observed != null && observed.isPlaying && onTarget) {
                         confirmed = true
                         break
                     }
@@ -1296,13 +1319,13 @@ class PlayerViewModel(
      * the current [playbackJob] and is awaited by the manager's play coroutine. False only when
      * the ViewModel is already gone — the manager then falls back to the bare single-uri play.
      */
-    private suspend fun runPlayButtonRestore(track: SpotifyTrack, pausedProgressMs: Long): Boolean {
+    private suspend fun runPlayButtonRestore(track: SpotifyTrack, pausedProgressMs: Long, step: Int): Boolean {
         if (!viewModelScope.isActive) return false
         val job = withContext(Dispatchers.Main) {
             val owner = ++wakingOwner
             playbackJob?.cancel()
             val generation = playerStateManager.playGeneration
-            viewModelScope.async { restoreForResume(track, pausedProgressMs, generation, owner) }
+            viewModelScope.async { restoreForResume(track, pausedProgressMs, step, generation, owner) }
                 .also { playbackJob = it }
         }
         return try {
@@ -1318,13 +1341,21 @@ class PlayerViewModel(
         }
     }
 
+    /**
+     * The play button ([step] 0) and next / previous ([step] ±1) after Spotify died. A uris queue
+     * whose order Lyra knows (Liked, a uris origin) and the user's shuffle OFF: the restore lands
+     * straight on the NEIGHBOUR — no detour through the current song. Otherwise (a context, whose
+     * order Spotify owns; shuffle on, where Spotify must pick; or no neighbour) it lands on the
+     * current item and then skips, which means a moment of the current song first.
+     */
     private suspend fun restoreForResume(
         track           : SpotifyTrack,
         pausedProgressMs: Long,
+        step            : Int,
         generation      : Long,
         owner           : Long,
     ) {
-        val uri = track.uri
+        val currentUri = track.uri
         val isEpisode = track.isEpisode
         val mirror = playerStateManager.state.value
         val ctx = mirror.contextUri
@@ -1336,11 +1367,28 @@ class PlayerViewModel(
             libraryCache.loadTrackList(LibraryCache.LIKED_SONGS_KEY)?.tracks
                 ?.distinctBy { it.id }?.map { it.uri }
         }
-        val body = planWakeRestore(uri, ctx, origin, likedUris, isEpisode)
-        // The same bracket as a tap: a multi-uri body with shuffle on would start at random. The
-        // user's setting is the mirror OR a previous bracket's debt (shuffleOwedOn).
         val owedOn = playerStateManager.shuffleOwedOn
         val userShuffleOn = mirror.shuffleEnabled || owedOn
+        var body = planWakeRestore(currentUri, ctx, origin, likedUris, isEpisode)
+        // A skip on a uris queue with shuffle off: the neighbour in the FULL list the plan drew
+        // from, then the plan again from there.
+        var uri = currentUri
+        var thenSkip = step
+        if (step != 0 && !userShuffleOn && body is WakeRestoreBody.Uris && !isEpisode) {
+            val fullList = when {
+                origin is PlaybackOrigin.Uris && origin.uris.contains(currentUri) -> origin.uris
+                else -> likedUris
+            }
+            val idx = fullList?.indexOf(currentUri) ?: -1
+            val neighbour = if (idx >= 0) fullList?.getOrNull(idx + step) else null
+            if (neighbour != null) {
+                uri = neighbour
+                body = planWakeRestore(neighbour, ctx, origin, likedUris, isEpisode)
+                thenSkip = 0
+            }
+        }
+        val onNeighbour = uri != currentUri
+        // The same bracket as a tap: a multi-uri body with shuffle on would start at random.
         val bracket = body is WakeRestoreBody.Uris && body.uris.size > 1 && userShuffleOn
         val sdkShuffle = when {
             bracket -> false
@@ -1356,18 +1404,21 @@ class PlayerViewModel(
             is PlaybackOrigin.Uris    -> "uris ×${origin.uris.size}"
             null                      -> "none"
         }
-        Log.d(TAG, "wake: play button — plan ${body.describe()} (mirror context=$ctx, " +
-                   "origin=$originLabel, liked cache=${likedUris?.size}, shuffleBracket=$bracket)")
+        val what = when (step) { 0 -> "play button"; 1 -> "next"; else -> "previous" }
+        Log.d(TAG, "wake: $what — plan ${body.describe()} (mirror context=$ctx, origin=$originLabel, " +
+                   "liked cache=${likedUris?.size}, shuffleBracket=$bracket, " +
+                   (if (onNeighbour) "on the neighbour $uri" else "then skip $thenSkip") + ")")
         restoreAfterWake(
             uri             = uri,
             body            = body,
-            positionMs      = if (isEpisode) null else pausedProgressMs,
+            positionMs      = if (isEpisode || onNeighbour) null else pausedProgressMs,
             shuffle         = sdkShuffle,
-            startPositionMs = pausedProgressMs,
+            startPositionMs = if (onNeighbour) null else pausedProgressMs,
             reassertShuffle = userShuffleOn,
             generation      = generation,
             owner           = owner,
             degradeTo       = if (isEpisode) listOf(uri) else null,
+            thenSkip        = thenSkip,
         )
     }
 
