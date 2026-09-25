@@ -337,15 +337,18 @@ class LibraryCache(context: Context) {
      * counted), and writing a stale total would revert a concurrent like's increment.
      * Returns null when there is no liked list to append to.
      */
-    fun appendToLikedSongs(tracks: List<SpotifyTrack>): LikedSongsAppend? {
+    fun appendToLikedSongs(tracks: List<SpotifyTrack>, rawOffset: Int? = null): LikedSongsAppend? {
         synchronized(lock) {
             val current  = loadLocked() ?: return null
             val existing = current.trackLists[LIKED_SONGS_KEY] ?: return null
             val held     = existing.tracks.mapTo(HashSet()) { it.id }
             val added    = tracks.filter { it.id !in held }.distinctBy { it.id }
+            // [rawOffset] (the indexer's raw position after this page) is persisted when given, so
+            // a resumed loop seeds from it instead of the filtered size (2026-09-25); null keeps
+            // whatever the list already carries.
             saveLocked(current.copy(
                 trackLists = current.trackLists + (LIKED_SONGS_KEY to
-                    CachedTrackList(existing.snapshotId, existing.tracks + added)),
+                    CachedTrackList(existing.snapshotId, existing.tracks + added, rawOffset ?: existing.rawOffset)),
             ))
             return LikedSongsAppend(added, existing.tracks.size + added.size)
         }

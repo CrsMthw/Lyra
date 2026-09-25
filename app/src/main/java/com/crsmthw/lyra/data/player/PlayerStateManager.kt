@@ -31,8 +31,18 @@ import java.util.concurrent.atomic.AtomicLong
  */
 private const val ORIGIN_POLL_QUIET_MS = 6_000L
 
-/** The longest a single 429 may gate the app for, whatever `Retry-After` says (30 min). */
-private const val MAX_RATE_LIMIT_BACKOFF_MS = 30L * 60L * 1_000L
+/** The longest a single 429 may gate the PLAYER family for, whatever `Retry-After` says (30 min). */
+private const val MAX_PLAYER_BACKOFF_MS = 30L * 60L * 1_000L
+/** The LIBRARY family honours the header up to 6 h: retrying into a ban only extends it. */
+private const val MAX_LIBRARY_BACKOFF_MS = 6L * 60L * 60L * 1_000L
+
+/**
+ * Spotify rate-limits PER ENDPOINT FAMILY, not per app (device pass 2026-09-25 evening: `me/tracks`
+ * banned with `Retry-After=13657` s while every `me/player` call kept working). One shared gate
+ * therefore froze the player for a library ban. [PLAYER] = `me/player/…`; [LIBRARY] = `me/tracks`,
+ * `me/albums`, `me/playlists`, `me/shows`, `me` — the indexer's and iLyra's browse calls.
+ */
+enum class RateLimitFamily { PLAYER, LIBRARY }
 
 data class PlayerState(
     val isPlaying             : Boolean        = false,
@@ -82,7 +92,8 @@ class PlayerStateManager(
     private var isPlayingLockUntil: Long = 0L
     private var shuffleLockUntil  : Long = 0L
     private var repeatLockUntil   : Long = 0L
-    private var pollBackoffUntil  : Long = 0L
+    private var pollBackoffUntil  : Long = 0L   // the PLAYER family's window
+    private var libraryBackoffUntil: Long = 0L  // the LIBRARY family's window
     private var trackLockUntil    : Long = 0L
 
     @Volatile private var serviceRunning = false
@@ -281,9 +292,15 @@ class PlayerStateManager(
     fun lockRepeat()     { repeatLockUntil    = System.currentTimeMillis() + 5_000L }
     // Prevents currentTrack from being nulled by a mid-transfer poll where response.item is briefly null.
     fun lockTrack()      { trackLockUntil     = System.currentTimeMillis() + 3_000L }
-    fun isRateLimited()  = System.currentTimeMillis() < pollBackoffUntil
-    /** Seconds left in the shared rate-limit window, 0 when open. */
-    fun rateLimitSecondsLeft(): Long = ((pollBackoffUntil - System.currentTimeMillis()) / 1_000L).coerceAtLeast(0L)
+    private fun backoffUntil(family: RateLimitFamily) = when (family) {
+        RateLimitFamily.PLAYER  -> pollBackoffUntil
+        RateLimitFamily.LIBRARY -> libraryBackoffUntil
+    }
+    fun isRateLimited(family: RateLimitFamily = RateLimitFamily.PLAYER) =
+        System.currentTimeMillis() < backoffUntil(family)
+    /** Seconds left in that family's rate-limit window, 0 when open. */
+    fun rateLimitSecondsLeft(family: RateLimitFamily = RateLimitFamily.PLAYER): Long =
+        ((backoffUntil(family) - System.currentTimeMillis()) / 1_000L).coerceAtLeast(0L)
 
     /**
      * Arms the ONE shared backoff window every Web API caller checks (`isRateLimited()`).
@@ -294,13 +311,24 @@ class PlayerStateManager(
      * `max(60 s, Retry-After)`, capped at [MAX_RATE_LIMIT_BACKOFF_MS], and every arming is logged
      * with its origin so a device log names the endpoint.
      */
-    fun noteRateLimited(e: Throwable? = null, who: String = "caller") {
+    fun noteRateLimited(
+        e     : Throwable? = null,
+        who   : String = "caller",
+        family: RateLimitFamily = RateLimitFamily.PLAYER,
+    ) {
         val retryAfterS = e?.message?.let { Regex("Retry-After=(\\d+)").find(it)?.groupValues?.get(1)?.toLongOrNull() }
-        val backoffMs = ((retryAfterS ?: 0L) * 1_000L).coerceIn(60_000L, MAX_RATE_LIMIT_BACKOFF_MS)
+        val cap = when (family) {
+            RateLimitFamily.PLAYER  -> MAX_PLAYER_BACKOFF_MS
+            RateLimitFamily.LIBRARY -> MAX_LIBRARY_BACKOFF_MS
+        }
+        val backoffMs = ((retryAfterS ?: 0L) * 1_000L).coerceIn(60_000L, cap)
         val until = System.currentTimeMillis() + backoffMs
-        if (until > pollBackoffUntil) pollBackoffUntil = until
-        Log.w("PlayerStateManager", "429 from $who — Retry-After=${retryAfterS ?: "?"} s; every player " +
-              "call backs off ${backoffMs / 1_000L} s (${e?.message?.take(80)})")
+        when (family) {
+            RateLimitFamily.PLAYER  -> if (until > pollBackoffUntil) pollBackoffUntil = until
+            RateLimitFamily.LIBRARY -> if (until > libraryBackoffUntil) libraryBackoffUntil = until
+        }
+        Log.w("PlayerStateManager", "429 from $who — Retry-After=${retryAfterS ?: "?"} s; the $family " +
+              "family backs off ${backoffMs / 1_000L} s (${e?.message?.take(80)})")
     }
 
     // Optimistically marks Spotify as playing AND locks the state so transient 204 polls

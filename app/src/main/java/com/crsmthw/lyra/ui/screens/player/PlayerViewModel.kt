@@ -8,6 +8,7 @@ import com.crsmthw.lyra.data.local.LibraryCache
 import com.crsmthw.lyra.data.player.PlaybackOrigin
 import com.crsmthw.lyra.data.player.PlayerStateManager
 import com.crsmthw.lyra.data.player.WakeRestoreBody
+import com.crsmthw.lyra.data.player.RateLimitFamily
 import com.crsmthw.lyra.data.player.isCollectionContext
 import com.crsmthw.lyra.data.player.pickLocalDevice
 import com.crsmthw.lyra.data.player.planWakeRestore
@@ -451,9 +452,11 @@ class PlayerViewModel(
     }
 
     private suspend fun checkIsLiked(trackId: String) {
+        // `me/tracks/contains` is a LIBRARY-family call: skipped while that family is banned.
+        if (playerStateManager.isRateLimited(RateLimitFamily.LIBRARY)) return
         repository.isTrackSaved(trackId).fold(
             onSuccess = { liked -> _uiState.update { it.copy(isLiked = liked) } },
-            onFailure = { },
+            onFailure = { e -> if (e.isRateLimited()) playerStateManager.noteRateLimited(e, "me/tracks/contains", RateLimitFamily.LIBRARY) },
         )
     }
 
