@@ -28,18 +28,24 @@ fun windowFrom(list: List<String>, uri: String, cap: Int = PlaybackOrigin.URI_CA
 }
 
 /**
- * Chooses the restore body for the PLAY BUTTON (a resume after Spotify died while paused).
- * `playTrack` does not use this — it derives its body from its own arguments.
+ * Chooses the restore body for the PLAY BUTTON (a resume after Spotify died while paused) and for
+ * next / previous on a dead Spotify. `playTrack` does not use this — it derives its body from its
+ * own arguments.
  *
  * Rules, first match wins:
- *  1. The mirror has a non-collection [mirrorContextUri] → [WakeRestoreBody.Context]. The mirror's
- *     context and its current track come from the same poll, so they agree. An EPISODE never
- *     gets a `spotify:show:` context: a show is not a documented `context_uri`.
- *  2. A track whose mirror context is the Liked `collection`, or whose [origin] is
- *     [PlaybackOrigin.Liked] → the liked window from [currentUri] (the collection context rejects
- *     any `offset`) — if [likedUris] holds it.
+ *  1. The mirror has a [mirrorContextUri] → [WakeRestoreBody.Context]. The Liked `collection` is a
+ *     REAL context since the device pass of 2026-09-25 pm: `context_uri = spotify:user:<id>:collection`
+ *     + `offset.uri` (or `.position`) is accepted and positions inside the collection — the 2021
+ *     "Can't have offset for context type: COLLECTION" error is gone. A collection reported in
+ *     another form (`spotify:collection:…`) is addressed through [collectionUri], the user's own;
+ *     without one it falls to the liked window. An EPISODE never gets a `spotify:show:` context:
+ *     a show is not a documented `context_uri`.
+ *  2. A [PlaybackOrigin.Liked] origin → [collectionUri] as the context when known, else the liked
+ *     window from [currentUri] (the pre-2026-09-25 shape, still the fallback with no user id) — if
+ *     [likedUris] holds it.
  *  3. A [PlaybackOrigin.Uris] origin holding [currentUri] → that list from [currentUri] onward.
- *  4. No origin at all (nothing better known), a track, and [likedUris] holds it → the liked window.
+ *  4. No origin at all (nothing better known), a track, and [likedUris] holds it → the collection
+ *     context when known, else the liked window.
  *  5. Otherwise the single item.
  *
  * Every window is capped at [PlaybackOrigin.URI_CAP].
@@ -50,19 +56,30 @@ fun planWakeRestore(
     origin          : PlaybackOrigin?,
     likedUris       : List<String>?,
     isEpisode       : Boolean,
+    collectionUri   : String? = null,
 ): WakeRestoreBody {
     val ctx = mirrorContextUri?.takeIf { it.isNotBlank() }
-    if (ctx != null && !isCollectionContext(ctx) && !(isEpisode && ctx.startsWith("spotify:show:"))) {
-        return WakeRestoreBody.Context(ctx)
-    }
     val likedWindow = if (isEpisode) null else likedUris?.let { windowFrom(it, currentUri) }
-    if (!isEpisode && (isCollectionContext(ctx) || origin is PlaybackOrigin.Liked) && likedWindow != null) {
-        return WakeRestoreBody.Uris(likedWindow)
+    val collection = collectionUri?.takeIf { !isEpisode && it.isNotBlank() }
+    if (ctx != null && !(isEpisode && ctx.startsWith("spotify:show:"))) {
+        when {
+            !isCollectionContext(ctx)       -> return WakeRestoreBody.Context(ctx)
+            // The user form is addressable as it stands; no user-id lookup needed.
+            ctx.startsWith("spotify:user:") -> return WakeRestoreBody.Context(ctx)
+            collection != null              -> return WakeRestoreBody.Context(collection)
+            likedWindow != null             -> return WakeRestoreBody.Uris(likedWindow)
+        }
+    }
+    if (!isEpisode && origin is PlaybackOrigin.Liked) {
+        if (collection != null) return WakeRestoreBody.Context(collection)
+        if (likedWindow != null) return WakeRestoreBody.Uris(likedWindow)
     }
     if (origin is PlaybackOrigin.Uris) {
         windowFrom(origin.uris, currentUri)?.let { return WakeRestoreBody.Uris(it) }
     }
-    if (origin == null && likedWindow != null) return WakeRestoreBody.Uris(likedWindow)
+    if (origin == null && likedWindow != null) {
+        return if (collection != null) WakeRestoreBody.Context(collection) else WakeRestoreBody.Uris(likedWindow)
+    }
     return WakeRestoreBody.Uris(listOf(currentUri))
 }
 

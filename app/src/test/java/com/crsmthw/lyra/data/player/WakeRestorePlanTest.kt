@@ -20,7 +20,8 @@ class WakeRestorePlanTest {
         origin: PlaybackOrigin? = null,
         likedUris: List<String>? = liked,
         isEpisode: Boolean = false,
-    ) = planWakeRestore(uri, ctx, origin, likedUris, isEpisode)
+        collectionUri: String? = null,
+    ) = planWakeRestore(uri, ctx, origin, likedUris, isEpisode, collectionUri)
 
     // ── Rule 1: a non-collection mirror context ──────────────────────────────
 
@@ -56,21 +57,40 @@ class WakeRestorePlanTest {
         assertEquals(WakeRestoreBody.Context(playlist), plan(uri = ep, ctx = playlist, isEpisode = true))
     }
 
-    // ── Rule 2: Liked (collection context or Liked origin) ───────────────────
+    // ── Rule 1b / 2: Liked — the collection IS a context (2026-09-25 pm) ─────
 
     @Test
-    fun `collection mirror context restores as the liked window from the current uri`() {
-        assertEquals(WakeRestoreBody.Uris(listOf(t2, t3)), plan(ctx = collection))
+    fun `collection mirror context restores as the collection context`() {
+        assertEquals(WakeRestoreBody.Context(collection), plan(ctx = collection))
+        assertEquals(WakeRestoreBody.Context(collection), plan(ctx = collection, collectionUri = collection))
     }
 
     @Test
-    fun `spotify collection form is also a collection`() {
+    fun `spotify collection form is addressed through the user's collection uri`() {
+        assertEquals(WakeRestoreBody.Context(collection), plan(ctx = "spotify:collection:tracks", collectionUri = collection))
+    }
+
+    @Test
+    fun `spotify collection form without a user id falls back to the liked window`() {
         assertEquals(WakeRestoreBody.Uris(listOf(t2, t3)), plan(ctx = "spotify:collection:tracks"))
     }
 
     @Test
-    fun `Liked origin restores as the liked window`() {
+    fun `Liked origin restores as the collection context when the user id is known`() {
+        assertEquals(WakeRestoreBody.Context(collection), plan(origin = PlaybackOrigin.Liked, collectionUri = collection))
+    }
+
+    @Test
+    fun `Liked origin without a user id restores as the liked window`() {
         assertEquals(WakeRestoreBody.Uris(listOf(t2, t3)), plan(origin = PlaybackOrigin.Liked))
+    }
+
+    @Test
+    fun `an episode never restores into the collection`() {
+        assertEquals(
+            WakeRestoreBody.Uris(listOf(ep)),
+            plan(uri = ep, origin = PlaybackOrigin.Liked, isEpisode = true, likedUris = null, collectionUri = collection),
+        )
     }
 
     @Test
@@ -92,8 +112,8 @@ class WakeRestorePlanTest {
     }
 
     @Test
-    fun `collection context with no liked cache falls back to the single item`() {
-        assertEquals(WakeRestoreBody.Uris(listOf(t2)), plan(ctx = collection, likedUris = null))
+    fun `Liked origin with no liked cache and no user id falls back to the single item`() {
+        assertEquals(WakeRestoreBody.Uris(listOf(t2)), plan(origin = PlaybackOrigin.Liked, likedUris = null))
     }
 
     // ── Rule 3: a Uris origin ────────────────────────────────────────────────
@@ -130,8 +150,9 @@ class WakeRestorePlanTest {
     // ── Rule 4: no origin, uri in the liked cache ────────────────────────────
 
     @Test
-    fun `no origin and the uri liked restores as the liked window`() {
+    fun `no origin and the uri liked restores as the liked window, or the collection when known`() {
         assertEquals(WakeRestoreBody.Uris(listOf(t1, t2, t3)), plan(uri = t1, origin = null))
+        assertEquals(WakeRestoreBody.Context(collection), plan(uri = t1, origin = null, collectionUri = collection))
     }
 
     @Test

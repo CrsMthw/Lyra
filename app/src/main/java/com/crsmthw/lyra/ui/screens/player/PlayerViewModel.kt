@@ -635,6 +635,30 @@ class PlayerViewModel(
         }
     }
 
+    /** The signed-in user's id, cache-first, then ONE rate-limit-gated `me` call; memoised. */
+    private var cachedUserId: String? = null
+    private suspend fun resolveUserId(): String? {
+        cachedUserId?.let { return it }
+        val cached = withContext(Dispatchers.IO) { libraryCache.load()?.user?.id?.takeIf { it.isNotBlank() } }
+        if (cached != null) return cached.also { cachedUserId = it }
+        if (playerStateManager.isRateLimited()) return null
+        return repository.getCurrentUser()
+            .onFailure { if (it.isRateLimited()) playerStateManager.noteRateLimited() }
+            .getOrNull()?.id?.takeIf { it.isNotBlank() }
+            ?.also { cachedUserId = it }
+    }
+
+    /** `spotify:user:<id>:collection` — Liked Songs as a REAL context — or null with no user id. */
+    private suspend fun collectionUri(): String? = resolveUserId()?.let { "spotify:user:$it:collection" }
+
+    /**
+     * Plays a Liked Songs row. Since 2026-09-25 pm Liked Songs is a REAL context —
+     * `context_uri = spotify:user:<id>:collection` + `offset.uri` positions inside the whole
+     * collection (device-verified; the 2021 "Can't have offset for context type: COLLECTION" error
+     * is gone) — so there is no 750-uri window and no cap any more, and shuffle / repeat / previous
+     * are Spotify's own over all liked songs. The window (from the tapped song, cap 750) survives
+     * only as the FALLBACK: no user id, or the API refusing the collection body.
+     */
     fun playFromLikedSongs(trackUri: String, shuffle: Boolean? = null) {
         viewModelScope.launch {
             val cached = withContext(Dispatchers.IO) {
@@ -642,19 +666,19 @@ class PlayerViewModel(
                 // still hold duplicate liked songs (see LibraryViewModel pagination dedup).
                 libraryCache.loadTrackList(LibraryCache.LIKED_SONGS_KEY)?.tracks?.distinctBy { it.id }
             }
-            // Origin = Liked either way: a restore rebuilds the window from the liked cache at that
-            // time (the collection context rejects an offset, so it is never sent as a context).
-            // A uri missing from the cache (not indexed yet) plays alone: a window from the TOP of
-            // the list would lead with a different song, and a uris body plays its head.
+            // A uri missing from the cache (not indexed yet) plays alone in the fallback: a window
+            // from the TOP of the list would lead with a different song, and a uris body plays its head.
             val idx = cached?.indexOfFirst { it.uri == trackUri } ?: -1
+            val window = cached?.takeIf { idx >= 0 }?.drop(idx)?.map { it.uri }?.take(PlaybackOrigin.URI_CAP)
+            val collection = collectionUri()
             startPlay(
-                uri             = trackUri,
-                contextUri      = null,
-                uris            = cached?.takeIf { idx >= 0 }
-                    ?.drop(idx)?.map { it.uri }?.take(PlaybackOrigin.URI_CAP),
-                startPositionMs = null,
-                shuffle         = shuffle,
-                origin          = PlaybackOrigin.Liked,
+                uri                   = trackUri,
+                contextUri            = collection,
+                uris                  = if (collection == null) window else null,
+                startPositionMs       = null,
+                shuffle               = shuffle,
+                origin                = PlaybackOrigin.Liked,
+                collectionFallbackUris = window,
             )
         }
     }
@@ -798,6 +822,8 @@ class PlayerViewModel(
         startPositionMs: Long?,
         shuffle        : Boolean?,
         origin         : PlaybackOrigin,
+        /** The Liked window to fall back to if the API REFUSES the collection context body. */
+        collectionFallbackUris: List<String>? = null,
     ) {
         val isEpisode = uri.startsWith("spotify:episode:")
         // Recorded BEFORE anything is sent, and it bumps the play-request generation: an older
@@ -837,6 +863,9 @@ class PlayerViewModel(
             // the queue, not the playback. `playUris` is a var so the wake path below never
             // re-sends a body the API has already rejected.
             var playUris = uris ?: episodeSingleUri
+            // The context actually being sent — dropped to null if a collection body is refused
+            // and the Liked window takes over (see below).
+            var ctx = contextUri
             // BUG C (2026-09-25): see the `shuffle` KDoc. The user's setting is the mirror OR a
             // bracket still owed ON (a previous bracket's OFF has not been undone yet — see
             // PlayerStateManager.shuffleOwedOn). The mirror can be stale on a cold start (defaults
@@ -881,11 +910,23 @@ class PlayerViewModel(
             }
             var result = repository.play(
                 uri        = uri,
-                contextUri = contextUri,
-                offsetUri  = if (contextUri != null) uri else null,
+                contextUri = ctx,
+                offsetUri  = if (ctx != null) uri else null,
                 uris       = playUris,
             )
-            val firstError = result.exceptionOrNull()
+            var firstError = result.exceptionOrNull()
+            if (firstError != null && ctx != null && isCollectionContext(ctx) &&
+                collectionFallbackUris != null && firstError.isRequestRefused()) {
+                // The collection context is device-verified (2026-09-25 pm) but undocumented as a
+                // `context_uri`; if the API ever refuses it again, the pre-2026-09-25 window is
+                // the proven shape. Once, then the multi-uri degrade below applies to THAT body.
+                Log.w(TAG, "play() refused the collection context (${firstError.message}); " +
+                           "falling back to the ${collectionFallbackUris.size}-uri liked window", firstError)
+                ctx = null
+                playUris = collectionFallbackUris
+                result = repository.play(uri = uri, uris = playUris)
+                firstError = result.exceptionOrNull()
+            }
             if (firstError != null && (playUris?.size ?: 0) > 1 && firstError.isRequestRefused()) {
                 Log.w(TAG, "play() refused a ${playUris?.size}-uri body (${firstError.message}); " +
                            "retrying with the single uri", firstError)
@@ -896,8 +937,8 @@ class PlayerViewModel(
                 playUris = episodeSingleUri
                 result = repository.play(
                     uri        = uri,
-                    contextUri = contextUri,
-                    offsetUri  = if (contextUri != null) uri else null,
+                    contextUri = ctx,
+                    offsetUri  = if (ctx != null) uri else null,
                     uris       = null,
                 )
                 val retryError = result.exceptionOrNull()
@@ -923,8 +964,8 @@ class PlayerViewModel(
                 onFailure = { e ->
                     if (e.isNoActiveDevice()) {
                         val body = when {
-                            contextUri != null -> WakeRestoreBody.Context(contextUri)
-                            playUris   != null -> WakeRestoreBody.Uris(playUris)
+                            ctx      != null -> WakeRestoreBody.Context(ctx)
+                            playUris != null -> WakeRestoreBody.Uris(playUris)
                             // A track whose multi-uri body was refused above: nothing to rebuild.
                             else               -> null
                         }
@@ -1374,7 +1415,8 @@ class PlayerViewModel(
         }
         val owedOn = playerStateManager.shuffleOwedOn
         val userShuffleOn = mirror.shuffleEnabled || owedOn
-        var body = planWakeRestore(currentUri, ctx, origin, likedUris, isEpisode)
+        val collection = collectionUri()
+        var body = planWakeRestore(currentUri, ctx, origin, likedUris, isEpisode, collection)
         // A skip on a uris queue with shuffle off: the neighbour in the FULL list the plan drew
         // from, then the plan again from there.
         var uri = currentUri
@@ -1388,7 +1430,7 @@ class PlayerViewModel(
             val neighbour = if (idx >= 0) fullList?.getOrNull(idx + step) else null
             if (neighbour != null) {
                 uri = neighbour
-                body = planWakeRestore(neighbour, ctx, origin, likedUris, isEpisode)
+                body = planWakeRestore(neighbour, ctx, origin, likedUris, isEpisode, collection)
                 thenSkip = 0
             }
         }
@@ -1466,6 +1508,14 @@ class PlayerViewModel(
         playbackJob?.cancel()
         val generation = playerStateManager.playGeneration
         playbackJob = viewModelScope.launch {
+            // The Liked collection: its size for a random start, and the song the COLD path leads
+            // with (the App Remote cannot play the collection — it plays the first liked song under
+            // a derived playlist context and ignores skipToIndex, lab 2026-09-25 pm — so the cold
+            // path is the ordinary wake restore: SDK plays ONE liked song, the body is the
+            // collection context positioned on it).
+            val likedForCollection = if (!isCollectionContext(contextUri)) null else withContext(Dispatchers.IO) {
+                libraryCache.loadTrackList(LibraryCache.LIKED_SONGS_KEY)?.tracks?.distinctBy { it.id }
+            }
             val shuffleResult = playerStateManager.applyShuffle(shuffle)
             val shuffleErr = shuffleResult.exceptionOrNull()
             if (shuffleErr != null && shuffleErr.isRateLimited()) {
@@ -1484,10 +1534,10 @@ class PlayerViewModel(
             // flipped it). So the first item is pinned here — position 0 for Play, a random
             // position for Shuffle — and the re-assert below only has to sort out the REST.
             // Never for the Liked `collection`, which rejects any offset.
+            // `offset.position` is accepted for the collection too (lab 2026-09-25 pm).
             val startAt = when {
-                isCollectionContext(contextUri) -> null
-                !shuffle                        -> 0
-                else                            -> itemCount?.takeIf { it > 1 }?.let { Random.nextInt(it) }
+                !shuffle -> 0
+                else     -> (itemCount ?: likedForCollection?.size)?.takeIf { it > 1 }?.let { Random.nextInt(it) }
             }
 
             repository.play(contextUri = contextUri, offsetPosition = startAt).fold(
@@ -1506,7 +1556,23 @@ class PlayerViewModel(
                 },
                 onFailure = { e ->
                     if (e.isNoActiveDevice() || shuffleWas404) {
-                        playContextViaRemote(contextUri, shuffle, owner, generation)
+                        val pick = likedForCollection?.let { if (shuffle) it.randomOrNull() else it.firstOrNull() }
+                        if (pick != null) {
+                            if (shuffle) playerStateManager.markShuffleOwedOn()
+                            restoreAfterWake(
+                                uri             = pick.uri,
+                                body            = WakeRestoreBody.Context(contextUri),
+                                positionMs      = 0L,
+                                shuffle         = shuffle,
+                                startPositionMs = null,
+                                reassertShuffle = shuffle,
+                                generation      = generation,
+                                owner           = owner,
+                                degradeTo       = null,
+                            )
+                        } else {
+                            playContextViaRemote(contextUri, shuffle, owner, generation)
+                        }
                     } else {
                         if (e.isRateLimited()) playerStateManager.noteRateLimited()
                         playerStateManager.releasePlayingOptimism()
