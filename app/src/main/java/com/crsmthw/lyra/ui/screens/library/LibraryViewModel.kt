@@ -8,6 +8,7 @@ import com.crsmthw.lyra.data.local.ForYouCacheData
 import com.crsmthw.lyra.data.local.JumpBackInItem
 import com.crsmthw.lyra.data.local.LibraryCache
 import com.crsmthw.lyra.data.local.ReorderCalculator
+import com.crsmthw.lyra.data.player.PlaybackOrigin
 import com.crsmthw.lyra.data.player.PlayerStateManager
 import com.crsmthw.lyra.data.remote.SpotifyRemoteManager
 import com.crsmthw.lyra.data.remote.model.*
@@ -1509,6 +1510,7 @@ class LibraryViewModel(
     }
 
     fun playPlaylist(uri: String) {
+        playerStateManager.recordPlayOrigin(PlaybackOrigin.forContext(uri))
         playerStateManager.setOptimisticallyPlaying()
         viewModelScope.launch {
             repository.play(contextUri = uri).onFailure { e ->
@@ -1522,6 +1524,7 @@ class LibraryViewModel(
     }
 
     fun shufflePlaylist(uri: String) {
+        playerStateManager.recordPlayOrigin(PlaybackOrigin.forContext(uri))
         playerStateManager.setOptimisticallyPlaying()
         viewModelScope.launch {
             repository.setShuffle(true)

@@ -2,7 +2,9 @@ package com.crsmthw.lyra.data.player
 
 import android.content.Context
 import android.content.Intent
+import com.crsmthw.lyra.data.local.PlaybackOriginStore
 import com.crsmthw.lyra.data.remote.SpotifyRemoteManager
+import com.crsmthw.lyra.data.remote.model.PlayerStateResponse
 import com.crsmthw.lyra.data.remote.model.SpotifyDevice
 import com.crsmthw.lyra.data.remote.model.SpotifyTrack
 import com.crsmthw.lyra.data.repository.SpotifyRepository
@@ -17,6 +19,16 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicLong
+
+/**
+ * After Lyra itself records a play's origin, a context change the poll reports within this window
+ * is NOT recorded: a poll already in flight when the play went out still describes the PREVIOUS
+ * playback and would overwrite the origin Lyra just wrote (a Liked play replaced by the playlist
+ * that was playing a second earlier).
+ */
+private const val ORIGIN_POLL_QUIET_MS = 6_000L
 
 data class PlayerState(
     val isPlaying             : Boolean        = false,
@@ -36,6 +48,13 @@ data class PlayerState(
      * a poll window while [currentTrack] is still held at the previous track.
      */
     val hasContext            : Boolean        = false,
+    /**
+     * The playback context's uri (`response.context?.uri`) — what the play button's wake restore
+     * rebuilds the queue from (`planWakeRestore`). Locked with the track exactly like
+     * [hasContext], and — like every field but `isPlaying` — left alone by a 204, so it survives
+     * Spotify dying, which is the whole point of reading it. Null for a bare `uris` play.
+     */
+    val contextUri            : String?        = null,
     val sleepTimerMinutes     : Int            = 0,
     val sleepTimerTotalMinutes: Int            = 0,
     val currentDevice         : SpotifyDevice? = null,
@@ -45,6 +64,7 @@ class PlayerStateManager(
     private val context      : Context,
     private val repository   : SpotifyRepository,
     private val remoteManager: SpotifyRemoteManager,
+    private val originStore  : PlaybackOriginStore,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -72,6 +92,54 @@ class PlayerStateManager(
     // PlayerViewModel sets this to clear its isWakingUp flag precisely when the operation is done.
     var onWakeOperationComplete: (() -> Unit)? = null
 
+    /**
+     * The play button's wake restore (set by `PlayerViewModel.init`): runs the same
+     * `restoreAfterWake` as a track tap, with the body `planWakeRestore` picks and the progress at
+     * the tap as the base position. Returns false when it could not run at all (the ViewModel is
+     * gone), in which case [playPause] falls back to the bare single-uri `connectAndPlay`.
+     * It owns clearing the waking state; [onWakeOperationComplete] is not fired when it ran.
+     */
+    var onWakeRestore: (suspend (track: SpotifyTrack, pausedProgressMs: Long) -> Boolean)? = null
+
+    // ── Playback origin + play-request generation ─────────────────────────────
+
+    /**
+     * Bumped by every user play/pause/skip request. A wake restore captures it when it starts and
+     * abandons silently — no body, no waking-state change — once it moves: the device wait can
+     * take a minute, and a body landing after the user picked something else (or paused) would
+     * override them. Every Lyra-issued play also records its origin, so [recordPlayOrigin] bumps it.
+     */
+    private val playRequestGeneration = AtomicLong(0L)
+    val playGeneration: Long get() = playRequestGeneration.get()
+    fun notePlayRequest(): Long = playRequestGeneration.incrementAndGet()
+
+    @Volatile private var lastLyraOriginAt = 0L
+    /** The context uri the poll last reported (null included), so a CHANGE is what gets recorded. */
+    @Volatile private var lastObservedContextUri: String? = null
+
+    /**
+     * Records where a play Lyra is about to issue comes from, and counts as a new play request.
+     * The write runs on `Dispatchers.IO`; the generation bump is synchronous, so a caller that
+     * reads [playGeneration] right after sees its own request.
+     */
+    fun recordPlayOrigin(origin: PlaybackOrigin) {
+        notePlayRequest()
+        lastLyraOriginAt = System.currentTimeMillis()
+        scope.launch(Dispatchers.IO) { originStore.save(origin) }
+    }
+
+    suspend fun loadPlayOrigin(): PlaybackOrigin? = withContext(Dispatchers.IO) { originStore.load() }
+
+    /** Poll side: remember a context the user started elsewhere (e.g. inside the Spotify app). */
+    private fun observeContextUri(contextUri: String?) {
+        if (contextUri == lastObservedContextUri) return
+        lastObservedContextUri = contextUri
+        if (contextUri == null) return
+        if (System.currentTimeMillis() - lastLyraOriginAt < ORIGIN_POLL_QUIET_MS) return
+        val origin = PlaybackOrigin.forContext(contextUri)
+        scope.launch(Dispatchers.IO) { originStore.save(origin) }
+    }
+
     init { startPolling() }
 
     // ── Polling ───────────────────────────────────────────────────────────────
@@ -85,9 +153,14 @@ class PlayerStateManager(
         }
     }
 
-    suspend fun fetchOnce() = fetchPlayerState()
+    /**
+     * One poll now. Returns the RAW response (null on a 204 or a failure): the mirror's
+     * `isPlaying` is held by the optimistic lock, so a caller that must know what Spotify REALLY
+     * reports — the wake restore's "is the song playing yet" check — reads this instead.
+     */
+    suspend fun fetchOnce(): PlayerStateResponse? = fetchPlayerState()
 
-    private suspend fun fetchPlayerState() {
+    private suspend fun fetchPlayerState(): PlayerStateResponse? =
         repository.getPlayerState().fold(
             onSuccess = { response ->
                 if (response != null) {
@@ -107,22 +180,28 @@ class PlayerStateManager(
                             // Locked with the TRACK, not on a lock of its own: `context` goes null
                             // alongside `item` mid-transfer, and the queue's echo drop reads this.
                             hasContext     = if (lockingTransfer) it.hasContext else response.context != null,
+                            contextUri     = if (lockingTransfer) it.contextUri
+                                             else response.context?.uri?.takeIf { u -> u.isNotBlank() },
                             currentDevice  = response.device,
                         )
                     }
+                    if (!lockingTransfer) observeContextUri(_state.value.contextUri)
                     val isNowPlaying = _state.value.isPlaying
                     if (isNowPlaying && progressTickJob?.isActive != true) startProgressTick()
                     else if (!isNowPlaying) progressTickJob?.cancel()
                     maybeStartService()
                 } else {
                     // 204 — no active device (Spotify killed or closed)
-                    // Clear playing state unless an optimistic lock is in effect (e.g. SDK wake-up in progress)
+                    // Clear playing state unless an optimistic lock is in effect (e.g. SDK wake-up in progress).
+                    // ONLY isPlaying: the track and its contextUri must survive, the play button
+                    // restores from them.
                     val now = System.currentTimeMillis()
                     if (now >= isPlayingLockUntil) {
                         _state.update { it.copy(isPlaying = false) }
                         progressTickJob?.cancel()
                     }
                 }
+                response
             },
             onFailure = { e ->
                 when {
@@ -130,9 +209,9 @@ class PlayerStateManager(
                         pollBackoffUntil = System.currentTimeMillis() + 60_000L
                     e.isTransientNetworkError() -> { /* silent */ }
                 }
+                null
             },
         )
-    }
 
     // ── Progress tick ─────────────────────────────────────────────────────────
 
@@ -205,6 +284,7 @@ class PlayerStateManager(
 
     fun playPause() {
         val current = _state.value
+        notePlayRequest()
         lockIsPlaying()
         scope.launch {
             if (current.isPlaying) {
@@ -239,6 +319,7 @@ class PlayerStateManager(
     }
 
     fun skipNext() {
+        notePlayRequest()
         scope.launch {
             setOptimisticallyPlaying()
             val prevId = _state.value.currentTrack?.id
@@ -263,6 +344,7 @@ class PlayerStateManager(
     }
 
     fun skipPrevious() {
+        notePlayRequest()
         scope.launch {
             setOptimisticallyPlaying()
             val prevId = _state.value.currentTrack?.id

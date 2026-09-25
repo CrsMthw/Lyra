@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.crsmthw.lyra.data.local.LibraryCache
+import com.crsmthw.lyra.data.player.PlaybackOrigin
 import com.crsmthw.lyra.data.player.PlayerStateManager
 import com.crsmthw.lyra.data.remote.SpotifyRemoteManager
 import com.crsmthw.lyra.data.remote.model.SpotifyDevice
@@ -910,6 +911,7 @@ class PlayerViewModel(
      */
     fun shuffleContext(contextUri: String) {
         if (playerStateManager.isRateLimited()) return
+        playerStateManager.recordPlayOrigin(PlaybackOrigin.forContext(contextUri))
         playerStateManager.setOptimisticallyPlaying()
         viewModelScope.launch {
             val shuffleResult = playerStateManager.applyShuffle(true)

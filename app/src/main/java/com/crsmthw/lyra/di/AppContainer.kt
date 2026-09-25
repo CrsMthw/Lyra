@@ -11,6 +11,7 @@ import com.crsmthw.lyra.data.local.EncryptedPrefs
 import com.crsmthw.lyra.data.local.LibraryCache
 import com.crsmthw.lyra.data.local.LikedSongsIndexer
 import com.crsmthw.lyra.data.local.LyraDataStore
+import com.crsmthw.lyra.data.local.PlaybackOriginStore
 import com.crsmthw.lyra.BuildConfig
 import com.crsmthw.lyra.data.remote.LrcLibApiService
 import com.crsmthw.lyra.data.remote.SpotifyApiService
@@ -32,6 +33,8 @@ class AppContainer(context: Context) {
     val encryptedPrefs = EncryptedPrefs(context)
     val dataStore      = LyraDataStore(context)
     val libraryCache   = LibraryCache(context)
+    /** Where the current playback came from — the play button's wake restore reads it. */
+    val playbackOriginStore = PlaybackOriginStore(context)
 
     // ── Auth ─────────────────────────────────────────────────────────────────
     val authManager  = SpotifyAuthManager(context, encryptedPrefs)
@@ -140,7 +143,7 @@ class AppContainer(context: Context) {
     val lyricsRepository   = LyricsRepository(lrcLibApiService)
 
     // ── App-scoped player state ───────────────────────────────────────────────
-    val playerStateManager = PlayerStateManager(context, spotifyRepository, remoteManager)
+    val playerStateManager = PlayerStateManager(context, spotifyRepository, remoteManager, playbackOriginStore)
 
     // ── Liked-songs indexer (shared by the foreground service and the iLyra) ──
     val likedSongsIndexer = LikedSongsIndexer(libraryCache, spotifyRepository, playerStateManager)
