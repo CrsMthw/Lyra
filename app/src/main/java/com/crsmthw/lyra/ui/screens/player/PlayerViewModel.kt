@@ -1160,13 +1160,18 @@ class PlayerViewModel(
                 if (superseded()) { abandon("before the skip"); return }
                 // A 404 here is "listed but not active yet" — the body was accepted a moment ago,
                 // so a couple of short retries cover it.
+                // ONE skip. (A `repeat` with `return@repeat` shipped for twenty minutes: that only
+                // ends the iteration, so a successful skip was followed by two more — "sometimes
+                // it skipped 3 tracks", device pass 2026-09-25.)
                 var skipErr: Throwable? = null
-                repeat(3) { attempt ->
-                    if (attempt > 0) delay(WAKE_CONFIRM_POLL_MS)
+                var attempts = 0
+                while (true) {
                     val r = if (thenSkip > 0) repository.skipNext(landedDeviceId)
                             else repository.skipPrevious(landedDeviceId)
                     skipErr = r.exceptionOrNull()
-                    if (skipErr == null || skipErr?.isNoActiveDevice() != true) return@repeat
+                    val notReadyYet = skipErr?.isNoActiveDevice() == true
+                    if (!notReadyYet || ++attempts >= 3) break
+                    delay(WAKE_CONFIRM_POLL_MS)
                 }
                 if (skipErr?.isRateLimited() == true) playerStateManager.noteRateLimited()
                 Log.d(TAG, "wake: skip ${if (thenSkip > 0) "next" else "previous"} on $landedDeviceId → " +
