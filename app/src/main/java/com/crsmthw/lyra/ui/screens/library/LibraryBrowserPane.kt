@@ -297,8 +297,11 @@ internal fun LibraryBrowserPane(
     // The bar's `actions` slot verbatim — the old floating TopActionPill's contents, including the
     // conditional refresh-error warning. `@Composable RowScope.() -> Unit` is exactly the shape
     // `TopAppBar`/`LargeFlexibleTopAppBar` want, so it hands straight over.
+    // The shared LIBRARY-family gate (the indexer's / iLyra's 429s) lights the same icon as a
+    // refresh error: before 2026-09-25 a background ban on `me/tracks` was invisible here.
+    val gateActive = state.libraryRateLimitUntil > System.currentTimeMillis()
     val actionsBar: @Composable RowScope.() -> Unit = {
-        if (state.refreshError != null || state.refreshPartial) {
+        if (state.refreshError != null || state.refreshPartial || gateActive) {
             IconButton(onClick = { showRefreshErrorDialog = true }) {
                 Icon(Icons.Default.Warning, contentDescription = stringResource(R.string.cd_refresh_error),
                     tint = MaterialTheme.colorScheme.error)
@@ -667,9 +670,14 @@ internal fun LibraryBrowserPane(
         }
     }
 
-    if (showRefreshErrorDialog && (state.refreshError != null || state.refreshPartial)) {
+    if (showRefreshErrorDialog && (state.refreshError != null || state.refreshPartial || gateActive)) {
+        // A gate-only warning synthesises the error shape the dialog already parses, with the
+        // REMAINING time, so it reads "Rate Limited — Retry-After: 3h 41m" like a refresh 429.
+        val gateError = if (state.refreshError == null && gateActive)
+            "HTTP 429: Retry-After=${((state.libraryRateLimitUntil - System.currentTimeMillis()) / 1_000L).coerceAtLeast(1L)}"
+        else null
         RefreshErrorDialog(
-            error          = state.refreshError,
+            error          = state.refreshError ?: gateError,
             isPartialSweep = state.refreshPartial,
             onDismiss      = { showRefreshErrorDialog = false },
         )

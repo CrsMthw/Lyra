@@ -78,6 +78,8 @@ data class LibraryUiState(
     val playlistTracksTotal   : Int                    = 0,
     val error                 : String?                = null,  // blocking — shown when no cache
     val refreshError          : String?                = null,  // non-blocking — shown as icon when cache is visible
+    /** Epoch ms until which Spotify's LIBRARY endpoints are rate-limited (0 = open) — the shared gate, so the bar's warning icon also covers the indexer's 429s (2026-09-25). */
+    val libraryRateLimitUntil : Long                   = 0L,
     val refreshPartial        : Boolean                = false, // sweep incomplete — UI resolves fallback from string resource
     val user                  : SpotifyUser?           = null,
     val playlistsWithMosaics  : Set<String>            = emptySet(),
@@ -700,6 +702,11 @@ class LibraryViewModel(
     }
 
     init {
+        viewModelScope.launch {
+            playerStateManager.libraryRateLimitUntil.collect { until ->
+                _uiState.update { it.copy(libraryRateLimitUntil = until) }
+            }
+        }
         _uiState.update { it.copy(playlistsWithMosaics = mosaicGenerator.existingIds()) }
         loadLibrary()
         observeCacheRevision()

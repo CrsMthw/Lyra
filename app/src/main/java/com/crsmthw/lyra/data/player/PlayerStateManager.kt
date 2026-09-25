@@ -94,6 +94,9 @@ class PlayerStateManager(
     private var repeatLockUntil   : Long = 0L
     private var pollBackoffUntil  : Long = 0L   // the PLAYER family's window
     private var libraryBackoffUntil: Long = 0L  // the LIBRARY family's window
+    private val _libraryRateLimitUntil = MutableStateFlow(0L)
+    /** Epoch ms until which the LIBRARY family is gated (0 = open) — the Library bar's warning icon reads it. */
+    val libraryRateLimitUntil: StateFlow<Long> = _libraryRateLimitUntil
     private var trackLockUntil    : Long = 0L
 
     @Volatile private var serviceRunning = false
@@ -325,7 +328,10 @@ class PlayerStateManager(
         val until = System.currentTimeMillis() + backoffMs
         when (family) {
             RateLimitFamily.PLAYER  -> if (until > pollBackoffUntil) pollBackoffUntil = until
-            RateLimitFamily.LIBRARY -> if (until > libraryBackoffUntil) libraryBackoffUntil = until
+            RateLimitFamily.LIBRARY -> if (until > libraryBackoffUntil) {
+                libraryBackoffUntil = until
+                _libraryRateLimitUntil.value = until
+            }
         }
         Log.w("PlayerStateManager", "429 from $who — Retry-After=${retryAfterS ?: "?"} s; the $family " +
               "family backs off ${backoffMs / 1_000L} s (${e?.message?.take(80)})")
