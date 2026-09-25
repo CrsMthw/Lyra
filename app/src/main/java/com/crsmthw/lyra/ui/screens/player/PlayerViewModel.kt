@@ -436,7 +436,7 @@ class PlayerViewModel(
                             cassetteMetaVersion.update { it + 1 }
                         },
                         onFailure = { e ->
-                            if (e.isRateLimited()) playerStateManager.noteRateLimited()
+                            if (e.isRateLimited()) playerStateManager.noteRateLimited(e)
                             Log.w(TAG, "cassette album meta for $albumId failed: ${e.message}")
                         },
                     )
@@ -643,7 +643,7 @@ class PlayerViewModel(
         if (cached != null) return cached.also { cachedUserId = it }
         if (playerStateManager.isRateLimited()) return null
         return repository.getCurrentUser()
-            .onFailure { if (it.isRateLimited()) playerStateManager.noteRateLimited() }
+            .onFailure { if (it.isRateLimited()) playerStateManager.noteRateLimited(it) }
             .getOrNull()?.id?.takeIf { it.isNotBlank() }
             ?.also { cachedUserId = it }
     }
@@ -730,7 +730,7 @@ class PlayerViewModel(
                     playerStateManager.fetchOnce()
                 },
                 onFailure = { e ->
-                    if (e.message?.contains("429") == true) playerStateManager.noteRateLimited()
+                    if (e.message?.contains("429") == true) playerStateManager.noteRateLimited(e)
                     _uiState.update { it.copy(deviceTransferError = e.message) }
                 },
             )
@@ -760,7 +760,7 @@ class PlayerViewModel(
             repository.setVolume(clamped).fold(
                 onSuccess = {},
                 onFailure = { e ->
-                    if (e.message?.contains("429") == true) playerStateManager.noteRateLimited()
+                    if (e.message?.contains("429") == true) playerStateManager.noteRateLimited(e)
                     _uiState.update { it.copy(deviceTransferError = e.message) }
                 },
             )
@@ -908,7 +908,7 @@ class PlayerViewModel(
             // App Remote fallback below handles both the shuffle and the play.
             if (effectiveShuffle != null) {
                 val err = playerStateManager.applyShuffle(effectiveShuffle).exceptionOrNull()
-                if (err != null && err.isRateLimited()) playerStateManager.noteRateLimited()
+                if (err != null && err.isRateLimited()) playerStateManager.noteRateLimited(err)
                 // Only an OFF before a multi-uri body can start the wrong song; an ON before a
                 // context / single body cannot, so it is not worth a round trip.
                 if (err == null && !effectiveShuffle && (multiUriBody || collectionBody)) confirmShuffleState(false)
@@ -952,7 +952,7 @@ class PlayerViewModel(
                     // Noted HERE as well as in onFailure below: when the retry is rate limited the
                     // original rejection is what gets surfaced (next line), so the 429 would never
                     // reach the failure branch and the backoff gate would never be armed.
-                    if (retryError.isRateLimited()) playerStateManager.noteRateLimited()
+                    if (retryError.isRateLimited()) playerStateManager.noteRateLimited(retryError)
                     // A 404 on the retry means "no active device", which the App Remote fallback
                     // below can still fix — keep it so that path runs. Anything else: surface the
                     // ORIGINAL rejection, which names the real cause rather than its second symptom.
@@ -989,7 +989,7 @@ class PlayerViewModel(
                         // Share the one 60-second penalty window with every other caller rather
                         // than letting this path fire again into an active limit (docs/SPOTIFY.md →
                         // Rate Limiting); the device-transfer and volume paths do the same.
-                        if (e.isRateLimited()) playerStateManager.noteRateLimited()
+                        if (e.isRateLimited()) playerStateManager.noteRateLimited(e)
                         // The bracket turned the user's shuffle OFF; a failed play must not leave
                         // it that way. (Not inside a rate limit — that PUT would only be refused.)
                         else if (reassertOn) restoreShuffleOn(owner)
@@ -1119,7 +1119,7 @@ class PlayerViewModel(
                 currentCoroutineContext().ensureActive()
                 val devicesError = devices.exceptionOrNull()
                 if (devicesError != null && devicesError.isRateLimited()) {
-                    playerStateManager.noteRateLimited()
+                    playerStateManager.noteRateLimited(devicesError, "wake me/player/devices")
                     Log.d(TAG, "wake: me/player/devices rate limited; abandoning the restore")
                     abandoned = true
                     break
@@ -1153,7 +1153,7 @@ class PlayerViewModel(
                             // window passes. Arm the shared gate and stop — re-sending inside a
                             // penalty window is the hammering the gate exists to stop. The SDK is
                             // still playing the single item.
-                            playerStateManager.noteRateLimited()
+                            playerStateManager.noteRateLimited(err, "wake body")
                             abandoned = true
                             break
                         }
@@ -1197,7 +1197,7 @@ class PlayerViewModel(
                     val sent = sendWakeBody(toSend, uri, positionMs, sdkStartedAt, deviceId = null)
                     currentCoroutineContext().ensureActive()
                     val err = sent.exceptionOrNull()
-                    if (err != null && err.isRateLimited()) playerStateManager.noteRateLimited()
+                    if (err != null && err.isRateLimited()) playerStateManager.noteRateLimited(err)
                     Log.d(TAG, "wake: device never listed in ${WAKE_DEVICE_TIMEOUT_MS} ms; one body " +
                                "${toSend.describe()} without device_id → ${err?.message ?: "accepted"}")
                     accepted = err == null
@@ -1221,7 +1221,7 @@ class PlayerViewModel(
                     if (!notReadyYet || ++attempts >= 3) break
                     delay(WAKE_CONFIRM_POLL_MS)
                 }
-                if (skipErr?.isRateLimited() == true) playerStateManager.noteRateLimited()
+                if (skipErr?.isRateLimited() == true) playerStateManager.noteRateLimited(skipErr)
                 Log.d(TAG, "wake: skip ${if (thenSkip > 0) "next" else "previous"} on $landedDeviceId → " +
                            (skipErr?.message ?: "accepted"))
             }
@@ -1358,7 +1358,7 @@ class PlayerViewModel(
         Log.d(TAG, "shuffle: re-asserting ON after the play")
         playerStateManager.applyShuffle(true).onFailure { e ->
             when {
-                e.isRateLimited()    -> playerStateManager.noteRateLimited()
+                e.isRateLimited() -> playerStateManager.noteRateLimited(e)
                 e.isNoActiveDevice() -> {
                     remoteManager.setShuffle(true)
                     playerStateManager.clearShuffleOwed()
@@ -1510,7 +1510,13 @@ class PlayerViewModel(
      * Rate-limit-gated throughout; a newer play cancels it (it is the current [playbackJob]).
      */
     fun playContext(contextUri: String, shuffle: Boolean, itemCount: Int? = null) {
-        if (playerStateManager.isRateLimited()) return
+        if (playerStateManager.isRateLimited()) {
+            // Never a silent no-op: the hero buttons "did nothing" for a whole evening (2026-09-25).
+            val left = playerStateManager.rateLimitSecondsLeft()
+            Log.w(TAG, "playContext refused: rate limited for another $left s")
+            _uiState.update { it.copy(error = "Spotify is rate limiting Lyra — try again in $left s") }
+            return
+        }
         playerStateManager.recordPlayOrigin(PlaybackOrigin.forContext(contextUri))
         playerStateManager.clearShuffleOwed()   // an explicit shuffle choice settles a bracket's debt
         playerStateManager.setOptimisticallyPlaying()
@@ -1533,7 +1539,7 @@ class PlayerViewModel(
             val shuffleResult = playerStateManager.applyShuffle(preSet)
             val shuffleErr = shuffleResult.exceptionOrNull()
             if (shuffleErr != null && shuffleErr.isRateLimited()) {
-                playerStateManager.noteRateLimited()
+                playerStateManager.noteRateLimited(shuffleErr)
                 playerStateManager.releasePlayingOptimism()
                 return@launch
             }
@@ -1565,7 +1571,7 @@ class PlayerViewModel(
                     if (playerStateManager.state.value.shuffleEnabled != shuffle) {
                         Log.d(TAG, "shuffle: context play landed with shuffle=${!shuffle}; re-asserting $shuffle")
                         repository.setShuffle(shuffle)
-                            .onFailure { if (it.isRateLimited()) playerStateManager.noteRateLimited() }
+                            .onFailure { if (it.isRateLimited()) playerStateManager.noteRateLimited(it) }
                     }
                 },
                 onFailure = { e ->
@@ -1588,7 +1594,7 @@ class PlayerViewModel(
                             playContextViaRemote(contextUri, shuffle, owner, generation)
                         }
                     } else {
-                        if (e.isRateLimited()) playerStateManager.noteRateLimited()
+                        if (e.isRateLimited()) playerStateManager.noteRateLimited(e)
                         playerStateManager.releasePlayingOptimism()
                     }
                 },
@@ -1642,7 +1648,7 @@ class PlayerViewModel(
             if (observedShuffle != null && observedShuffle != shuffle && !playerStateManager.isRateLimited()) {
                 playerStateManager.clearShuffleLock()
                 repository.setShuffle(shuffle)
-                    .onFailure { if (it.isRateLimited()) playerStateManager.noteRateLimited() }
+                    .onFailure { if (it.isRateLimited()) playerStateManager.noteRateLimited(it) }
             }
         } finally {
             ownedWakeRestores--

@@ -229,7 +229,7 @@ class LikedSongsIndexer(
                         },
                         onFailure = { e ->
                             if (e.message?.contains("429") == true) {
-                                playerStateManager.noteRateLimited()
+                                playerStateManager.noteRateLimited(e, "LikedSongsIndexer me/tracks")
                             }
                         },
                     )

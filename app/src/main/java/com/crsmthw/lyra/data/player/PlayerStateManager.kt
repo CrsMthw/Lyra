@@ -31,6 +31,9 @@ import java.util.concurrent.atomic.AtomicLong
  */
 private const val ORIGIN_POLL_QUIET_MS = 6_000L
 
+/** The longest a single 429 may gate the app for, whatever `Retry-After` says (30 min). */
+private const val MAX_RATE_LIMIT_BACKOFF_MS = 30L * 60L * 1_000L
+
 data class PlayerState(
     val isPlaying             : Boolean        = false,
     val currentTrack          : SpotifyTrack?  = null,
@@ -237,10 +240,7 @@ class PlayerStateManager(
             },
             onFailure = { e ->
                 when {
-                    e.message?.contains("429") == true -> {
-                        Log.w("PlayerStateManager", "poll: 429 — backing off 60 s (${e.message?.take(120)})")
-                        pollBackoffUntil = System.currentTimeMillis() + 60_000L
-                    }
+                    e.message?.contains("429") == true -> noteRateLimited(e, "poll me/player")
                     e.isTransientNetworkError() -> { /* silent */ }
                 }
                 null
@@ -282,9 +282,25 @@ class PlayerStateManager(
     // Prevents currentTrack from being nulled by a mid-transfer poll where response.item is briefly null.
     fun lockTrack()      { trackLockUntil     = System.currentTimeMillis() + 3_000L }
     fun isRateLimited()  = System.currentTimeMillis() < pollBackoffUntil
-    fun noteRateLimited() {
-        Log.w("PlayerStateManager", "429 noted by a caller — every player call backs off 60 s", Throwable())
-        pollBackoffUntil  = System.currentTimeMillis() + 60_000L
+    /** Seconds left in the shared rate-limit window, 0 when open. */
+    fun rateLimitSecondsLeft(): Long = ((pollBackoffUntil - System.currentTimeMillis()) / 1_000L).coerceAtLeast(0L)
+
+    /**
+     * Arms the ONE shared backoff window every Web API caller checks (`isRateLimited()`).
+     * **Honours `Retry-After`** (2026-09-25 evening): `safeCall` puts the header into the 429
+     * message as `Retry-After=<seconds>`; a fixed 60 s used to be re-armed on the FIRST call after
+     * it expired, every minute, for as long as Spotify's real penalty lasted — a frozen player
+     * (the 3 s poll is gated too) with hero buttons that silently did nothing. The window is now
+     * `max(60 s, Retry-After)`, capped at [MAX_RATE_LIMIT_BACKOFF_MS], and every arming is logged
+     * with its origin so a device log names the endpoint.
+     */
+    fun noteRateLimited(e: Throwable? = null, who: String = "caller") {
+        val retryAfterS = e?.message?.let { Regex("Retry-After=(\\d+)").find(it)?.groupValues?.get(1)?.toLongOrNull() }
+        val backoffMs = ((retryAfterS ?: 0L) * 1_000L).coerceIn(60_000L, MAX_RATE_LIMIT_BACKOFF_MS)
+        val until = System.currentTimeMillis() + backoffMs
+        if (until > pollBackoffUntil) pollBackoffUntil = until
+        Log.w("PlayerStateManager", "429 from $who — Retry-After=${retryAfterS ?: "?"} s; every player " +
+              "call backs off ${backoffMs / 1_000L} s (${e?.message?.take(80)})")
     }
 
     // Optimistically marks Spotify as playing AND locks the state so transient 204 polls

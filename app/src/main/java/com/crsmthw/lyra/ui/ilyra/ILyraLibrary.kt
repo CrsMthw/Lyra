@@ -42,7 +42,7 @@ class ILyraLibrary(
 
     /** Marks the global rate-limit gate when a 429 is detected in a failure message. */
     private fun noteIfRateLimited(error: Throwable?) {
-        if (error?.message?.contains("429") == true) playerStateManager.noteRateLimited()
+        if (error?.message?.contains("429") == true) playerStateManager.noteRateLimited(error, "ILyraLibrary")
     }
 
     private suspend fun loadCache(): LibraryCacheData? = withContext(Dispatchers.IO) {
