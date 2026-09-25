@@ -814,11 +814,24 @@ class PlayerViewModel(
             // the queue, not the playback. `playUris` is a var so the wake path below never
             // re-sends a body the API has already rejected.
             var playUris = uris ?: episodeSingleUri
-            // BUG C (2026-09-25): see the `shuffle` KDoc. Read off the mirror — it can be stale on a
-            // cold start (defaults false), which only means the bracket is skipped, never misapplied.
-            val bracketShuffle = shuffle == null && contextUri == null &&
-                (playUris?.size ?: 0) > 1 && playerStateManager.state.value.shuffleEnabled
-            val effectiveShuffle = if (bracketShuffle) false else shuffle
+            // BUG C (2026-09-25): see the `shuffle` KDoc. The user's setting is the mirror OR a
+            // bracket still owed ON (a previous bracket's OFF has not been undone yet — see
+            // PlayerStateManager.shuffleOwedOn). The mirror can be stale on a cold start (defaults
+            // false), which only means the bracket is skipped, never misapplied.
+            if (shuffle != null) playerStateManager.clearShuffleOwed()
+            val owedOn = playerStateManager.shuffleOwedOn
+            val userShuffleOn = playerStateManager.state.value.shuffleEnabled || owedOn
+            val multiUriBody = contextUri == null && (playUris?.size ?: 0) > 1
+            val bracketShuffle = shuffle == null && multiUriBody && userShuffleOn
+            val effectiveShuffle = when {
+                shuffle != null -> shuffle
+                bracketShuffle  -> false
+                // A context or single-item body with a debt outstanding: settle it BEFORE the play
+                // (a context's offset is honoured with shuffle on; a single item cannot start wrong).
+                owedOn          -> true
+                else            -> null
+            }
+            if (bracketShuffle) playerStateManager.markShuffleOwedOn()
             // ── Shuffle pre-set ──────────────────────────────────────────────
             // When the caller says "turn shuffle OFF before playing" (iLyra deliberate selection,
             // or the bracket above) or ON, apply it before the play request so the uris body starts
@@ -868,7 +881,7 @@ class PlayerViewModel(
             }
             result.fold(
                 onSuccess = {
-                    if (bracketShuffle) reassertShuffleOn(generation)
+                    if (bracketShuffle) reassertShuffleOn(owner)
                     delay(1_000L)
                     playerStateManager.fetchOnce()
                     clearIsWakingUp()
@@ -899,7 +912,7 @@ class PlayerViewModel(
                         if (e.isRateLimited()) playerStateManager.noteRateLimited()
                         // The bracket turned the user's shuffle OFF; a failed play must not leave
                         // it that way. (Not inside a rate limit — that PUT would only be refused.)
-                        else if (bracketShuffle) restoreShuffleOn()
+                        else if (bracketShuffle) restoreShuffleOn(owner)
                         playerStateManager.releasePlayingOptimism()
                         _uiState.update { it.copy(error = e.message, isPlaying = false) }
                         clearIsWakingUp()
@@ -954,7 +967,12 @@ class PlayerViewModel(
         fun superseded() = playerStateManager.playGeneration != generation
         fun abandon(stage: String) {
             Log.d(TAG, "wake: superseded $stage — stopping")
-            if (wakingOwner == owner) clearIsWakingUp()
+            if (wakingOwner == owner) {
+                clearIsWakingUp()
+                // Superseded by a pause / skip / Library play, which do not settle a bracket: undo
+                // it now. (A newer play here took the ownership and settles the debt itself.)
+                if (reassertShuffle) restoreShuffleOn(owner)
+            }
         }
         if (superseded()) { abandon("before it started"); return }
         ownedWakeRestores++
@@ -977,6 +995,7 @@ class PlayerViewModel(
             }
             if (shuffle != null) {
                 remoteManager.setShuffle(shuffle)
+                if (shuffle) playerStateManager.clearShuffleOwed()
                 delay(REMOTE_SHUFFLE_SETTLE_MS)
             }
             remoteManager.play(uri)
@@ -1105,8 +1124,10 @@ class PlayerViewModel(
                 else      -> "failed — the SDK plays the single item"
             })
             clearIsWakingUp()
+            // A 429 abandon leaves the debt owed (shuffleOwedOn): a PUT now would only be refused,
+            // and the next play settles it.
             if (reassertShuffle) {
-                if (accepted) reassertShuffleOn(generation) else if (!abandoned) restoreShuffleOn()
+                if (accepted) reassertShuffleOn(owner) else if (!abandoned) restoreShuffleOn(owner)
             }
         } finally {
             ownedWakeRestores--
@@ -1158,28 +1179,33 @@ class PlayerViewModel(
     /**
      * The second half of the shuffle bracket: turn shuffle back ON ~1.5 s after a successful play
      * — the `shuffleContext` re-assert pattern. Spotify keeps the playing item and shuffles the
-     * rest. Skipped when the user has made another play request meanwhile (it may have set its own
-     * shuffle state) and inside the rate-limit window.
+     * rest. Gated on OWNERSHIP ([wakingOwner]), not the play-request generation: a newer play
+     * here inherits the debt (`shuffleOwedOn`) and settles it itself, while a pause, skip or
+     * Library play in between does not, so the re-assert must still run for those. Skipped when
+     * the debt is already gone (the user chose a shuffle state) and inside the rate-limit window.
      */
-    private fun reassertShuffleOn(generation: Long) {
+    private fun reassertShuffleOn(owner: Long) {
         viewModelScope.launch {
             delay(SHUFFLE_REASSERT_DELAY_MS)
-            if (playerStateManager.playGeneration != generation) return@launch
-            restoreShuffleOnNow()
+            settleShuffleDebt(owner)
         }
     }
 
-    /** The bracket's undo when the play itself failed: the user's shuffle setting comes back. */
-    private fun restoreShuffleOn() {
-        viewModelScope.launch { restoreShuffleOnNow() }
+    /** The bracket's undo when the play failed or was superseded: the user's shuffle comes back. */
+    private fun restoreShuffleOn(owner: Long) {
+        viewModelScope.launch { settleShuffleDebt(owner) }
     }
 
-    private suspend fun restoreShuffleOnNow() {
-        if (playerStateManager.isRateLimited()) return
+    private suspend fun settleShuffleDebt(owner: Long) {
+        if (wakingOwner != owner || !playerStateManager.shuffleOwedOn) return
+        if (playerStateManager.isRateLimited()) return   // stays owed; the next play settles it
         playerStateManager.applyShuffle(true).onFailure { e ->
             when {
                 e.isRateLimited()    -> playerStateManager.noteRateLimited()
-                e.isNoActiveDevice() -> remoteManager.setShuffle(true)
+                e.isNoActiveDevice() -> {
+                    remoteManager.setShuffle(true)
+                    playerStateManager.clearShuffleOwed()
+                }
             }
         }
     }
@@ -1231,8 +1257,17 @@ class PlayerViewModel(
                 ?.distinctBy { it.id }?.map { it.uri }
         }
         val body = planWakeRestore(uri, ctx, origin, likedUris, isEpisode)
-        // The same bracket as a tap: a multi-uri body with shuffle on would start at random.
-        val bracket = body is WakeRestoreBody.Uris && body.uris.size > 1 && mirror.shuffleEnabled
+        // The same bracket as a tap: a multi-uri body with shuffle on would start at random. The
+        // user's setting is the mirror OR a previous bracket's debt (shuffleOwedOn).
+        val owedOn = playerStateManager.shuffleOwedOn
+        val bracket = body is WakeRestoreBody.Uris && body.uris.size > 1 &&
+            (mirror.shuffleEnabled || owedOn)
+        val sdkShuffle = when {
+            bracket -> false
+            owedOn  -> true    // a context / single body: settle the debt before the play
+            else    -> null
+        }
+        if (bracket) playerStateManager.markShuffleOwedOn()
         val originLabel = when (origin) {
             is PlaybackOrigin.Context -> "context ${origin.contextUri}"
             PlaybackOrigin.Liked      -> "liked"
@@ -1245,7 +1280,7 @@ class PlayerViewModel(
             uri             = uri,
             body            = body,
             positionMs      = if (isEpisode) null else pausedProgressMs,
-            shuffle         = if (bracket) false else null,
+            shuffle         = sdkShuffle,
             startPositionMs = pausedProgressMs,
             reassertShuffle = bracket,
             generation      = generation,
@@ -1265,6 +1300,7 @@ class PlayerViewModel(
     fun shuffleContext(contextUri: String) {
         if (playerStateManager.isRateLimited()) return
         playerStateManager.recordPlayOrigin(PlaybackOrigin.forContext(contextUri))
+        playerStateManager.clearShuffleOwed()   // an explicit shuffle-ON play settles a bracket's debt
         playerStateManager.setOptimisticallyPlaying()
         viewModelScope.launch {
             val shuffleResult = playerStateManager.applyShuffle(true)

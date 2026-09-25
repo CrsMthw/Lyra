@@ -113,6 +113,27 @@ class PlayerStateManager(
     val playGeneration: Long get() = playRequestGeneration.get()
     fun notePlayRequest(): Long = playRequestGeneration.incrementAndGet()
 
+    /**
+     * True while a Liked-style shuffle BRACKET (PlayerViewModel.startPlay: shuffle OFF → play →
+     * shuffle ON) has turned the user's shuffle off and not yet turned it back on. The mirror then
+     * reads `shuffleEnabled = false`, so without this a second tap inside the ~1.5 s window — or a
+     * pause / skip / Library play superseding a wake restore — would read "shuffle is off" and the
+     * user's shuffle would stay off for good. The next play treats `mirror || owed` as the user's
+     * setting; cleared by a successful ON, by an explicit shuffle choice ([toggleShuffle],
+     * [setShuffle], a caller's `shuffle` argument, a shuffle-play), never by a 429.
+     */
+    @Volatile var shuffleOwedOn: Boolean = false
+        private set
+    fun markShuffleOwedOn() { shuffleOwedOn = true }
+    fun clearShuffleOwed()  { shuffleOwedOn = false }
+
+    /**
+     * ONE writer for the origin file: two writes launched close together (a Lyra play and a poll
+     * observation) must land in the order they were issued, or the older origin would be what
+     * survives on disk. `synchronized` in the store protects the file, not the order.
+     */
+    private val originWriter = Dispatchers.IO.limitedParallelism(1)
+
     @Volatile private var lastLyraOriginAt = 0L
     /** The context uri the poll last reported (null included), so a CHANGE is what gets recorded. */
     @Volatile private var lastObservedContextUri: String? = null
@@ -125,10 +146,10 @@ class PlayerStateManager(
     fun recordPlayOrigin(origin: PlaybackOrigin) {
         notePlayRequest()
         lastLyraOriginAt = System.currentTimeMillis()
-        scope.launch(Dispatchers.IO) { originStore.save(origin) }
+        scope.launch(originWriter) { originStore.save(origin) }
     }
 
-    suspend fun loadPlayOrigin(): PlaybackOrigin? = withContext(Dispatchers.IO) { originStore.load() }
+    suspend fun loadPlayOrigin(): PlaybackOrigin? = withContext(originWriter) { originStore.load() }
 
     /** Poll side: remember a context the user started elsewhere (e.g. inside the Spotify app). */
     private fun observeContextUri(contextUri: String?) {
@@ -137,7 +158,7 @@ class PlayerStateManager(
         if (contextUri == null) return
         if (System.currentTimeMillis() - lastLyraOriginAt < ORIGIN_POLL_QUIET_MS) return
         val origin = PlaybackOrigin.forContext(contextUri)
-        scope.launch(Dispatchers.IO) { originStore.save(origin) }
+        scope.launch(originWriter) { originStore.save(origin) }
     }
 
     init { startPolling() }
@@ -393,6 +414,7 @@ class PlayerStateManager(
     }
 
     fun toggleShuffle() {
+        clearShuffleOwed()
         val new = !_state.value.shuffleEnabled
         lockShuffle()
         _state.update { it.copy(shuffleEnabled = new) }
@@ -409,6 +431,7 @@ class PlayerStateManager(
      * structure: optimistic lock + optimistic state + Web API, 404 → App Remote.
      */
     fun setShuffle(enabled: Boolean) {
+        clearShuffleOwed()
         lockShuffle()
         _state.update { it.copy(shuffleEnabled = enabled) }
         scope.launch {
@@ -427,7 +450,7 @@ class PlayerStateManager(
     suspend fun applyShuffle(enabled: Boolean): Result<Unit> {
         lockShuffle()
         _state.update { it.copy(shuffleEnabled = enabled) }
-        return repository.setShuffle(enabled)
+        return repository.setShuffle(enabled).also { if (enabled && it.isSuccess) clearShuffleOwed() }
     }
 
     /**

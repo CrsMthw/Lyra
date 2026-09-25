@@ -1,6 +1,7 @@
 package com.crsmthw.lyra.data.remote
 
 import android.content.Context
+import android.util.Log
 import com.crsmthw.lyra.data.auth.SpotifyAuthManager
 import com.crsmthw.lyra.data.local.EncryptedPrefs
 import com.spotify.android.appremote.api.ConnectionParams
@@ -13,6 +14,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
+
+private const val TAG = "SpotifyRemote"
 
 /**
  * Manages the Spotify App Remote connection.
@@ -67,9 +70,14 @@ class SpotifyRemoteManager(
      */
     suspend fun connectSuspend(): Boolean {
         if (liveRemote() != null) {
+            Log.d(TAG, "connectSuspend: live remote (SDK isConnected) — short-circuit")
             _connected.value = true
             return true
         }
+        Log.d(TAG, "connectSuspend: " + when {
+            _appRemote != null -> "stale remote dropped (SDK isConnected=false, flag=${_connected.value}) — real connect"
+            else               -> "no remote — real connect"
+        })
         dropStaleRemote()
         _connecting.value = true
         return try {

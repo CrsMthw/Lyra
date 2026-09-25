@@ -1525,6 +1525,7 @@ class LibraryViewModel(
 
     fun shufflePlaylist(uri: String) {
         playerStateManager.recordPlayOrigin(PlaybackOrigin.forContext(uri))
+        playerStateManager.clearShuffleOwed()   // an explicit shuffle-ON play settles a bracket's debt
         playerStateManager.setOptimisticallyPlaying()
         viewModelScope.launch {
             repository.setShuffle(true)
