@@ -270,7 +270,7 @@ internal fun RightPaneContent(
                     name         = playlistName,
                     trackCount   = trackCount,
                     onPlay       = { haptics.press(); viewModel.playPlaylist(playUri) },
-                    onShuffle    = { haptics.press(); viewModel.shufflePlaylist(playUri) },
+                    onShuffle    = { haptics.press(); playerViewModel.shuffleContext(playUri) },
                     selecting    = inSelection || inReorder,
                     playlistId   = playlist?.id,
                     sharedScope  = sharedScope,
