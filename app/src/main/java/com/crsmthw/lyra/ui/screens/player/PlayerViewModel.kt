@@ -1403,9 +1403,18 @@ class PlayerViewModel(
             // The state must have TAKEN EFFECT before the context play: OFF still pending → a
             // random first song; ON still pending → track 1 with the rest in order.
             if (shuffleErr == null) confirmShuffleState(shuffle)
-            val startAt = if (!shuffle) null else itemCount
-                ?.takeIf { it > 1 && !isCollectionContext(contextUri) }
-                ?.let { Random.nextInt(it) }
+            // An explicit offset is honoured WHATEVER the shuffle state (device pass 2026-09-25,
+            // A5), and the state the poll confirmed is not what decides the first song: the phone
+            // client applies its own remembered preference when a context starts (pm rerun: "OFF
+            // confirmed", then "landed with shuffle=true", every time until the re-asserts had
+            // flipped it). So the first item is pinned here — position 0 for Play, a random
+            // position for Shuffle — and the re-assert below only has to sort out the REST.
+            // Never for the Liked `collection`, which rejects any offset.
+            val startAt = when {
+                isCollectionContext(contextUri) -> null
+                !shuffle                        -> 0
+                else                            -> itemCount?.takeIf { it > 1 }?.let { Random.nextInt(it) }
+            }
 
             repository.play(contextUri = contextUri, offsetPosition = startAt).fold(
                 onSuccess = {
