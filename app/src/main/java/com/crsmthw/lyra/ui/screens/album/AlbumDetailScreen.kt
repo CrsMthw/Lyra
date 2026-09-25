@@ -118,12 +118,12 @@ fun AlbumDetailScreen(
                 val onPlayAll: () -> Unit = {
                     if (tracks.isNotEmpty()) {
                         haptics.press()
-                        playerViewModel.playTrack(uri = tracks[0].uri, contextUri = albumUri, index = 0)
+                        playerViewModel.playTrack(uri = tracks[0].uri, contextUri = albumUri)
                         onNavigateToPlayer()
                     }
                 }
-                val onPlayTrack = { track: AlbumTrack, idx: Int ->
-                    playerViewModel.playTrack(uri = track.uri, contextUri = albumUri, index = idx)
+                val onPlayTrack = { track: AlbumTrack ->
+                    playerViewModel.playTrack(uri = track.uri, contextUri = albumUri)
                     onNavigateToPlayer()
                 }
                 val onTrackLongPress = { track: AlbumTrack ->
@@ -273,8 +273,8 @@ fun AlbumDetailScreen(
                                         modifier       = Modifier.fillMaxSize(),
                                         contentPadding = PaddingValues(top = statusBarTopDp, bottom = 100.dp + navBarBottomDp),
                                     ) {
-                                        itemsIndexed(tracks, key = { idx, t -> "track_${t.id}_$idx" }) { idx, track ->
-                                            AlbumTrackRow(track = track, onClick = { onPlayTrack(track, idx) }, onLongClick = { onTrackLongPress(track) })
+                                        itemsIndexed(tracks, key = { idx, t -> "track_${t.id}_$idx" }) { _, track ->
+                                            AlbumTrackRow(track = track, onClick = { onPlayTrack(track) }, onLongClick = { onTrackLongPress(track) })
                                         }
                                         if (!album.label.isNullOrBlank() || album.copyrights?.isNotEmpty() == true) {
                                             item(key = "footer") { AlbumFooter(album = album) }
@@ -341,8 +341,8 @@ fun AlbumDetailScreen(
                                     artContent   = albumArt,
                                 )
                             }
-                            itemsIndexed(tracks, key = { idx, t -> "track_${t.id}_$idx" }) { idx, track ->
-                                AlbumTrackRow(track = track, onClick = { onPlayTrack(track, idx) }, onLongClick = { onTrackLongPress(track) })
+                            itemsIndexed(tracks, key = { idx, t -> "track_${t.id}_$idx" }) { _, track ->
+                                AlbumTrackRow(track = track, onClick = { onPlayTrack(track) }, onLongClick = { onTrackLongPress(track) })
                             }
                             if (!album.label.isNullOrBlank() || album.copyrights?.isNotEmpty() == true) {
                                 item(key = "footer") { AlbumFooter(album = album) }

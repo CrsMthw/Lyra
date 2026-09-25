@@ -136,16 +136,6 @@ class SpotifyRemoteManager(
         _appRemote?.playerApi?.play(uri)
     }
 
-    fun skipToIndex(contextUri: String, index: Int) {
-        _appRemote?.playerApi?.skipToIndex(contextUri, index)
-    }
-
-    suspend fun connectAndSkipToIndex(contextUri: String, index: Int): Boolean {
-        if (!connectSuspend()) return false
-        skipToIndex(contextUri, index)
-        return true
-    }
-
     /**
      * Seek whatever the App Remote is currently playing to [positionMs] (`PlayerApi.seekTo(long)`).
      *

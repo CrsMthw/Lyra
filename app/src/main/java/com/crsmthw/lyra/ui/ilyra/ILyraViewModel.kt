@@ -1042,10 +1042,9 @@ class ILyraViewModel(
                 ILyraEffect.PlayTrack(
                     uri = item.id,
                     contextUri = screen.albumUri,
-                    // No index: it would be this FILTERED list's position, and the App Remote
-                    // fallback would skipToIndex into the real context with it. The Web API path
-                    // positions by uri; the fallback plays the uri itself.
-                    index = null,
+                    // Positioned by uri (offset.uri) on every path, the App Remote wake restore
+                    // included — the row index is this FILTERED list's position and is never sent
+                    // (resolved 2026-09-25, docs/IPOD.md).
                     shuffle = false,
                 ),
             )
@@ -1269,9 +1268,8 @@ class ILyraViewModel(
                 ILyraEffect.PlayTrack(
                     uri = trackUri,
                     contextUri = screen.playlistUri,
-                    // No index — see activateAlbumTrackItem: a filtered-list position must never
-                    // reach skipToIndex (playlists also hide episodes and unplayable tracks).
-                    index = null,
+                    // Positioned by uri, like activateAlbumTrackItem — a filtered-list position is
+                    // never sent (playlists also hide episodes and unplayable tracks).
                     shuffle = false,
                 ),
             )

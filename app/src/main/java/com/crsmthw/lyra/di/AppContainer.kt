@@ -1,6 +1,8 @@
 package com.crsmthw.lyra.di
 
 import android.content.Context
+import android.os.Build
+import android.provider.Settings
 import coil3.ImageLoader
 import coil3.disk.DiskCache
 import coil3.memory.MemoryCache
@@ -28,6 +30,20 @@ import retrofit2.converter.gson.GsonConverterFactory
 import kotlin.time.Duration.Companion.seconds
 
 class AppContainer(context: Context) {
+
+    private val appContext: Context = context.applicationContext
+
+    /**
+     * The names this phone is likely listed under in `me/player/devices` — the user-set device
+     * name (Settings.Global `device_name`) and `Build.MODEL`. Read at call time (the name can be
+     * edited); the wake restore matches them against the device list (`pickLocalDevice`).
+     */
+    fun localDeviceNameHints(): List<String> = listOfNotNull(
+        runCatching {
+            Settings.Global.getString(appContext.contentResolver, Settings.Global.DEVICE_NAME)
+        }.getOrNull(),
+        Build.MODEL,
+    ).filter { it.isNotBlank() }.distinct()
 
     // ── Local storage ────────────────────────────────────────────────────────
     val encryptedPrefs = EncryptedPrefs(context)

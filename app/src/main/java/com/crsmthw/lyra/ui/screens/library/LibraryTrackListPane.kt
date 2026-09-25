@@ -217,8 +217,9 @@ internal fun RightPaneContent(
                 } else if (inSelection) {
                     viewModel.toggleTrackSelection(track.uri)
                 } else if (playlist != null) {
-                    val idx = state.currentTracks.indexOfFirst { it.uri == track.uri }.coerceAtLeast(0)
-                    playerViewModel.playTrack(track.uri, contextUri = playlist.uri, index = idx)
+                    // Positioned by uri (offset.uri) on every path — a row index is a FILTERED
+                    // position and is never sent anywhere (docs/PLAYER.md → Playback 404 Fallback).
+                    playerViewModel.playTrack(track.uri, contextUri = playlist.uri)
                     onTrackClick()
                 } else {
                     playerViewModel.playFromLikedSongs(track.uri)

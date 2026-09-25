@@ -303,14 +303,22 @@ class PlayerStateManager(
                         if (e.message?.contains("404") == true && track != null) {
                             onWakeOperationStart?.invoke()
                             progressTickJob?.cancel()
-                            _state.update { it.copy(progressMs = 0L) }
-                            remoteManager.connectAndPlay(track.uri)
-                            delay(500L)
-                            fetchPlayerState()
-                            // Start tick optimistically so the bar counts from the moment
-                            // indeterminate clears, even if fetchPlayerState returned 204.
-                            if (progressTickJob?.isActive != true) startProgressTick()
-                            onWakeOperationComplete?.invoke()
+                            // The full restore (PlayerViewModel.restoreAfterWake): the SDK plays the
+                            // item, the queue is rebuilt from where it came from, and the waking
+                            // state clears only once Spotify reports the song playing — the hook
+                            // owns that clear. Before 2026-09-25 this was the bare single-uri play
+                            // below and nothing else, so a play after Spotify died queued ONE song.
+                            val restored = onWakeRestore?.invoke(track, current.progressMs) == true
+                            if (!restored) {
+                                _state.update { it.copy(progressMs = 0L) }
+                                remoteManager.connectAndPlay(track.uri)
+                                delay(500L)
+                                fetchPlayerState()
+                                // Start tick optimistically so the bar counts from the moment
+                                // indeterminate clears, even if fetchPlayerState returned 204.
+                                if (progressTickJob?.isActive != true) startProgressTick()
+                                onWakeOperationComplete?.invoke()
+                            }
                         }
                     },
                 )

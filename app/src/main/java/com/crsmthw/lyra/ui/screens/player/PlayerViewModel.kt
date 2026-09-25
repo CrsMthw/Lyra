@@ -7,6 +7,10 @@ import androidx.lifecycle.viewModelScope
 import com.crsmthw.lyra.data.local.LibraryCache
 import com.crsmthw.lyra.data.player.PlaybackOrigin
 import com.crsmthw.lyra.data.player.PlayerStateManager
+import com.crsmthw.lyra.data.player.WakeRestoreBody
+import com.crsmthw.lyra.data.player.isCollectionContext
+import com.crsmthw.lyra.data.player.pickLocalDevice
+import com.crsmthw.lyra.data.player.planWakeRestore
 import com.crsmthw.lyra.data.remote.SpotifyRemoteManager
 import com.crsmthw.lyra.data.remote.model.SpotifyDevice
 import com.crsmthw.lyra.data.remote.model.SpotifyPlaylist
@@ -26,8 +30,10 @@ import com.crsmthw.lyra.ui.components.toTrackActionTarget
 import com.crsmthw.lyra.util.LyricLine
 import com.crsmthw.lyra.util.visualizer.VisualizerManager
 import com.crsmthw.lyra.util.visualizer.VisualizerStyle
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
@@ -40,6 +46,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -61,6 +68,25 @@ private const val SDK_SEEK_SETTLE_MS = 1_200L
  * picked at random (the exact bug the user reports). Tunable on device.
  */
 private const val REMOTE_SHUFFLE_SETTLE_MS = 300L
+
+/**
+ * The wake restore's device wait (docs/PLAYER.md → Playback 404 Fallback): `me/player/devices` every
+ * [WAKE_DEVICE_POLL_MS] until this phone is LISTED, for at most [WAKE_DEVICE_TIMEOUT_MS] after the
+ * SDK play — then one body without `device_id`. Two seconds keeps a minute's wait at ~30 calls.
+ */
+private const val WAKE_DEVICE_POLL_MS    = 2_000L
+private const val WAKE_DEVICE_TIMEOUT_MS = 60_000L
+
+/**
+ * After the body is accepted, `me/player` every [WAKE_CONFIRM_POLL_MS] until Spotify REPORTS the
+ * song playing (the only thing that clears the waking state), for at most [WAKE_CONFIRM_TIMEOUT_MS].
+ * 700 ms is `fetchUntilTrackChanges`' cadence.
+ */
+private const val WAKE_CONFIRM_POLL_MS    = 700L
+private const val WAKE_CONFIRM_TIMEOUT_MS = 8_000L
+
+/** The shuffle bracket's re-assert delay after a successful play — `shuffleContext`'s 1.5 s. */
+private const val SHUFFLE_REASSERT_DELAY_MS = 1_500L
 
 /** How many albums' cassette fine print the player keeps (one small entry per album id). */
 private const val CASSETTE_META_CACHE_SIZE = 24
@@ -155,6 +181,8 @@ class PlayerViewModel(
     private val lyricsRepository  : LyricsRepository,
     private val settingsRepository: SettingsRepository,
     private val visualizerManager : VisualizerManager,
+    /** This phone's likely Spotify Connect names (Settings `device_name`, `Build.MODEL`) — see [pickLocalDevice]. */
+    private val deviceNameHints   : () -> List<String>,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(PlayerUiState())
@@ -226,6 +254,34 @@ class PlayerViewModel(
     // playTrack / playPause / skip paths cancel this job and clear explicitly via clearIsWakingUp().
     private var clearWakingUpJob: Job? = null
     private var lyricsJob: Job? = null
+
+    /**
+     * The play in flight (a tap, or the play button's restore). A new one cancels it: a wake
+     * restore can wait a minute for its device, and must never send its body over a newer choice.
+     * (The play-request generation covers the paths that do not go through here.)
+     */
+    private var playbackJob: Job? = null
+
+    /**
+     * How many [restoreAfterWake] calls are running (main thread only). While non-zero the
+     * `connecting` collector does not arm its 3.5 s fallback clear — Cris's rule: the waking state
+     * lasts until Spotify reports the song playing, and a restore's own connect would otherwise
+     * start a timer that clears it mid-wait.
+     */
+    private var ownedWakeRestores = 0
+
+    /**
+     * Which VM-issued play currently OWNS the waking state (main thread only): bumped by every
+     * [startPlay] and every play-button restore. A superseded restore clears the waking state only
+     * if it is still the owner — i.e. what superseded it was a pause, a skip or a Library /
+     * shuffle play, none of which clears a waking state it did not set — and leaves it alone when
+     * a newer play here has taken it over (that play clears it when ITS song is reported playing).
+     */
+    private var wakingOwner = 0L
+
+    /** Installed as `PlayerStateManager.onWakeRestore`; kept so [onCleared] removes only its own. */
+    private val wakeRestoreHook: suspend (SpotifyTrack, Long) -> Boolean =
+        { track, pausedProgressMs -> runPlayButtonRestore(track, pausedProgressMs) }
 
     private fun clearIsWakingUp() {
         clearWakingUpJob?.cancel()
@@ -313,12 +369,13 @@ class PlayerViewModel(
                 if (connecting) {
                     clearWakingUpJob?.cancel()
                     _uiState.update { it.copy(isWakingUp = true) }
-                } else {
+                } else if (ownedWakeRestores == 0) {
                     // Fallback: library-play (LibraryViewModel) calls the SDK with no callback.
-                    // For playTrack/playPause/skip the explicit clear will cancel this before it fires.
+                    // For playTrack/playPause/skip the explicit clear will cancel this before it
+                    // fires; a running restoreAfterWake never arms it (see ownedWakeRestores).
                     clearWakingUpJob = viewModelScope.launch {
                         delay(3_500L)
-                        _uiState.update { it.copy(isWakingUp = false) }
+                        if (ownedWakeRestores == 0) _uiState.update { it.copy(isWakingUp = false) }
                     }
                 }
             }
@@ -332,6 +389,8 @@ class PlayerViewModel(
         playerStateManager.onWakeOperationComplete = {
             viewModelScope.launch { clearIsWakingUp() }
         }
+        // The play button's wake restore — the same restoreAfterWake a tap uses (§ playPause).
+        playerStateManager.onWakeRestore = wakeRestoreHook
         // The cassette's album fine print. Anti-bloat: NO album call while the feature is off —
         // the id is null then, and flipping the feature ON with a track playing emits that track's
         // album id, which fetches it. Episodes and local files have no id (cassetteAlbumIdFor).
@@ -363,6 +422,12 @@ class PlayerViewModel(
                 }
         }
         remoteManager.connect(onConnected = { }, onFailure = { })
+    }
+
+    override fun onCleared() {
+        // The manager is app-scoped: a dead ViewModel's hook would leak it and restore into it.
+        if (playerStateManager.onWakeRestore === wakeRestoreHook) playerStateManager.onWakeRestore = null
+        super.onCleared()
     }
 
     private suspend fun checkIsLiked(trackId: String) {
@@ -557,12 +622,20 @@ class PlayerViewModel(
                 // still hold duplicate liked songs (see LibraryViewModel pagination dedup).
                 libraryCache.loadTrackList(LibraryCache.LIKED_SONGS_KEY)?.tracks?.distinctBy { it.id }
             }
-            if (cached != null) {
-                val idx = cached.indexOfFirst { it.uri == trackUri }.coerceAtLeast(0)
-                playTrack(trackUri, uris = cached.drop(idx).map { it.uri }.take(750), shuffle = shuffle)
-            } else {
-                playTrack(trackUri, shuffle = shuffle)
-            }
+            // Origin = Liked either way: a restore rebuilds the window from the liked cache at that
+            // time (the collection context rejects an offset, so it is never sent as a context).
+            // A uri missing from the cache (not indexed yet) plays alone: a window from the TOP of
+            // the list would lead with a different song, and a uris body plays its head.
+            val idx = cached?.indexOfFirst { it.uri == trackUri } ?: -1
+            startPlay(
+                uri             = trackUri,
+                contextUri      = null,
+                uris            = cached?.takeIf { idx >= 0 }
+                    ?.drop(idx)?.map { it.uri }?.take(PlaybackOrigin.URI_CAP),
+                startPositionMs = null,
+                shuffle         = shuffle,
+                origin          = PlaybackOrigin.Liked,
+            )
         }
     }
 
@@ -653,6 +726,15 @@ class PlayerViewModel(
     // ── Play track (keeps SDK fallback logic, always user-initiated) ──────────
 
     /**
+     * Plays [uri] — alone, inside [contextUri] (positioned by `offset.uri`, honoured even with
+     * shuffle ON), or at the head of [uris].
+     *
+     * There is no `index` any more (2026-09-25): the 404 fallback used to `skipToIndex` into the
+     * context through the App Remote, which is fire-and-forget and was dispatched before a freshly
+     * started Spotify had loaded the context, so it was DROPPED and song 1 played. The fallback now
+     * plays the single item for instant audio and then sends the context / uris body ONCE through
+     * the Web API, positioned by uri ([restoreAfterWake]).
+     *
      * @param startPositionMs where the caller knows this item should start — an episode's
      *   `resume_point` (`ShowDetailScreen`), or null to let the API decide. It is deliberately NOT
      *   forwarded to `me/player/play`: the server resumes an episode from its own authoritative
@@ -663,22 +745,45 @@ class PlayerViewModel(
      *   authorized before that scope existed (a refresh never widens a grant), and on an episode
      *   the user has never started — in both cases the REST path's server-side resume, unchanged
      *   here, is what places the playhead.
-     */
-    /**
-     * @param shuffle When non-null and different from the current shuffle state, the shuffle mode is
-     *   changed BEFORE the play request. iLyra mode passes `false` for a deliberate song selection
-     *   (with shuffle on, a uris body starts at a random entry — the "tapped one song, got another"
-     *   bug) and `null` for non-iLyra callers that leave the device state alone.
+     * @param shuffle When non-null, the shuffle mode is set to it BEFORE the play request. iLyra
+     *   passes `false` for a deliberate song selection. When null and the body is a multi-uri
+     *   `uris` list while the mirror says shuffle is ON, the play is BRACKETED instead: shuffle OFF
+     *   → play → shuffle ON again ~1.5 s later — a `uris` body with shuffle on starts at a RANDOM
+     *   entry (the Liked Songs "tapped one song, got another" bug), while the bracket gives what a
+     *   playlist tap gives natively: the tapped song first, the rest shuffled. Context bodies are
+     *   never bracketed (their offset is honoured).
      */
     fun playTrack(
         uri            : String,
         contextUri     : String?       = null,
         uris           : List<String>? = null,
-        index          : Int?          = null,
         startPositionMs: Long?         = null,
         shuffle        : Boolean?      = null,
+    ) = startPlay(
+        uri             = uri,
+        contextUri      = contextUri,
+        uris            = uris,
+        startPositionMs = startPositionMs,
+        shuffle         = shuffle,
+        origin          = when {
+            contextUri != null -> PlaybackOrigin.forContext(contextUri)
+            else               -> PlaybackOrigin.forUris(uris ?: listOf(uri))
+        },
+    )
+
+    private fun startPlay(
+        uri            : String,
+        contextUri     : String?,
+        uris           : List<String>?,
+        startPositionMs: Long?,
+        shuffle        : Boolean?,
+        origin         : PlaybackOrigin,
     ) {
         val isEpisode = uri.startsWith("spotify:episode:")
+        // Recorded BEFORE anything is sent, and it bumps the play-request generation: an older
+        // wake restore still waiting for its device sees the bump and abandons silently.
+        playerStateManager.recordPlayOrigin(origin)
+        val generation = playerStateManager.playGeneration
         playerStateManager.setOptimisticallyPlaying()
         playerStateManager.resetProgressForNewTrack()
         _uiState.update { it.copy(isPlaying = true, isLiked = false, error = null, isWakingUp = true) }
@@ -690,42 +795,44 @@ class PlayerViewModel(
             val trackId = uri.substringAfterLast(":")
             viewModelScope.launch { checkIsLiked(trackId) }
         }
-        viewModelScope.launch {
-            // ── Shuffle pre-set ──────────────────────────────────────────────
-            // When the caller says "turn shuffle OFF before playing" (iLyra deliberate selection) or
-            // ON, apply it before the play request so the uris body starts at the tapped entry
-            // instead of a random one. Always sends the PUT when shuffle is non-null: the mirror
-            // may be stale (cold start, Spotify closed → shuffleEnabled defaults false while the
-            // device is actually shuffling), so comparing against it would skip the PUT in exactly
-            // the scenario the user hits first. One idempotent PUT per deliberate selection is the
-            // correct price. A 404 is NOT an error — it means "no active device", and the App
-            // Remote fallback below handles both the shuffle and the play.
-            if (shuffle != null) {
-                val result = playerStateManager.applyShuffle(shuffle)
-                val err = result.exceptionOrNull()
-                if (err != null) {
-                    if (err.isRateLimited()) playerStateManager.noteRateLimited()
-                    // A 404 is fine — the App Remote fallback below sends setShuffle too.
-                }
-            }
+        playbackJob?.cancel()
+        val owner = ++wakingOwner
+        playbackJob = viewModelScope.launch {
             // The body an EPISODE degrades to, and the body it restores with — null for a track.
             // `repository.play` is wire-identical for `uris = [uri]` and `uri = uri` (both send
             // `PlayRequest(uris = listOf(uri))`), so this changes nothing about the request; what it
-            // changes is that `playUris` stays non-null for an episode, which is what makes
-            // `needsRestore` true below. Without it a ONE-EPISODE show (whose `uris` is null by
-            // design) never ran the restore loop at all, so the App Remote's 0:00 start was never
-            // corrected — the Web API's play is the only one of the two that honours Spotify's
-            // server-side resume point. Gated on `contextUri == null` so the restore loop's
-            // `pending` branch can never pre-empt its `contextUri` branch.
+            // changes is that `playUris` stays non-null for an episode, so the wake path always
+            // has a body to send. Without it a ONE-EPISODE show (whose `uris` is null by design)
+            // was never restored at all, so the App Remote's 0:00 start was never corrected — the
+            // Web API's play is the only one of the two that honours Spotify's server-side resume
+            // point. Gated on `contextUri == null` so it can never pre-empt a context body.
             val episodeSingleUri = listOf(uri).takeIf { isEpisode && contextUri == null }
             // The uri list actually being sent. Queue continuity is BEST-EFFORT: `uris` holding
             // more than one entry is undocumented for episodes (the Web API reference describes
             // `uris` as track uris, and a show is not a valid `context_uri`), while a SINGLE uri is
             // the shape podcasts shipped on and tracks have always used. So the first time the API
             // refuses the multi-uri body we degrade to `[uri]` once and carry on — the user loses
-            // the queue, not the playback. `playUris` is a var so the SDK-restore loop below cannot
-            // spend its whole 10-second window re-sending a body the API has already rejected.
+            // the queue, not the playback. `playUris` is a var so the wake path below never
+            // re-sends a body the API has already rejected.
             var playUris = uris ?: episodeSingleUri
+            // BUG C (2026-09-25): see the `shuffle` KDoc. Read off the mirror — it can be stale on a
+            // cold start (defaults false), which only means the bracket is skipped, never misapplied.
+            val bracketShuffle = shuffle == null && contextUri == null &&
+                (playUris?.size ?: 0) > 1 && playerStateManager.state.value.shuffleEnabled
+            val effectiveShuffle = if (bracketShuffle) false else shuffle
+            // ── Shuffle pre-set ──────────────────────────────────────────────
+            // When the caller says "turn shuffle OFF before playing" (iLyra deliberate selection,
+            // or the bracket above) or ON, apply it before the play request so the uris body starts
+            // at the tapped entry instead of a random one. Always sends the PUT when non-null: the
+            // mirror may be stale (cold start, Spotify closed → shuffleEnabled defaults false while
+            // the device is actually shuffling), so comparing against it would skip the PUT in
+            // exactly the scenario the user hits first. One idempotent PUT per deliberate selection
+            // is the correct price. A 404 is NOT an error — it means "no active device", and the
+            // App Remote fallback below handles both the shuffle and the play.
+            if (effectiveShuffle != null) {
+                val err = playerStateManager.applyShuffle(effectiveShuffle).exceptionOrNull()
+                if (err != null && err.isRateLimited()) playerStateManager.noteRateLimited()
+            }
             var result = repository.play(
                 uri        = uri,
                 contextUri = contextUri,
@@ -762,143 +869,390 @@ class PlayerViewModel(
             }
             result.fold(
                 onSuccess = {
+                    if (bracketShuffle) reassertShuffleOn(generation)
                     delay(1_000L)
                     playerStateManager.fetchOnce()
                     clearIsWakingUp()
                 },
                 onFailure = { e ->
                     if (e.isNoActiveDevice()) {
-                        // When the caller asked for a specific shuffle state, apply it via
-                        // the App Remote BEFORE playing. Always sends when shuffle is
-                        // non-null: whether the pre-set 404'd or not, we're going through
-                        // the SDK now and the remote is the only way to set shuffle here.
-                        // remoteManager.setShuffle self-connects, and connectAndPlay reuses
-                        // the live connection, so no extra connect round trip.
-                        if (shuffle != null) {
-                            remoteManager.setShuffle(shuffle)
-                            delay(REMOTE_SHUFFLE_SETTLE_MS)
+                        val body = when {
+                            contextUri != null -> WakeRestoreBody.Context(contextUri)
+                            playUris   != null -> WakeRestoreBody.Uris(playUris)
+                            // A track whose multi-uri body was refused above: nothing to rebuild.
+                            else               -> null
                         }
-                        val sdkSuccess = when {
-                            contextUri != null && index != null -> {
-                                val ok = remoteManager.connectAndPlay(contextUri)
-                                if (ok) remoteManager.skipToIndex(contextUri, index)
-                                ok
-                            }
-                            else -> {
-                                val ok = remoteManager.connectAndPlay(uri)
-                                // The SDK's play() starts an episode at 0:00 — unlike the Web API
-                                // it does not consult the server-side resume point. When the caller
-                                // knows the position, seek to it rather than waiting for the restore
-                                // loop's first attempt. The settle delay is required, not defensive:
-                                // connectAndPlay returns when the IPC call has been DISPATCHED, not
-                                // when playback has started, so a seek in the same breath arrives
-                                // before the item does and is dropped.
-                                if (ok && startPositionMs != null) {
-                                    delay(SDK_SEEK_SETTLE_MS)
-                                    remoteManager.seekTo(startPositionMs)
-                                }
-                                ok
-                            }
-                        }
-                        // Cancel the 3.5s fallback timer — we own the clear from here.
-                        clearWakingUpJob?.cancel()
-                        if (sdkSuccess) {
-                            // `playUris`, not `uris`: a list already degraded above is gone, and
-                            // there is then nothing to restore (the SDK is playing the single item),
-                            // so the loop is correctly skipped. For an EPISODE `playUris` is never
-                            // null (see `episodeSingleUri`) — the restore is what puts it at its
-                            // resume point, so it must run even with no queue to rebuild.
-                            val needsRestore = playUris != null || (contextUri != null && index == null)
-                            if (needsRestore) {
-                                val sdkStartedAt = System.currentTimeMillis()
-                                val deadline = sdkStartedAt + 10_000L
-                                while (System.currentTimeMillis() < deadline) {
-                                    delay(1_500L)
-                                    val elapsedMs = System.currentTimeMillis() - sdkStartedAt
-                                    val pending   = playUris
-                                    var rateLimited = false
-                                    val ok = when {
-                                        pending != null -> {
-                                            // An EPISODE resumes from Spotify's own server-side
-                                            // position when the play call carries NO `position_ms` —
-                                            // which is why a half-listened episode resumes correctly
-                                            // whenever the Web API is the path that starts it.
-                                            // Sending `elapsedMs` overrode that and pinned the
-                                            // restored episode a second or two from the START: the
-                                            // symptom Cris hit was "force-stop Spotify, tap a
-                                            // half-listened episode, it plays from 0:00". A track
-                                            // has no resume point, so for tracks `elapsedMs` is
-                                            // still exactly what makes the restore seamless.
-                                            //
-                                            // Read off the body's OWN first entry rather than the
-                                            // tapped `uri`: `position_ms` applies to whatever `uris`
-                                            // starts with, so this stays right even if a caller ever
-                                            // leads with something other than the tapped item.
-                                            val restorePositionMs =
-                                                if (pending.firstOrNull()?.startsWith("spotify:episode:") == true) null
-                                                else elapsedMs
-                                            val restore = repository.play(uris = pending, positionMs = restorePositionMs)
-                                            val err     = restore.exceptionOrNull()
-                                            when {
-                                                // A 429 says nothing about the body — the SAME body
-                                                // is fine once the window passes. Arm the shared
-                                                // backoff gate and ABANDON the loop with `playUris`
-                                                // INTACT: retrying every 1.5s inside a penalty
-                                                // window is exactly the hammering the gate exists
-                                                // to stop. This does NOT recover the queue (the SDK
-                                                // is playing the single item and we stop trying to
-                                                // restore it); what it fixes is the wrong diagnosis
-                                                // — before, a 429 read as "the API refused this
-                                                // body", nulled playUris and dropped the queue
-                                                // permanently on a transient throttle.
-                                                err != null && err.isRateLimited() -> {
-                                                    Log.w(TAG, "SDK restore rate limited; backing off " +
-                                                               "and leaving the queue unrestored", err)
-                                                    playerStateManager.noteRateLimited()
-                                                    rateLimited = true
-                                                }
-                                                // The same degrade as the direct call, applied inside
-                                                // the loop: a multi-uri body the API REFUSES must not
-                                                // be re-sent for the full 10-second window. A 404 here
-                                                // is just "the device isn't awake yet" — that is
-                                                // exactly what this loop retries for, so it never
-                                                // degrades.
-                                                err != null && pending.size > 1 && err.isRequestRefused() -> {
-                                                    Log.w(TAG, "SDK restore refused a ${pending.size}-uri " +
-                                                               "body (${err.message}); dropping the queue", err)
-                                                    // Same reasoning as the direct call's degrade:
-                                                    // an episode falls back to the single uri (one
-                                                    // more iteration can still place it at its
-                                                    // resume point), a track to null.
-                                                    playUris = episodeSingleUri
-                                                }
-                                            }
-                                            restore.isSuccess
-                                        }
-                                        contextUri != null -> repository.play(contextUri = contextUri, offsetUri = uri, positionMs = elapsedMs).isSuccess
-                                        else               -> true
-                                    }
-                                    if (ok || rateLimited) break
-                                }
-                            }
-                            delay(500L)
-                            playerStateManager.fetchOnce()
-                        } else {
-                            playerStateManager.releasePlayingOptimism()
-                            _uiState.update { it.copy(error = "Couldn't connect to Spotify.", isPlaying = false) }
-                        }
+                        restoreAfterWake(
+                            uri             = uri,
+                            body            = body,
+                            positionMs      = if (isEpisode) null else 0L,
+                            shuffle         = effectiveShuffle,
+                            startPositionMs = startPositionMs,
+                            reassertShuffle = bracketShuffle,
+                            generation      = generation,
+                            owner           = owner,
+                            degradeTo       = episodeSingleUri,
+                        )
                     } else {
                         // Share the one 60-second penalty window with every other caller rather
                         // than letting this path fire again into an active limit (docs/SPOTIFY.md →
                         // Rate Limiting); the device-transfer and volume paths do the same.
                         if (e.isRateLimited()) playerStateManager.noteRateLimited()
+                        // The bracket turned the user's shuffle OFF; a failed play must not leave
+                        // it that way. (Not inside a rate limit — that PUT would only be refused.)
+                        else if (bracketShuffle) restoreShuffleOn()
                         playerStateManager.releasePlayingOptimism()
                         _uiState.update { it.copy(error = e.message, isPlaying = false) }
+                        clearIsWakingUp()
                     }
-                    clearIsWakingUp()
                 },
             )
         }
+    }
+
+    /**
+     * The ONE App Remote wake path — a track tap whose `me/player/play` answered 404 (no active
+     * device) and the play button after Spotify died while paused both end here
+     * (docs/PLAYER.md → Playback 404 Fallback).
+     *
+     *  1. The caller has set the waking state and the optimistic playing lock; both are held until
+     *     step 5 — Cris's rule: the player shows WAKING until Spotify REPORTS the song playing,
+     *     never cleared on a timer or on an IPC dispatch.
+     *  2. [shuffle] (when non-null) goes through the App Remote first, with its settle delay.
+     *  3. The SDK plays the single item for instant audio (and seeks to [startPositionMs] after
+     *     [SDK_SEEK_SETTLE_MS] when known). `connectSuspend` resumes only after Spotify's
+     *     `onConnected`, so a cold Spotify's boot is spent before this returns.
+     *  4. `me/player/devices` is polled every [WAKE_DEVICE_POLL_MS] until THIS phone is listed
+     *     ([pickLocalDevice]) — up to [WAKE_DEVICE_TIMEOUT_MS] — and [body] is sent ONCE with its
+     *     `device_id`: with it the device only has to be listed, not active. A 404 there is
+     *     "listed but not ready" and goes back to polling; a 429 abandons; a refused multi-uri
+     *     body degrades once to [degradeTo]. At the ceiling, ONE attempt without `device_id`.
+     *  5. `me/player` is re-read every [WAKE_CONFIRM_POLL_MS] (up to [WAKE_CONFIRM_TIMEOUT_MS])
+     *     until it reports [uri] PLAYING; then — or on a definitive failure, or at that ceiling
+     *     (logged "unconfirmed": a relinked track can legitimately report a different uri) — the
+     *     waking state clears.
+     *
+     * Superseded — the play-request [generation] moved because the user played, paused or skipped
+     * something else meanwhile — it stops at the next checkpoint: no body, no error, no shuffle
+     * change, and the waking state is cleared only if this restore still [owner]s it (see
+     * [wakingOwner]); a newer play here keeps its own.
+     *
+     * @param positionMs the BASE position of a track body (0 for a fresh tap, the paused
+     *   progress for the play button); the time since the SDK play is added when the body is
+     *   sent, so the restore continues from where the SDK already is. Null for an episode.
+     */
+    private suspend fun restoreAfterWake(
+        uri            : String,
+        body           : WakeRestoreBody?,
+        positionMs     : Long?,
+        shuffle        : Boolean?,
+        startPositionMs: Long?,
+        reassertShuffle: Boolean,
+        generation     : Long,
+        owner          : Long,
+        degradeTo      : List<String>?,
+    ) {
+        fun superseded() = playerStateManager.playGeneration != generation
+        fun abandon(stage: String) {
+            Log.d(TAG, "wake: superseded $stage — stopping")
+            if (wakingOwner == owner) clearIsWakingUp()
+        }
+        if (superseded()) { abandon("before it started"); return }
+        ownedWakeRestores++
+        try {
+            // Cancel the connecting collector's 3.5 s fallback timer — this path owns the clear.
+            clearWakingUpJob?.cancel()
+            _uiState.update { it.copy(isWakingUp = true) }
+            // Connect first, on its own, so a request superseded DURING the connect (a cold Spotify
+            // can take ~30 s to answer) never dispatches its now-stale shuffle or play over the
+            // newer one. setShuffle / play below then reuse the live bind.
+            val sdkOk = remoteManager.connectSuspend()
+            clearWakingUpJob?.cancel()
+            if (superseded()) { abandon("during the App Remote connect"); return }
+            if (!sdkOk) {
+                Log.d(TAG, "wake: outcome failed — App Remote could not connect")
+                playerStateManager.releasePlayingOptimism()
+                _uiState.update { it.copy(error = "Couldn't connect to Spotify.", isPlaying = false) }
+                clearIsWakingUp()
+                return
+            }
+            if (shuffle != null) {
+                remoteManager.setShuffle(shuffle)
+                delay(REMOTE_SHUFFLE_SETTLE_MS)
+            }
+            remoteManager.play(uri)
+            Log.d(TAG, "wake: SDK play dispatched ($uri)")
+            // The SDK's play() starts an episode at 0:00 — unlike the Web API it does not consult
+            // the server-side resume point — and the play button's track at 0:00 too. When the
+            // caller knows the position, seek to it. The settle delay is required, not defensive:
+            // connectAndPlay returns when the IPC call has been DISPATCHED, not when playback has
+            // started, so a seek in the same breath arrives before the item does and is dropped.
+            if (startPositionMs != null && startPositionMs > 0L) {
+                delay(SDK_SEEK_SETTLE_MS)
+                remoteManager.seekTo(startPositionMs)
+            }
+            // Captured AFTER the seek: from here on the SDK is at `positionMs + elapsed`.
+            val sdkStartedAt = System.currentTimeMillis()
+
+            val hints = deviceNameHints()
+            var pending = body
+            var accepted = false
+            var abandoned = false
+            var listedLogged = false
+            val deadline = sdkStartedAt + WAKE_DEVICE_TIMEOUT_MS
+            while (System.currentTimeMillis() < deadline) {
+                if (superseded()) { abandon("while waiting for the device"); return }
+                // The optimistic lock is 5 s; the wait can be a minute. Without re-arming it, 204
+                // polls flip isPlaying false under the notification, widget and visualizer gate.
+                playerStateManager.lockIsPlaying()
+                if (playerStateManager.isRateLimited()) {
+                    Log.d(TAG, "wake: rate limited while waiting for the device; abandoning the restore")
+                    abandoned = true
+                    break
+                }
+                val devices = repository.getAvailableDevices()
+                currentCoroutineContext().ensureActive()
+                val devicesError = devices.exceptionOrNull()
+                if (devicesError != null && devicesError.isRateLimited()) {
+                    playerStateManager.noteRateLimited()
+                    Log.d(TAG, "wake: me/player/devices rate limited; abandoning the restore")
+                    abandoned = true
+                    break
+                }
+                val device = devices.getOrNull()?.let { pickLocalDevice(it, hints) }
+                val deviceId = device?.id
+                if (deviceId != null) {
+                    if (!listedLogged) {
+                        listedLogged = true
+                        Log.d(TAG, "wake: device listed after ${System.currentTimeMillis() - sdkStartedAt} ms " +
+                                   "(${device.name} / $deviceId, active=${device.isActive})")
+                    }
+                    val toSend = pending
+                    if (toSend == null) {
+                        // Nothing to rebuild — the SDK play IS the playback. Go and confirm it.
+                        accepted = true
+                        break
+                    }
+                    val sent = sendWakeBody(toSend, uri, positionMs, sdkStartedAt, deviceId)
+                    currentCoroutineContext().ensureActive()
+                    val err = sent.exceptionOrNull()
+                    Log.d(TAG, "wake: body sent ${toSend.describe()} to $deviceId → " +
+                               (err?.message ?: "accepted"))
+                    when {
+                        err == null -> { accepted = true; break }
+                        err.isRateLimited() -> {
+                            // A 429 says nothing about the body; the same body is fine once the
+                            // window passes. Arm the shared gate and stop — re-sending inside a
+                            // penalty window is the hammering the gate exists to stop. The SDK is
+                            // still playing the single item.
+                            playerStateManager.noteRateLimited()
+                            abandoned = true
+                            break
+                        }
+                        // "Listed but not ready" — exactly what this loop waits out.
+                        err.isNoActiveDevice() -> Unit
+                        // A multi-uri body the API REFUSES is never re-sent: an episode falls back
+                        // to the single uri (one more send can still place it at its resume point),
+                        // a track to nothing (the SDK is playing it).
+                        toSend is WakeRestoreBody.Uris && toSend.uris.size > 1 && err.isRequestRefused() -> {
+                            pending = degradeTo?.let { WakeRestoreBody.Uris(it) }
+                            continue
+                        }
+                        else -> Unit
+                    }
+                }
+                delay(WAKE_DEVICE_POLL_MS)
+            }
+            if (!accepted && !abandoned) {
+                if (superseded()) { abandon("at the device ceiling"); return }
+                val toSend = pending
+                if (toSend == null) {
+                    accepted = true
+                } else if (!playerStateManager.isRateLimited()) {
+                    // Today's behaviour, once: no device_id, whichever device is active.
+                    val sent = sendWakeBody(toSend, uri, positionMs, sdkStartedAt, deviceId = null)
+                    currentCoroutineContext().ensureActive()
+                    val err = sent.exceptionOrNull()
+                    if (err != null && err.isRateLimited()) playerStateManager.noteRateLimited()
+                    Log.d(TAG, "wake: device never listed in ${WAKE_DEVICE_TIMEOUT_MS} ms; one body " +
+                               "${toSend.describe()} without device_id → ${err?.message ?: "accepted"}")
+                    accepted = err == null
+                }
+            }
+
+            var confirmed = false
+            if (accepted) {
+                val confirmDeadline = System.currentTimeMillis() + WAKE_CONFIRM_TIMEOUT_MS
+                while (System.currentTimeMillis() < confirmDeadline) {
+                    delay(WAKE_CONFIRM_POLL_MS)
+                    if (superseded()) { abandon("while confirming"); return }
+                    if (playerStateManager.isRateLimited()) break
+                    playerStateManager.lockIsPlaying()
+                    val observed = playerStateManager.fetchOnce()
+                    if (observed != null && observed.isPlaying && observed.item?.uri == uri) {
+                        confirmed = true
+                        break
+                    }
+                }
+            } else {
+                // Definitive: the body never landed. Sync the mirror with whatever the SDK has.
+                playerStateManager.fetchOnce()
+            }
+            if (superseded()) { abandon("at the outcome"); return }
+            Log.d(TAG, "wake: outcome " + when {
+                confirmed -> "confirmed — $uri playing after ${System.currentTimeMillis() - sdkStartedAt} ms"
+                accepted  -> "unconfirmed — body accepted, $uri not reported playing within ${WAKE_CONFIRM_TIMEOUT_MS} ms"
+                abandoned -> "abandoned (rate limited) — the SDK plays the single item"
+                else      -> "failed — the SDK plays the single item"
+            })
+            clearIsWakingUp()
+            if (reassertShuffle) {
+                if (accepted) reassertShuffleOn(generation) else if (!abandoned) restoreShuffleOn()
+            }
+        } finally {
+            ownedWakeRestores--
+        }
+    }
+
+    /** One `me/player/play` for [body], targeted at [deviceId] (null = the active device). */
+    private suspend fun sendWakeBody(
+        body        : WakeRestoreBody,
+        uri         : String,
+        positionMs  : Long?,
+        sdkStartedAt: Long,
+        deviceId    : String?,
+    ): Result<Unit> {
+        val elapsedMs = System.currentTimeMillis() - sdkStartedAt
+        // An EPISODE resumes from Spotify's own server-side position when the play call carries NO
+        // `position_ms` — which is why a half-listened episode resumes correctly whenever the Web
+        // API is the path that starts it. Sending `elapsedMs` overrode that and pinned the restored
+        // episode a second or two from the START: the symptom Cris hit was "force-stop Spotify, tap
+        // a half-listened episode, it plays from 0:00". A track has no resume point, so for tracks
+        // `base + elapsedMs` is exactly what makes the restore seamless.
+        //
+        // Read off the body's OWN first entry as well as the caller's null: `position_ms` applies
+        // to whatever `uris` starts with, so this stays right even if a caller ever leads with
+        // something other than the tapped item.
+        return when (body) {
+            is WakeRestoreBody.Context -> repository.play(
+                contextUri = body.contextUri,
+                offsetUri  = uri,
+                positionMs = positionMs?.plus(elapsedMs),
+                deviceId   = deviceId,
+            )
+            is WakeRestoreBody.Uris -> {
+                val leadIsEpisode = body.uris.firstOrNull()?.startsWith("spotify:episode:") == true
+                repository.play(
+                    uris       = body.uris,
+                    positionMs = if (leadIsEpisode) null else positionMs?.plus(elapsedMs),
+                    deviceId   = deviceId,
+                )
+            }
+        }
+    }
+
+    private fun WakeRestoreBody.describe(): String = when (this) {
+        is WakeRestoreBody.Context -> "context ${contextUri}"
+        is WakeRestoreBody.Uris    -> "uris ×${uris.size}"
+    }
+
+    /**
+     * The second half of the shuffle bracket: turn shuffle back ON ~1.5 s after a successful play
+     * — the `shuffleContext` re-assert pattern. Spotify keeps the playing item and shuffles the
+     * rest. Skipped when the user has made another play request meanwhile (it may have set its own
+     * shuffle state) and inside the rate-limit window.
+     */
+    private fun reassertShuffleOn(generation: Long) {
+        viewModelScope.launch {
+            delay(SHUFFLE_REASSERT_DELAY_MS)
+            if (playerStateManager.playGeneration != generation) return@launch
+            restoreShuffleOnNow()
+        }
+    }
+
+    /** The bracket's undo when the play itself failed: the user's shuffle setting comes back. */
+    private fun restoreShuffleOn() {
+        viewModelScope.launch { restoreShuffleOnNow() }
+    }
+
+    private suspend fun restoreShuffleOnNow() {
+        if (playerStateManager.isRateLimited()) return
+        playerStateManager.applyShuffle(true).onFailure { e ->
+            when {
+                e.isRateLimited()    -> playerStateManager.noteRateLimited()
+                e.isNoActiveDevice() -> remoteManager.setShuffle(true)
+            }
+        }
+    }
+
+    /**
+     * The play button's half of [restoreAfterWake], installed as
+     * `PlayerStateManager.onWakeRestore`. Runs in [viewModelScope] (it touches VM-owned state) as
+     * the current [playbackJob] and is awaited by the manager's play coroutine. False only when
+     * the ViewModel is already gone — the manager then falls back to the bare single-uri play.
+     */
+    private suspend fun runPlayButtonRestore(track: SpotifyTrack, pausedProgressMs: Long): Boolean {
+        if (!viewModelScope.isActive) return false
+        val job = withContext(Dispatchers.Main) {
+            playbackJob?.cancel()
+            val generation = playerStateManager.playGeneration
+            val owner = ++wakingOwner
+            viewModelScope.async { restoreForResume(track, pausedProgressMs, generation, owner) }
+                .also { playbackJob = it }
+        }
+        return try {
+            job.await()
+            true
+        } catch (e: CancellationException) {
+            // Superseded by a newer play, or the ViewModel went away mid-restore: either way the
+            // restore has stopped on purpose, and the manager must NOT start a second play. Only a
+            // cancellation of the CALLER is rethrown.
+            currentCoroutineContext().ensureActive()
+            Log.d(TAG, "wake: play-button restore cancelled (${e.message})")
+            true
+        }
+    }
+
+    private suspend fun restoreForResume(
+        track           : SpotifyTrack,
+        pausedProgressMs: Long,
+        generation      : Long,
+        owner           : Long,
+    ) {
+        val uri = track.uri
+        val isEpisode = track.isEpisode
+        val mirror = playerStateManager.state.value
+        val ctx = mirror.contextUri
+        val origin = playerStateManager.loadPlayOrigin()
+        // The liked cache is the whole library file; read it only when the plan can use it.
+        val planUsesLiked = !isEpisode && (ctx == null || isCollectionContext(ctx)) &&
+            (isCollectionContext(ctx) || origin is PlaybackOrigin.Liked || origin == null)
+        val likedUris = if (!planUsesLiked) null else withContext(Dispatchers.IO) {
+            libraryCache.loadTrackList(LibraryCache.LIKED_SONGS_KEY)?.tracks
+                ?.distinctBy { it.id }?.map { it.uri }
+        }
+        val body = planWakeRestore(uri, ctx, origin, likedUris, isEpisode)
+        // The same bracket as a tap: a multi-uri body with shuffle on would start at random.
+        val bracket = body is WakeRestoreBody.Uris && body.uris.size > 1 && mirror.shuffleEnabled
+        val originLabel = when (origin) {
+            is PlaybackOrigin.Context -> "context ${origin.contextUri}"
+            PlaybackOrigin.Liked      -> "liked"
+            is PlaybackOrigin.Uris    -> "uris ×${origin.uris.size}"
+            null                      -> "none"
+        }
+        Log.d(TAG, "wake: play button — plan ${body.describe()} (mirror context=$ctx, " +
+                   "origin=$originLabel, liked cache=${likedUris?.size}, shuffleBracket=$bracket)")
+        restoreAfterWake(
+            uri             = uri,
+            body            = body,
+            positionMs      = if (isEpisode) null else pausedProgressMs,
+            shuffle         = if (bracket) false else null,
+            startPositionMs = pausedProgressMs,
+            reassertShuffle = bracket,
+            generation      = generation,
+            owner           = owner,
+            degradeTo       = if (isEpisode) listOf(uri) else null,
+        )
     }
 
     /**
@@ -969,5 +1323,6 @@ class PlayerViewModelFactory(private val container: com.crsmthw.lyra.di.AppConta
             lyricsRepository   = container.lyricsRepository,
             settingsRepository = container.settingsRepository,
             visualizerManager  = container.visualizerManager,
+            deviceNameHints    = container::localDeviceNameHints,
         ) as T
 }
