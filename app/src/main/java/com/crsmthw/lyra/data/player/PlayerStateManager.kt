@@ -2,6 +2,7 @@ package com.crsmthw.lyra.data.player
 
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import com.crsmthw.lyra.data.local.PlaybackOriginStore
 import com.crsmthw.lyra.data.remote.SpotifyRemoteManager
 import com.crsmthw.lyra.data.remote.model.PlayerStateResponse
@@ -196,6 +197,10 @@ class PlayerStateManager(
                     // Lock track+progress+duration together so the UI doesn't flash "Nothing Playing"
                     // or reset the seek bar to 0 while Spotify is switching devices.
                     val lockingTransfer = now < trackLockUntil && response.item == null
+                    if (response.item == null && !lockingTransfer) {
+                        Log.w("PlayerStateManager", "poll: 200 with item=null (playing=${response.isPlaying}, " +
+                              "context=${response.context?.uri}) — the UI will show Nothing Playing")
+                    }
                     _state.update {
                         it.copy(
                             isPlaying      = if (now < isPlayingLockUntil) it.isPlaying else response.isPlaying,
@@ -232,8 +237,10 @@ class PlayerStateManager(
             },
             onFailure = { e ->
                 when {
-                    e.message?.contains("429") == true ->
+                    e.message?.contains("429") == true -> {
+                        Log.w("PlayerStateManager", "poll: 429 — backing off 60 s (${e.message?.take(120)})")
                         pollBackoffUntil = System.currentTimeMillis() + 60_000L
+                    }
                     e.isTransientNetworkError() -> { /* silent */ }
                 }
                 null
@@ -275,7 +282,10 @@ class PlayerStateManager(
     // Prevents currentTrack from being nulled by a mid-transfer poll where response.item is briefly null.
     fun lockTrack()      { trackLockUntil     = System.currentTimeMillis() + 3_000L }
     fun isRateLimited()  = System.currentTimeMillis() < pollBackoffUntil
-    fun noteRateLimited() { pollBackoffUntil  = System.currentTimeMillis() + 60_000L }
+    fun noteRateLimited() {
+        Log.w("PlayerStateManager", "429 noted by a caller — every player call backs off 60 s", Throwable())
+        pollBackoffUntil  = System.currentTimeMillis() + 60_000L
+    }
 
     // Optimistically marks Spotify as playing AND locks the state so transient 204 polls
     // during SDK wake-up don't flip the UI back to the play icon.

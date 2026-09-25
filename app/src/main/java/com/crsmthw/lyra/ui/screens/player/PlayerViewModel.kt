@@ -83,7 +83,7 @@ private const val WAKE_DEVICE_TIMEOUT_MS = 60_000L
  * song playing (the only thing that clears the waking state), for at most [WAKE_CONFIRM_TIMEOUT_MS].
  * 700 ms is `fetchUntilTrackChanges`' cadence.
  */
-private const val WAKE_CONFIRM_POLL_MS    = 700L
+private const val WAKE_CONFIRM_POLL_MS    = 1_000L
 private const val WAKE_CONFIRM_TIMEOUT_MS = 8_000L
 
 /**
@@ -106,7 +106,7 @@ private const val SHUFFLE_REASSERT_DELAY_MS = 1_500L
  * it reports the requested state, for at most [SHUFFLE_CONFIRM_TIMEOUT_MS]; at the ceiling the play
  * goes out anyway (a wrong song beats no song).
  */
-private const val SHUFFLE_CONFIRM_POLL_MS    = 250L
+private const val SHUFFLE_CONFIRM_POLL_MS    = 500L
 private const val SHUFFLE_CONFIRM_TIMEOUT_MS = 1_500L
 
 /** How many albums' cassette fine print the player keeps (one small entry per album id). */
@@ -874,7 +874,12 @@ class PlayerViewModel(
             val owedOn = playerStateManager.shuffleOwedOn
             val userShuffleOn = playerStateManager.state.value.shuffleEnabled || owedOn
             val multiUriBody = contextUri == null && (playUris?.size ?: 0) > 1
-            val bracketShuffle = shuffle == null && multiUriBody && userShuffleOn
+            // The Liked COLLECTION context is bracketed too: started with shuffle ON and an offset
+            // Spotify never reported the item playing (device pass 2026-09-25 pm — every failure
+            // that evening was collection + shuffle on; shuffle off worked). OFF (confirmed) →
+            // play → ON re-asserted after, so the tapped song plays and the rest is shuffled.
+            val collectionBody = contextUri != null && isCollectionContext(contextUri)
+            val bracketShuffle = shuffle == null && (multiUriBody || collectionBody) && userShuffleOn
             // Device pass 2026-09-25 (checklist A3): Spotify DROPPED shuffle when a playlist
             // context was started right after a `uris` playback, though it had kept it that
             // morning when the previous playback was itself a context. So whenever the user's
@@ -906,7 +911,7 @@ class PlayerViewModel(
                 if (err != null && err.isRateLimited()) playerStateManager.noteRateLimited()
                 // Only an OFF before a multi-uri body can start the wrong song; an ON before a
                 // context / single body cannot, so it is not worth a round trip.
-                if (err == null && !effectiveShuffle && multiUriBody) confirmShuffleState(false)
+                if (err == null && !effectiveShuffle && (multiUriBody || collectionBody)) confirmShuffleState(false)
             }
             var result = repository.play(
                 uri        = uri,
@@ -1103,6 +1108,8 @@ class PlayerViewModel(
                 // The optimistic lock is 5 s; the wait can be a minute. Without re-arming it, 204
                 // polls flip isPlaying false under the notification, widget and visualizer gate.
                 playerStateManager.lockIsPlaying()
+                // A 200 with item=null while the context loads must not show "Nothing Playing".
+                playerStateManager.lockTrack()
                 if (playerStateManager.isRateLimited()) {
                     Log.d(TAG, "wake: rate limited while waiting for the device; abandoning the restore")
                     abandoned = true
@@ -1226,6 +1233,7 @@ class PlayerViewModel(
                     if (superseded()) { abandon("while confirming"); return }
                     if (playerStateManager.isRateLimited()) break
                     playerStateManager.lockIsPlaying()
+                    playerStateManager.lockTrack()
                     val observed = playerStateManager.fetchOnce()
                     // After a skip the target is whatever Spotify moved to: any OTHER item playing.
                     val onTarget = if (thenSkip == 0) observed?.item?.uri == uri
@@ -1436,7 +1444,10 @@ class PlayerViewModel(
         }
         val onNeighbour = uri != currentUri
         // The same bracket as a tap: a multi-uri body with shuffle on would start at random.
-        val bracket = body is WakeRestoreBody.Uris && body.uris.size > 1 && userShuffleOn
+        val bracket = userShuffleOn && when (val b = body) {
+            is WakeRestoreBody.Uris    -> b.uris.size > 1
+            is WakeRestoreBody.Context -> isCollectionContext(b.contextUri)   // see startPlay
+        }
         val sdkShuffle = when {
             bracket -> false
             owedOn  -> true    // a context / single body: settle the debt before the play
@@ -1516,7 +1527,10 @@ class PlayerViewModel(
             val likedForCollection = if (!isCollectionContext(contextUri)) null else withContext(Dispatchers.IO) {
                 libraryCache.loadTrackList(LibraryCache.LIKED_SONGS_KEY)?.tracks?.distinctBy { it.id }
             }
-            val shuffleResult = playerStateManager.applyShuffle(shuffle)
+            // The collection is always STARTED with shuffle OFF (see startPlay); `shuffle` is then
+            // re-asserted after the play by the "did it stick" step below.
+            val preSet = if (likedForCollection != null) false else shuffle
+            val shuffleResult = playerStateManager.applyShuffle(preSet)
             val shuffleErr = shuffleResult.exceptionOrNull()
             if (shuffleErr != null && shuffleErr.isRateLimited()) {
                 playerStateManager.noteRateLimited()
@@ -1526,7 +1540,7 @@ class PlayerViewModel(
             val shuffleWas404 = shuffleErr != null && shuffleErr.isNoActiveDevice()
             // The state must have TAKEN EFFECT before the context play: OFF still pending → a
             // random first song; ON still pending → track 1 with the rest in order.
-            if (shuffleErr == null) confirmShuffleState(shuffle)
+            if (shuffleErr == null) confirmShuffleState(preSet)
             // An explicit offset is honoured WHATEVER the shuffle state (device pass 2026-09-25,
             // A5), and the state the poll confirmed is not what decides the first song: the phone
             // client applies its own remembered preference when a context starts (pm rerun: "OFF
@@ -1563,7 +1577,7 @@ class PlayerViewModel(
                                 uri             = pick.uri,
                                 body            = WakeRestoreBody.Context(contextUri),
                                 positionMs      = 0L,
-                                shuffle         = shuffle,
+                                shuffle         = false,   // the collection starts with shuffle OFF; ON is re-asserted after
                                 startPositionMs = null,
                                 reassertShuffle = shuffle,
                                 generation      = generation,
