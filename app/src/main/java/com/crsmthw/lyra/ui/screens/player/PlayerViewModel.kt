@@ -831,6 +831,14 @@ class PlayerViewModel(
             val userShuffleOn = playerStateManager.state.value.shuffleEnabled || owedOn
             val multiUriBody = contextUri == null && (playUris?.size ?: 0) > 1
             val bracketShuffle = shuffle == null && multiUriBody && userShuffleOn
+            // Device pass 2026-09-25 (checklist A3): Spotify DROPPED shuffle when a playlist
+            // context was started right after a `uris` playback, though it had kept it that
+            // morning when the previous playback was itself a context. So whenever the user's
+            // shuffle is on and the caller left it to us, shuffle is re-asserted ON after EVERY
+            // successful play — the bracket's second half, now for context and single bodies too.
+            // A context's offset is honoured with shuffle on, so the tapped song keeps playing and
+            // only the rest is (re)shuffled; an ON that Spotify kept anyway is idempotent.
+            val reassertOn = shuffle == null && userShuffleOn
             val effectiveShuffle = when {
                 shuffle != null -> shuffle
                 bracketShuffle  -> false
@@ -839,7 +847,7 @@ class PlayerViewModel(
                 owedOn          -> true
                 else            -> null
             }
-            if (bracketShuffle) playerStateManager.markShuffleOwedOn()
+            if (reassertOn) playerStateManager.markShuffleOwedOn()
             // ── Shuffle pre-set ──────────────────────────────────────────────
             // When the caller says "turn shuffle OFF before playing" (iLyra deliberate selection,
             // or the bracket above) or ON, apply it before the play request so the uris body starts
@@ -889,7 +897,7 @@ class PlayerViewModel(
             }
             result.fold(
                 onSuccess = {
-                    if (bracketShuffle) reassertShuffleOn(owner)
+                    if (reassertOn) reassertShuffleOn(owner)
                     delay(1_000L)
                     playerStateManager.fetchOnce()
                     clearIsWakingUp()
@@ -908,7 +916,7 @@ class PlayerViewModel(
                             positionMs      = if (isEpisode) null else 0L,
                             shuffle         = effectiveShuffle,
                             startPositionMs = startPositionMs,
-                            reassertShuffle = bracketShuffle,
+                            reassertShuffle = reassertOn,
                             generation      = generation,
                             owner           = owner,
                             degradeTo       = episodeSingleUri,
@@ -920,7 +928,7 @@ class PlayerViewModel(
                         if (e.isRateLimited()) playerStateManager.noteRateLimited()
                         // The bracket turned the user's shuffle OFF; a failed play must not leave
                         // it that way. (Not inside a rate limit — that PUT would only be refused.)
-                        else if (bracketShuffle) restoreShuffleOn(owner)
+                        else if (reassertOn) restoreShuffleOn(owner)
                         playerStateManager.releasePlayingOptimism()
                         _uiState.update { it.copy(error = e.message, isPlaying = false) }
                         clearIsWakingUp()
@@ -1215,6 +1223,7 @@ class PlayerViewModel(
     private suspend fun settleShuffleDebt(owner: Long) {
         if (wakingOwner != owner || !playerStateManager.shuffleOwedOn) return
         if (playerStateManager.isRateLimited()) return   // stays owed; the next play settles it
+        Log.d(TAG, "shuffle: re-asserting ON after the play")
         playerStateManager.applyShuffle(true).onFailure { e ->
             when {
                 e.isRateLimited()    -> playerStateManager.noteRateLimited()
@@ -1276,14 +1285,16 @@ class PlayerViewModel(
         // The same bracket as a tap: a multi-uri body with shuffle on would start at random. The
         // user's setting is the mirror OR a previous bracket's debt (shuffleOwedOn).
         val owedOn = playerStateManager.shuffleOwedOn
-        val bracket = body is WakeRestoreBody.Uris && body.uris.size > 1 &&
-            (mirror.shuffleEnabled || owedOn)
+        val userShuffleOn = mirror.shuffleEnabled || owedOn
+        val bracket = body is WakeRestoreBody.Uris && body.uris.size > 1 && userShuffleOn
         val sdkShuffle = when {
             bracket -> false
             owedOn  -> true    // a context / single body: settle the debt before the play
             else    -> null
         }
-        if (bracket) playerStateManager.markShuffleOwedOn()
+        // Re-asserted ON after the body lands whenever the user's shuffle is on (see startPlay:
+        // Spotify can drop shuffle when a context starts), not only after a bracket's OFF.
+        if (userShuffleOn) playerStateManager.markShuffleOwedOn()
         val originLabel = when (origin) {
             is PlaybackOrigin.Context -> "context ${origin.contextUri}"
             PlaybackOrigin.Liked      -> "liked"
@@ -1298,7 +1309,7 @@ class PlayerViewModel(
             positionMs      = if (isEpisode) null else pausedProgressMs,
             shuffle         = sdkShuffle,
             startPositionMs = pausedProgressMs,
-            reassertShuffle = bracket,
+            reassertShuffle = userShuffleOn,
             generation      = generation,
             owner           = owner,
             degradeTo       = if (isEpisode) listOf(uri) else null,

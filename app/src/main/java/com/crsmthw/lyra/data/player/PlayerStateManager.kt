@@ -114,8 +114,10 @@ class PlayerStateManager(
     fun notePlayRequest(): Long = playRequestGeneration.incrementAndGet()
 
     /**
-     * True while a Liked-style shuffle BRACKET (PlayerViewModel.startPlay: shuffle OFF → play →
-     * shuffle ON) has turned the user's shuffle off and not yet turned it back on. The mirror then
+     * True while a play made with the user's shuffle ON still owes its re-assert
+     * (PlayerViewModel.startPlay: for a multi-uri body the bracket shuffle OFF → play → shuffle ON;
+     * for a context / single body just the ON after the play — Spotify can DROP shuffle when a
+     * context starts after a `uris` playback, device pass 2026-09-25 A3). The mirror then
      * reads `shuffleEnabled = false`, so without this a second tap inside the ~1.5 s window — or a
      * pause / skip / Library play superseding a wake restore — would read "shuffle is off" and the
      * user's shuffle would stay off for good. The next play treats `mirror || owed` as the user's
