@@ -427,7 +427,6 @@ class PlayerViewModel(
     override fun onCleared() {
         // The manager is app-scoped: a dead ViewModel's hook would leak it and restore into it.
         if (playerStateManager.onWakeRestore === wakeRestoreHook) playerStateManager.onWakeRestore = null
-        super.onCleared()
     }
 
     private suspend fun checkIsLiked(trackId: String) {
