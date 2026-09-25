@@ -96,6 +96,18 @@ private const val WAKE_MAX_BODY_FAILURES = 3
 /** The shuffle bracket's re-assert delay after a successful play — `shuffleContext`'s 1.5 s. */
 private const val SHUFFLE_REASSERT_DELAY_MS = 1_500L
 
+/**
+ * A shuffle OFF sent right before a `uris` play must have TAKEN EFFECT before the play goes out —
+ * "the order of execution is not guaranteed when you use this API with other Player API endpoints"
+ * (Toggle Playback Shuffle reference). Device pass 2026-09-25: the first liked tap of a fresh
+ * process played the wrong song although the bracket had run (both PUTs left on cold connections
+ * and the play was applied first). So `me/player` is re-read every [SHUFFLE_CONFIRM_POLL_MS] until
+ * it reports the requested state, for at most [SHUFFLE_CONFIRM_TIMEOUT_MS]; at the ceiling the play
+ * goes out anyway (a wrong song beats no song).
+ */
+private const val SHUFFLE_CONFIRM_POLL_MS    = 250L
+private const val SHUFFLE_CONFIRM_TIMEOUT_MS = 1_500L
+
 /** How many albums' cassette fine print the player keeps (one small entry per album id). */
 private const val CASSETTE_META_CACHE_SIZE = 24
 
@@ -860,6 +872,9 @@ class PlayerViewModel(
             if (effectiveShuffle != null) {
                 val err = playerStateManager.applyShuffle(effectiveShuffle).exceptionOrNull()
                 if (err != null && err.isRateLimited()) playerStateManager.noteRateLimited()
+                // Only an OFF before a multi-uri body can start the wrong song; an ON before a
+                // context / single body cannot, so it is not worth a round trip.
+                if (err == null && !effectiveShuffle && multiUriBody) confirmShuffleState(false)
             }
             var result = repository.play(
                 uri        = uri,
@@ -1213,6 +1228,27 @@ class PlayerViewModel(
             delay(SHUFFLE_REASSERT_DELAY_MS)
             settleShuffleDebt(owner)
         }
+    }
+
+    /**
+     * Waits until `me/player` reports `shuffle_state == [enabled]` (see [SHUFFLE_CONFIRM_POLL_MS]).
+     * Rate-limit gated; a 204 (no device) or a failure ends the wait early — the play that follows
+     * will 404 and the App Remote path applies shuffle itself.
+     */
+    private suspend fun confirmShuffleState(enabled: Boolean) {
+        val deadline = System.currentTimeMillis() + SHUFFLE_CONFIRM_TIMEOUT_MS
+        var polls = 0
+        while (System.currentTimeMillis() < deadline) {
+            if (playerStateManager.isRateLimited()) return
+            val observed = playerStateManager.fetchOnce() ?: return
+            polls++
+            if (observed.shuffleState == enabled) {
+                Log.d(TAG, "shuffle: ${if (enabled) "ON" else "OFF"} confirmed after $polls poll(s)")
+                return
+            }
+            delay(SHUFFLE_CONFIRM_POLL_MS)
+        }
+        Log.d(TAG, "shuffle: ${if (enabled) "ON" else "OFF"} NOT confirmed within ${SHUFFLE_CONFIRM_TIMEOUT_MS} ms; playing anyway")
     }
 
     /** The bracket's undo when the play failed or was superseded: the user's shuffle comes back. */
