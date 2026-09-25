@@ -35,9 +35,42 @@ class SpotifyRemoteManager(
         return true
     }
 
+    /**
+     * True only when the SDK itself says the bind is live. `_connected` alone is not enough: it is
+     * our own mirror, and a device pass (2026-09-25) saw the fast path taken with Spotify
+     * force-stopped, so the IPC `play` went to a dead remote and Spotify was only started by a
+     * later call. `SpotifyAppRemote.isConnected()` (spotify-app-remote 0.8.0 — `mIsConnected`,
+     * cleared by the SDK's own connection-terminated handler) is the authority.
+     */
+    private fun liveRemote(): SpotifyAppRemote? = _appRemote?.takeIf { it.isConnected }
+
+    /**
+     * Drops a remote the SDK no longer reports as connected, so the next connect starts clean
+     * instead of short-circuiting on a stale `_connected`. `disconnect` releases the old binding;
+     * it is wrapped because the remote is already dead by definition here.
+     */
+    private fun dropStaleRemote() {
+        val stale = _appRemote ?: run { _connected.value = false; return }
+        if (stale.isConnected) return
+        runCatching { SpotifyAppRemote.disconnect(stale) }
+        _appRemote = null
+        _connected.value = false
+    }
+
     // showAuthView(true): one-time Spotify auth dialog on first use; silent thereafter.
+    /**
+     * Suspends until the App Remote is bound. Short-circuits ONLY when the SDK reports the current
+     * remote as connected ([liveRemote]); otherwise a stale remote is dropped and a real connect
+     * runs, which resumes after Spotify's `onConnected` — i.e. after a cold Spotify has booted
+     * (up to ~30 s). [connecting] is true for exactly that real connect, so it now also fires on
+     * the paths that used to short-circuit on a stale flag (a skip / shuffle with Spotify dead).
+     */
     suspend fun connectSuspend(): Boolean {
-        if (_connected.value && _appRemote != null) return true
+        if (liveRemote() != null) {
+            _connected.value = true
+            return true
+        }
+        dropStaleRemote()
         _connecting.value = true
         return try {
             withContext(Dispatchers.Main) {
@@ -46,17 +79,10 @@ class SpotifyRemoteManager(
                         .setRedirectUri(SpotifyAuthManager.REDIRECT_URI)
                         .showAuthView(true)
                         .build()
-                    SpotifyAppRemote.connect(context, params, object : Connector.ConnectionListener {
-                        override fun onConnected(appRemote: SpotifyAppRemote) {
-                            _appRemote = appRemote
-                            _connected.value = true
-                            if (cont.isActive) cont.resume(true)
-                        }
-                        override fun onFailure(throwable: Throwable) {
-                            _connected.value = false
-                            if (cont.isActive) cont.resume(false)
-                        }
-                    })
+                    SpotifyAppRemote.connect(context, params, trackingListener(
+                        onConnected = { if (cont.isActive) cont.resume(true) },
+                        onFailure   = { if (cont.isActive) cont.resume(false) },
+                    ))
                 }
             }
         } finally {
@@ -65,21 +91,45 @@ class SpotifyRemoteManager(
     }
 
     fun connect(onConnected: () -> Unit, onFailure: (Throwable) -> Unit) {
+        if (liveRemote() != null) {
+            _connected.value = true
+            onConnected()
+            return
+        }
+        dropStaleRemote()
         val connectionParams = ConnectionParams.Builder(encryptedPrefs.clientId)
             .setRedirectUri(SpotifyAuthManager.REDIRECT_URI)
             .showAuthView(false)
             .build()
-        SpotifyAppRemote.connect(context, connectionParams, object : Connector.ConnectionListener {
-            override fun onConnected(appRemote: SpotifyAppRemote) {
-                _appRemote = appRemote
-                _connected.value = true
-                onConnected()
-            }
-            override fun onFailure(throwable: Throwable) {
-                _connected.value = false
-                onFailure(throwable)
-            }
-        })
+        SpotifyAppRemote.connect(context, connectionParams, trackingListener(
+            onConnected = { onConnected() },
+            onFailure   = onFailure,
+        ))
+    }
+
+    /**
+     * The one ConnectionListener shape both connects use. The SDK calls `onFailure` again LATER —
+     * with `SpotifyConnectionTerminatedException` — when an established bind dies (Spotify
+     * force-stopped), so a failure clears the remote only if it is still the one this listener
+     * installed; a newer connect's remote is never nulled by an older listener.
+     */
+    private fun trackingListener(
+        onConnected: () -> Unit,
+        onFailure  : (Throwable) -> Unit,
+    ): Connector.ConnectionListener = object : Connector.ConnectionListener {
+        private var installed: SpotifyAppRemote? = null
+        override fun onConnected(appRemote: SpotifyAppRemote) {
+            installed = appRemote
+            _appRemote = appRemote
+            _connected.value = true
+            onConnected()
+        }
+        override fun onFailure(throwable: Throwable) {
+            val mine = installed
+            if (mine != null && _appRemote === mine) _appRemote = null
+            if (liveRemote() == null) _connected.value = false
+            onFailure(throwable)
+        }
     }
 
     fun play(uri: String) {

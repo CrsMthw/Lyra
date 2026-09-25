@@ -114,11 +114,20 @@ interface SpotifyApiService {
         @Query("additional_types") additionalTypes: String = PLAYER_ADDITIONAL_TYPES,
     ): PlayerStateResponse?
 
+    /**
+     * `device_id` targets a device that only has to be LISTED by `me/player/devices`, not active —
+     * what the App Remote wake path needs while a freshly started Spotify has registered but not
+     * yet become the active device (docs/PLAYER.md → Playback 404 Fallback). Retrofit omits a null
+     * query, so every existing caller's request is unchanged.
+     */
     @PUT("me/player/play")
-    suspend fun resumePlayback()
+    suspend fun resumePlayback(@Query("device_id") deviceId: String? = null)
 
     @PUT("me/player/play")
-    suspend fun play(@Body body: PlayRequest)
+    suspend fun play(
+        @Body              body    : PlayRequest,
+        @Query("device_id") deviceId: String? = null,
+    )
 
     @PUT("me/player/pause")
     suspend fun pause()
