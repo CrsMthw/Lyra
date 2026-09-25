@@ -815,8 +815,10 @@ class PlayerViewModel(
             val trackId = uri.substringAfterLast(":")
             viewModelScope.launch { checkIsLiked(trackId) }
         }
-        playbackJob?.cancel()
+        // Ownership moves BEFORE the old job is cancelled: its `finally` clears the waking state
+        // only while it still owns it, so a newer play is never robbed of its own spinner.
         val owner = ++wakingOwner
+        playbackJob?.cancel()
         playbackJob = viewModelScope.launch {
             // The body an EPISODE degrades to, and the body it restores with — null for a track.
             // `repository.play` is wire-identical for `uris = [uri]` and `uri = uri` (both send
@@ -1085,6 +1087,8 @@ class PlayerViewModel(
                         accepted = true
                         break
                     }
+                    // Last look before the body goes out: the device poll takes real time.
+                    if (superseded()) { abandon("just before the body"); return }
                     val sent = sendWakeBody(toSend, uri, positionMs, sdkStartedAt, deviceId)
                     currentCoroutineContext().ensureActive()
                     val err = sent.exceptionOrNull()
@@ -1120,6 +1124,16 @@ class PlayerViewModel(
                     }
                 }
                 delay(WAKE_DEVICE_POLL_MS)
+            }
+            if (accepted && superseded()) {
+                // The body went out in the window between the last check and the send. If what
+                // superseded it was a PAUSE (the mirror is optimistically not playing), the body has
+                // just restarted playback under the user's pause — undo that before stopping.
+                if (!playerStateManager.state.value.isPlaying) {
+                    Log.d(TAG, "wake: body landed after a pause; pausing again")
+                    repository.pause()
+                }
+                abandon("after the body landed"); return
             }
             if (!accepted && !abandoned && !failed) {
                 if (superseded()) { abandon("at the device ceiling"); return }
@@ -1171,6 +1185,10 @@ class PlayerViewModel(
             }
         } finally {
             ownedWakeRestores--
+            // A CANCELLED restore (a newer play cancelled the job mid-suspend) never reaches its
+            // own clear; if it still owns the waking state — no newer play took it — clear it here,
+            // or the spinner is stranded (device pass 2026-09-25, C11).
+            if (wakingOwner == owner) clearIsWakingUp()
         }
     }
 
@@ -1281,9 +1299,9 @@ class PlayerViewModel(
     private suspend fun runPlayButtonRestore(track: SpotifyTrack, pausedProgressMs: Long): Boolean {
         if (!viewModelScope.isActive) return false
         val job = withContext(Dispatchers.Main) {
+            val owner = ++wakingOwner
             playbackJob?.cancel()
             val generation = playerStateManager.playGeneration
-            val owner = ++wakingOwner
             viewModelScope.async { restoreForResume(track, pausedProgressMs, generation, owner) }
                 .also { playbackJob = it }
         }
@@ -1388,8 +1406,8 @@ class PlayerViewModel(
         playerStateManager.clearShuffleOwed()   // an explicit shuffle choice settles a bracket's debt
         playerStateManager.setOptimisticallyPlaying()
         playerStateManager.resetProgressForNewTrack()
-        playbackJob?.cancel()
         val owner = ++wakingOwner
+        playbackJob?.cancel()
         val generation = playerStateManager.playGeneration
         playbackJob = viewModelScope.launch {
             val shuffleResult = playerStateManager.applyShuffle(shuffle)

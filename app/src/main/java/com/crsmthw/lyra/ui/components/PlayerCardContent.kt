@@ -484,7 +484,8 @@ fun PlayerCardContent(
                     }
                 }
                 FilledIconButton(
-                    onClick  = { haptics.press(); playerViewModel.playPause() },
+                    // Inert while WAKING — see PlayerScreen's play button (C11, 2026-09-25).
+                    onClick  = { if (!state.isWakingUp) { haptics.press(); playerViewModel.playPause() } },
                     modifier = Modifier.size(60.dp).graphicsLayer { rotationZ = cookieRotation.value },
                     shape    = squigglyShape,
                     colors   = IconButtonDefaults.filledIconButtonColors(
