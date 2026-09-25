@@ -10,6 +10,7 @@ import com.crsmthw.lyra.data.player.PlayerStateManager
 import com.crsmthw.lyra.data.player.WakeRestoreBody
 import com.crsmthw.lyra.data.player.RateLimitFamily
 import com.crsmthw.lyra.data.player.isCollectionContext
+import com.crsmthw.lyra.data.player.windowFrom
 import com.crsmthw.lyra.data.player.pickLocalDevice
 import com.crsmthw.lyra.data.player.planWakeRestore
 import com.crsmthw.lyra.data.remote.SpotifyRemoteManager
@@ -966,7 +967,18 @@ class PlayerViewModel(
                 onSuccess = {
                     if (reassertOn) reassertShuffleOn(owner)
                     delay(1_000L)
-                    playerStateManager.fetchOnce()
+                    val observed = playerStateManager.fetchOnce()
+                    // A collection body Spotify accepted and then answered with an EMPTY player
+                    // (a cached uri the collection no longer holds): the liked window plays the uri.
+                    if (collectionBody && collectionFallbackUris != null &&
+                        observed != null && observed.item == null && !playerStateManager.isRateLimited()) {
+                        Log.d(TAG, "play: the collection body left the player EMPTY; falling back to the " +
+                                   "${collectionFallbackUris.size}-uri liked window")
+                        repository.play(uris = collectionFallbackUris)
+                            .onFailure { if (it.isRateLimited()) playerStateManager.noteRateLimited(it) }
+                        delay(1_000L)
+                        playerStateManager.fetchOnce()
+                    }
                     clearIsWakingUp()
                 },
                 onFailure = { e ->
@@ -987,6 +999,7 @@ class PlayerViewModel(
                             generation      = generation,
                             owner           = owner,
                             degradeTo       = episodeSingleUri,
+                            collectionFallback = collectionFallbackUris,
                         )
                     } else {
                         // Share the one 60-second penalty window with every other caller rather
@@ -1048,6 +1061,12 @@ class PlayerViewModel(
         degradeTo      : List<String>?,
         /** +1 / -1: after the body lands, skip next / previous (a skip on a dead Spotify). */
         thenSkip       : Int = 0,
+        /**
+         * The liked `uris` window to send if a COLLECTION body is accepted and Spotify then reports
+         * an EMPTY player (item null, not playing): a cached uri the collection no longer holds
+         * does exactly that (iLyra Shuffle Songs, 2026-09-25 evening). The window plays the uri.
+         */
+        collectionFallback: List<String>? = null,
     ) {
         fun superseded() = playerStateManager.playGeneration != generation
         fun abandon(stage: String) {
@@ -1229,21 +1248,43 @@ class PlayerViewModel(
                            (skipErr?.message ?: "accepted"))
             }
             var confirmed = false
-            if (accepted) {
+            var observedEmpty = false
+            suspend fun confirmOnce(): Boolean {
                 val confirmDeadline = System.currentTimeMillis() + WAKE_CONFIRM_TIMEOUT_MS
                 while (System.currentTimeMillis() < confirmDeadline) {
                     delay(WAKE_CONFIRM_POLL_MS)
-                    if (superseded()) { abandon("while confirming"); return }
-                    if (playerStateManager.isRateLimited()) break
+                    if (superseded() || playerStateManager.isRateLimited()) return false
                     playerStateManager.lockIsPlaying()
                     playerStateManager.lockTrack()
                     val observed = playerStateManager.fetchOnce()
+                    observedEmpty = observed != null && observed.item == null
                     // After a skip the target is whatever Spotify moved to: any OTHER item playing.
                     val onTarget = if (thenSkip == 0) observed?.item?.uri == uri
                                    else observed?.item?.uri != null && observed.item.uri != uri
-                    if (observed != null && observed.isPlaying && onTarget) {
-                        confirmed = true
-                        break
+                    if (observed != null && observed.isPlaying && onTarget) return true
+                }
+                return false
+            }
+            if (accepted) {
+                confirmed = confirmOnce()
+                if (superseded()) { abandon("while confirming"); return }
+                val b = body
+                if (!confirmed && observedEmpty && thenSkip == 0 && collectionFallback != null &&
+                    b is WakeRestoreBody.Context && isCollectionContext(b.contextUri) &&
+                    !playerStateManager.isRateLimited()) {
+                    Log.d(TAG, "wake: the collection body left the player EMPTY; falling back to the " +
+                               "${collectionFallback.size}-uri liked window")
+                    val sent = repository.play(
+                        uris       = collectionFallback,
+                        positionMs = positionMs?.plus(System.currentTimeMillis() - sdkStartedAt),
+                        deviceId   = landedDeviceId,
+                    )
+                    val err = sent.exceptionOrNull()
+                    if (err == null) {
+                        confirmed = confirmOnce()
+                        if (superseded()) { abandon("while confirming the fallback"); return }
+                    } else if (err.isRateLimited()) {
+                        playerStateManager.noteRateLimited(err, "wake fallback body")
                     }
                 }
             } else {
@@ -1293,10 +1334,11 @@ class PlayerViewModel(
         // something other than the tapped item.
         return when (body) {
             is WakeRestoreBody.Context -> repository.play(
-                contextUri = body.contextUri,
-                offsetUri  = uri,
-                positionMs = positionMs?.plus(elapsedMs),
-                deviceId   = deviceId,
+                contextUri     = body.contextUri,
+                offsetUri      = if (body.offsetPosition == null) uri else null,
+                offsetPosition = body.offsetPosition,
+                positionMs     = positionMs?.plus(elapsedMs),
+                deviceId       = deviceId,
             )
             is WakeRestoreBody.Uris -> {
                 val leadIsEpisode = body.uris.firstOrNull()?.startsWith("spotify:episode:") == true
@@ -1310,7 +1352,7 @@ class PlayerViewModel(
     }
 
     private fun WakeRestoreBody.describe(): String = when (this) {
-        is WakeRestoreBody.Context -> "context ${contextUri}"
+        is WakeRestoreBody.Context -> "context ${contextUri}" + (offsetPosition?.let { " @$it" } ?: "")
         is WakeRestoreBody.Uris    -> "uris ×${uris.size}"
     }
 
@@ -1480,6 +1522,7 @@ class PlayerViewModel(
             owner           = owner,
             degradeTo       = if (isEpisode) listOf(uri) else null,
             thenSkip        = thenSkip,
+            collectionFallback = if (isEpisode) null else likedUris?.let { windowFrom(it, uri) },
         )
     }
 
@@ -1579,12 +1622,20 @@ class PlayerViewModel(
                 },
                 onFailure = { e ->
                     if (e.isNoActiveDevice() || shuffleWas404) {
-                        val pick = likedForCollection?.let { if (shuffle) it.randomOrNull() else it.firstOrNull() }
+                        // Positioned by RAW position (0 for Play, random for Shuffle): a cached uri
+                        // the collection no longer holds empties the player. The SDK placeholder
+                        // is the cached song at that position when there is one (the first for
+                        // Play; the list is filtered, so a deep position may miss — any song
+                        // then, it is only the sound until the body lands).
+                        val position = if (!shuffle) 0
+                                       else (itemCount ?: likedForCollection?.size)?.takeIf { it > 1 }?.let { Random.nextInt(it) } ?: 0
+                        val pick = likedForCollection?.let { it.getOrNull(position) ?: it.randomOrNull() }
                         if (pick != null) {
                             if (shuffle) playerStateManager.markShuffleOwedOn()
+                            val pickIdx = likedForCollection.indexOf(pick)
                             restoreAfterWake(
                                 uri             = pick.uri,
-                                body            = WakeRestoreBody.Context(contextUri),
+                                body            = WakeRestoreBody.Context(contextUri, offsetPosition = position),
                                 positionMs      = 0L,
                                 shuffle         = false,   // the collection starts with shuffle OFF; ON is re-asserted after
                                 startPositionMs = null,
@@ -1592,6 +1643,8 @@ class PlayerViewModel(
                                 generation      = generation,
                                 owner           = owner,
                                 degradeTo       = null,
+                                collectionFallback = likedForCollection.drop(pickIdx.coerceAtLeast(0))
+                                    .map { it.uri }.take(PlaybackOrigin.URI_CAP),
                             )
                         } else {
                             playContextViaRemote(contextUri, shuffle, owner, generation)

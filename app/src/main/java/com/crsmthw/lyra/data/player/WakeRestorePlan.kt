@@ -7,8 +7,13 @@ import com.crsmthw.lyra.data.remote.model.SpotifyDevice
  * (docs/PLAYER.md → Playback 404 Fallback). Pure Kotlin.
  */
 sealed interface WakeRestoreBody {
-    /** `context_uri` + `offset.uri` = the current item. The offset is honoured even with shuffle ON. */
-    data class Context(val contextUri: String) : WakeRestoreBody
+    /**
+     * `context_uri` + an offset: `offset.uri` = the current item, or `offset.position` when
+     * [offsetPosition] is set (the collection on the cold path — a cached uri Spotify no longer
+     * holds in the collection EMPTIES the player, device pass 2026-09-25 evening). The offset is
+     * honoured even with shuffle ON.
+     */
+    data class Context(val contextUri: String, val offsetPosition: Int? = null) : WakeRestoreBody
 
     /**
      * A `uris` list starting at the current item. With shuffle ON Spotify starts such a body at a
