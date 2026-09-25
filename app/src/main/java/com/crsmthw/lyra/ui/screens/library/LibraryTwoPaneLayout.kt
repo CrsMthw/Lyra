@@ -118,6 +118,7 @@ internal fun TwoPaneLayout(
                         listStates            = browserListStates,
                         barState              = browserBarState,
                         viewModel             = viewModel,
+                        onPlayContext         = { playerViewModel.playContext(it, shuffle = false) },
                         onOpenSettings        = onOpenSettings,
                         onOpenAlbum           = onOpenAlbum,
                         onOpenArtist          = onOpenArtist,

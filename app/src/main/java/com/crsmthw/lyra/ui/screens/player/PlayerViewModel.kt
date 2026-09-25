@@ -1353,39 +1353,46 @@ class PlayerViewModel(
         )
     }
 
+    /** The hero Shuffle button and iLyra's Shuffle Songs: [playContext] with shuffle ON. */
+    fun shuffleContext(contextUri: String, itemCount: Int? = null) =
+        playContext(contextUri, shuffle = true, itemCount = itemCount)
+
     /**
-     * Play a context (playlist / album / the Liked `collection`) with shuffle ON — the hero Shuffle
-     * button (Library, since 2026-09-25) and iLyra's Shuffle Songs. THE one shuffle-play path.
+     * Play a context (playlist / album / the Liked `collection`) with [shuffle] set the way the
+     * user asked — the hero PLAY (shuffle OFF, from the first item; Library, Album — since
+     * 2026-09-25 pm it no longer inherits whatever shuffle state Spotify was in) and the hero
+     * SHUFFLE (shuffle ON, from a random item). THE one context-play path.
      *
-     * Awake: shuffle ON is awaited AND CONFIRMED by re-reading `me/player` before the context play
-     * goes out ("order of execution is not guaranteed" across player endpoints — the Liked hero
-     * sometimes started in order, checklist B7), then the play, then one re-assert 1.5 s later.
+     * Awake: the shuffle state is awaited AND CONFIRMED by re-reading `me/player` before the play
+     * goes out ("order of execution is not guaranteed" across player endpoints — with shuffle ON
+     * still applied a Play started at a random song, with it OFF still pending a Shuffle started in
+     * order), then the play, then one re-assert 1.5 s later if the poll says it did not stick.
+     * With shuffle ON and [itemCount] known, the play carries a RANDOM raw `offset.position`
+     * (device pass 2026-09-25 B7 rerun: with shuffle confirmed ON the context still started at
+     * track 1 about half the time — Spotify applies the play, drops shuffle, and the re-assert only
+     * shuffles the REST — so the start is chosen here, as Home Assistant's Spotify integration
+     * does). Never for the Liked `collection`, which rejects any offset.
      *
-     * Cold (404): the App Remote applies shuffle, then plays the CONTEXT itself (proven: the whole
-     * context loads — device pass 2026-09-25 B7 / IPOD #8). The player shows WAKING until Spotify
-     * reports playing (Cris's rule), then shuffle is re-asserted through the Web API if the poll
-     * says it did not stick. Before 2026-09-25 the Library's own `shufflePlaylist` never set
-     * shuffle on the SDK at all, so a cold Shuffle tap played in order and needed a second tap.
-     *
-     * [itemCount] (the context's item total, when the caller knows it): the awake play starts at
-     * a RANDOM raw `offset.position` — device pass 2026-09-25 B7 rerun: with shuffle confirmed ON
-     * the context still started at track 1 about half the time (Spotify applies the play, drops
-     * shuffle, and the re-assert only shuffles the REST), so the random start is chosen here, the
-     * way Home Assistant's Spotify integration does it. Never for the Liked `collection`, which
-     * rejects any offset; and not on the cold path, where the SDK plays the context itself.
+     * Cold (404): the App Remote applies the shuffle state, then plays the CONTEXT itself (proven:
+     * the whole context loads — device pass 2026-09-25 B7 / IPOD #8). The player shows WAKING
+     * until Spotify reports playing (Cris's rule), then shuffle is re-asserted through the Web API
+     * if the poll says it did not stick. The SDK takes no offset, so a cold Shuffle can still open
+     * on track 1. Before 2026-09-25 the Library's own `shufflePlaylist` never set shuffle on the
+     * SDK at all, so a cold Shuffle tap played in order and needed a second tap.
      *
      * Rate-limit-gated throughout; a newer play cancels it (it is the current [playbackJob]).
      */
-    fun shuffleContext(contextUri: String, itemCount: Int? = null) {
+    fun playContext(contextUri: String, shuffle: Boolean, itemCount: Int? = null) {
         if (playerStateManager.isRateLimited()) return
         playerStateManager.recordPlayOrigin(PlaybackOrigin.forContext(contextUri))
-        playerStateManager.clearShuffleOwed()   // an explicit shuffle-ON play settles a bracket's debt
+        playerStateManager.clearShuffleOwed()   // an explicit shuffle choice settles a bracket's debt
         playerStateManager.setOptimisticallyPlaying()
+        playerStateManager.resetProgressForNewTrack()
         playbackJob?.cancel()
         val owner = ++wakingOwner
         val generation = playerStateManager.playGeneration
         playbackJob = viewModelScope.launch {
-            val shuffleResult = playerStateManager.applyShuffle(true)
+            val shuffleResult = playerStateManager.applyShuffle(shuffle)
             val shuffleErr = shuffleResult.exceptionOrNull()
             if (shuffleErr != null && shuffleErr.isRateLimited()) {
                 playerStateManager.noteRateLimited()
@@ -1393,29 +1400,30 @@ class PlayerViewModel(
                 return@launch
             }
             val shuffleWas404 = shuffleErr != null && shuffleErr.isNoActiveDevice()
-            // The ON must have TAKEN EFFECT before the context play, or the play is applied first
-            // and the context starts in order from track 1.
-            if (shuffleErr == null) confirmShuffleState(true)
-            val startAt = itemCount?.takeIf { it > 1 && !isCollectionContext(contextUri) }
+            // The state must have TAKEN EFFECT before the context play: OFF still pending → a
+            // random first song; ON still pending → track 1 with the rest in order.
+            if (shuffleErr == null) confirmShuffleState(shuffle)
+            val startAt = if (!shuffle) null else itemCount
+                ?.takeIf { it > 1 && !isCollectionContext(contextUri) }
                 ?.let { Random.nextInt(it) }
 
             repository.play(contextUri = contextUri, offsetPosition = startAt).fold(
                 onSuccess = {
-                    // Re-assert: Spotify sometimes applies the play before the shuffle, so the
-                    // first item is in-order. Clear the optimistic lock so fetchOnce reads the
-                    // server's truth, then re-set shuffle if it didn't stick.
+                    // Re-assert: Spotify sometimes applies the play before the shuffle (or drops
+                    // shuffle as a context starts). Clear the optimistic lock so fetchOnce reads
+                    // the server's truth, then re-set it if it didn't stick.
                     delay(SHUFFLE_REASSERT_DELAY_MS)
                     playerStateManager.clearShuffleLock()
                     playerStateManager.fetchOnce()
-                    if (!playerStateManager.state.value.shuffleEnabled) {
-                        Log.d(TAG, "shuffle: context play landed in order; re-asserting ON")
-                        repository.setShuffle(true)
+                    if (playerStateManager.state.value.shuffleEnabled != shuffle) {
+                        Log.d(TAG, "shuffle: context play landed with shuffle=${!shuffle}; re-asserting $shuffle")
+                        repository.setShuffle(shuffle)
                             .onFailure { if (it.isRateLimited()) playerStateManager.noteRateLimited() }
                     }
                 },
                 onFailure = { e ->
                     if (e.isNoActiveDevice() || shuffleWas404) {
-                        shuffleContextViaRemote(contextUri, owner, generation)
+                        playContextViaRemote(contextUri, shuffle, owner, generation)
                     } else {
                         if (e.isRateLimited()) playerStateManager.noteRateLimited()
                         playerStateManager.releasePlayingOptimism()
@@ -1426,11 +1434,11 @@ class PlayerViewModel(
     }
 
     /**
-     * The cold half of [shuffleContext]: connect, shuffle ON on the SDK, play the context on the
-     * SDK, hold the waking state until `me/player` reports playing (up to [WAKE_CONFIRM_TIMEOUT_MS]
-     * after the phone is listed, like a track restore), then re-assert shuffle if it did not stick.
+     * The cold half of [playContext]: connect, set [shuffle] on the SDK, play the context on the
+     * SDK, hold the waking state until `me/player` reports playing (up to [WAKE_DEVICE_TIMEOUT_MS]),
+     * then re-assert the shuffle state if it did not stick.
      */
-    private suspend fun shuffleContextViaRemote(contextUri: String, owner: Long, generation: Long) {
+    private suspend fun playContextViaRemote(contextUri: String, shuffle: Boolean, owner: Long, generation: Long) {
         fun superseded() = playerStateManager.playGeneration != generation
         ownedWakeRestores++
         try {
@@ -1441,16 +1449,16 @@ class PlayerViewModel(
             if (superseded()) return
             if (!ok) {
                 // A failed bind must not leave a 5 s "playing" lock with nothing playing.
-                Log.d(TAG, "wake: shuffle context — App Remote could not connect")
+                Log.d(TAG, "wake: context play — App Remote could not connect")
                 playerStateManager.releasePlayingOptimism()
                 _uiState.update { it.copy(error = "Couldn't connect to Spotify", isPlaying = false) }
                 return
             }
-            remoteManager.setShuffle(true)
+            remoteManager.setShuffle(shuffle)
             delay(REMOTE_SHUFFLE_SETTLE_MS)
             remoteManager.play(contextUri)
             val startedAt = System.currentTimeMillis()
-            Log.d(TAG, "wake: SDK shuffle + context play dispatched ($contextUri)")
+            Log.d(TAG, "wake: SDK shuffle=$shuffle + context play dispatched ($contextUri)")
             // Confirm: the phone registers as a device a few seconds after the SDK play; the poll
             // answers 204 until then. Same cadence and rule as a track restore's confirm step.
             var observedShuffle: Boolean? = null
@@ -1463,14 +1471,14 @@ class PlayerViewModel(
                 val observed = playerStateManager.fetchOnce() ?: continue
                 if (observed.isPlaying) { observedShuffle = observed.shuffleState; break }
             }
-            Log.d(TAG, "wake: shuffle context outcome " + when (observedShuffle) {
-                null  -> "unconfirmed — not reported playing within ${WAKE_DEVICE_TIMEOUT_MS} ms"
-                true  -> "confirmed shuffled after ${System.currentTimeMillis() - startedAt} ms"
-                false -> "playing IN ORDER after ${System.currentTimeMillis() - startedAt} ms; re-asserting ON"
+            Log.d(TAG, "wake: context play outcome " + when (observedShuffle) {
+                null    -> "unconfirmed — not reported playing within ${WAKE_DEVICE_TIMEOUT_MS} ms"
+                shuffle -> "confirmed (shuffle=$shuffle) after ${System.currentTimeMillis() - startedAt} ms"
+                else    -> "playing with shuffle=${!shuffle} after ${System.currentTimeMillis() - startedAt} ms; re-asserting $shuffle"
             })
-            if (observedShuffle == false && !playerStateManager.isRateLimited()) {
+            if (observedShuffle != null && observedShuffle != shuffle && !playerStateManager.isRateLimited()) {
                 playerStateManager.clearShuffleLock()
-                repository.setShuffle(true)
+                repository.setShuffle(shuffle)
                     .onFailure { if (it.isRateLimited()) playerStateManager.noteRateLimited() }
             }
         } finally {

@@ -1509,20 +1509,6 @@ class LibraryViewModel(
         ).modesCleared() }
     }
 
-    fun playPlaylist(uri: String) {
-        playerStateManager.recordPlayOrigin(PlaybackOrigin.forContext(uri))
-        playerStateManager.setOptimisticallyPlaying()
-        viewModelScope.launch {
-            repository.play(contextUri = uri).onFailure { e ->
-                if (e.message?.contains("404") == true) {
-                    remoteManager.connectAndPlay(uri)
-                } else {
-                    playerStateManager.releasePlayingOptimism()
-                }
-            }
-        }
-    }
-
     fun selectLikedSongs() {
         // Already on Liked (no playlist + tracks loaded), or a Liked load already in flight → no-op.
         if ((_uiState.value.currentPlaylist == null && _uiState.value.currentTracks.isNotEmpty()) ||

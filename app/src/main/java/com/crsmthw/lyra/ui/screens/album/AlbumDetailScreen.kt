@@ -118,7 +118,9 @@ fun AlbumDetailScreen(
                 val onPlayAll: () -> Unit = {
                     if (tracks.isNotEmpty()) {
                         haptics.press()
-                        playerViewModel.playTrack(uri = tracks[0].uri, contextUri = albumUri)
+                        // Shuffle OFF, from track 1 — not a tap on track 1, which would keep
+                        // (and re-assert) whatever shuffle state the user was in.
+                        playerViewModel.playContext(albumUri, shuffle = false)
                         onNavigateToPlayer()
                     }
                 }

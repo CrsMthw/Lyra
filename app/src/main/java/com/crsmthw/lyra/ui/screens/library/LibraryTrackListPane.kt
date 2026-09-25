@@ -269,7 +269,7 @@ internal fun RightPaneContent(
                     isLikedSongs = isLikedSongs,
                     name         = playlistName,
                     trackCount   = trackCount,
-                    onPlay       = { haptics.press(); viewModel.playPlaylist(playUri) },
+                    onPlay       = { haptics.press(); playerViewModel.playContext(playUri, shuffle = false) },
                     onShuffle    = { haptics.press(); playerViewModel.shuffleContext(playUri, trackCount) },
                     selecting    = inSelection || inReorder,
                     playlistId   = playlist?.id,
@@ -293,7 +293,7 @@ internal fun RightPaneContent(
                             style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
                         if (!isLikedSongs && playUri.isNotBlank()) {
                             Spacer(Modifier.height(16.dp))
-                            Button(onClick = { viewModel.playPlaylist(playUri) }) {
+                            Button(onClick = { playerViewModel.playContext(playUri, shuffle = false) }) {
                                 Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(8.dp))
                                 Text(stringResource(R.string.player_play))
                             }

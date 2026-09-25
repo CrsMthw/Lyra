@@ -81,6 +81,9 @@ internal fun LibraryBrowserPane(
     onOpenShow            : (String) -> Unit = {},
     onOpenStats           : () -> Unit = {},
     onPlayTopTrack        : (Int) -> Unit = {},
+    /** The card Play buttons: plays that context with shuffle OFF, from its first item
+     *  (`PlayerViewModel.playContext`) — the Liked card passes the `collection` uri. */
+    onPlayContext         : (String) -> Unit = {},
     /** The pane's own container colour, which the app bar and the tab row both paint (defaults to
      *  `background`; the two-pane left card passes `surface`). */
     containerColor        : Color = Color.Unspecified,
@@ -183,7 +186,7 @@ internal fun LibraryBrowserPane(
                 count             = state.likedSongCount,
                 isSelected        = likedSongsSelected,
                 onOpen            = { haptics.confirm(); viewModel.selectLikedSongs() },
-                onPlay            = { viewModel.playPlaylist("spotify:user:${state.user?.id}:collection") },
+                onPlay            = { onPlayContext("spotify:user:${state.user?.id}:collection") },
                 artSharedModifier = likedArt,
             )
         }
@@ -257,7 +260,7 @@ internal fun LibraryBrowserPane(
                     isSelected        = playlist.id == selectedPlaylistId,
                     isMine            = true,
                     onClick           = { haptics.confirm(); viewModel.selectPlaylist(playlist) },
-                    onPlay            = { viewModel.playPlaylist(playlist.uri) },
+                    onPlay            = { onPlayContext(playlist.uri) },
                     artSharedModifier = playlistArt,
                 )
             }
@@ -282,7 +285,7 @@ internal fun LibraryBrowserPane(
                         File(mosaicDir, "${playlist.id}.png") else null,
                     isSelected        = playlist.id == selectedPlaylistId,
                     onClick           = { haptics.confirm(); viewModel.selectPlaylist(playlist) },
-                    onPlay            = { viewModel.playPlaylist(playlist.uri) },
+                    onPlay            = { onPlayContext(playlist.uri) },
                     artSharedModifier = playlistArt,
                 )
             }
