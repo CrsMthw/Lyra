@@ -85,6 +85,14 @@ private const val WAKE_DEVICE_TIMEOUT_MS = 60_000L
 private const val WAKE_CONFIRM_POLL_MS    = 700L
 private const val WAKE_CONFIRM_TIMEOUT_MS = 8_000L
 
+/**
+ * How many times the wake body may fail with an error that is NOT 404 (listed but not ready), NOT
+ * 429 (abandon) and NOT a body refusal (degrade) — a 5xx, a "Restriction violated" 403 on a context
+ * body — before the restore gives up. Without a cap such a body was re-sent every
+ * [WAKE_DEVICE_POLL_MS] for the whole [WAKE_DEVICE_TIMEOUT_MS].
+ */
+private const val WAKE_MAX_BODY_FAILURES = 3
+
 /** The shuffle bracket's re-assert delay after a successful play — `shuffleContext`'s 1.5 s. */
 private const val SHUFFLE_REASSERT_DELAY_MS = 1_500L
 
@@ -1016,6 +1024,8 @@ class PlayerViewModel(
             var pending = body
             var accepted = false
             var abandoned = false
+            var failed = false
+            var bodyFailures = 0
             var listedLogged = false
             val deadline = sdkStartedAt + WAKE_DEVICE_TIMEOUT_MS
             while (System.currentTimeMillis() < deadline) {
@@ -1076,12 +1086,18 @@ class PlayerViewModel(
                             pending = degradeTo?.let { WakeRestoreBody.Uris(it) }
                             continue
                         }
-                        else -> Unit
+                        // Anything else (a 5xx, a restriction on a context body): a few retries,
+                        // then give up — the SDK is playing the single item either way.
+                        else -> if (++bodyFailures >= WAKE_MAX_BODY_FAILURES) {
+                            Log.d(TAG, "wake: body failed $bodyFailures times; giving up the restore")
+                            failed = true
+                            break
+                        }
                     }
                 }
                 delay(WAKE_DEVICE_POLL_MS)
             }
-            if (!accepted && !abandoned) {
+            if (!accepted && !abandoned && !failed) {
                 if (superseded()) { abandon("at the device ceiling"); return }
                 val toSend = pending
                 if (toSend == null) {
