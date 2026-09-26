@@ -132,17 +132,29 @@ internal fun hubDegreesPerSecond(packRadius: Float, tapeSpeed: Float = CassetteG
     (tapeSpeed / max(packRadius, 1f)) * (180f / PI.toFloat())
 
 /**
- * Advances a hub angle by one frame, wrapped into [0, 360). BOTH hubs turn ANTICLOCKWISE (natural
- * frame, head edge at the bottom): the tape leaves the supply (left) pack and winds onto the
- * take-up (right) pack along the HEAD side, so the bottom of each pack moves toward the reel that
- * is filling — left to right — and a circle whose bottom moves right turns anticlockwise. A rigid
- * rotation keeps handedness, so the portrait screen sees anticlockwise too. The angle is fed to
- * DrawScope `rotate`, which is CLOCKWISE-positive on screen (y down), so it DECREASES over time.
- * `dtSeconds` is capped at 0.1 s so a hitch or the first frame after a resume never jumps the teeth.
+ * Advances a hub angle by one frame, wrapped into [0, 360). In PLAY both hubs turn ANTICLOCKWISE
+ * (natural frame, head edge at the bottom): the tape leaves the supply (left) pack and winds onto
+ * the take-up (right) pack along the HEAD side, so the bottom of each pack moves toward the reel
+ * that is filling — left to right — and a circle whose bottom moves right turns anticlockwise. A
+ * rigid rotation keeps handedness, so the portrait screen sees anticlockwise too. The angle is fed
+ * to DrawScope `rotate`, which is CLOCKWISE-positive on screen (y down), so it DECREASES over time.
+ *
+ * `tapeVelocity` is the SIGNED tape speed ([windTapeVelocity] during a reel wind): positive turns
+ * the hubs the play way, negative (a rewind) clockwise, 0 not at all — ω = |v| / r either way.
+ * `maxStepDeg` clamps one frame's turn ([CassetteWind.HubMaxStepDeg] in the frame loop). With both
+ * defaults this is bit-identical to the play-only form it replaced. `dtSeconds` is capped at 0.1 s
+ * so a hitch or the first frame after a resume never jumps the teeth.
  */
-internal fun advanceHubAngle(angle: Float, packRadius: Float, dtSeconds: Float): Float {
+internal fun advanceHubAngle(
+    angle: Float,
+    packRadius: Float,
+    dtSeconds: Float,
+    tapeVelocity: Float = CassetteGeometry.TapeSpeed,
+    maxStepDeg: Float = Float.MAX_VALUE,
+): Float {
     val dt = dtSeconds.coerceIn(0f, 0.1f)
-    val next = angle - hubDegreesPerSecond(packRadius) * dt
+    val step = (hubDegreesPerSecond(packRadius, abs(tapeVelocity)) * dt).coerceAtMost(maxStepDeg)
+    val next = if (tapeVelocity >= 0f) angle - step else angle + step
     return ((next % 360f) + 360f) % 360f
 }
 

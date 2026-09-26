@@ -93,6 +93,33 @@ object CassetteTiming {
     const val EjectOutMs    = 380
     const val EjectGapMs    = 120
     const val InsertMs      = 480
+
+    /**
+     * The reel wind (CassetteReelWind.kt): a position change of at least this much track time —
+     * and [CassetteWind.WindJumpMinFraction] of the tape — is a JUMP the reels wind to. 5 s sits
+     * above the correction a poll makes after a pause or a stall elsewhere (the up to 3–4 ticks
+     * that ran ahead since the last 3 s poll, plus the response's age: ~4.5 s at worst, and a
+     * resume elsewhere the same forward), so such a correction snaps as it always did.
+     */
+    const val WindJumpMinMs  = 5_000L
+
+    /**
+     * How long an exact-0 jump is HELD before the reels wind to 0. An exact 0 is Lyra's own
+     * optimistic reset on a skip (after which `fetchUntilTrackChanges` polls for up to 4 s) or the
+     * wake fallback, so the next value usually resolves it: a new track freezes the old face where
+     * it was, and a stale poll restoring the old position is no jump. 5 s outlasts that 4 s window
+     * plus the skip request's and one fetch's latency. A null-item poll's 0 never reaches the
+     * reels: while playing, the 1 s tick counts on from it and the first tick would read as a
+     * restart, so PlayerScreen holds the last position while the item is absent ([ReelItemHold]).
+     */
+    const val WindZeroHoldMs = 5_000L
+
+    /** The shortest wind (a hop of almost no tape), ms: long enough to read as a wind, not a snap. */
+    const val WindMinMs      = 350
+
+    /** The longest wind (the whole tape — a repeat-one wrap), ms: under a second, so the reels
+     *  never trail the music for long. */
+    const val WindMaxMs      = 900
 }
 
 /** How a track change is shown. */

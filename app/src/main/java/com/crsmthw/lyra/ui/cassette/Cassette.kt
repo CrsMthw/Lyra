@@ -16,8 +16,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -32,6 +36,10 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import com.crsmthw.lyra.R
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlin.math.min
 
 /*
@@ -56,6 +64,11 @@ import kotlin.math.min
  *   hub direction    BOTH hubs ANTICLOCKWISE (natural frame, and so on the portrait screen too):
  *                    the tape runs supply → take-up along the HEAD edge, so each pack's bottom
  *                    moves left → right; the angle fed to `rotate` (clockwise-positive) falls
+ *   reel wind        a position JUMP (≥ 5 s of track time AND ≥ 1 % of the tape: a seek elsewhere,
+ *                    a repeat-one wrap) winds the packs to the new radii instead of snapping —
+ *                    350..900 ms by √(pack distance), a trapezoidal motor curve — and the hubs
+ *                    with them, one signed tape velocity peaking at 1080°/s on the empty hub
+ *                    (18° per 60 Hz frame, under the teeth's aliasing limit); CassetteReelWind.kt
  *   between packs    NOTHING but the centre pin: the ad's diagonal strand (Cris, 2026-09-23) and
  *                    the run along the window's flat bottom (2026-09-24) were both deleted — the
  *                    tape path is implied by the pinch rollers and the head recess
@@ -79,32 +92,58 @@ import kotlin.math.min
  *                    (272|728, 590) r 27; guide rollers (122|878, 557) r 46; head recess 418..582
  *
  * ── Performance ──────────────────────────────────────────────────────────────────────────────
- * Per frame only the hub angles move (and, once a second, the pack radii). Everything else is
- * recorded into two GraphicsLayers per (size, palette, label, side) in `drawWithCache`; the text
- * is measured in composition (keyed on label, side, strings and pixel size, NOT the palette —
- * colour is applied at draw time), and the hub frame loop runs only while `spinning`.
+ * Per frame only the hub angles move, and the pack radii — once a second on a tick, every frame
+ * through a wind. Everything else is recorded into two GraphicsLayers per (size, palette, label,
+ * side) in `drawWithCache`; the text is measured in composition (keyed on label, side, strings and
+ * pixel size, NOT the palette — colour is applied at draw time). Each face's frame loop runs while
+ * it is spinning OR winding and parks otherwise. `progress` is sampled only by the face's
+ * snapshotFlow (never in composition, never in the draw): the draw reads only the face's own
+ * position ([ReelSpin.shown]) and writes nothing.
  */
 
-/** The hub angles (degrees as DrawScope `rotate` takes them — clockwise-positive, so the hubs'
- *  anticlockwise turn makes them fall; see [advanceHubAngle]) and the pack radii the draw last
- *  used. The angles are snapshot state read ONLY in the draw phase (one redraw per frame, no recomposition); the
- *  radii are plain fields the draw writes and the frame loop reads, so `progress` is only ever
- *  called inside the draw block. */
+/**
+ * One face's reels: the [ReelTracker] (the position the packs show, and any wind toward a new one)
+ * and the two hub angles (degrees as DrawScope `rotate` takes them — clockwise-positive, so the
+ * hubs' anticlockwise play turn makes them fall; see [advanceHubAngle]). [shown] and the angles
+ * are snapshot state read ONLY in the draw phase (one redraw per change, no recomposition);
+ * [winding] is read ONLY by the frame loop's park. The face's effect is the only writer — the
+ * draw writes nothing — so a face whose effect is cancelled (the outgoing face of a flip or an
+ * eject, `live = false`) stays exactly where it was last drawn.
+ */
 @Stable
-private class HubSpin {
+private class ReelSpin(initial: Float) {
+    val tracker = ReelTracker(initial)
     var supplyDeg by mutableFloatStateOf(0f)
     var takeUpDeg by mutableFloatStateOf(0f)
-    var supplyR = CassetteGeometry.RMax
-    var takeUpR = CassetteGeometry.RMin
+    var shown by mutableFloatStateOf(tracker.displayed)
+    var winding by mutableStateOf(false)
+
+    /** Mirrors the tracker into the snapshot state after every change (an equal write is free). */
+    fun publish() {
+        shown = tracker.displayed
+        winding = tracker.winding
+    }
 }
+
+/**
+ * One snapshotFlow sample. The position is LIVE — `progress` reads PlayerScreen's state directly —
+ * but the duration is this face's last COMPOSED value (`rememberUpdatedState`). On a track change
+ * the collector usually runs before the face recomposes, so for one sample the new position is
+ * classified against the OUTGOING track's length; the next sample carries the new length, if the
+ * face is still live (the skip-edge residual in [CassetteImpl]'s collector comment).
+ */
+private data class ReelSample(val progress: Float, val durationMs: Long)
 
 /**
  * The cassette in its NATURAL orientation: long edge horizontal, head edge (the exposed tape,
  * the capstan holes, the shield) at the BOTTOM, label upright. Fills `modifier`'s bounds, which
  * the CALLER has sized at [CASSETTE_ASPECT] (see [cassetteFit]); nothing here letterboxes.
  *
- * `progress` is a lambda read inside the draw phase so the per-second tick never recomposes the
- * label. `spinning` drives the hubs (a frame clock while true, frozen while false — paused music).
+ * `progress` is a lambda sampled by the face's reel tracker (a snapshotFlow — never read in
+ * composition), and the draw reads the tracker's position, so the per-second tick never recomposes
+ * the label. `spinning` drives the hubs (a frame clock while true, frozen while false — paused
+ * music). This overload never winds — its duration is unknown — so the packs follow `progress`
+ * exactly (the Settings preview); the player's stage winds through [CassetteImpl].
  */
 @Composable
 fun Cassette(
@@ -114,6 +153,36 @@ fun Cassette(
     progress: () -> Float,
     spinning: Boolean,
     modifier: Modifier = Modifier,
+) = CassetteImpl(
+    palette    = palette,
+    label      = label,
+    side       = side,
+    progress   = progress,
+    durationMs = 0L,
+    spinning   = spinning,
+    live       = true,
+    debug      = null,
+    modifier   = modifier,
+)
+
+/**
+ * [Cassette] with the reel wind's inputs (CassetteReelWind.kt). `durationMs` = the track's length,
+ * 0 when unknown (the reels then never wind: they follow `progress`, as the Settings preview does).
+ * `live` = this face follows playback; false freezes it where it was last drawn — the stage's
+ * outgoing face — because its collector, its hold and its frame loop live in ONE effect keyed on
+ * it. `debug` = the preview's reel clock ([ReelDebug]); null in production.
+ */
+@Composable
+internal fun CassetteImpl(
+    palette   : CassettePalette,
+    label     : CassetteLabel,
+    side      : CassetteSide,
+    progress  : () -> Float,
+    durationMs: Long,
+    spinning  : Boolean,
+    live      : Boolean,
+    debug     : ReelDebug?,
+    modifier  : Modifier,
 ) {
     val strings = CassetteArtStrings(
         stereo        = stringResource(R.string.cassette_stereo),
@@ -124,22 +193,72 @@ fun Cassette(
         metaSeparator = stringResource(R.string.cassette_meta_separator),
     )
     val measurer = rememberTextMeasurer()
-    val spin = remember { HubSpin() }
+    // Seeded with the position at the face's first composition, read WITHOUT observation (a read
+    // here would recompose this scope on every tick); the collector's first value then primes the
+    // tracker, so a new face — a new track, the overlay coming up — never winds.
+    val spin = remember { ReelSpin(Snapshot.withoutReadObservation { progress() }) }
+    val currentProgress by rememberUpdatedState(progress)
+    val currentDuration by rememberUpdatedState(durationMs)
+    val currentSpinning by rememberUpdatedState(spinning)
 
-    // Hubs: ω = v / r per hub, both ANTICLOCKWISE (the tape runs left → right along the head
-    // edge). Frozen exactly where they are when `spinning` goes false; on resume the first frame
-    // only stamps the clock, so nothing snaps.
-    LaunchedEffect(spinning) {
-        if (!spinning) return@LaunchedEffect
+    LaunchedEffect(live, debug) {
+        if (!live) return@LaunchedEffect                 // the outgoing face: frozen at spin.shown
+
+        // COLLECTOR: classifies every value; never owns a wind — collectLatest cancels its block
+        // on every tick, and the exact-0 hold is the ONE thing the next value should cancel.
+        //
+        // The skip-edge residual (accepted): a new track's id and position land in ONE snapshot,
+        // and THIS face's collector may classify the new position before the stage's key tracking
+        // turns the face outgoing (live = false). A jump then only makes a hold or a new UNSTAMPED
+        // wind — a retarget when one was running, never a fold into it (ReelTracker.windTo) — and
+        // the cancellation comes first: the faces are composed inside the stage's
+        // BoxWithConstraints, a SubcomposeLayout, so they recompose in the measure pass of the very
+        // frame whose animation callbacks can at most STAMP that wind. A stamp moves no pack, and a
+        // retarget's stamp keeps the hubs on the replaced wind's speed (ReelTracker.onFrame), so
+        // the old face's packs never move and its hubs never reverse: they take one last step their
+        // own way, as they would have anyway. But a new position that is NO jump is accepted here
+        // and, if the face is idle, snaps it at the flip's first frame (a skip inside a song's first
+        // seconds, say; a running wind only gets a re-based end, which moves nothing at once — see
+        // ReelTracker's Span.moveEnd). The threshold is measured against the OUTGOING
+        // track's length (the face has not recomposed with the new one yet — see ReelSample), so
+        // the snap is at most 5 s of the outgoing face's own tape: ≤ 3.3 units on a 3-minute song,
+        // up to ~30 on a 20 s interlude. When the outgoing track is the LONGER one, the stale length
+        // only makes a jump more likely — a cancelled unstamped wind, so the face does not move.
+        // Exact would need the track id read in the same snapshot as the position.
+        launch {
+            snapshotFlow { ReelSample(currentProgress(), currentDuration) }.collectLatest { sample ->
+                val input = spin.tracker.onProgress(sample.progress, sample.durationMs)
+                spin.publish()
+                if (input == ReelInput.Hold) {           // the ONLY suspension; the next value cancels it
+                    delay(CassetteTiming.WindZeroHoldMs)
+                    spin.tracker.onHoldExpired(currentDuration)
+                    spin.publish()
+                }
+            }
+        }
+
+        // FRAME LOOP: the hubs' play drive plus any wind. ω = v / r per hub, one signed tape
+        // velocity for both (anticlockwise in play). It parks while neither is needed, so the hubs
+        // freeze exactly where they are when paused; on waking the first frame only stamps the
+        // clock (and the tracker stamps any new wind on it), so nothing snaps.
+        val timeScale = debug?.timeScale ?: 1f
         var last = -1L
         while (true) {
+            if (!currentSpinning && !spin.winding) {
+                last = -1L
+                snapshotFlow { currentSpinning || spin.winding }.first { it }
+            }
             withFrameNanos { now ->
+                val s = spin.tracker.onFrame(now, timeScale, debug?.freezeFraction)
                 if (last >= 0L) {
-                    val dt = (now - last) / 1_000_000_000f
-                    spin.supplyDeg = advanceHubAngle(spin.supplyDeg, spin.supplyR, dt)
-                    spin.takeUpDeg = advanceHubAngle(spin.takeUpDeg, spin.takeUpR, dt)
+                    val dt = (now - last) / 1_000_000_000f * timeScale
+                    val v = windTapeVelocity(s, currentSpinning)
+                    val r = packRadii(spin.tracker.displayed)
+                    spin.supplyDeg = advanceHubAngle(spin.supplyDeg, r.supply, dt, v, CassetteWind.HubMaxStepDeg)
+                    spin.takeUpDeg = advanceHubAngle(spin.takeUpDeg, r.takeUp, dt, v, CassetteWind.HubMaxStepDeg)
                 }
                 last = now
+                spin.publish()
             }
         }
     }
@@ -187,9 +306,9 @@ fun Cassette(
                         }
                     }
                     onDrawBehind {
-                        val radii = packRadii(progress())
-                        spin.supplyR = radii.supply
-                        spin.takeUpR = radii.takeUp
+                        // The face's OWN position — never `progress()`, which would flash the
+                        // target for a frame before a wind starts. The draw writes nothing.
+                        val radii = packRadii(spin.shown)
                         drawLayer(under)
                         translate(ox, oy) {
                             scale(scale, pivot = Offset.Zero) {
@@ -210,20 +329,32 @@ fun Cassette(
  * and shows a change of `trackKey` as a FLIP or an EJECT per [CassetteChoreographer] — the same
  * alternation whatever the change's direction. The outgoing face keeps the label it had; the
  * incoming face gets the new one.
+ *
+ * `durationMs` = the current track's length, 0 when unknown (the reels then never wind). A
+ * playback-position JUMP on the same track — a seek made elsewhere, a repeat-one wrap — winds the
+ * incoming face's packs and hubs to the new position instead of snapping (CassetteReelWind.kt);
+ * the outgoing face stays frozen where it was.
  */
 @Composable
 fun CassetteStage(
-    palette : CassettePalette,
-    label   : CassetteLabel,
-    trackKey: String?,
-    progress: () -> Float,
-    spinning: Boolean,
-    modifier: Modifier = Modifier,
-) = CassetteStageImpl(palette, label, trackKey, progress, spinning, modifier, freeze = null)
+    palette   : CassettePalette,
+    label     : CassetteLabel,
+    trackKey  : String?,
+    progress  : () -> Float,
+    durationMs: Long,
+    spinning  : Boolean,
+    modifier  : Modifier = Modifier,
+) = CassetteStageImpl(palette, label, trackKey, progress, durationMs, spinning, modifier, freeze = null, reelDebug = null)
 
 /** DEBUG ONLY (the src/debug preview): hold a [move] at `fraction` of its timeline instead of
  *  playing it, so a screenshot can catch a mid-flip / mid-eject frame. Production passes null. */
 internal data class CassetteFreeze(val move: CassetteMove, val fraction: Float)
+
+/** DEBUG ONLY (the src/debug preview): slow the reels' clock — winds AND hubs — by `timeScale`, or
+ *  hold any wind at `freezeFraction` of its timeline so a screenshot catches it mid-wind (the hubs
+ *  keep turning at that fraction's speed). Production passes null. A data class, so an equal
+ *  instance is a stable effect key. */
+internal data class ReelDebug(val timeScale: Float = 1f, val freezeFraction: Float? = null)
 
 /** One face of the stage: a shell showing `label` on `side`. `id` is its composition identity. */
 private data class StageFace(val id: Int, val label: CassetteLabel, val side: CassetteSide)
@@ -232,30 +363,31 @@ private data class StageFace(val id: Int, val label: CassetteLabel, val side: Ca
  * The stage's choreography bookkeeping, assigned DURING COMPOSITION when the key changes
  * (PaneStateHolder-style, deliberately not snapshot state) so the outgoing face never shows the
  * new text. [finished] is the one snapshot value: the generation whose move has completed, which
- * recomposes the outgoing face away.
+ * recomposes the outgoing face away. No reel position lives here: each face owns its own
+ * ([ReelSpin], kept across the key(face.id) loop), and the outgoing face — `live = false`, its
+ * effect cancelled in the frame the key changes — stays at the position it was last drawn at.
  */
 private class StageState(initial: CassetteLabel) {
     var lastKey: String? = null
     var nextId = 1
     var current = StageFace(0, initial, CassetteSide.A)
     var outgoing: StageFace? = null
-    var outgoingProgress = 0f
     var move: CassetteMove? = null
     var generation = 0
-    /** Written by the current face's draw: what the outgoing face freezes at. */
-    var lastProgress = 0f
     val finished = mutableIntStateOf(0)
 }
 
 @Composable
 internal fun CassetteStageImpl(
-    palette : CassettePalette,
-    label   : CassetteLabel,
-    trackKey: String?,
-    progress: () -> Float,
-    spinning: Boolean,
-    modifier: Modifier,
-    freeze  : CassetteFreeze?,
+    palette   : CassettePalette,
+    label     : CassetteLabel,
+    trackKey  : String?,
+    progress  : () -> Float,
+    durationMs: Long,
+    spinning  : Boolean,
+    modifier  : Modifier,
+    freeze    : CassetteFreeze?,
+    reelDebug : ReelDebug?,
 ) {
     val choreographer = remember { CassetteChoreographer() }
     val state = remember { StageState(label) }
@@ -269,7 +401,6 @@ internal fun CassetteStageImpl(
             // A move still running is snapped to its end: its incoming face becomes the outgoing
             // one at rest, and the new move starts from 0 on a FRESH Animatable (below).
             state.outgoing = state.current
-            state.outgoingProgress = state.lastProgress
             state.current = StageFace(state.nextId++, label, choreographer.side)
             state.move = move
             state.generation++
@@ -297,9 +428,6 @@ internal fun CassetteStageImpl(
     val outgoing = state.outgoing
     val faces = if (animating && outgoing != null) listOf(outgoing, state.current) else listOf(state.current)
 
-    val liveProgress = remember(progress, state) { { progress().also { state.lastProgress = it } } }
-    val frozenProgress = remember(generation) { val v = state.outgoingProgress; { v } }
-
     BoxWithConstraints(
         modifier.fillMaxSize().clipToBounds().background(palette.background),
         contentAlignment = Alignment.Center,
@@ -323,13 +451,16 @@ internal fun CassetteStageImpl(
             for (face in faces) {
                 key(face.id) {
                     val incoming = face.id == state.current.id
-                    Cassette(
-                        palette  = palette,
-                        label    = face.label,
-                        side     = face.side,
-                        progress = if (incoming) liveProgress else frozenProgress,
-                        spinning = incoming && spinning,
-                        modifier = Modifier
+                    CassetteImpl(
+                        palette    = palette,
+                        label      = face.label,
+                        side       = face.side,
+                        progress   = progress,
+                        durationMs = durationMs,
+                        spinning   = incoming && spinning,
+                        live       = incoming,
+                        debug      = reelDebug,
+                        modifier   = Modifier
                             .fillMaxSize()
                             .graphicsLayer {
                                 val t = anim.value

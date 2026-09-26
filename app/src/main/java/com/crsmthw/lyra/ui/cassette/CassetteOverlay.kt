@@ -89,21 +89,25 @@ private const val DriftGlideMs = 1_000
  * @param seed      the palette seed colour PlayerScreen picked from the colour source. It slides
  *                  (800 ms, like the player's own accent) when the track changes the album colour.
  * @param trackKey  the current item's id — a change is shown as a flip / eject by the stage.
- * @param progress  playback progress 0..1, read in the draw phase only.
+ * @param progress  playback progress 0..1, sampled by the stage's reel tracker (a snapshotFlow) —
+ *                  never read in composition.
+ * @param durationMs the current item's length in ms; 0 = unknown, and the reels then never wind.
+ *                  With it, a position jump (a seek elsewhere, a repeat-one wrap) winds the reels.
  * @param isPlaying drives the hubs and the keep-screen-on hold (paused = frozen hubs, screen may sleep).
  * @param onExit    called on every exit this overlay detects (double-tap, back, ON_STOP, TalkBack).
  */
 @Composable
 fun CassetteOverlay(
-    visible  : Boolean,
-    settings : CassetteSettings,
-    seed     : Color,
-    label    : CassetteLabel?,
-    trackKey : String?,
-    progress : () -> Float,
-    isPlaying: Boolean,
-    onExit   : () -> Unit,
-    modifier : Modifier = Modifier,
+    visible   : Boolean,
+    settings  : CassetteSettings,
+    seed      : Color,
+    label     : CassetteLabel?,
+    trackKey  : String?,
+    progress  : () -> Float,
+    durationMs: Long,
+    isPlaying : Boolean,
+    onExit    : () -> Unit,
+    modifier  : Modifier = Modifier,
 ) {
     val window  = LocalActivity.current?.window
     val view    = LocalView.current
@@ -203,6 +207,9 @@ fun CassetteOverlay(
         // last label and key, so the stage neither blanks its label nor plays a flip / eject for
         // "no track" and another one back. Plain fields written after each composition: read only
         // on a pass where the incoming value is null, i.e. the pass that change itself caused.
+        // The POSITION is held by PlayerScreen (ReelItemHold), not here: `trackKey` is null for a
+        // local file's whole track and `label` is a separate flow, so neither says "the item is
+        // gone" in the same snapshot as the position.
         val held = remember { HeldItem() }
         SideEffect {
             if (label != null) held.label = label
@@ -246,12 +253,13 @@ fun CassetteOverlay(
                 ),
         ) {
             CassetteStage(
-                palette  = palette,
-                label    = shownLabel ?: EmptyLabel,
-                trackKey = shownTrackKey,
-                progress = progress,
-                spinning = isPlaying,
-                modifier = Modifier
+                palette    = palette,
+                label      = shownLabel ?: EmptyLabel,
+                trackKey   = shownTrackKey,
+                progress   = progress,
+                durationMs = durationMs,
+                spinning   = isPlaying,
+                modifier   = Modifier
                     .fillMaxSize()
                     .offset { drift.value },
             )
