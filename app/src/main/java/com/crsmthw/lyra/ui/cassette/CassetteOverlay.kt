@@ -67,11 +67,35 @@ import kotlin.math.roundToInt
  *
  * Every window-level change is keyed on `visible` and undone in `onDispose`, so an exit — or the
  * player leaving composition with the cassette up — always hands back the bars, the cutout mode,
- * the brightness and the screen timeout.
+ * the rotation animation, the brightness and the screen timeout.
  */
 
 /** No label yet (the feed has not emitted) — the stage still draws a blank label. */
 private val EmptyLabel = CassetteLabel(title = "", artist = "")
+
+/**
+ * The window's rotation animation while the cassette is up: a JUMP CUT, the old frame giving way to
+ * the new one with no system turn (2026-09-26).
+ *
+ * The default, ROTATE, turns a screenshot of the old frame by the quarter turn while the new frame
+ * turns in. Turning the phone CLOCKWISE out of portrait leaves the shell exactly where it was on the
+ * glass (the head edge stays on the same physical side), yet ROTATE still spun it a quarter turn
+ * and back (Cris). With a jump cut, the stage draws its first new frame where the old one left the
+ * shell, so the swap cannot be seen. A rotation that DOES flip the image by 180° is played by the
+ * stage's own settle (Cassette.kt, the header's rotation row).
+ *
+ * Why not ROTATION_ANIMATION_SEAMLESS, the camera-app mode, which looks the same when it is honoured.
+ * Under shell transitions (Android 14+, so the Fold) a SEAMLESS request that cannot be honoured falls
+ * back to ROTATE. Its documented CROSSFADE fallback is the legacy DisplayRotation path.
+ * WMShell's DefaultTransitionHandler.getRotationAnimationHint starts its hint at ROTATE and leaves
+ * it there for a task that asks for SEAMLESS. It rejects seamless when a system-alert window is
+ * shown, when the nav bar cannot change sides (a ≥ 600 dp screen, unless the device allows it), and
+ * for the upside-down rotation. JUMPCUT is passed through by the server
+ * (Transition.getTaskRotationAnimation) and skips the shell's rotation animation with no
+ * conditions. On the legacy path it is rotation_animation_jump_exit. Read in AOSP main, 2026-09-26;
+ * an OEM shell may differ. SEAMLESS is the one-line alternative.
+ */
+internal const val CassetteRotationAnimation = WindowManager.LayoutParams.ROTATION_ANIMATION_JUMPCUT
 
 /** The burn-in drift's fixed ring: eight points around the origin, [CassetteTiming.DriftMaxPx] out. */
 private val DriftRing: List<IntOffset> = CassetteTiming.DriftMaxPx.roundToInt().let { d ->
@@ -115,19 +139,26 @@ fun CassetteOverlay(
     val haptics = LocalHapticFeedback.current
 
     // ── Immersive window: hidden bars (swipe reveals them transiently) + the cutout ──────────
-    // iLyra's recipe (ILyraRoot), minus the orientation request: the cassette follows rotation.
-    // The cutout mode is restored to what it WAS, not blindly to DEFAULT.
+    // iLyra's recipe (ILyraRoot), minus the orientation request: the cassette follows rotation,
+    // with a jump cut instead of the system's rotate animation (CassetteRotationAnimation) so the
+    // stage can play the rotation itself. The cutout mode and the rotation animation are restored
+    // to what they WERE, not blindly to the defaults; one attributes write each way.
     DisposableEffect(visible, window) {
         if (!visible || window == null) return@DisposableEffect onDispose { }
         val previousCutoutMode = window.attributes.layoutInDisplayCutoutMode
+        val previousRotationAnimation = window.attributes.rotationAnimation
         window.attributes = window.attributes.also {
             it.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            it.rotationAnimation = CassetteRotationAnimation
         }
         val controller = WindowInsetsControllerCompat(window, window.decorView)
         controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         controller.hide(WindowInsetsCompat.Type.systemBars())
         onDispose {
-            window.attributes = window.attributes.also { it.layoutInDisplayCutoutMode = previousCutoutMode }
+            window.attributes = window.attributes.also {
+                it.layoutInDisplayCutoutMode = previousCutoutMode
+                it.rotationAnimation = previousRotationAnimation
+            }
             WindowInsetsControllerCompat(window, window.decorView).show(WindowInsetsCompat.Type.systemBars())
         }
     }

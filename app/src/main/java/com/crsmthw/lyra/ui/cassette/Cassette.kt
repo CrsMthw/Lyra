@@ -1,6 +1,8 @@
 package com.crsmthw.lyra.ui.cassette
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationVector1D
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -32,9 +34,12 @@ import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import com.crsmthw.lyra.R
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
@@ -88,6 +93,20 @@ import kotlin.math.min
  *                    edge opposite the head: LEFT in portrait, UP in landscape), and the fresh
  *                    shell back in through the same edge, in both directions. travel = the short
  *                    side × 1.04 + the letterbox band on that side, so the shell clears the stage
+ *   rotation         (2026-09-26) while the overlay is up the window asks for a JUMP CUT instead of
+ *                    the system's rotate animation (CassetteRotationAnimation, CassetteOverlay.kt):
+ *                    the old frame gives way to the new one with no system turn. The shell's angle
+ *                    ON THE GLASS is stageRotationZ + the display's content rotation (Surface
+ *                    ROTATION_n × 90). Portrait → landscape CLOCKWISE (ROTATION_270), and back, leaves
+ *                    it unchanged, so NOTHING plays. Anticlockwise (ROTATION_90), back from there,
+ *                    or a turn-over changes it by 180°: the stage's first frame in the new rotation
+ *                    is drawn where the old one left the shell (head edge on the wrong side) and
+ *                    SETTLES 180° into the new rest angle over OrientationTurnMs, FastOutSlowIn,
+ *                    scaled by spinFitScale (≈ 0.638 crosswise) so it never leaves the stage. It
+ *                    turns clockwise when the content turned clockwise (+90 or a half turn) and
+ *                    anticlockwise for −90. A rotation mid-settle carries the rest of the settle;
+ *                    a size-only change (unfolding) and a rotation that changes the smallest width
+ *                    (a fold that also rotated) never settle. The reels keep turning through it
  *   head edge        trapezoid 168..832 from y 486; capstans (367|633, 573); pinch rollers
  *                    (272|728, 590) r 27; guide rollers (122|878, 557) r 46; head recess 418..582
  *
@@ -334,6 +353,13 @@ internal fun CassetteImpl(
  * playback-position JUMP on the same track — a seek made elsewhere, a repeat-one wrap — winds the
  * incoming face's packs and hubs to the new position instead of snapping (CassetteReelWind.kt);
  * the outgoing face stays frozen where it was.
+ *
+ * A screen rotation that turns the image ON THE GLASS by 180° (anticlockwise out of portrait,
+ * back from there, a turn-over) starts the new frame where the old one left the shell and settles
+ * it into the new rest angle ([CassetteTiming.OrientationTurnMs]); one that leaves the image where
+ * it was (clockwise out of portrait, and back) plays nothing. The hosting window must ask for a
+ * jump cut rather than the system's rotate animation ([CassetteRotationAnimation]) — see the
+ * header's rotation row.
  */
 @Composable
 fun CassetteStage(
@@ -375,6 +401,20 @@ private class StageState(initial: CassetteLabel) {
     var move: CassetteMove? = null
     var generation = 0
     val finished = mutableIntStateOf(0)
+}
+
+/**
+ * The stage's rotation settle. [state] is the pure bookkeeping ([OrientationTurnState]), fed in
+ * composition. [settle] is the running settle's Animatable, kept so that a rotation landing
+ * mid-settle starts from where the shell actually is. Plain fields, like [StageState].
+ */
+private class StageTurn {
+    val state = OrientationTurnState()
+    var settle: Animatable<Float, AnimationVector1D>? = null
+
+    /** What is left of the running settle. Read WITHOUT observation, because a read in composition
+     *  would recompose the stage's content on every frame of the settle. */
+    fun inFlightDeg(): Float = settle?.let { s -> Snapshot.withoutReadObservation { s.value } } ?: 0f
 }
 
 @Composable
@@ -440,13 +480,48 @@ internal fun CassetteStageImpl(
             val h = constraints.maxHeight.toFloat()
             ejectBand(w, h, cassetteFit(w, h).short, fit.portrait)
         }
+
+        // ── Rotation settle (the header's rotation row). The configuration is read here for its
+        // KEY: every rotation dispatches a new one (a 180° turn-over changes nothing in it but the
+        // window configuration's rotation, which Configuration.equals compares), and so re-reads
+        // the display rotation in composition. On an Activity's display, Display.getRotation()
+        // reads that same resources configuration, so the two never disagree.
+        val configuration = LocalConfiguration.current
+        val context = LocalContext.current
+        val rotation = remember(configuration, context) { ContextCompat.getDisplayOrDefault(context).rotation }
+        val stageTurn = remember { StageTurn() }
+        stageTurn.state.update(rotation, fit.portrait, configuration.smallestScreenWidthDp, stageTurn::inFlightDeg)
+        val turnGeneration = stageTurn.state.generation
+        val turnFrom = stageTurn.state.from
+        // A FRESH Animatable per settle, created AT turnFrom in this very composition, so the first
+        // frame of the new rotation already draws the shell where the old frame left it on the glass
+        // (the same pattern as the move's `anim` above).
+        val turn = remember(turnGeneration) { Animatable(turnFrom) }
+        stageTurn.settle = turn
+        LaunchedEffect(turnGeneration) {
+            if (turnGeneration > 0 && turnFrom != 0f) {
+                turn.animateTo(0f, tween(durationMillis = CassetteTiming.OrientationTurnMs, easing = FastOutSlowInEasing))
+            }
+        }
+        val stageW = maxWidth.value
+        val stageH = maxHeight.value
+
         // (long × short) in the natural frame; in portrait the SAME box turned −90° about its
         // centre, overflowing its slot on purpose (requiredSize, centred; only the stage's own
-        // bounds clip it).
+        // bounds clip it). A settle adds its turn and shrinks the shell so its bounding box stays
+        // inside the stage; at rest (extra == 0, which a finished settle lands on exactly) the
+        // layer is what it always was.
         Box(
             Modifier
                 .requiredSize(fit.long.dp, fit.short.dp)
-                .graphicsLayer { rotationZ = stageRotationZ(fit.portrait) },
+                .graphicsLayer {
+                    val extra = turn.value
+                    val z = stageRotationZ(fit.portrait) + extra
+                    rotationZ = z
+                    val k = if (extra == 0f) 1f else spinFitScale(z, fit.long, fit.short, stageW, stageH)
+                    scaleX = k
+                    scaleY = k
+                },
         ) {
             for (face in faces) {
                 key(face.id) {

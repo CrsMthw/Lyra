@@ -59,6 +59,12 @@ import kotlinx.coroutines.launch
  *   own (sideB and ejectAt keep theirs).
  * - `--ef timeScale S` — the reels' clock, winds AND hubs, × S ([ReelDebug.timeScale]).
  * - `--ef windAt F` — hold every wind at fraction F of its timeline ([ReelDebug.freezeFraction]).
+ *
+ * Rotation (2026-09-26): `settings put system accelerometer_rotation 0`, then `settings put system
+ * user_rotation N` (0 = portrait, 1 = ROTATION_90, 3 = ROTATION_270) while the preview is up. The
+ * activity handles the change itself, like MainActivity, so the stage's rotation settle plays.
+ * Note that the ATD image has no SystemUI and so no WMShell: its rotations take the legacy
+ * (non-shell) path, unlike a phone on Android 14+.
  */
 class CassettePreviewActivity : ComponentActivity() {
 
@@ -172,21 +178,31 @@ private data class PreviewArgs(
     }
 }
 
-/** iLyra's window recipe: cutout ALWAYS + hidden bars, swipe to reveal transiently. */
+/**
+ * CassetteOverlay's window recipe: iLyra's cutout ALWAYS + hidden bars (swipe to reveal
+ * transiently) + the cassette's rotation animation ([CassetteRotationAnimation]), so a rotation on
+ * the emulator plays exactly what the player's overlay plays. The activity handles rotation itself,
+ * as MainActivity does (the debug manifest's configChanges), so the stage keeps its state and the
+ * settle can run. Everything is restored to what it was.
+ */
 @Composable
 private fun ImmersiveWindow(activity: ComponentActivity) {
     DisposableEffect(Unit) {
         val window = activity.window
         val view = window.decorView
+        val previousCutoutMode = window.attributes.layoutInDisplayCutoutMode
+        val previousRotationAnimation = window.attributes.rotationAnimation
         window.attributes = window.attributes.also {
             it.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            it.rotationAnimation = CassetteRotationAnimation
         }
         val controller = WindowInsetsControllerCompat(window, view)
         controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         controller.hide(WindowInsetsCompat.Type.systemBars())
         onDispose {
             window.attributes = window.attributes.also {
-                it.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT
+                it.layoutInDisplayCutoutMode = previousCutoutMode
+                it.rotationAnimation = previousRotationAnimation
             }
             WindowInsetsControllerCompat(window, view).show(WindowInsetsCompat.Type.systemBars())
         }
