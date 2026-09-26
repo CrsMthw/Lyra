@@ -1,5 +1,6 @@
 package com.crsmthw.lyra.ui.cassette
 
+import android.content.res.Configuration
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -481,16 +482,31 @@ internal fun CassetteStageImpl(
             ejectBand(w, h, cassetteFit(w, h).short, fit.portrait)
         }
 
-        // ── Rotation settle (the header's rotation row). The configuration is read here for its
-        // KEY: every rotation dispatches a new one (a 180° turn-over changes nothing in it but the
-        // window configuration's rotation, which Configuration.equals compares), and so re-reads
-        // the display rotation in composition. On an Activity's display, Display.getRotation()
-        // reads that same resources configuration, so the two never disagree.
+        // ── Rotation settle (the header's rotation row). Reading LocalConfiguration SUBSCRIBES the
+        // stage to every rotation: each one dispatches a new Configuration (a 180° turn-over changes
+        // nothing in it but the window configuration's rotation, which Configuration.updateFrom
+        // reports, so Compose provides a new one), and the stage recomposes and re-reads the display
+        // rotation. The rotation is read FRESH at every composition, never remembered on the
+        // configuration: Display.getRotation() on the Activity's display reads the Activity's
+        // resources configuration, which ActivityThread updates synchronously inside
+        // ViewRootImpl.performConfigurationChange, before performMeasure, on the resize-message path
+        // AND on the path where a relayout of our own hands back the new configuration
+        // mid-traversal, so it is never older than this pass's constraints. LocalConfiguration is not
+        // like that: it lags until its provider recomposes, one pass later on the relayout path. A
+        // rotation remembered on it paired the NEW constraints with the OLD rotation in that measure
+        // pass and corrupted the bookkeeping (review, 2026-09-26). The bookkeeping's orientation and
+        // smallest width come from that same Configuration, never from `fit` (the constraints);
+        // OrientationTurnState's KDoc says why that order is safe. The fit still decides what is
+        // DRAWN (the layer below).
         val configuration = LocalConfiguration.current
-        val context = LocalContext.current
-        val rotation = remember(configuration, context) { ContextCompat.getDisplayOrDefault(context).rotation }
+        val rotation = ContextCompat.getDisplayOrDefault(LocalContext.current).rotation
         val stageTurn = remember { StageTurn() }
-        stageTurn.state.update(rotation, fit.portrait, configuration.smallestScreenWidthDp, stageTurn::inFlightDeg)
+        stageTurn.state.update(
+            rotation        = rotation,
+            configPortrait  = configuration.orientation == Configuration.ORIENTATION_PORTRAIT,
+            smallestWidthDp = configuration.smallestScreenWidthDp,
+            inFlightDeg     = stageTurn::inFlightDeg,
+        )
         val turnGeneration = stageTurn.state.generation
         val turnFrom = stageTurn.state.from
         // A FRESH Animatable per settle, created AT turnFrom in this very composition, so the first

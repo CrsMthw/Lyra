@@ -394,22 +394,40 @@ internal fun orientationTurnStart(startDeg: Float, inFlightDeg: Float): Float {
  * state), so the first frame of a new rotation already carries its settle. It is pure so that the
  * order in which a rotation's inputs reach the composition can be unit-tested (CassetteRotationTest).
  *
- * A rotation is judged from the display rotation alone ([orientationTurnFor]). The fit's orientation
- * only re-syncs [portrait] at compositions that bring no rotation change. The new configuration can
- * recompose the stage in the recomposer's pass while its constraints are still the OLD ones, before
- * the new size measures it. That is how a size-only change, such as unfolding with the rotation
- * unchanged, never becomes a turn. A rotation whose configuration also changes the window's smallest
- * width is not a turn of the same window (a fold or unfold that also rotated, or a split-screen
- * resize), so it settles nothing: the parity prediction would be meaningless there. This relies on
- * the configuration reaching the composition no later than the new constraints, which holds because
- * ViewRootImpl dispatches a resize's configuration before it applies the resize's frame.
+ * Where the inputs come from, and why the order they arrive in cannot bend a decision:
+ * - The ROTATION is read fresh at every composition (`Display.getRotation()` on the Activity's
+ *   display). That reads the Activity's resources configuration, which ActivityThread updates
+ *   synchronously inside ViewRootImpl.performConfigurationChange, before the view hears of the change
+ *   and before performMeasure, on both paths a rotation arrives by: the resize message (handleResized
+ *   applies the configuration, then the frame) and a relayout of the app's own that hands back the
+ *   new configuration mid-traversal. So it is never older than the constraints or the configuration
+ *   the same composition sees.
+ * - The ORIENTATION ([update]'s `configPortrait`) and the smallest width come from the Compose
+ *   Configuration (LocalConfiguration), NEVER from the constraints. That value can lag the rotation
+ *   by one recomposer pass (on the relayout path the measure pass composes the new constraints and
+ *   the fresh rotation under the old Configuration), but it never leads it.
+ * - A rotation is decided from the rotations and the stored baseline alone ([orientationTurnFor]
+ *   predicts the new orientation from the turn's parity) at the first composition that sees it, so
+ *   the orientation input is IGNORED there and a lagging Configuration cannot bend the decision. The
+ *   orientation only re-syncs [portrait] at compositions that bring no rotation change: a size-only
+ *   change such as unfolding with the rotation unchanged (never a turn), and the Configuration
+ *   catching up. No composition pairs a NEWER orientation with an OLDER rotation. The one pairing
+ *   left, a lagging orientation at a later composition of the same rotation, needs the stage to
+ *   compose again between that measure pass and the recomposer's next one; the Configuration lands
+ *   in that next pass and overwrites it, long before the display can rotate again.
+ *
+ * A rotation whose configuration also changes the window's smallest width is not a turn of the same
+ * window (a fold or unfold that also rotated, or a split-screen resize), so it settles nothing: the
+ * parity prediction would be meaningless there. On the relayout path that smallest width is the
+ * lagging Configuration's too, so a fold that rotates in the same traversal as a relayout of the
+ * app's own can still settle once (accepted).
  */
 internal class OrientationTurnState {
     /** The last display rotation seen; −1 before the first composition. */
     var rotation: Int = -1
         private set
 
-    /** The orientation that rotation gives the window: predicted at a rotation, re-synced from the fit otherwise. */
+    /** The orientation that rotation gives the window: predicted at a rotation, re-synced from the Configuration otherwise. */
     var portrait: Boolean = false
         private set
 
@@ -425,19 +443,22 @@ internal class OrientationTurnState {
     private var smallestWidthDp: Int = -1
 
     /**
-     * One composition's inputs: the display `rotation`, the fit's `portrait` (from whichever
-     * constraints this composition sees) and the configuration's `smallestWidthDp`. `inFlightDeg` =
-     * what is left of a running settle, read only when a new one starts. Returns true when a new
-     * settle starts, i.e. [generation] was bumped and [from] set.
+     * One composition's inputs: the display `rotation` (read fresh, see the class KDoc) and, from the
+     * Compose Configuration, `configPortrait` (its orientation is ORIENTATION_PORTRAIT) and
+     * `smallestWidthDp`. Never the fit's orientation: that comes from the constraints, which can be
+     * newer than the Configuration. The two part only for an exactly square window (the Configuration
+     * reads width ≤ height as portrait, the fit only height > width). `inFlightDeg` = what is left of a
+     * running settle, read only when a new one starts. Returns true when a new settle starts, i.e.
+     * [generation] was bumped and [from] set.
      */
-    fun update(rotation: Int, portrait: Boolean, smallestWidthDp: Int, inFlightDeg: () -> Float): Boolean {
+    fun update(rotation: Int, configPortrait: Boolean, smallestWidthDp: Int, inFlightDeg: () -> Float): Boolean {
         val lastRotation = this.rotation
         val lastPortrait = this.portrait
         val sameWindow = smallestWidthDp == this.smallestWidthDp
         this.smallestWidthDp = smallestWidthDp
         this.rotation = rotation
         if (lastRotation < 0 || rotation == lastRotation || !sameWindow) {
-            this.portrait = portrait
+            this.portrait = configPortrait
             return false
         }
         val turn = orientationTurnFor(lastRotation, lastPortrait, rotation)

@@ -146,6 +146,12 @@ class CassetteOrientationTurnStartTest {
     }
 }
 
+/**
+ * Every `update` below is ONE composition of the stage, fed what the stage now feeds it: the display
+ * rotation read FRESH, and the Compose Configuration's orientation and smallest width, which may be
+ * one recomposer pass behind that rotation (a relayout of our own that hands back the rotation
+ * mid-traversal) but never ahead of it. The fit's orientation, from the constraints, is not an input.
+ */
 class CassetteOrientationTurnStateTest {
 
     private val noSettle = { 0f }
@@ -154,76 +160,119 @@ class CassetteOrientationTurnStateTest {
     @Test
     fun `the first composition only records`() {
         val s = OrientationTurnState()
-        assertFalse(s.update(R0, portrait = true, smallestWidthDp = sw, inFlightDeg = noSettle))
+        assertFalse(s.update(R0, configPortrait = true, smallestWidthDp = sw, inFlightDeg = noSettle))
         assertEquals(R0, s.rotation); assertTrue(s.portrait); assertEquals(0, s.generation)
     }
 
     @Test
-    fun `the configuration first, the constraints next - one settle, predicted then re-synced`() {
+    fun `the resize message - the rotation and its configuration together - one settle`() {
         val s = OrientationTurnState()
-        s.update(R0, portrait = true, smallestWidthDp = sw, inFlightDeg = noSettle)
-        // the recomposer's pass: the new rotation, the OLD (portrait) constraints
-        assertTrue(s.update(R90, portrait = true, smallestWidthDp = sw, inFlightDeg = noSettle))
+        s.update(R0, configPortrait = true, smallestWidthDp = sw, inFlightDeg = noSettle)
+        assertTrue(s.update(R90, configPortrait = false, smallestWidthDp = sw, inFlightDeg = noSettle))
         assertEquals(1, s.generation); assertEquals(-180f, s.from); assertFalse(s.portrait)
-        // the measure pass: the new constraints, the same rotation — no second settle
-        assertFalse(s.update(R90, portrait = false, smallestWidthDp = sw, inFlightDeg = noSettle))
+        // the measure pass with the new constraints composes the same inputs: no second settle
+        assertFalse(s.update(R90, configPortrait = false, smallestWidthDp = sw, inFlightDeg = noSettle))
         assertEquals(1, s.generation); assertEquals(-180f, s.from); assertFalse(s.portrait)
     }
 
     @Test
-    fun `the configuration and the constraints together - the same settle`() {
+    fun `a relayout of our own - anticlockwise, the fresh rotation under the stale configuration - one settle`() {
         val s = OrientationTurnState()
-        s.update(R0, portrait = true, smallestWidthDp = sw, inFlightDeg = noSettle)
-        assertTrue(s.update(R90, portrait = false, smallestWidthDp = sw, inFlightDeg = noSettle))
+        s.update(R0, configPortrait = true, smallestWidthDp = sw, inFlightDeg = noSettle)
+        // the measure pass: the new constraints and the fresh rotation, LocalConfiguration still
+        // portrait. The orientation is ignored at a rotation change; the settle starts right here,
+        // so the first frame in the new rotation already carries it
+        assertTrue(s.update(R90, configPortrait = true, smallestWidthDp = sw, inFlightDeg = noSettle))
         assertEquals(1, s.generation); assertEquals(-180f, s.from); assertFalse(s.portrait)
+        // the recomposer's next pass: the configuration lands, a re-sync to what was predicted
+        assertFalse(s.update(R90, configPortrait = false, smallestWidthDp = sw, inFlightDeg = noSettle))
+        assertEquals(1, s.generation); assertEquals(-180f, s.from); assertFalse(s.portrait)
+    }
+
+    @Test
+    fun `a relayout of our own - clockwise under the stale configuration settles nothing, nor does the way back`() {
+        val s = OrientationTurnState()
+        s.update(R0, configPortrait = true, smallestWidthDp = sw, inFlightDeg = noSettle)
+        assertFalse(s.update(R270, configPortrait = true, smallestWidthDp = sw, inFlightDeg = noSettle))
+        assertFalse(s.portrait); assertEquals(0, s.generation)
+        assertFalse(s.update(R270, configPortrait = false, smallestWidthDp = sw, inFlightDeg = noSettle))
+        assertFalse(s.portrait); assertEquals(0, s.generation)
+        // back to portrait the same way: judged from the landscape baseline, the image stays put
+        assertFalse(s.update(R0, configPortrait = false, smallestWidthDp = sw, inFlightDeg = noSettle))
+        assertTrue(s.portrait); assertEquals(0, s.generation)
+        assertFalse(s.update(R0, configPortrait = true, smallestWidthDp = sw, inFlightDeg = noSettle))
+        assertTrue(s.portrait); assertEquals(0, s.generation)
+    }
+
+    @Test
+    fun `a composition that changes nothing the bookkeeping reads is a no-op, and the rotation after it is judged right`() {
+        // Review finding, 2026-09-26: a measure pass that composed NEW constraints under the OLD
+        // Configuration re-synced the baseline to the new orientation at the old rotation, so the
+        // clockwise turn then spun and the anticlockwise one jump-cut. The constraints are no longer
+        // an input; such a pass repeats what the bookkeeping already has.
+        val clockwise = OrientationTurnState()
+        clockwise.update(R0, configPortrait = true, smallestWidthDp = sw, inFlightDeg = noSettle)
+        assertFalse(clockwise.update(R0, configPortrait = true, smallestWidthDp = sw, inFlightDeg = noSettle))
+        assertFalse(clockwise.update(R270, configPortrait = false, smallestWidthDp = sw, inFlightDeg = noSettle))
+        assertEquals(0, clockwise.generation); assertFalse(clockwise.portrait)
+
+        val anticlockwise = OrientationTurnState()
+        anticlockwise.update(R0, configPortrait = true, smallestWidthDp = sw, inFlightDeg = noSettle)
+        assertFalse(anticlockwise.update(R0, configPortrait = true, smallestWidthDp = sw, inFlightDeg = noSettle))
+        assertTrue(anticlockwise.update(R90, configPortrait = false, smallestWidthDp = sw, inFlightDeg = noSettle))
+        assertEquals(1, anticlockwise.generation); assertEquals(-180f, anticlockwise.from); assertFalse(anticlockwise.portrait)
     }
 
     @Test
     fun `clockwise and back settle nothing`() {
         val s = OrientationTurnState()
-        s.update(R0, portrait = true, smallestWidthDp = sw, inFlightDeg = noSettle)
-        assertFalse(s.update(R270, portrait = true, smallestWidthDp = sw, inFlightDeg = noSettle))
-        assertFalse(s.update(R270, portrait = false, smallestWidthDp = sw, inFlightDeg = noSettle))
-        assertFalse(s.update(R0, portrait = false, smallestWidthDp = sw, inFlightDeg = noSettle))
-        assertFalse(s.update(R0, portrait = true, smallestWidthDp = sw, inFlightDeg = noSettle))
-        assertEquals(0, s.generation)
+        s.update(R0, configPortrait = true, smallestWidthDp = sw, inFlightDeg = noSettle)
+        assertFalse(s.update(R270, configPortrait = false, smallestWidthDp = sw, inFlightDeg = noSettle))
+        assertFalse(s.update(R0, configPortrait = true, smallestWidthDp = sw, inFlightDeg = noSettle))
+        assertEquals(0, s.generation); assertTrue(s.portrait)
     }
 
     @Test
     fun `a size-only change re-syncs the orientation and is never a turn`() {
         val s = OrientationTurnState()
-        s.update(R0, portrait = true, smallestWidthDp = sw, inFlightDeg = noSettle)
-        // unfolded, rotation unchanged: the window is landscape now
-        assertFalse(s.update(R0, portrait = false, smallestWidthDp = 704, inFlightDeg = noSettle))
+        s.update(R0, configPortrait = true, smallestWidthDp = sw, inFlightDeg = noSettle)
+        // unfolded, rotation unchanged; the new constraints may compose first, under the old
+        // configuration: nothing the bookkeeping reads has changed yet
+        assertFalse(s.update(R0, configPortrait = true, smallestWidthDp = sw, inFlightDeg = noSettle))
+        assertTrue(s.portrait); assertEquals(0, s.generation)
+        // the configuration: the window is landscape now
+        assertFalse(s.update(R0, configPortrait = false, smallestWidthDp = 704, inFlightDeg = noSettle))
         assertFalse(s.portrait); assertEquals(0, s.generation)
         // and the NEXT rotation is judged from the landscape it re-synced to: landscape R0 → R90 is
         // portrait, the image stays put on the glass (0 → −90 + 90)
-        assertFalse(s.update(R90, portrait = false, smallestWidthDp = 704, inFlightDeg = noSettle))
+        assertFalse(s.update(R90, configPortrait = true, smallestWidthDp = 704, inFlightDeg = noSettle))
         assertTrue(s.portrait); assertEquals(0, s.generation)
     }
 
     @Test
     fun `a rotation that also changes the smallest width is a fold, not a turn`() {
         val s = OrientationTurnState()
-        s.update(R0, portrait = true, smallestWidthDp = sw, inFlightDeg = noSettle)
-        assertFalse(s.update(R90, portrait = true, smallestWidthDp = 704, inFlightDeg = noSettle))
-        assertEquals(0, s.generation); assertEquals(R90, s.rotation)
-        // the new constraints then re-sync the orientation
-        assertFalse(s.update(R90, portrait = false, smallestWidthDp = 704, inFlightDeg = noSettle))
-        assertFalse(s.portrait); assertEquals(0, s.generation)
+        s.update(R0, configPortrait = true, smallestWidthDp = sw, inFlightDeg = noSettle)
+        // unfolded AND rotated: one Configuration carries the new orientation and smallest width
+        assertFalse(s.update(R90, configPortrait = false, smallestWidthDp = 704, inFlightDeg = noSettle))
+        assertEquals(0, s.generation); assertEquals(R90, s.rotation); assertFalse(s.portrait)
+        // the baseline is that Configuration's: the unfolded screen then turned back to R0 (content
+        // −90) is portrait, and the image flips on the glass (90 → 270), settling from +180
+        assertTrue(s.update(R0, configPortrait = true, smallestWidthDp = 704, inFlightDeg = noSettle))
+        assertEquals(1, s.generation); assertEquals(180f, s.from); assertTrue(s.portrait)
     }
 
     @Test
     fun `a rotation mid-settle carries what is left of the settle`() {
         val s = OrientationTurnState()
-        s.update(R0, portrait = true, smallestWidthDp = sw, inFlightDeg = noSettle)
-        assertTrue(s.update(R90, portrait = false, smallestWidthDp = sw, inFlightDeg = noSettle))
+        s.update(R0, configPortrait = true, smallestWidthDp = sw, inFlightDeg = noSettle)
+        assertTrue(s.update(R90, configPortrait = false, smallestWidthDp = sw, inFlightDeg = noSettle))
         // turned back while the shell is still 170° from rest (it had barely moved)
         var asked = 0
-        assertTrue(s.update(R0, portrait = true, smallestWidthDp = sw) { asked++; -170f })
+        assertTrue(s.update(R0, configPortrait = true, smallestWidthDp = sw) { asked++; -170f })
         assertEquals(1, asked); assertEquals(2, s.generation); assertEquals(10f, s.from, 1e-4f)
         // a rotation that leaves the image put never reads the running settle and starts none
-        assertFalse(s.update(R270, portrait = false, smallestWidthDp = sw) { asked++; -90f })
+        assertFalse(s.update(R270, configPortrait = false, smallestWidthDp = sw) { asked++; -90f })
         assertEquals(1, asked); assertEquals(2, s.generation)
     }
 }
