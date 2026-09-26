@@ -217,8 +217,9 @@ internal fun CassetteImpl(
         // retarget's stamp keeps the hubs on the replaced wind's speed (ReelTracker.onFrame), so
         // the old face's packs never move and its hubs never reverse: they take one last step their
         // own way, as they would have anyway. But a new position that is NO jump is accepted here
-        // and snaps the old face — or moves its running wind's end — at the flip's first frame (a
-        // skip inside a song's first seconds, say). The threshold is measured against the OUTGOING
+        // and, if the face is idle, snaps it at the flip's first frame (a skip inside a song's first
+        // seconds, say; a running wind only gets a re-based end, which moves nothing at once — see
+        // ReelTracker's Span.moveEnd). The threshold is measured against the OUTGOING
         // track's length (the face has not recomposed with the new one yet — see ReelSample), so
         // the snap is at most 5 s of the outgoing face's own tape: ≤ 3.3 units on a 3-minute song,
         // up to ~30 on a 20 s interlude. When the outgoing track is the LONGER one, the stale length

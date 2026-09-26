@@ -20,8 +20,11 @@ import kotlin.math.sqrt
  *   [CassetteTiming.WindJumpMinMs] of track time AND [CassetteWind.WindJumpMinFraction] of the
  *   tape; `from` is the last ACCEPTED value (the tracker's target), never the displayed one
  *   tick / correction      accepted: snapped while idle, as always; during a wind it moves the
- *                          wind's end and keeps its timeline (the shift is δ·ease(f): ~1 px for a
- *                          tick, up to ~6 px for a 4.5 s correction on a 3-minute song)
+ *                          wind's END without moving the packs — the span is RE-BASED so the
+ *                          position shown at that instant is unchanged and the remaining ease
+ *                          carries the difference (the one tick that can land inside a ≤ 900 ms
+ *                          wind used to shift the packs by δ·ease(f) at once: ~1 px on a 3-minute
+ *                          song, a visible hitch against a rewind on a short track)
  *   first value            primes the tracker: nothing winds on a new face, the overlay's entry,
  *                          or when the duration arrives; a value with duration ≤ 0 un-primes it
  *   exact 0f               a HOLD, not a jump: Lyra's own optimistic reset on a skip, the wake
@@ -205,9 +208,26 @@ internal class ReelTracker(initial: Float) {
      * moved, so a retarget replacing a still-unstamped retarget passes the running speed on — and
      * it seeds the next retarget's stamp speed.
      */
-    private class Span(val from: Float, var to: Float, val durationMs: Int, val stampSpeed: Float) {
+    private class Span(var from: Float, var to: Float, val durationMs: Int, val stampSpeed: Float) {
         var startNanos = -1L
         var lastSpeed = stampSpeed
+        /** The ease the span last moved to (0 until it has), the anchor of [moveEnd]'s re-base. */
+        var lastEase = 0f
+
+        /**
+         * Moves the end to `p` WITHOUT moving the packs, which show `displayed` at [lastEase]: the
+         * start is re-based so `from + (p − from)·lastEase == displayed` still holds, and the
+         * remaining ease then carries the packs from where they are to `p` — monotone, in the
+         * direction of `p − displayed` (which [onFrame]'s sign follows). Past [RebaseEaseLimit]
+         * almost no ease is left to carry anything, so the end simply moves: the difference lands
+         * within the last frame or two — a tick's ~0.7 units on a 3-minute song, in the brake
+         * tail where the packs are all but stopped.
+         */
+        fun moveEnd(p: Float, displayed: Float) {
+            val e = lastEase
+            if (e < RebaseEaseLimit) from = (displayed - p * e) / (1f - e)
+            to = p
+        }
     }
 
     /** The position the packs show, 0..1. */
@@ -290,17 +310,20 @@ internal class ReelTracker(initial: Float) {
             wind = null
             return 0f
         }
-        displayed = w.from + (w.to - w.from) * windEase(f)
+        val e = windEase(f)
+        displayed = w.from + (w.to - w.from) * e
+        w.lastEase = e
         val s = sign(w.to - w.from) * windSpeed(f)
         w.lastSpeed = s
         return s
     }
 
-    /** Takes `p` as the position: at once while idle, as the running wind's new end otherwise. */
+    /** Takes `p` as the position: at once while idle; as the running wind's new end otherwise,
+     *  re-based so the packs do not move at that instant ([Span.moveEnd]). */
     private fun accept(p: Float) {
         target = p
         val w = wind
-        if (w != null) w.to = p else displayed = p
+        if (w != null) w.moveEnd(p, displayed) else displayed = p
     }
 
     /**
@@ -318,6 +341,11 @@ internal class ReelTracker(initial: Float) {
     }
 
     private companion object {
+        /** The ease past which [Span.moveEnd] no longer re-bases: `1 − ease` is the share of the
+         *  wind left to carry the difference, and below 2 % it is a frame or two — and a division
+         *  by nearly nothing. */
+        const val RebaseEaseLimit = 0.98f
+
         /** A NaN or out-of-range position reads as the nearest end (NaN as the start), like
          *  [packRadii]. */
         fun sanitize(v: Float): Float = if (v.isNaN()) 0f else v.coerceIn(0f, 1f)

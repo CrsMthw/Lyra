@@ -351,6 +351,53 @@ class CassetteReelTrackerTest {
     }
 
     @Test
+    fun `a tick inside a rewind is folded into the remaining distance - the packs never step forward`() {
+        // Re-measurement 2026-09-26 (repeat-one at a quarter speed): a sub-threshold value accepted
+        // mid-wind used to move the end outright, shifting the packs by δ·ease(f) at once — against
+        // a rewind that is a step the WRONG way. The span is re-based instead: the position shown
+        // at that instant is unchanged and the remaining ease carries the tick.
+        val t = primed(0.9f)
+        val wrapped = 1_500f / Track240
+        assertEquals(ReelInput.Wind, t.onProgress(wrapped, Track240))
+        val clock = Clock()
+        clock.frame(t)                                        // the stamp
+        repeat(26) { clock.frame(t) }                         // about half the ~870 ms wind
+        val before = t.displayed
+        val ticked = wrapped + 1_000f / Track240              // the one tick a ≤ 900 ms wind can see
+        assertEquals(ReelInput.Accept, t.onProgress(ticked, Track240))
+        assertEquals(before, t.displayed, "the tick moves nothing at the call")
+        assertEquals(ticked, t.target)
+        assertTrue(t.winding)
+        assertTrue(clock.frame(t) < 0f, "still a rewind after the re-base")
+        assertTrue(t.displayed < before, "and still moving the rewind's way")
+        var last = t.displayed
+        while (t.winding) {
+            clock.frame(t)
+            assertTrue(t.displayed <= last + 1e-6f, "never forward: ${t.displayed} > $last")
+            last = t.displayed
+        }
+        assertEquals(ticked, t.displayed, "ends exactly on the ticked value")
+    }
+
+    @Test
+    fun `a correction in a wind's last frames still lands it exactly on the corrected value`() {
+        // Past the re-base limit (98 % of the ease) the end simply moves: the difference lands in
+        // the last frame or two, on the corrected value, never on a NaN.
+        val t = primed(0.2f)
+        t.onProgress(0.8f, Track240)
+        val clock = Clock()
+        clock.frame(t)
+        while (t.winding && t.displayed < 0.2f + 0.6f * 0.985f) clock.frame(t)
+        assertTrue(t.winding, "still winding in the brake tail")
+        val corrected = 0.8f + 1_000f / Track240
+        assertEquals(ReelInput.Accept, t.onProgress(corrected, Track240))
+        val n = clock.toEnd(t)
+        assertTrue(n in 1..8, "a few frames left ($n)")
+        assertFalse(t.displayed.isNaN())
+        assertEquals(corrected, t.displayed)
+    }
+
+    @Test
     fun `a jump away from the displayed position retargets from where the packs are`() {
         val t = primed(0.2f).apply { onProgress(0.8f, Track240) }
         val clock = Clock()
