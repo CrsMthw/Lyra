@@ -34,12 +34,14 @@ import kotlinx.coroutines.launch
  * ```
  * Extras: title / artist / album / year / copyright (strings), seed (ARGB int), progress (float),
  * spinning, demo (every 5 s a new track — alternating a 40-character and a short title — so the
- * flip and the eject play; progress sweeps 0 → 1 over 60 s), sideB (one flip at start),
+ * flip and the eject play; progress sweeps 0 → 1 over 60 s, starting at 0 — with demo `--ef
+ * progress` is ignored, so the first sweep value is a tick, not a jump), sideB (one flip at start),
  * flipAt / ejectAt (freeze that move at a fraction of its timeline; every change is the same
  * move, so ejectAt plays the flip to B first and freezes the eject after it).
  *
- * The reel wind (CassetteReelWind.kt). `--el` extras are LONGS — an `--ei` silently falls back to
- * the default — `--ef` floats, `--ez` booleans. Every scripted event is anchored at seekAfterMs:
+ * The reel wind (CassetteReelWind.kt). `--el` extras are LONGS, `--ef` floats, `--ez` booleans; a
+ * wrong-typed extra (an `--ei` for an `--el`, say) is ignored — it falls back to the default, or
+ * to "not given" for an optional one. Every scripted event is anchored at seekAfterMs:
  * - `--el durationMs D` — the track length the stage winds against: default 200000; 60000 with
  *   demo, so its 60 s sweep matches (and its wrap then lands WITH a key change — the atomic
  *   track-change case, for free). 0 = unknown: the reels never wind.
@@ -124,11 +126,14 @@ private data class PreviewArgs(
     fun fraction(ms: Long): Float = if (durationMs > 0L) ms.toFloat() / durationMs else 0f
 
     companion object {
-        /** A float extra, or null when absent — "not given" must differ from any value. */
-        private fun Intent.floatOrNull(name: String) = if (hasExtra(name)) getFloatExtra(name, 0f) else null
+        /** A float extra, or null when absent OR wrong-typed: "not given" must differ from any
+         *  value, and an `--ei windAt 1` must not read as 0 (every wind frozen at its start). The
+         *  Bundle returns the default on a type mismatch, so the default is a sentinel. */
+        private fun Intent.floatOrNull(name: String) = getFloatExtra(name, Float.NaN).takeIf { !it.isNaN() }
 
-        /** A LONG extra (`--el`), or null when absent; an `--ei` reads as its 0 default. */
-        private fun Intent.longOrNull(name: String) = if (hasExtra(name)) getLongExtra(name, 0L) else null
+        /** A LONG extra (`--el`), or null when absent OR wrong-typed: an `--ei keyAfterMs 400` must
+         *  not read as 0 (the key change at the seek instant, and flipAt's own one suppressed). */
+        private fun Intent.longOrNull(name: String) = getLongExtra(name, Long.MIN_VALUE).takeIf { it != Long.MIN_VALUE }
 
         fun from(i: Intent): PreviewArgs {
             val demo = i.getBooleanExtra("demo", false)
@@ -199,7 +204,9 @@ private val ShortTitle = CassetteLabel(title = "HALO", artist = "Plumbs", album 
 @Composable
 private fun CassettePreview(a: PreviewArgs) {
     var step by remember { mutableIntStateOf(0) }
-    var progress by remember { mutableFloatStateOf(a.progress) }
+    // demo starts where its sweep starts: seeded at `a.progress` (0.35 by default), the sweep's first
+    // value 100 ms later was a JUMP back to ~0, and the preview wound a rewind nobody had scripted
+    var progress by remember { mutableFloatStateOf(if (a.demo) 0f else a.progress) }
     val freeze = when {
         a.flipAt != null  -> CassetteFreeze(CassetteMove.FLIP, a.flipAt)
         a.ejectAt != null -> CassetteFreeze(CassetteMove.EJECT, a.ejectAt)
