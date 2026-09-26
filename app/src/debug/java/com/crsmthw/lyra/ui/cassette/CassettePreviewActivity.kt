@@ -78,10 +78,15 @@ class CassettePreviewActivity : ComponentActivity() {
  * skip, a repeat-one wrap as the next poll reports it), not the feature's durations, which all live
  * in CassetteTiming — so they stay here, in the debug source set.
  */
+/** The fake track's length: a 3 min 20 s song, long enough that a tick never winds. */
 private const val PreviewDefaultDurationMs = 200_000L
+/** With demo: the length its 60 s progress sweep implies, so a demo tick is a real second. */
 private const val PreviewDemoDurationMs    = 60_000L
+/** When the scripted events fire, after the first composition: the stage has settled by then. */
 private const val PreviewSeekAfterMs       = 2_000L
+/** How long after a seek its correction lands: inside even the shortest (350 ms) wind. */
 private const val PreviewCorrectAfterMs    = 300L
+/** The player's progress tick. */
 private const val PreviewTickMs            = 1_000L
 /** How long the repeat-one script sits at 1.0 before the next "poll" reports the restart. */
 private const val PreviewRepeatHoldMs      = 2_000L
@@ -119,7 +124,10 @@ private data class PreviewArgs(
     fun fraction(ms: Long): Float = if (durationMs > 0L) ms.toFloat() / durationMs else 0f
 
     companion object {
+        /** A float extra, or null when absent — "not given" must differ from any value. */
         private fun Intent.floatOrNull(name: String) = if (hasExtra(name)) getFloatExtra(name, 0f) else null
+
+        /** A LONG extra (`--el`), or null when absent; an `--ei` reads as its 0 default. */
         private fun Intent.longOrNull(name: String) = if (hasExtra(name)) getLongExtra(name, 0L) else null
 
         fun from(i: Intent): PreviewArgs {
