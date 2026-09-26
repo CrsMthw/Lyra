@@ -145,12 +145,14 @@ private fun CassettePreview(a: PreviewArgs) {
         else        -> a.label
     }
     CassetteStageImpl(
-        palette  = remember(a.seed) { CassettePalette.from(Color(a.seed)) },
-        label    = label,
-        trackKey = "track-$step",
-        progress = { progress },
-        spinning = a.spinning,
-        modifier = Modifier.fillMaxSize(),
-        freeze   = freeze,
+        palette    = remember(a.seed) { CassettePalette.from(Color(a.seed)) },
+        label      = label,
+        trackKey   = "track-$step",
+        progress   = { progress },
+        durationMs = 0L,
+        spinning   = a.spinning,
+        modifier   = Modifier.fillMaxSize(),
+        freeze     = freeze,
+        reelDebug  = null,
     )
 }

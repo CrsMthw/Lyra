@@ -936,14 +936,15 @@ fun PlayerScreen(
 
         if (!docked) {
             CassetteOverlay(
-                visible   = cassetteVisible,
-                settings  = cassetteSettings,
-                seed      = cassetteSeed,
-                label     = cassetteLabel,
-                trackKey  = state.currentTrack?.id,
-                progress  = { state.progress },
-                isPlaying = state.isPlaying,
-                onExit    = exitCassette,
+                visible    = cassetteVisible,
+                settings   = cassetteSettings,
+                seed       = cassetteSeed,
+                label      = cassetteLabel,
+                trackKey   = state.currentTrack?.id,
+                progress   = { state.progress },
+                durationMs = state.durationMs,
+                isPlaying  = state.isPlaying,
+                onExit     = exitCassette,
             )
         }
     }
