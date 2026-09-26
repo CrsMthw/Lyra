@@ -298,8 +298,9 @@ fun PlayerScreen(
     val squigglyShape = MaterialShapes.Cookie12Sided.toShape()
 
     // ── Cassette idle screen (docs/CASSETTE.md) ───────────────────────────────
-    // The idle gate: with the feature on, the visualizer off, music playing, lyrics hidden and no
-    // menu/sheet/dialog open, the idle delay (a setting, 5..600 s) without a touch slides the
+    // The idle gate: with the feature on, the visualizer off, music playing (and the wake spinner
+    // gone — the wake path marks the state playing before Spotify has started), lyrics hidden and
+    // no menu/sheet/dialog open, the idle delay (a setting, 5..600 s) without a touch slides the
     // cassette over the player.
     val cassetteSettings by viewModel.cassetteSettings.collectAsStateWithLifecycle()
     val cassetteLabel    by viewModel.cassetteLabel.collectAsStateWithLifecycle()
@@ -316,6 +317,7 @@ fun PlayerScreen(
     val cassetteEligibleNow = !cassetteVisible && cassetteEligible(
         settings          = cassetteSettings,
         isPlaying         = state.isPlaying,
+        waking            = state.isWakingUp,
         visualizerEnabled = state.visualizerEnabled,
         lyricsShowing     = cassetteLyricsShowing,
         docked            = docked,

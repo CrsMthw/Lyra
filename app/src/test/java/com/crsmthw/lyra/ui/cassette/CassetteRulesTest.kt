@@ -26,6 +26,7 @@ class CassetteRulesTest {
     private fun eligible(
         settings: CassetteSettings = on,
         isPlaying: Boolean = true,
+        waking: Boolean = false,
         visualizerEnabled: Boolean = false,
         lyricsShowing: Boolean = false,
         docked: Boolean = false,
@@ -33,12 +34,16 @@ class CassetteRulesTest {
         hasTrack: Boolean = true,
         windowFocused: Boolean = true,
         touchExploring: Boolean = false,
-    ) = cassetteEligible(settings, isPlaying, visualizerEnabled, lyricsShowing, docked, overlayOpen, hasTrack,
-        windowFocused, touchExploring)
+    ) = cassetteEligible(settings, isPlaying, waking, visualizerEnabled, lyricsShowing, docked, overlayOpen,
+        hasTrack, windowFocused, touchExploring)
 
     @Test fun `eligible when every condition holds`() = assertTrue(eligible())
     @Test fun `setting off is never eligible`() = assertFalse(eligible(settings = CassetteSettings()))
     @Test fun `paused music is not eligible`() = assertFalse(eligible(isPlaying = false))
+    @Test fun `the wake spinner is not eligible even though the state reads playing`() =
+        assertFalse(eligible(isPlaying = true, waking = true))
+    @Test fun `eligible once the spinner clears with the music playing`() =
+        assertTrue(eligible(isPlaying = true, waking = false))
     @Test fun `the visualizer suppresses it`() = assertFalse(eligible(visualizerEnabled = true))
     @Test fun `showing lyrics suppresses it`() = assertFalse(eligible(lyricsShowing = true))
     @Test fun `never on the docked pane`() = assertFalse(eligible(docked = true))
