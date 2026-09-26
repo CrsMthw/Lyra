@@ -314,3 +314,156 @@ internal fun naturalToScreen(dx: Float, dy: Float, portrait: Boolean): Pair<Floa
     val s = kotlin.math.sin(rad)
     return (dx * c - dy * s) to (dx * s + dy * c)
 }
+
+// ── Screen rotation: the settle after a turn that flips the image on the glass ────────────────────
+
+/**
+ * How far the system turns the window's content ON THE GLASS for a display rotation: degrees,
+ * clockwise-positive like `rotationZ`. `surfaceRotation` is `Display.getRotation()`, a
+ * `Surface.ROTATION_*` value, which is the rotation of the DRAWN GRAPHICS, opposite to the device's
+ * own turn. A phone turned 90° anticlockwise draws its content turned 90° clockwise: ROTATION_90 →
+ * 90, ROTATION_270 → 270 (≡ −90), ROTATION_180 → 180. Out-of-range values are clamped to 0..3.
+ */
+internal fun contentRotationDeg(surfaceRotation: Int): Float = surfaceRotation.coerceIn(0, 3) * 90f
+
+/**
+ * The shell's angle ON THE GLASS (the display's natural frame), degrees clockwise, in [0, 360): the
+ * stage's own turn ([stageRotationZ]) plus the system's ([contentRotationDeg]). Portrait at
+ * ROTATION_0 is 270 (the head edge on the glass's right), and so is landscape at ROTATION_270: turning
+ * the phone CLOCKWISE out of portrait leaves the image exactly where it was on the glass, while the
+ * anticlockwise turn (ROTATION_90 → 90) moves the head edge to the glass's other side.
+ */
+internal fun glassAngleDeg(portrait: Boolean, surfaceRotation: Int): Float =
+    wrapDeg360(stageRotationZ(portrait) + contentRotationDeg(surfaceRotation))
+
+/** `deg` wrapped into [0, 360). */
+private fun wrapDeg360(deg: Float): Float = ((deg % 360f) + 360f) % 360f
+
+/** `deg` wrapped into (−180, 180]. */
+private fun wrapHalfTurn(deg: Float): Float = wrapDeg360(deg).let { if (it > 180f) it - 360f else it }
+
+/**
+ * What a display rotation does to the stage. [startDeg] = the extra turn the stage's FIRST frame in
+ * the new rotation is drawn with, so the shell sits on the glass exactly where the old frame left
+ * it; the settle then runs it to 0 over [CassetteTiming.OrientationTurnMs]. 0 = nothing to settle.
+ * [portrait] = the orientation the new rotation gives a full-screen window.
+ */
+internal data class OrientationTurn(val startDeg: Float, val portrait: Boolean)
+
+/**
+ * Decides a rotation from the ROTATIONS alone. The new orientation is PREDICTED from the turn's
+ * parity: a quarter turn (90° or 270°) swaps portrait and landscape and a half turn keeps it, which
+ * holds for a full-screen window. So the answer is the same whether the stage composes the new
+ * configuration before its new constraints or together with them.
+ *
+ * The image on the glass ([glassAngleDeg]) either stays where it was, and there is nothing to settle,
+ * or turns by 180°; a rotation can produce nothing else, and any other change also reads as no
+ * settle. A 180° change starts the stage at −180 when the content turned clockwise (+90, or a half
+ * turn) and at +180 when it turned anticlockwise (−90), so the settle carries on the way the
+ * system turned the content. The content turn is (new − last) × 90, wrapped into (−180, 180].
+ */
+internal fun orientationTurnFor(lastRotation: Int, lastPortrait: Boolean, newRotation: Int): OrientationTurn {
+    val last = lastRotation.coerceIn(0, 3)
+    val new = newRotation.coerceIn(0, 3)
+    val portrait = if ((new - last).mod(2) == 1) !lastPortrait else lastPortrait
+    val glassChange = wrapHalfTurn(glassAngleDeg(portrait, new) - glassAngleDeg(lastPortrait, last))
+    if (abs(abs(glassChange) - 180f) > 0.5f) return OrientationTurn(startDeg = 0f, portrait = portrait)
+    val contentTurn = wrapHalfTurn(contentRotationDeg(new) - contentRotationDeg(last))
+    return OrientationTurn(startDeg = if (contentTurn < 0f) 180f else -180f, portrait = portrait)
+}
+
+/**
+ * Where a settle starts when a rotation lands while an earlier settle is still running: the new
+ * turn's [OrientationTurn.startDeg] plus whatever is left of the old one (`inFlightDeg`, 0 at rest).
+ * The first frame in the new rotation then still shows the shell where the last frame left it on the
+ * glass. A total beyond a half turn goes the short way round. An at-rest ±180 is never beyond it, so
+ * the direction rule holds whenever no settle was running.
+ */
+internal fun orientationTurnStart(startDeg: Float, inFlightDeg: Float): Float {
+    val total = startDeg + inFlightDeg
+    return when {
+        total > 180f  -> total - 360f
+        total < -180f -> total + 360f
+        else          -> total
+    }
+}
+
+/**
+ * The stage's rotation bookkeeping. It is fed once per composition of the stage's content and
+ * assigned THERE, in plain fields (PaneStateHolder-style, like the stage's StageState, never snapshot
+ * state), so the first frame of a new rotation already carries its settle. It is pure so that the
+ * order in which a rotation's inputs reach the composition can be unit-tested (CassetteRotationTest).
+ *
+ * A rotation is judged from the display rotation alone ([orientationTurnFor]). The fit's orientation
+ * only re-syncs [portrait] at compositions that bring no rotation change. The new configuration can
+ * recompose the stage in the recomposer's pass while its constraints are still the OLD ones, before
+ * the new size measures it. That is how a size-only change, such as unfolding with the rotation
+ * unchanged, never becomes a turn. A rotation whose configuration also changes the window's smallest
+ * width is not a turn of the same window (a fold or unfold that also rotated, or a split-screen
+ * resize), so it settles nothing: the parity prediction would be meaningless there. This relies on
+ * the configuration reaching the composition no later than the new constraints, which holds because
+ * ViewRootImpl dispatches a resize's configuration before it applies the resize's frame.
+ */
+internal class OrientationTurnState {
+    /** The last display rotation seen; −1 before the first composition. */
+    var rotation: Int = -1
+        private set
+
+    /** The orientation that rotation gives the window: predicted at a rotation, re-synced from the fit otherwise. */
+    var portrait: Boolean = false
+        private set
+
+    /** Where the current settle starts, in degrees added to the stage's rest turn (see [orientationTurnStart]). */
+    var from: Float = 0f
+        private set
+
+    /** Bumped once per settle; the stage keys a fresh Animatable on it. */
+    var generation: Int = 0
+        private set
+
+    /** The configuration's smallest width (dp) at the last composition; a rotation never changes a full-screen window's. */
+    private var smallestWidthDp: Int = -1
+
+    /**
+     * One composition's inputs: the display `rotation`, the fit's `portrait` (from whichever
+     * constraints this composition sees) and the configuration's `smallestWidthDp`. `inFlightDeg` =
+     * what is left of a running settle, read only when a new one starts. Returns true when a new
+     * settle starts, i.e. [generation] was bumped and [from] set.
+     */
+    fun update(rotation: Int, portrait: Boolean, smallestWidthDp: Int, inFlightDeg: () -> Float): Boolean {
+        val lastRotation = this.rotation
+        val lastPortrait = this.portrait
+        val sameWindow = smallestWidthDp == this.smallestWidthDp
+        this.smallestWidthDp = smallestWidthDp
+        this.rotation = rotation
+        if (lastRotation < 0 || rotation == lastRotation || !sameWindow) {
+            this.portrait = portrait
+            return false
+        }
+        val turn = orientationTurnFor(lastRotation, lastPortrait, rotation)
+        this.portrait = turn.portrait
+        if (turn.startDeg == 0f) return false
+        from = orientationTurnStart(turn.startDeg, inFlightDeg())
+        generation++
+        return true
+    }
+}
+
+/**
+ * The largest uniform scale, never above 1, at which a `long` × `short` box turned by `angleDeg`
+ * about its centre still fits a `windowW` × `windowH` window (any one unit; the stage passes dp).
+ * The turned box's bounding box is `long·|cos| + short·|sin|` wide and `long·|sin| + short·|cos|`
+ * tall. At a rest angle (0 in landscape, −90 in portrait) on a full-bleed window it is 1 up to float
+ * rounding, and the stage does not call it at rest. Crosswise, at the midpoint of a 180° settle, it
+ * is short / long ≈ 0.638, so the shell never leaves the clipped stage while it turns. A degenerate
+ * (empty) box reads as 1.
+ */
+internal fun spinFitScale(angleDeg: Float, long: Float, short: Float, windowW: Float, windowH: Float): Float {
+    val rad = angleDeg * (PI.toFloat() / 180f)
+    val c = abs(kotlin.math.cos(rad))
+    val s = abs(sin(rad))
+    val boundsW = long * c + short * s
+    val boundsH = long * s + short * c
+    if (boundsW <= 0f || boundsH <= 0f) return 1f
+    return min(1f, min(windowW / boundsW, windowH / boundsH))
+}
