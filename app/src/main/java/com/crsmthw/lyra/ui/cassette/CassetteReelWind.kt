@@ -24,11 +24,12 @@ import kotlin.math.sqrt
  *                          tick, up to ~6 px for a 4.5 s correction on a 3-minute song)
  *   first value            primes the tracker: nothing winds on a new face, the overlay's entry,
  *                          or when the duration arrives; a value with duration ≤ 0 un-primes it
- *   exact 0f               a HOLD, not a jump: Lyra's own optimistic reset on a skip, a null-item
- *                          poll, the wake fallback. The next value resolves it (a stale poll that
- *                          restores the old position is no jump; a restart winds from the pre-zero
- *                          position); with no value within [CassetteTiming.WindZeroHoldMs] it
- *                          winds to 0
+ *   exact 0f               a HOLD, not a jump: Lyra's own optimistic reset on a skip, the wake
+ *                          fallback. The next value resolves it (a stale poll that restores the
+ *                          old position is no jump; a restart winds from the pre-zero position);
+ *                          with no value within [CassetteTiming.WindZeroHoldMs] it winds to 0. A
+ *                          null-item poll's 0 never gets here: PlayerScreen holds the position
+ *                          while the item is absent ([ReelItemHold])
  *   a jump while winding   ALWAYS a new wind from the DISPLAYED value, a retarget: the position
  *                          stays continuous, the stamping frame keeps the hubs on the replaced
  *                          wind's speed, then the speed restarts from 0. Never folded into the
@@ -320,5 +321,31 @@ internal class ReelTracker(initial: Float) {
         /** A NaN or out-of-range position reads as the nearest end (NaN as the start), like
          *  [packRadii]. */
         fun sanitize(v: Float): Float = if (v.isNaN()) 0f else v.coerceIn(0f, 1f)
+    }
+}
+
+/**
+ * The reels' position while the now-playing ITEM may be briefly absent — what PlayerScreen hands
+ * the cassette as `progress`. A poll answering 200 with `item: null` (a transfer started from
+ * another Spotify client, an unsupported item) zeroes the position but keeps the duration, and
+ * while playing the 1 s progress tick counts on from that 0. Fed straight through, the 0 is held
+ * (the tracker's exact-0 hold) but the tick right after it reads as a restart — the whole tape
+ * winds back — and the next poll's restored position winds it forward again. So while the item is
+ * absent this hands out the last position read WITH one, which the tracker sees as no change at
+ * all; when the item returns, its position is only the few seconds played meanwhile past the held
+ * one — a correction, taken as it comes (and should the item stay away, the cassette exits).
+ * Callers pass "is there an item", never "is there an id": a local file's id is null for the whole
+ * track. Plain Kotlin, not snapshot state: [progress] is called where the item and the position
+ * are read together — the reels' snapshotFlow, and a new face's first composition.
+ */
+internal class ReelItemHold {
+    /** The last position read with an item; NaN until the first value. */
+    private var last = Float.NaN
+
+    /** `progress` itself while there is an item (remembered); the last remembered one while there
+     *  is not. The very first value passes whatever it is — there is nothing to hold yet. */
+    fun progress(hasItem: Boolean, progress: Float): Float {
+        if (hasItem || last.isNaN()) last = progress
+        return last
     }
 }

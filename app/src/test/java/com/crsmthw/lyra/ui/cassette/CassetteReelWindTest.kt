@@ -583,3 +583,49 @@ class CassetteReelTrackerTest {
         }
     }
 }
+
+class CassetteReelItemHoldTest {
+
+    @Test
+    fun `the position passes while there is an item and is held while there is none`() {
+        val hold = ReelItemHold()
+        assertEquals(0.5f, hold.progress(hasItem = true, progress = 0.5f))
+        assertEquals(0.5f, hold.progress(hasItem = false, progress = 0f), "the null item's 0")
+        assertEquals(0.5f, hold.progress(hasItem = false, progress = 1_000f / Track240), "the tick counting on from it")
+        assertEquals(0.5125f, hold.progress(hasItem = true, progress = 0.5125f), "the item is back")
+        assertEquals(0.5125f, hold.progress(hasItem = false, progress = 0f), "held again from there")
+    }
+
+    @Test
+    fun `the first value passes even without an item - there is nothing to hold yet`() {
+        val hold = ReelItemHold()
+        assertEquals(0.3f, hold.progress(hasItem = false, progress = 0.3f))
+        assertEquals(0.3f, hold.progress(hasItem = false, progress = 0f))
+    }
+
+    @Test
+    fun `a null-item poll while playing never winds the reels`() {
+        // Review 2026-09-26, the verifier's sequence on a 240 s song at 0.5: a 200 with item null
+        // zeroes the position and keeps the duration, and while playing the 1 s tick counts on
+        // from that 0. Straight into the tracker the 0 was held, but the first tick wound the whole
+        // tape back and the next poll wound it forward again.
+        val hold = ReelItemHold()
+        val t = ReelTracker(hold.progress(hasItem = true, progress = 0.5f))
+        val clock = Clock()
+        val back = 0.5f + 3_000f / Track240                   // the next poll, 3 s on
+        val feed = listOf(
+            true to 0.5f,                                     // the face's first value: primes
+            false to 0f,                                      // the null-item poll
+            false to 1_000f / Track240,                       // the tick, within a second
+            false to 2_000f / Track240,
+            true to back,                                     // the item is back
+        )
+        for ((hasItem, raw) in feed) {
+            assertEquals(ReelInput.Accept, t.onProgress(hold.progress(hasItem, raw), Track240), "($hasItem, $raw)")
+            repeat(10) { clock.frame(t) }
+            assertFalse(t.winding, "($hasItem, $raw)")
+            assertTrue(t.displayed >= 0.5f, "never wound back: ${t.displayed}")
+        }
+        assertEquals(back, t.displayed, "the item's return is a correction, taken as it comes")
+    }
+}

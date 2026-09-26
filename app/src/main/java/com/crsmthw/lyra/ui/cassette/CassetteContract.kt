@@ -105,10 +105,12 @@ object CassetteTiming {
 
     /**
      * How long an exact-0 jump is HELD before the reels wind to 0. An exact 0 is Lyra's own
-     * optimistic reset on a skip (after which `fetchUntilTrackChanges` polls for up to 4 s), a
-     * null-item poll or the wake fallback, so the next value usually resolves it: a new track
-     * freezes the old face where it was, and a stale poll restoring the old position is no jump.
-     * 5 s outlasts that 4 s window plus the skip request's and one fetch's latency.
+     * optimistic reset on a skip (after which `fetchUntilTrackChanges` polls for up to 4 s) or the
+     * wake fallback, so the next value usually resolves it: a new track freezes the old face where
+     * it was, and a stale poll restoring the old position is no jump. 5 s outlasts that 4 s window
+     * plus the skip request's and one fetch's latency. A null-item poll's 0 never reaches the
+     * reels: while playing, the 1 s tick counts on from it and the first tick would read as a
+     * restart, so PlayerScreen holds the last position while the item is absent ([ReelItemHold]).
      */
     const val WindZeroHoldMs = 5_000L
 

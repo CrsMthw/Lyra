@@ -78,6 +78,7 @@ import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.repository.LyricsState
 import com.crsmthw.lyra.ui.cassette.CassetteColorSource
 import com.crsmthw.lyra.ui.cassette.CassetteOverlay
+import com.crsmthw.lyra.ui.cassette.ReelItemHold
 import com.crsmthw.lyra.ui.cassette.cassetteEligible
 import com.crsmthw.lyra.ui.cassette.rememberTouchExplorationEnabled
 import com.crsmthw.lyra.ui.components.AddToPlaylistSheet
@@ -378,6 +379,12 @@ fun PlayerScreen(
         delay(CassetteNullItemGraceMs)
         exitCassette()
     }
+    // …and the reels hold their POSITION through that grace, here rather than in the overlay:
+    // that poll zeroes the position but keeps the duration and (while playing) the 1 s tick, so
+    // fed through, the reels would wind the whole tape back on the first tick and forward again
+    // on the next poll. Gated on the ITEM, never on its id (a local file's id is null for the
+    // whole track), and read with the position from ONE PlayerUiState, so the two never disagree.
+    val cassetteReelHold = remember { ReelItemHold() }
     // One seed → the whole palette (CassettePalette.from, inside the overlay, which slides it).
     val systemDynamicPrimary = remember(context) { dynamicDarkColorScheme(context).primary }
     val cassetteSeed = when (cassetteSettings.colorSource) {
@@ -941,7 +948,10 @@ fun PlayerScreen(
                 seed       = cassetteSeed,
                 label      = cassetteLabel,
                 trackKey   = state.currentTrack?.id,
-                progress   = { state.progress },
+                progress   = {
+                    val ui = state
+                    cassetteReelHold.progress(hasItem = ui.currentTrack != null, progress = ui.progress)
+                },
                 durationMs = state.durationMs,
                 isPlaying  = state.isPlaying,
                 onExit     = exitCassette,

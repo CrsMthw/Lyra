@@ -207,6 +207,9 @@ fun CassetteOverlay(
         // last label and key, so the stage neither blanks its label nor plays a flip / eject for
         // "no track" and another one back. Plain fields written after each composition: read only
         // on a pass where the incoming value is null, i.e. the pass that change itself caused.
+        // The POSITION is held by PlayerScreen (ReelItemHold), not here: `trackKey` is null for a
+        // local file's whole track and `label` is a separate flow, so neither says "the item is
+        // gone" in the same snapshot as the position.
         val held = remember { HeldItem() }
         SideEffect {
             if (label != null) held.label = label
