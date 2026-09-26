@@ -125,8 +125,13 @@ private class ReelSpin(initial: Float) {
     }
 }
 
-/** One snapshotFlow sample: the position and the duration read in ONE snapshot, so a track
- *  change's new position and length arrive together. */
+/**
+ * One snapshotFlow sample. The position is LIVE — `progress` reads PlayerScreen's state directly —
+ * but the duration is this face's last COMPOSED value (`rememberUpdatedState`). On a track change
+ * the collector usually runs before the face recomposes, so for one sample the new position is
+ * classified against the OUTGOING track's length; the next sample carries the new length, if the
+ * face is still live (the skip-edge residual in [CassetteImpl]'s collector comment).
+ */
 private data class ReelSample(val progress: Float, val durationMs: Long)
 
 /**
@@ -202,16 +207,23 @@ internal fun CassetteImpl(
         // COLLECTOR: classifies every value; never owns a wind — collectLatest cancels its block
         // on every tick, and the exact-0 hold is the ONE thing the next value should cancel.
         //
-        // The skip-edge residual (accepted, ≤ 5 s of tape): a new track's id and position land in
-        // ONE snapshot, and THIS face's collector may classify the new position before the stage's
-        // key tracking turns the face outgoing (live = false). A jump then only makes an UNSTAMPED
-        // wind or a hold, and the cancellation comes first — the faces are composed inside the
-        // stage's BoxWithConstraints, a SubcomposeLayout, so they recompose in the measure pass of
-        // the very frame whose animation callbacks could at most stamp that wind — so the old face
-        // never moves. But a new position within 5 s of the old target is no jump: it is accepted
-        // here and snaps the old face by up to 5 s of tape (≤ 3.3 units on a 3-minute song) at the
-        // flip's first frame — a skip inside a song's first seconds, say. Exact would need the
-        // track id read in the same snapshot as the position.
+        // The skip-edge residual (accepted): a new track's id and position land in ONE snapshot,
+        // and THIS face's collector may classify the new position before the stage's key tracking
+        // turns the face outgoing (live = false). A jump then only makes a hold or a new UNSTAMPED
+        // wind — a retarget when one was running, never a fold into it (ReelTracker.windTo) — and
+        // the cancellation comes first: the faces are composed inside the stage's
+        // BoxWithConstraints, a SubcomposeLayout, so they recompose in the measure pass of the very
+        // frame whose animation callbacks can at most STAMP that wind. A stamp moves no pack, and a
+        // retarget's stamp keeps the hubs on the replaced wind's speed (ReelTracker.onFrame), so
+        // the old face's packs never move and its hubs never reverse: they take one last step their
+        // own way, as they would have anyway. But a new position that is NO jump is accepted here
+        // and snaps the old face — or moves its running wind's end — at the flip's first frame (a
+        // skip inside a song's first seconds, say). The threshold is measured against the OUTGOING
+        // track's length (the face has not recomposed with the new one yet — see ReelSample), so
+        // the snap is at most 5 s of the outgoing face's own tape: ≤ 3.3 units on a 3-minute song,
+        // up to ~30 on a 20 s interlude. When the outgoing track is the LONGER one, the stale length
+        // only makes a jump more likely — a cancelled unstamped wind, so the face does not move.
+        // Exact would need the track id read in the same snapshot as the position.
         launch {
             snapshotFlow { ReelSample(currentProgress(), currentDuration) }.collectLatest { sample ->
                 val input = spin.tracker.onProgress(sample.progress, sample.durationMs)

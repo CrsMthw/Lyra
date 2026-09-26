@@ -354,14 +354,16 @@ class CassetteReelTrackerTest {
     fun `a jump away from the displayed position retargets from where the packs are`() {
         val t = primed(0.2f).apply { onProgress(0.8f, Track240) }
         val clock = Clock()
-        repeat(25) { clock.frame(t) }
+        var running = 0f
+        repeat(25) { running = clock.frame(t) }
         val before = t.displayed
         assertTrue(before > 0.3f && before < 0.7f, "mid-wind: $before")
+        assertTrue(running > 0f, "fast-forwarding at speed: $running")
         assertEquals(ReelInput.Wind, t.onProgress(0.05f, Track240))
         assertEquals(before, t.displayed, "position continuous at the call")
         assertEquals(0.05f, t.target)
-        assertEquals(0f, clock.frame(t), "the next frame stamps the new wind")
-        assertEquals(before, t.displayed)
+        assertEquals(running, clock.frame(t), "the next frame stamps the new wind, at the old speed")
+        assertEquals(before, t.displayed, "the stamp moves no pack")
         clock.frame(t); clock.frame(t)
         assertTrue(t.displayed < before, "heading for 0.05")
         clock.toEnd(t)
@@ -369,21 +371,77 @@ class CassetteReelTrackerTest {
     }
 
     @Test
-    fun `a jump landing near the displayed position is absorbed, not restarted`() {
-        val reference = Clock().toEnd(primed(0.2f).apply { onProgress(0.8f, Track240) })
-        val t = primed(0.2f).apply { onProgress(0.8f, Track240) }
+    fun `a jump landing near the displayed position retargets too - the stamp moves nothing`() {
+        // Review 2026-09-26: a 240 s seek 0.9 → 0.1 is 24 frames in, the packs near 0.5, when a
+        // value lands at 0.504 — a jump from the target but not from the packs (a new item resuming
+        // there, read by the OUTGOING face, say). Folded into the running wind it moved the packs
+        // ~0.21 of the tape in one frame, the outgoing face's last.
+        val t = primed(0.9f).apply { onProgress(0.1f, Track240) }
         val clock = Clock()
-        repeat(25) { clock.frame(t) }
-        val near = t.displayed + 1_000f / Track240           // a jump from the target, 1 s from the packs
+        var running = clock.frame(t)                          // the stamp
+        repeat(24) { running = clock.frame(t) }
+        val before = t.displayed
+        assertTrue(close(before, 0.5f), "mid-wind: $before")
+        assertTrue(running < 0f, "rewinding at speed: $running")
+        val near = 0.504f
         assertTrue(isReelJump(t.target, near, Track240))
-        assertFalse(isReelJump(t.displayed, near, Track240))
+        assertFalse(isReelJump(before, near, Track240))
         assertEquals(ReelInput.Wind, t.onProgress(near, Track240))
         assertEquals(near, t.target)
-        assertTrue(t.winding)
-        assertNotEquals(0f, clock.frame(t), "not a stamp: the same wind runs on")
-        val total = 26 + clock.toEnd(t)
-        assertEquals(reference, total, "ends at the original T")
-        assertEquals(near, t.displayed)
+        assertEquals(before, t.displayed, "nothing moves at the call")
+        assertEquals(running, clock.frame(t), "a stamp, at the replaced wind's speed")
+        assertEquals(before, t.displayed, "the stamp moves no pack: an outgoing face stays put")
+        clock.toEnd(t)
+        assertEquals(near, t.displayed, "the new wind ends exactly on it")
+    }
+
+    @Test
+    fun `a retarget's stamp never steps a rewinding hub the play way`() {
+        // Review 2026-09-26: the stamp returned 0, so while playing the hubs fell onto the play
+        // drive for that frame — one step anticlockwise against a clockwise rewind, shown by the
+        // outgoing face of a skip made during a wind
+        val t = primed(0.9f).apply { onProgress(0.2f, Track240) }
+        val clock = Clock()
+        var running = 0f
+        repeat(16) { running = clock.frame(t) }              // the stamp + 15 frames: at cruise
+        assertEquals(-1f, running, "a rewind at cruise")
+        assertEquals(ReelInput.Wind, t.onProgress(0.1f, Track240))
+        val stamp = clock.frame(t)
+        assertEquals(running, stamp)
+        val v = windTapeVelocity(stamp, playing = true)
+        assertTrue(v < 0f, "still rewinding on the stamp: $v")
+        val r = packRadii(t.displayed)
+        val step = unwrap(advanceHubAngle(100f, r.supply, 1f / 60f, v, w.HubMaxStepDeg) - 100f)
+        assertTrue(step > 0f, "the supply hub keeps turning clockwise: $step")
+    }
+
+    @Test
+    fun `two retargets between frames still pass the running speed on`() {
+        val t = primed(0.9f).apply { onProgress(0.2f, Track240) }
+        val clock = Clock()
+        var running = 0f
+        repeat(16) { running = clock.frame(t) }
+        assertEquals(ReelInput.Wind, t.onProgress(0.05f, Track240))   // a retarget, not yet stamped…
+        assertEquals(ReelInput.Wind, t.onProgress(0.6f, Track240))    // …replaced before any frame
+        assertEquals(running, clock.frame(t), "the unstamped retarget passed the speed on")
+        clock.toEnd(t)
+        assertEquals(0.6f, t.displayed)
+    }
+
+    @Test
+    fun `a fresh wind stamps 0 - after a finished wind, and after an unknown duration`() {
+        val t = primed(0.2f).apply { onProgress(0.8f, Track240) }
+        val clock = Clock()
+        clock.toEnd(t)
+        assertEquals(ReelInput.Wind, t.onProgress(0.3f, Track240))
+        assertEquals(0f, clock.frame(t), "nothing carried over from a finished wind")
+        repeat(20) { clock.frame(t) }
+        assertTrue(t.winding, "mid-wind")
+        assertEquals(ReelInput.Accept, t.onProgress(0.6f, 0L))        // snaps, ends the wind, un-primes
+        assertFalse(t.winding)
+        assertEquals(ReelInput.Accept, t.onProgress(0.6f, Track240))  // primes again
+        assertEquals(ReelInput.Wind, t.onProgress(0.1f, Track240))
+        assertEquals(0f, clock.frame(t), "nothing carried over across an un-prime")
     }
 
     @Test

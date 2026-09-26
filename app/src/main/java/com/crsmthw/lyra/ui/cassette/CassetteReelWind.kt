@@ -29,12 +29,14 @@ import kotlin.math.sqrt
  *                          restores the old position is no jump; a restart winds from the pre-zero
  *                          position); with no value within [CassetteTiming.WindZeroHoldMs] it
  *                          winds to 0
- *   a jump while winding   a new wind from the DISPLAYED value when it is a jump from there too
- *                          (a retarget: position continuous, speed restarts from 0), otherwise
- *                          absorbed into the running wind (its end moves, the timeline is kept)
+ *   a jump while winding   ALWAYS a new wind from the DISPLAYED value, a retarget: the position
+ *                          stays continuous, the stamping frame keeps the hubs on the replaced
+ *                          wind's speed, then the speed restarts from 0. Never folded into the
+ *                          running wind — moving a stamped wind's end by a jump shifts the packs
+ *                          in one frame (see [ReelTracker.windTo])
  * ── The wind ───────────────────────────────────────────────────────────────────────────────
  *   displayed = from + (to − from)·windEase(f), f = elapsed × timeScale / T, stamped on its FIRST
- *   frame (which moves nothing). T = [windDurationMs] = 350 + 550·√|Δp| ms — by PACK distance,
+ *   frame (which moves no pack). T = [windDurationMs] = 350 + 550·√|Δp| ms — by PACK distance,
  *   since every track maps onto the same tape (0.01 → 405, 0.25 → 625, a whole-tape wrap → 900).
  *   The velocity is a trapezoid, the way a deck motor spins up ([CassetteWind.WindRampFraction]),
  *   cruises and brakes ([CassetteWind.WindBrakeFraction]); windEase is its integral, C¹ and
@@ -176,8 +178,8 @@ internal enum class ReelInput {
      *  end. Also every priming value, and any value with an unknown duration. */
     Accept,
 
-    /** A jump: a wind started (stamped on the next frame) or retargeted — or, when the value is
-     *  close to the DISPLAYED position, absorbed into the running wind. */
+    /** A jump: a new wind from the DISPLAYED position, stamped on the next frame — a retarget when
+     *  one was already running, never folded into it. */
     Wind,
 
     /** An exact-0 jump: held until the next value, or until [ReelTracker.onHoldExpired]. */
@@ -194,10 +196,17 @@ internal enum class ReelInput {
  */
 internal class ReelTracker(initial: Float) {
 
-    /** A running wind. `to` moves with every accepted value; the timeline starts on the first
-     *  [onFrame] after it is created (`startNanos` < 0 until then). */
-    private class Span(val from: Float, var to: Float, val durationMs: Int) {
+    /**
+     * A running wind. `to` moves with every accepted value; the timeline starts on the first
+     * [onFrame] after it is created (`startNanos` < 0 until then). `stampSpeed` is what that
+     * stamping frame returns: 0 for a fresh wind, the replaced wind's last speed for a retarget
+     * (see [onFrame]). `lastSpeed` is what the span last returned — its stamp speed until it has
+     * moved, so a retarget replacing a still-unstamped retarget passes the running speed on — and
+     * it seeds the next retarget's stamp speed.
+     */
+    private class Span(val from: Float, var to: Float, val durationMs: Int, val stampSpeed: Float) {
         var startNanos = -1L
+        var lastSpeed = stampSpeed
     }
 
     /** The position the packs show, 0..1. */
@@ -241,7 +250,7 @@ internal class ReelTracker(initial: Float) {
             holding = true
             return ReelInput.Hold
         }
-        windTo(p, durationMs)
+        windTo(p)
         return ReelInput.Wind
     }
 
@@ -250,22 +259,28 @@ internal class ReelTracker(initial: Float) {
     fun onHoldExpired(durationMs: Long) {
         if (!holding) return
         holding = false
-        if (isReelJump(target, 0f, durationMs)) windTo(0f, durationMs) else accept(0f)
+        if (isReelJump(target, 0f, durationMs)) windTo(0f) else accept(0f)
     }
 
     /**
      * Advances a running wind to frame time `frameNanos` and returns `s`, the signed normalised
-     * wind speed for [windTapeVelocity] (+ fast-forward, − rewind). 0 when idle, on the frame that
-     * STAMPS a new wind (it moves nothing — a wind created between frames never jumps), and on the
-     * frame that completes it (which lands exactly on the target). `timeScale` slows the wind's
-     * clock and `freezeFraction` holds it at a fraction of its timeline, never completing — both
-     * for the debug preview only.
+     * wind speed for [windTapeVelocity] (+ fast-forward, − rewind). 0 when idle and on the frame
+     * that completes a wind (which lands exactly on the target).
+     *
+     * The frame that STAMPS a new wind moves no pack — a wind created between frames never jumps —
+     * and returns the span's stamp speed: 0 for a fresh wind, and for a RETARGET the replaced
+     * wind's last speed, so the hubs hold their old speed for that one frame. Returning 0 there
+     * dropped them onto the play drive, which against a running rewind is one step the PLAY way —
+     * and an outgoing face (its collector can see the new track's position a frame before the face
+     * is frozen) showed exactly that frame. `timeScale` slows the wind's clock and
+     * `freezeFraction` holds it at a fraction of its timeline, never completing — both for the
+     * debug preview only.
      */
     fun onFrame(frameNanos: Long, timeScale: Float = 1f, freezeFraction: Float? = null): Float {
         val w = wind ?: return 0f
         if (w.startNanos < 0L) {
             w.startNanos = frameNanos
-            return 0f
+            return w.stampSpeed
         }
         val f = freezeFraction?.coerceIn(0f, 1f)
             ?: ((frameNanos - w.startNanos) / 1_000_000f * timeScale / w.durationMs).coerceIn(0f, 1f)
@@ -275,7 +290,9 @@ internal class ReelTracker(initial: Float) {
             return 0f
         }
         displayed = w.from + (w.to - w.from) * windEase(f)
-        return sign(w.to - w.from) * windSpeed(f)
+        val s = sign(w.to - w.from) * windSpeed(f)
+        w.lastSpeed = s
+        return s
     }
 
     /** Takes `p` as the position: at once while idle, as the running wind's new end otherwise. */
@@ -285,15 +302,18 @@ internal class ReelTracker(initial: Float) {
         if (w != null) w.to = p else displayed = p
     }
 
-    /** Winds to `p` from the DISPLAYED position — or, while a wind runs and `p` is no jump from
-     *  the displayed position, folds `p` into that wind instead of restarting it. */
-    private fun windTo(p: Float, durationMs: Long) {
-        if (wind != null && !isReelJump(displayed, p, durationMs)) {
-            accept(p)
-            return
-        }
+    /**
+     * Winds to `p` from the DISPLAYED position. While a wind runs this is a RETARGET — always, even
+     * when `p` lands close to where the packs are: a new span from the displayed position (so the
+     * position stays continuous), unstamped until the next frame, whose stamp moves no pack and
+     * carries the replaced wind's last speed. Never folded into the running wind: moving a STAMPED
+     * wind's end shifts the packs at once by the move × windEase(f) — for a jump landing near the
+     * packs, up to about a quarter of the span — and on an outgoing face, whose collector can see
+     * the new track's position before the face is frozen, that shifted frame was its last.
+     */
+    private fun windTo(p: Float) {
         target = p
-        wind = Span(displayed, p, windDurationMs(p - displayed))
+        wind = Span(displayed, p, windDurationMs(p - displayed), stampSpeed = wind?.lastSpeed ?: 0f)
     }
 
     private companion object {
