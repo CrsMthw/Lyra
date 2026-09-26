@@ -8,6 +8,7 @@ import com.crsmthw.lyra.data.local.ForYouCacheData
 import com.crsmthw.lyra.data.local.JumpBackInItem
 import com.crsmthw.lyra.data.local.LibraryCache
 import com.crsmthw.lyra.data.local.ReorderCalculator
+import com.crsmthw.lyra.data.player.PlaybackOrigin
 import com.crsmthw.lyra.data.player.PlayerStateManager
 import com.crsmthw.lyra.data.remote.SpotifyRemoteManager
 import com.crsmthw.lyra.data.remote.model.*
@@ -77,6 +78,8 @@ data class LibraryUiState(
     val playlistTracksTotal   : Int                    = 0,
     val error                 : String?                = null,  // blocking — shown when no cache
     val refreshError          : String?                = null,  // non-blocking — shown as icon when cache is visible
+    /** Epoch ms until which Spotify's LIBRARY endpoints are rate-limited (0 = open) — the shared gate, so the bar's warning icon also covers the indexer's 429s (2026-09-25). */
+    val libraryRateLimitUntil : Long                   = 0L,
     val refreshPartial        : Boolean                = false, // sweep incomplete — UI resolves fallback from string resource
     val user                  : SpotifyUser?           = null,
     val playlistsWithMosaics  : Set<String>            = emptySet(),
@@ -699,6 +702,11 @@ class LibraryViewModel(
     }
 
     init {
+        viewModelScope.launch {
+            playerStateManager.libraryRateLimitUntil.collect { until ->
+                _uiState.update { it.copy(libraryRateLimitUntil = until) }
+            }
+        }
         _uiState.update { it.copy(playlistsWithMosaics = mosaicGenerator.existingIds()) }
         loadLibrary()
         observeCacheRevision()
@@ -1506,33 +1514,6 @@ class LibraryViewModel(
             likedSongsTotal     = 0,
             error               = null,
         ).modesCleared() }
-    }
-
-    fun playPlaylist(uri: String) {
-        playerStateManager.setOptimisticallyPlaying()
-        viewModelScope.launch {
-            repository.play(contextUri = uri).onFailure { e ->
-                if (e.message?.contains("404") == true) {
-                    remoteManager.connectAndPlay(uri)
-                } else {
-                    playerStateManager.releasePlayingOptimism()
-                }
-            }
-        }
-    }
-
-    fun shufflePlaylist(uri: String) {
-        playerStateManager.setOptimisticallyPlaying()
-        viewModelScope.launch {
-            repository.setShuffle(true)
-            repository.play(contextUri = uri).onFailure { e ->
-                if (e.message?.contains("404") == true) {
-                    remoteManager.connectAndPlay(uri)
-                } else {
-                    playerStateManager.releasePlayingOptimism()
-                }
-            }
-        }
     }
 
     fun selectLikedSongs() {

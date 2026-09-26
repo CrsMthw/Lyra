@@ -10,7 +10,8 @@ import com.crsmthw.lyra.data.remote.model.SpotifyTrack
  */
 sealed interface ILyraEffect {
     /**
-     * → PlayerViewModel.playTrack(uri, contextUri, uris, index, startPositionMs, shuffle).
+     * → PlayerViewModel.playTrack(uri, contextUri, uris, startPositionMs, shuffle). There is no
+     * index: every path positions by uri (the old App Remote `skipToIndex` fallback is gone).
      * [shuffle] = false means "the user picked THIS song, so turn shuffle off first" — with shuffle
      * left on, Spotify starts a uris body at a random entry (the "tapped one song, got another"
      * bug). null leaves the device's shuffle state alone; Shuffle Songs is the only path that turns
@@ -20,7 +21,6 @@ sealed interface ILyraEffect {
         val uri: String,
         val contextUri: String? = null,
         val uris: List<String>? = null,
-        val index: Int? = null,
         val startPositionMs: Long? = null,
         val shuffle: Boolean? = false,
     ) : ILyraEffect

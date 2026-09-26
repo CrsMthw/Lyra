@@ -267,7 +267,8 @@ fun MiniPlayer(
                         )
                     }
                     IconButton(
-                        onClick  = { haptics.press(); onPlayPause() },
+                        // Inert while WAKING — see PlayerScreen's play button (C11, 2026-09-25).
+                        onClick  = { if (!isWakingUp) { haptics.press(); onPlayPause() } },
                         modifier = Modifier.size(40.dp),
                     ) {
                         Icon(

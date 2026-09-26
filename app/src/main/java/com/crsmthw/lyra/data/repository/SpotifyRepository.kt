@@ -194,16 +194,21 @@ class SpotifyRepository(
         offsetUri  : String?       = null,
         uris       : List<String>? = null,
         positionMs : Long?         = null,
+        /** Target a LISTED device by id (`?device_id=`); null = the active device, as before. */
+        deviceId   : String?       = null,
+        /** Zero-based raw position in [contextUri]; used only when [offsetUri] is null. */
+        offsetPosition: Int?       = null,
     ): Result<Unit> = safeCall {
         when {
             contextUri != null -> api.play(PlayRequest(
                 contextUri = contextUri,
-                offset     = offsetUri?.let { PlayOffset(uri = it) },
+                offset     = offsetUri?.let { PlayOffset(uri = it) }
+                                ?: offsetPosition?.let { PlayOffset(position = it) },
                 positionMs = positionMs,
-            ))
-            uris != null -> api.play(PlayRequest(uris = uris, positionMs = positionMs))
-            uri  != null -> api.play(PlayRequest(uris = listOf(uri), positionMs = positionMs))
-            else         -> api.resumePlayback()
+            ), deviceId)
+            uris != null -> api.play(PlayRequest(uris = uris, positionMs = positionMs), deviceId)
+            uri  != null -> api.play(PlayRequest(uris = listOf(uri), positionMs = positionMs), deviceId)
+            else         -> api.resumePlayback(deviceId)
         }
     }
 
@@ -294,8 +299,8 @@ class SpotifyRepository(
     }
 
     suspend fun pause(): Result<Unit>                          = safeCall { api.pause() }
-    suspend fun skipNext(): Result<Unit>                       = safeCall { api.skipNext() }
-    suspend fun skipPrevious(): Result<Unit>                   = safeCall { api.skipPrevious() }
+    suspend fun skipNext(deviceId: String? = null): Result<Unit>     = safeCall { api.skipNext(deviceId) }
+    suspend fun skipPrevious(deviceId: String? = null): Result<Unit> = safeCall { api.skipPrevious(deviceId) }
     suspend fun seek(positionMs: Long): Result<Unit>           = safeCall { api.seek(positionMs) }
     suspend fun setShuffle(state: Boolean): Result<Unit>       = safeCall { api.setShuffle(state) }
     suspend fun setRepeat(state: String): Result<Unit>         = safeCall { api.setRepeat(state) }

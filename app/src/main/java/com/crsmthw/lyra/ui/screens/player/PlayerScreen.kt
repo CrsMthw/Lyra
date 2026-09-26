@@ -1174,7 +1174,9 @@ private fun PlayerControls(
             }
         }
         FilledIconButton(
-            onClick  = { haptics.press(); onPlayPause() },
+            // Inert while WAKING (device pass 2026-09-25, C11): a pause under the spinner has
+            // nothing to pause yet and only stranded the wake. The spinner is the disabled look.
+            onClick  = { if (!state.isWakingUp) { haptics.press(); onPlayPause() } },
             modifier = Modifier.size(68.dp).graphicsLayer { rotationZ = cookieRotation.value },
             shape    = squigglyShape,
             colors   = IconButtonDefaults.filledIconButtonColors(

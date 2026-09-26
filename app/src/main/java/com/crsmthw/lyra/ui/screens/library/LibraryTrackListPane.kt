@@ -217,8 +217,9 @@ internal fun RightPaneContent(
                 } else if (inSelection) {
                     viewModel.toggleTrackSelection(track.uri)
                 } else if (playlist != null) {
-                    val idx = state.currentTracks.indexOfFirst { it.uri == track.uri }.coerceAtLeast(0)
-                    playerViewModel.playTrack(track.uri, contextUri = playlist.uri, index = idx)
+                    // Positioned by uri (offset.uri) on every path — a row index is a FILTERED
+                    // position and is never sent anywhere (docs/PLAYER.md → Playback 404 Fallback).
+                    playerViewModel.playTrack(track.uri, contextUri = playlist.uri)
                     onTrackClick()
                 } else {
                     playerViewModel.playFromLikedSongs(track.uri)
@@ -268,8 +269,8 @@ internal fun RightPaneContent(
                     isLikedSongs = isLikedSongs,
                     name         = playlistName,
                     trackCount   = trackCount,
-                    onPlay       = { haptics.press(); viewModel.playPlaylist(playUri) },
-                    onShuffle    = { haptics.press(); viewModel.shufflePlaylist(playUri) },
+                    onPlay       = { haptics.press(); playerViewModel.playContext(playUri, shuffle = false) },
+                    onShuffle    = { haptics.press(); playerViewModel.shuffleContext(playUri, trackCount) },
                     selecting    = inSelection || inReorder,
                     playlistId   = playlist?.id,
                     sharedScope  = sharedScope,
@@ -292,7 +293,7 @@ internal fun RightPaneContent(
                             style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
                         if (!isLikedSongs && playUri.isNotBlank()) {
                             Spacer(Modifier.height(16.dp))
-                            Button(onClick = { viewModel.playPlaylist(playUri) }) {
+                            Button(onClick = { playerViewModel.playContext(playUri, shuffle = false) }) {
                                 Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(8.dp))
                                 Text(stringResource(R.string.player_play))
                             }

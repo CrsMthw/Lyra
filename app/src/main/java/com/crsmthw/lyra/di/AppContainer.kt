@@ -1,6 +1,8 @@
 package com.crsmthw.lyra.di
 
 import android.content.Context
+import android.os.Build
+import android.provider.Settings
 import coil3.ImageLoader
 import coil3.disk.DiskCache
 import coil3.memory.MemoryCache
@@ -11,6 +13,7 @@ import com.crsmthw.lyra.data.local.EncryptedPrefs
 import com.crsmthw.lyra.data.local.LibraryCache
 import com.crsmthw.lyra.data.local.LikedSongsIndexer
 import com.crsmthw.lyra.data.local.LyraDataStore
+import com.crsmthw.lyra.data.local.PlaybackOriginStore
 import com.crsmthw.lyra.BuildConfig
 import com.crsmthw.lyra.data.remote.LrcLibApiService
 import com.crsmthw.lyra.data.remote.SpotifyApiService
@@ -28,10 +31,26 @@ import kotlin.time.Duration.Companion.seconds
 
 class AppContainer(context: Context) {
 
+    private val appContext: Context = context.applicationContext
+
+    /**
+     * The names this phone is likely listed under in `me/player/devices` — the user-set device
+     * name (Settings.Global `device_name`) and `Build.MODEL`. Read at call time (the name can be
+     * edited); the wake restore matches them against the device list (`pickLocalDevice`).
+     */
+    fun localDeviceNameHints(): List<String> = listOfNotNull(
+        runCatching {
+            Settings.Global.getString(appContext.contentResolver, Settings.Global.DEVICE_NAME)
+        }.getOrNull(),
+        Build.MODEL,
+    ).filter { it.isNotBlank() }.distinct()
+
     // ── Local storage ────────────────────────────────────────────────────────
     val encryptedPrefs = EncryptedPrefs(context)
     val dataStore      = LyraDataStore(context)
     val libraryCache   = LibraryCache(context)
+    /** Where the current playback came from — the play button's wake restore reads it. */
+    val playbackOriginStore = PlaybackOriginStore(context)
 
     // ── Auth ─────────────────────────────────────────────────────────────────
     val authManager  = SpotifyAuthManager(context, encryptedPrefs)
@@ -140,7 +159,7 @@ class AppContainer(context: Context) {
     val lyricsRepository   = LyricsRepository(lrcLibApiService)
 
     // ── App-scoped player state ───────────────────────────────────────────────
-    val playerStateManager = PlayerStateManager(context, spotifyRepository, remoteManager)
+    val playerStateManager = PlayerStateManager(context, spotifyRepository, remoteManager, playbackOriginStore)
 
     // ── Liked-songs indexer (shared by the foreground service and the iLyra) ──
     val likedSongsIndexer = LikedSongsIndexer(libraryCache, spotifyRepository, playerStateManager)

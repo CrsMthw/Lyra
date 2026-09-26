@@ -154,7 +154,6 @@ fun ILyraRoot(container: AppContainer, modifier: Modifier = Modifier) {
                     uri = effect.uri,
                     contextUri = effect.contextUri,
                     uris = effect.uris,
-                    index = effect.index,
                     startPositionMs = effect.startPositionMs,
                     shuffle = effect.shuffle,
                 )

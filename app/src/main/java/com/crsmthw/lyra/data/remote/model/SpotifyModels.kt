@@ -262,7 +262,9 @@ data class SpotifyPlaylistFull(
 
 // ── Play request body ────────────────────────────────────────────────────────
 data class PlayOffset(
-    @SerializedName("uri") val uri: String? = null,
+    @SerializedName("uri")      val uri     : String? = null,
+    /** Zero-based RAW position in the context (counts every item, playable or not). */
+    @SerializedName("position") val position: Int?    = null,
 )
 
 data class PlayRequest(
