@@ -219,7 +219,8 @@ internal const val EjectMargin = 0.04f
  * How far an ejected shell travels (any unit — the stage passes px): out through its TITLE edge
  * (natural −y), so its own SHORT side, plus the `band` of stage between that edge and the stage's
  * own edge (the letterbox — the stage clips to its bounds, so the shell must cross it too), plus
- * an [EjectMargin] of the short side. A negative band reads as 0.
+ * an [EjectMargin] of the short side. A negative band reads as 0. At rest only: while a rotation
+ * settle turns and shrinks the shell, the stage uses [ejectTravelTurned].
  */
 internal fun ejectTravel(short: Float, band: Float): Float = short * (1f + EjectMargin) + max(band, 0f)
 
@@ -475,9 +476,9 @@ internal class OrientationTurnState {
  * about its centre still fits a `windowW` × `windowH` window (any one unit; the stage passes dp).
  * The turned box's bounding box is `long·|cos| + short·|sin|` wide and `long·|sin| + short·|cos|`
  * tall. At a rest angle (0 in landscape, −90 in portrait) on a full-bleed window it is 1 up to float
- * rounding, and the stage does not call it at rest. Crosswise, at the midpoint of a 180° settle, it
- * is short / long ≈ 0.638, so the shell never leaves the clipped stage while it turns. A degenerate
- * (empty) box reads as 1.
+ * rounding; the stage reaches it through [settleScale], which does not call it at rest. Crosswise, at
+ * the midpoint of a 180° settle, it is short / long ≈ 0.638, so the shell never leaves the clipped
+ * stage while it turns. A degenerate (empty) box reads as 1.
  */
 internal fun spinFitScale(angleDeg: Float, long: Float, short: Float, windowW: Float, windowH: Float): Float {
     val rad = angleDeg * (PI.toFloat() / 180f)
@@ -487,4 +488,38 @@ internal fun spinFitScale(angleDeg: Float, long: Float, short: Float, windowW: F
     val boundsH = long * s + short * c
     if (boundsW <= 0f || boundsH <= 0f) return 1f
     return min(1f, min(windowW / boundsW, windowH / boundsH))
+}
+
+/**
+ * The uniform scale the stage's shell layer is drawn at while a rotation settle adds `extraDeg` to
+ * its rest turn ([stageRotationZ]). EXACTLY 1 at rest (`extraDeg == 0`, where a finished settle lands,
+ * since `animateTo(0f)` ends on its target), so the layer is what it was before settles existed;
+ * otherwise the [spinFitScale] of the turned shell. The fit and the stage are in any one unit. The
+ * result is a ratio, so the stage computes it once, in dp, and the eject's px travel
+ * ([ejectTravelTurned]) takes the same value: one copy, so the shell's layer and the eject cannot
+ * drift apart.
+ */
+internal fun settleScale(portrait: Boolean, extraDeg: Float, long: Float, short: Float, stageW: Float, stageH: Float): Float =
+    if (extraDeg == 0f) 1f else spinFitScale(stageRotationZ(portrait) + extraDeg, long, short, stageW, stageH)
+
+/**
+ * [ejectTravel] while a rotation settle turns the stage's shell layer to `zDeg` (its rest turn plus
+ * the settle's extra) and scales it by `k` ([settleScale]). The face layer translates in its own units,
+ * INSIDE the stage layer, so on screen an ejected shell moves `k × travel` along its natural −y turned
+ * by `zDeg`, u = (sin z, −cos z), and it is `k × short` thick along u. It has cleared the stage when its
+ * near edge, `k × (travel − short / 2)` out along u, is past the stage's half-extent along u,
+ * `(stageW·|sin z| + stageH·|cos z|) / 2`. So travel = short / 2 + that half-extent / k, plus the
+ * [EjectMargin] of the short side that [ejectTravel] adds at rest. Both faces use it, so the incoming
+ * shell also starts clear of the stage, and one parked outside during a rotation stays outside.
+ *
+ * At a rest angle with k = 1 it IS [ejectTravel] with its letterbox band (the band is the stage minus
+ * the short side, halved), up to float rounding; the stage keeps [ejectTravel] itself at rest,
+ * bit-identical. All in px: `short` = the face layer's size.height, `stageW` × `stageH` = the stage's
+ * constraints. A `k` that is not positive (an empty stage, where [spinFitScale] reads 0) is taken as
+ * 1, never a division by zero.
+ */
+internal fun ejectTravelTurned(short: Float, zDeg: Float, k: Float, stageW: Float, stageH: Float): Float {
+    val rad = zDeg * (PI.toFloat() / 180f)
+    val halfExtent = (stageW * abs(sin(rad)) + stageH * abs(kotlin.math.cos(rad))) / 2f
+    return short * (0.5f + EjectMargin) + halfExtent / (if (k > 0f) k else 1f)
 }

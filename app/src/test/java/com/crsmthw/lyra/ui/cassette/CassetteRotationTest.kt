@@ -346,3 +346,123 @@ class CassetteSpinFitScaleTest {
         assertEquals(0f, spinFitScale(45f, 100f, 60f, 0f, 0f))
     }
 }
+
+class CassetteSettleScaleTest {
+
+    private val landW = 1972f
+    private val landH = 1248f
+    private val land = cassetteFit(landW, landH)            // the cover screen, landscape (px)
+    private val port = cassetteFit(landH, landW)            // the cover screen, portrait (px)
+
+    @Test
+    fun `exactly 1 at rest, whatever the window`() {
+        assertEquals(1f, settleScale(portrait = false, extraDeg = 0f, land.long, land.short, landW, landH))
+        assertEquals(1f, settleScale(portrait = true, extraDeg = 0f, port.long, port.short, landH, landW))
+        // rest is never rescaled, not even in a window the shell would overflow
+        assertEquals(1f, settleScale(portrait = false, extraDeg = 0f, long = 1000f, short = 638f, stageW = 10f, stageH = 10f))
+        assertEquals(1f, settleScale(portrait = false, extraDeg = -0f, land.long, land.short, landW, landH))
+    }
+
+    @Test
+    fun `during a settle it is the fit of the shell at its rest turn plus the extra`() {
+        for (extra in listOf(-180f, -135f, -90f, -45f, -1f, 1f, 45f, 90f, 135f, 180f)) {
+            assertEquals(spinFitScale(extra, land.long, land.short, landW, landH), settleScale(false, extra, land.long, land.short, landW, landH))
+            assertEquals(spinFitScale(-90f + extra, port.long, port.short, landH, landW), settleScale(true, extra, port.long, port.short, landH, landW))
+        }
+        assertEquals(1f / CASSETTE_ASPECT, settleScale(false, -90f, land.long, land.short, landW, landH), 1e-3f)
+    }
+
+    @Test
+    fun `a ratio - the stage's dp and the eject's px agree`() {
+        val density = 2.625f
+        val dpFit = cassetteFit(landW / density, landH / density)
+        for (extra in listOf(-150f, -90f, -30f, 30f, 90f, 150f)) {
+            val px = settleScale(false, extra, land.long, land.short, landW, landH)
+            val dp = settleScale(false, extra, dpFit.long, dpFit.short, landW / density, landH / density)
+            assertEquals(px, dp, 1e-5f, "$extra°")
+        }
+    }
+}
+
+class CassetteEjectTravelTurnedTest {
+
+    /** The stages the cassette is shown on, px: the cover screen both ways, and the emulator's
+     *  unfolded ratio (letterboxed) both ways. */
+    private val stages = listOf(1972f to 1248f, 1248f to 1972f, 2448f to 1848f, 1848f to 2448f)
+
+    /**
+     * How far the PARKED shell (shift 1, `travel` out) is past the stage along the eject axis, px on
+     * screen; negative = still over the stage. Independent of the travel formula: the shell's four
+     * corners are placed the way the layers place them — the face translates by −travel along its
+     * natural y, then the stage layer scales by `k` and turns by `zDeg` about the shared centre (y
+     * down, clockwise-positive like rotationZ) — and separated from the stage's four corners along
+     * u = the turned natural −y = (sin z, −cos z).
+     */
+    private fun clearance(long: Float, short: Float, travel: Float, zDeg: Float, k: Float, w: Float, h: Float): Double {
+        val rad = Math.toRadians(zDeg.toDouble())
+        val c = cos(rad)
+        val s = sin(rad)
+        val ux = s
+        val uy = -c
+        var shellNear = Double.MAX_VALUE
+        var stageFar = -Double.MAX_VALUE
+        for (fx in listOf(-0.5, 0.5)) for (fy in listOf(-0.5, 0.5)) {
+            val lx = fx * long * k
+            val ly = (fy * short - travel) * k
+            shellNear = minOf(shellNear, (lx * c - ly * s) * ux + (lx * s + ly * c) * uy)
+            stageFar = maxOf(stageFar, fx * w * ux + fy * h * uy)
+        }
+        return shellNear - stageFar
+    }
+
+    @Test
+    fun `at a rest angle it is the plain travel, letterbox band included`() {
+        for ((w, h) in stages) {
+            val fit = cassetteFit(w, h)
+            val plain = ejectTravel(fit.short, ejectBand(w, h, fit.short, fit.portrait))
+            val rest = stageRotationZ(fit.portrait)
+            assertEquals(plain, ejectTravelTurned(fit.short, rest, k = 1f, stageW = w, stageH = h), 1e-3f, "${w}×$h")
+            // a half turn from rest is aligned with the stage again
+            assertEquals(plain, ejectTravelTurned(fit.short, rest + 180f, k = 1f, stageW = w, stageH = h), 1e-3f, "${w}×$h, +180")
+        }
+    }
+
+    @Test
+    fun `at every angle of a settle the parked shell is clear of the stage by exactly the margin`() {
+        for ((w, h) in stages) {
+            val fit = cassetteFit(w, h)
+            for (i in 0..72) {
+                val z = i * 5f
+                val k = spinFitScale(z, fit.long, fit.short, w, h)
+                val travel = ejectTravelTurned(fit.short, z, k, w, h)
+                val gap = clearance(fit.long, fit.short, travel, z, k, w, h)
+                assertTrue(gap >= -1e-3, "${w}×$h at $z°: ${gap}px")
+                assertEquals(k * fit.short * EjectMargin.toDouble(), gap, 1e-2, "${w}×$h at $z°")
+            }
+        }
+    }
+
+    @Test
+    fun `the rest travel would have left the parked shell over the turned stage - the review's case`() {
+        // the cover screen in landscape, crosswise mid-settle: the shell at k ≈ 0.638
+        val (w, h) = 1972f to 1248f
+        val fit = cassetteFit(w, h)
+        val z = 90f
+        val k = spinFitScale(z, fit.long, fit.short, w, h)
+        val plain = ejectTravel(fit.short, ejectBand(w, h, fit.short, fit.portrait))
+        val before = clearance(fit.long, fit.short, plain, z, k, w, h)
+        assertTrue(before < -500.0, "the plain travel parked the shell ${-before}px inside the stage")
+        val after = clearance(fit.long, fit.short, ejectTravelTurned(fit.short, z, k, w, h), z, k, w, h)
+        assertTrue(after > 0.0, "$after")
+    }
+
+    @Test
+    fun `an empty stage never divides by zero`() {
+        // spinFitScale reads 0 for an empty window; that k is taken as 1
+        val k = spinFitScale(45f, 100f, 60f, 0f, 0f)
+        assertEquals(0f, k)
+        assertEquals(60f * (0.5f + EjectMargin), ejectTravelTurned(short = 60f, zDeg = 45f, k = k, stageW = 0f, stageH = 0f), 1e-4f)
+        val negative = ejectTravelTurned(short = 60f, zDeg = 45f, k = -1f, stageW = 10f, stageH = 10f)
+        assertTrue(negative.isFinite(), "$negative")
+    }
+}

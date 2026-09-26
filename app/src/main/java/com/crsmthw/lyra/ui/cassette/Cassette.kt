@@ -94,6 +94,7 @@ import kotlin.math.min
  *                    edge opposite the head: LEFT in portrait, UP in landscape), and the fresh
  *                    shell back in through the same edge, in both directions. travel = the short
  *                    side × 1.04 + the letterbox band on that side, so the shell clears the stage
+ *                    (at rest; while a rotation settle turns the stage, see the rotation row)
  *   rotation         (2026-09-26) while the overlay is up the window asks for a JUMP CUT instead of
  *                    the system's rotate animation (CassetteRotationAnimation, CassetteOverlay.kt):
  *                    the old frame gives way to the new one with no system turn. The shell's angle
@@ -107,7 +108,12 @@ import kotlin.math.min
  *                    turns clockwise when the content turned clockwise (+90 or a half turn) and
  *                    anticlockwise for −90. A rotation mid-settle carries the rest of the settle;
  *                    a size-only change (unfolding) and a rotation that changes the smallest width
- *                    (a fold that also rotated) never settle. The reels keep turning through it
+ *                    (a fold that also rotated) never settle. The reels keep turning through it,
+ *                    and an eject keeps clearing the stage: its translation sits INSIDE the turned,
+ *                    shrunk layer, so during a settle its travel is ejectTravelTurned = short ×
+ *                    0.54 + the stage's half-extent along the eject axis / settleScale (equal to
+ *                    the rest travel at a rest angle). The whole 980 ms eject can overlap a settle,
+ *                    the parked outgoing shell included
  *   head edge        trapezoid 168..832 from y 486; capstans (367|633, 573); pinch rollers
  *                    (272|728, 590) r 27; guide rollers (122|878, 557) r 46; head recess 418..582
  *
@@ -360,7 +366,8 @@ internal fun CassetteImpl(
  * it into the new rest angle ([CassetteTiming.OrientationTurnMs]); one that leaves the image where
  * it was (clockwise out of portrait, and back) plays nothing. The hosting window must ask for a
  * jump cut rather than the system's rotate animation ([CassetteRotationAnimation]) — see the
- * header's rotation row.
+ * header's rotation row. An eject under way when the phone turns keeps both shells clear of the
+ * stage while it settles ([ejectTravelTurned]).
  */
 @Composable
 fun CassetteStage(
@@ -476,11 +483,9 @@ internal fun CassetteStageImpl(
         val fit = cassetteFit(maxWidth.value, maxHeight.value)
         // The eject must clear the STAGE (it clips), letterbox included — in px, the unit of the
         // face layer's own size.height (= the shell's short side) that the travel is built from.
-        val ejectBandPx = run {
-            val w = constraints.maxWidth.toFloat()
-            val h = constraints.maxHeight.toFloat()
-            ejectBand(w, h, cassetteFit(w, h).short, fit.portrait)
-        }
+        val stageWPx = constraints.maxWidth.toFloat()
+        val stageHPx = constraints.maxHeight.toFloat()
+        val ejectBandPx = ejectBand(stageWPx, stageHPx, cassetteFit(stageWPx, stageHPx).short, fit.portrait)
 
         // ── Rotation settle (the header's rotation row). Reading LocalConfiguration SUBSCRIBES the
         // stage to every rotation: each one dispatches a new Configuration (a 180° turn-over changes
@@ -526,15 +531,15 @@ internal fun CassetteStageImpl(
         // centre, overflowing its slot on purpose (requiredSize, centred; only the stage's own
         // bounds clip it). A settle adds its turn and shrinks the shell so its bounding box stays
         // inside the stage; at rest (extra == 0, which a finished settle lands on exactly) the
-        // layer is what it always was.
+        // layer is what it always was. settleScale is the ONE copy of that scale: the eject below
+        // reads it too.
         Box(
             Modifier
                 .requiredSize(fit.long.dp, fit.short.dp)
                 .graphicsLayer {
                     val extra = turn.value
-                    val z = stageRotationZ(fit.portrait) + extra
-                    rotationZ = z
-                    val k = if (extra == 0f) 1f else spinFitScale(z, fit.long, fit.short, stageW, stageH)
+                    rotationZ = stageRotationZ(fit.portrait) + extra
+                    val k = settleScale(fit.portrait, extra, fit.long, fit.short, stageW, stageH)
                     scaleX = k
                     scaleY = k
                 },
@@ -573,9 +578,27 @@ internal fun CassetteStageImpl(
                                     }
                                     CassetteMove.EJECT -> {
                                         // out through the TITLE edge (natural −y: LEFT in
-                                        // portrait, UP in landscape), back in through the same
+                                        // portrait, UP in landscape), back in through the same.
+                                        // This translation lives INSIDE the stage layer, which a
+                                        // rotation settle turns and shrinks: then the travel is
+                                        // rebuilt for the turned stage with the layer's own
+                                        // scale, so a shell parked outside stays outside and the
+                                        // incoming one starts clear. At rest the plain travel,
+                                        // bit-identical. turn.value is read here, in the layer
+                                        // only: no recomposition.
                                         val e = ejectFrameAt(t)
-                                        val travel = ejectTravel(size.height, ejectBandPx)
+                                        val extra = turn.value
+                                        val travel = if (extra == 0f) {
+                                            ejectTravel(size.height, ejectBandPx)
+                                        } else {
+                                            ejectTravelTurned(
+                                                short  = size.height,
+                                                zDeg   = stageRotationZ(fit.portrait) + extra,
+                                                k      = settleScale(fit.portrait, extra, fit.long, fit.short, stageW, stageH),
+                                                stageW = stageWPx,
+                                                stageH = stageHPx,
+                                            )
+                                        }
                                         translationY = -(if (incoming) e.incomingShift else e.outgoingShift) * travel
                                         if (incoming) { scaleX = e.incomingScale; scaleY = e.incomingScale }
                                     }
