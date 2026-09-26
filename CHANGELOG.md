@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Tapping a Liked Songs song with shuffle on plays that song.** Spotify started such a list at a random song; Lyra now switches shuffle off for the tap and back on a moment later, so the song you tapped plays first and the rest stay shuffled — the same thing a playlist tap does. The same applies to top tracks, search results and episode lists.
 
 ### Changed
+- **Turning iLyra on or off is animated.** The click-wheel body used to appear and vanish in a single cut. It now slides up over the app, which dims and settles back behind it, and slides back down the same way when you leave — 300 ms, the same motion every other screen change in Lyra uses. Taps are ignored for that moment so nothing underneath can be hit through the moving body.
 - **About credits** — the four rows share one shape (a title over a role or licence line); the bundled fonts, Liberation Sans and the new Playfair Display, each get their own row.
 
 ## [4.0.0] - 2026-09-22 — Quattro
