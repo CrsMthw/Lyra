@@ -2,6 +2,7 @@ package com.crsmthw.lyra.ui.cassette
 
 import android.view.accessibility.AccessibilityManager
 import android.view.Window
+import android.content.pm.ActivityInfo
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
@@ -67,7 +68,7 @@ import kotlin.math.roundToInt
  *
  * Every window-level change is keyed on `visible` and undone in `onDispose`, so an exit — or the
  * player leaving composition with the cassette up — always hands back the bars, the cutout mode,
- * the rotation animation, the brightness and the screen timeout.
+ * the rotation animation, the orientation lock, the brightness and the screen timeout.
  */
 
 /** No label yet (the feed has not emitted) — the stage still draws a blank label. */
@@ -75,7 +76,10 @@ private val EmptyLabel = CassetteLabel(title = "", artist = "")
 
 /**
  * The window's rotation animation while the cassette is up: a JUMP CUT, the old frame giving way to
- * the new one with no system turn (2026-09-26).
+ * the new one with no system turn (2026-09-26). Since 2026-09-27 the window is also LOCKED in place
+ * while the cassette is up ([CassetteOverlay]'s window effect), so on a phone no rotation happens at
+ * all; this attribute and the stage's own settle are what a LARGE screen gets, where Android ignores
+ * an app's orientation request.
  *
  * The default, ROTATE, turns a screenshot of the old frame by the quarter turn while the new frame
  * turns in. Turning the phone CLOCKWISE out of portrait leaves the shell exactly where it was on the
@@ -133,24 +137,36 @@ fun CassetteOverlay(
     onExit    : () -> Unit,
     modifier  : Modifier = Modifier,
 ) {
-    val window  = LocalActivity.current?.window
+    val activity = LocalActivity.current
+    val window   = activity?.window
     val view    = LocalView.current
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
 
-    // ── Immersive window: hidden bars (swipe reveals them transiently) + the cutout ──────────
-    // iLyra's recipe (ILyraRoot), minus the orientation request: the cassette follows rotation,
-    // with a jump cut instead of the system's rotate animation (CassetteRotationAnimation) so the
-    // stage can play the rotation itself. The cutout mode and the rotation animation are restored
-    // to what they WERE, not blindly to the defaults; one attributes write each way.
+    // ── Immersive window: hidden bars (swipe reveals them transiently) + the cutout + the lock ──
+    // iLyra's recipe (ILyraRoot), with the orientation LOCKED IN PLACE rather than to portrait
+    // (Cris, 2026-09-27): whatever rotation the window is in when the cassette comes up is the one
+    // it keeps until the cassette exits — an old Walkman's tape does not turn in its player, it is
+    // upright or upside down by how you hold it — so on a phone no rotation, no cut and no hub
+    // hitch ever happens while the cassette is up, however the phone is waved to the beat. Lock to
+    // the CURRENT rotation, never to portrait: a portrait lock would rotate a landscape player at the
+    // very moment the cassette slides in. A LARGE screen (sw ≥ 600 dp — the unfolded Fold, a tablet)
+    // ignores an app's orientation request under targetSdk 36+, so there the cassette still follows
+    // rotation, with the jump cut (CassetteRotationAnimation) and the stage's own settle. The
+    // cutout mode, the rotation animation and the orientation are restored to what they WERE, not
+    // blindly to the defaults; one attributes write each way. The lock outlives a fold/unfold (same
+    // Activity, no recreation); LOCKED resolves to "the last rotation" whenever WindowManager next
+    // decides, so folding back keeps the cover screen where it was.
     DisposableEffect(visible, window) {
-        if (!visible || window == null) return@DisposableEffect onDispose { }
+        if (!visible || window == null || activity == null) return@DisposableEffect onDispose { }
         val previousCutoutMode = window.attributes.layoutInDisplayCutoutMode
         val previousRotationAnimation = window.attributes.rotationAnimation
+        val previousOrientation = activity.requestedOrientation
         window.attributes = window.attributes.also {
             it.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
             it.rotationAnimation = CassetteRotationAnimation
         }
+        activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LOCKED
         val controller = WindowInsetsControllerCompat(window, window.decorView)
         controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         controller.hide(WindowInsetsCompat.Type.systemBars())
@@ -159,6 +175,7 @@ fun CassetteOverlay(
                 it.layoutInDisplayCutoutMode = previousCutoutMode
                 it.rotationAnimation = previousRotationAnimation
             }
+            activity.requestedOrientation = previousOrientation
             WindowInsetsControllerCompat(window, window.decorView).show(WindowInsetsCompat.Type.systemBars())
         }
     }

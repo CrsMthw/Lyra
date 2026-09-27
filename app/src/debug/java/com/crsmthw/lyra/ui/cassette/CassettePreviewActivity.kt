@@ -1,6 +1,7 @@
 package com.crsmthw.lyra.ui.cassette
 
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -59,6 +60,9 @@ import kotlinx.coroutines.launch
  *   own (sideB and ejectAt keep theirs).
  * - `--ef timeScale S` — the reels' clock, winds AND hubs, × S ([ReelDebug.timeScale]).
  * - `--ef windAt F` — hold every wind at fraction F of its timeline ([ReelDebug.freezeFraction]).
+ * - `--ez followRotation true` — do NOT lock the window in place (production does, since 2026-09-27),
+ *   so a rotation reaches the stage: the large-screen path (jump cut + settle) on the API 35 emulator,
+ *   which honours a lock at any screen size.
  *
  * Rotation (2026-09-26): `settings put system accelerometer_rotation 0`, then `settings put system
  * user_rotation N` (0 = portrait, 1 = ROTATION_90, 3 = ROTATION_270) while the preview is up. The
@@ -74,7 +78,7 @@ class CassettePreviewActivity : ComponentActivity() {
         val args = PreviewArgs.from(intent)
         setContent {
             LyraTheme {
-                ImmersiveWindow(this)
+                ImmersiveWindow(this, followRotation = args.followRotation)
                 CassettePreview(args)
             }
         }
@@ -114,6 +118,8 @@ private data class PreviewArgs(
     val sideB         : Boolean,
     val flipAt        : Float?,
     val ejectAt       : Float?,
+    /** DEBUG: leave the window free to rotate (production locks it in place while the cassette is up). */
+    val followRotation: Boolean,
     val durationMs    : Long,
     val tick          : Boolean,
     val seekTo        : Float?,
@@ -160,6 +166,7 @@ private data class PreviewArgs(
                 sideB          = i.getBooleanExtra("sideB", false),
                 flipAt         = i.floatOrNull("flipAt"),
                 ejectAt        = i.floatOrNull("ejectAt"),
+                followRotation = i.getBooleanExtra("followRotation", false),
                 durationMs     = i.getLongExtra("durationMs", if (demo) PreviewDemoDurationMs else PreviewDefaultDurationMs),
                 tick           = i.getBooleanExtra("tick", false),
                 seekTo         = i.floatOrNull("seekTo"),
@@ -186,16 +193,21 @@ private data class PreviewArgs(
  * settle can run. Everything is restored to what it was.
  */
 @Composable
-private fun ImmersiveWindow(activity: ComponentActivity) {
-    DisposableEffect(Unit) {
+private fun ImmersiveWindow(activity: ComponentActivity, followRotation: Boolean) {
+    DisposableEffect(followRotation) {
         val window = activity.window
         val view = window.decorView
         val previousCutoutMode = window.attributes.layoutInDisplayCutoutMode
         val previousRotationAnimation = window.attributes.rotationAnimation
+        val previousOrientation = activity.requestedOrientation
         window.attributes = window.attributes.also {
             it.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
             it.rotationAnimation = CassetteRotationAnimation
         }
+        // Production locks the window in place (CassetteOverlay); `followRotation` leaves it free so
+        // the emulator — API 35, where a lock is honoured at any size — can still exercise the
+        // large-screen path (the jump cut + the stage's settle).
+        if (!followRotation) activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LOCKED
         val controller = WindowInsetsControllerCompat(window, view)
         controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         controller.hide(WindowInsetsCompat.Type.systemBars())
@@ -204,6 +216,7 @@ private fun ImmersiveWindow(activity: ComponentActivity) {
                 it.layoutInDisplayCutoutMode = previousCutoutMode
                 it.rotationAnimation = previousRotationAnimation
             }
+            activity.requestedOrientation = previousOrientation
             WindowInsetsControllerCompat(window, view).show(WindowInsetsCompat.Type.systemBars())
         }
     }
