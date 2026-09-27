@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Cassette idle screen — Settings strings. Owned by the SETTINGS lane; nothing else edits this file. -->
+<resources>
+    <string name="settings_cassette">Cassette</string>
+    <string name="settings_cassette_desc">Idle cassette animation on the player screen when no visualizer/lyrics are active</string>
+    <string name="settings_cassette_options">Cassette options</string>
+    <string name="settings_cassette_options_desc">Colours, idle delay, screen and the exit hint</string>
+
+    <!-- The sheet's live preview. The title slot uses app_name. -->
+    <string name="settings_cassette_preview_artist">Cassette preview</string>
+    <string name="settings_cassette_preview_cd">Preview of the cassette in the chosen colour</string>
+
+    <!-- Colour -->
+    <string name="settings_cassette_color_section">Colour</string>
+    <string name="settings_cassette_color_album">Album art</string>
+    <string name="settings_cassette_color_material_you">Material You</string>
+    <string name="settings_cassette_color_custom">Custom</string>
+    <string name="settings_cassette_color_album_tip">Follows the playing album\'s colours</string>
+    <string name="settings_cassette_color_material_you_tip">The system\'s Material You colour, even with Lyra\'s own Material You off</string>
+    <string name="settings_cassette_hue">Hue</string>
+    <string name="settings_cassette_saturation">Saturation</string>
+
+    <!-- Preset swatch names (TalkBack) -->
+    <string name="settings_cassette_swatch_purple">Purple</string>
+    <string name="settings_cassette_swatch_green">Green</string>
+    <string name="settings_cassette_swatch_red">Red</string>
+    <string name="settings_cassette_swatch_orange">Orange</string>
+    <string name="settings_cassette_swatch_yellow">Yellow</string>
+    <string name="settings_cassette_swatch_teal">Teal</string>
+    <string name="settings_cassette_swatch_blue">Blue</string>
+    <string name="settings_cassette_swatch_pink">Pink</string>
+    <string name="settings_cassette_swatch_brown">Brown</string>
+    <string name="settings_cassette_swatch_blue_grey">Blue grey</string>
+
+    <!-- Idle delay -->
+    <string name="settings_cassette_idle_section">Idle delay</string>
+    <string name="settings_cassette_idle_label">Seconds before the cassette appears</string>
+    <!-- The field's suffix: the unit, "s" for seconds -->
+    <string name="settings_cassette_idle_suffix">s</string>
+    <!-- %1$d = CASSETTE_IDLE_MIN_SECONDS, %2$d = CASSETTE_IDLE_MAX_SECONDS (the quantity) -->
+    <plurals name="settings_cassette_idle_error">
+        <item quantity="one">Between %1$d and %2$d second</item>
+        <item quantity="other">Between %1$d and %2$d seconds</item>
+    </plurals>
+    <!-- %1$d = CASSETTE_IDLE_DEFAULT_SECONDS -->
+    <plurals name="settings_cassette_idle_tip">
+        <item quantity="one">Keep it lower than your phone\'s own screen timeout (Settings → Display), or the screen may turn off before the cassette appears. %1$d second is the default.</item>
+        <item quantity="other">Keep it lower than your phone\'s own screen timeout (Settings → Display), or the screen may turn off before the cassette appears. %1$d seconds is the default.</item>
+    </plurals>
+
+    <!-- Screen -->
+    <string name="settings_cassette_screen_section">Screen</string>
+    <string name="settings_cassette_keep_screen_on">Keep screen on</string>
+    <string name="settings_cassette_keep_screen_on_desc">While the cassette is showing and music is playing</string>
+    <!-- %1$d = CassetteTiming.DimDelayMs in seconds -->
+    <plurals name="settings_cassette_dim">
+        <item quantity="one">Dim after %1$d second</item>
+        <item quantity="other">Dim after %1$d seconds</item>
+    </plurals>
+    <!-- %1$d = CassetteTiming.DimBrightness as a percentage -->
+    <string name="settings_cassette_dim_desc">Drops to %1$d%% brightness until you touch the screen, against OLED burn-in</string>
+
+    <!-- Hint -->
+    <string name="settings_cassette_hint_section">Hint</string>
+    <string name="settings_cassette_show_exit_hint">Show exit hint</string>
+    <string name="settings_cassette_show_exit_hint_desc">A single tap shows “Double-tap to exit”</string>
+
+    <!-- Footer. %1$d = the idle delay setting (CassetteSettings.idleSeconds) -->
+    <plurals name="settings_cassette_footer_tip">
+        <item quantity="one">Appears after %1$d second without a touch on the player while music plays and the visualizer and lyrics are off. Double-tap to leave it; in gesture navigation the first back only reveals the bars.</item>
+        <item quantity="other">Appears after %1$d seconds without a touch on the player while music plays and the visualizer and lyrics are off. Double-tap to leave it; in gesture navigation the first back only reveals the bars.</item>
+    </plurals>
+</resources>

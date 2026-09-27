@@ -320,9 +320,16 @@ fun LyraNavGraph(
     // and pops at commit (navigation-compose `NavHostEventHandler`). Null (a back that LEAVES the
     // app, e.g. from the Library root) falls back to "unchanged", so nothing is ever seeked for a
     // gesture that isn't an in-app pop.
+    // …and "unchanged" too while the full player's cassette overlay is up: ITS back handler owns the
+    // gesture (the first back reveals the system bars, the second exits the cassette), so no pop
+    // follows. `NavigationEventProcessor` publishes `InProgress` for every predictive gesture
+    // whichever handler won it, so without this the host would seek the bar in over the cassette
+    // and then unwind — and re-key the "album-art" element — on every cassette back.
     val backEntryRoute = navController.previousBackStackEntry?.destination?.route
+    val cassetteOwnsBack by playerVm.cassetteOwnsBack.collectAsStateWithLifecycle()
     val showsPlayerSurfaceAfterBack =
-        if (backEntryRoute == null) showsPlayerSurface else routeShowsPlayerSurface(backEntryRoute)
+        if (cassetteOwnsBack || backEntryRoute == null) showsPlayerSurface
+        else routeShowsPlayerSurface(backEntryRoute)
     // Per-route mini-player shape, animated in place by the host instead of swapped by remounting.
     // WIDTH only: the bar's IME lift used to be a second route-derived flag here and is now
     // unconditional inside the host — a Boolean that flips on the first frame of a push can never

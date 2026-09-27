@@ -5,6 +5,7 @@ import com.crsmthw.lyra.data.local.CachedTrackList
 import com.crsmthw.lyra.data.local.LibraryCache
 import com.crsmthw.lyra.data.local.LibraryCacheData
 import com.crsmthw.lyra.data.player.PlayerStateManager
+import com.crsmthw.lyra.data.player.RateLimitFamily
 import com.crsmthw.lyra.data.remote.model.AlbumTrack
 import com.crsmthw.lyra.data.remote.model.ShowPage
 import com.crsmthw.lyra.data.remote.model.SpotifyAlbum
@@ -37,12 +38,12 @@ class ILyraLibrary(
 
     /** Rate-limit gate: fails with a descriptive message when the global gate is tripped. */
     private fun checkRateLimit(): Result<Unit> =
-        if (playerStateManager.isRateLimited()) Result.failure(RateLimitedException())
+        if (playerStateManager.isRateLimited(RateLimitFamily.LIBRARY)) Result.failure(RateLimitedException())
         else Result.success(Unit)
 
     /** Marks the global rate-limit gate when a 429 is detected in a failure message. */
     private fun noteIfRateLimited(error: Throwable?) {
-        if (error?.message?.contains("429") == true) playerStateManager.noteRateLimited()
+        if (error?.message?.contains("429") == true) playerStateManager.noteRateLimited(error, "ILyraLibrary", RateLimitFamily.LIBRARY)
     }
 
     private suspend fun loadCache(): LibraryCacheData? = withContext(Dispatchers.IO) {
@@ -63,7 +64,7 @@ class ILyraLibrary(
             libraryCache.load()?.user?.id?.takeIf { it.isNotBlank() }
         }
         if (cached != null) return cached
-        if (playerStateManager.isRateLimited()) return null
+        if (playerStateManager.isRateLimited(RateLimitFamily.LIBRARY)) return null
         return repository.getCurrentUser()
             .onFailure { noteIfRateLimited(it) }
             .getOrNull()?.id?.takeIf { it.isNotBlank() }

@@ -90,9 +90,18 @@ import kotlinx.coroutines.launch
  *    and [ILyraEffect]s out to the Activity-scoped [PlayerViewModel];
  *  - the exit confirmation (BackHandler -> dialog -> setIlyraEnabled(false)), the session-expired
  *    collector, and [ClickSounds]' lifetime.
+ *
+ * [interactive] is false only while MainActivity's swap is animating this body OUT (the flag has
+ * already flipped back and LyraNavGraph is composing underneath): the back handler and the wheel
+ * are parked so a press in those 300 ms cannot raise the exit dialog on, or fire a play effect
+ * from, a composition that is about to be disposed. A parked wheel still consumes touches.
  */
 @Composable
-fun ILyraRoot(container: AppContainer, modifier: Modifier = Modifier) {
+fun ILyraRoot(
+    container: AppContainer,
+    modifier: Modifier = Modifier,
+    interactive: Boolean = true,
+) {
     val activity = LocalActivity.current
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
@@ -129,6 +138,21 @@ fun ILyraRoot(container: AppContainer, modifier: Modifier = Modifier) {
         }
     }
 
+    // The bars come back as the exit STARTS, not when this body is disposed at its end. Lyra is
+    // composed underneath from the first frame of the slide-down, and its insets must be settled
+    // before the body uncovers it. The case that showed it (device, 2026-09-26): a back gesture
+    // reveals the bars TRANSIENTLY, and a transient bar reports NO inset (InsetsPolicy hides the
+    // source so the app does not relayout) — so if the exit was confirmed while they were still
+    // up, Lyra laid out flush to the top edge and jumped down the moment the dispose-time show()
+    // made them permanent. Showing here is idempotent with the dispose-time show, which stays as
+    // the backstop for a dispose that is not an animated exit.
+    LaunchedEffect(interactive) {
+        if (interactive) return@LaunchedEffect
+        val window = activity?.window ?: return@LaunchedEffect
+        WindowInsetsControllerCompat(window, window.decorView)
+            .show(WindowInsetsCompat.Type.systemBars())
+    }
+
     // ── ViewModels ───────────────────────────────────────────────────────────
     // PlayerViewModel resolves against the ACTIVITY (the same instance LyraNavGraph uses), so
     // playback state, the poll/tick jobs and the App Remote pre-connect carry across the swap.
@@ -154,7 +178,6 @@ fun ILyraRoot(container: AppContainer, modifier: Modifier = Modifier) {
                     uri = effect.uri,
                     contextUri = effect.contextUri,
                     uris = effect.uris,
-                    index = effect.index,
                     startPositionMs = effect.startPositionMs,
                     shuffle = effect.shuffle,
                 )
@@ -212,7 +235,7 @@ fun ILyraRoot(container: AppContainer, modifier: Modifier = Modifier) {
 
     // ── Exit dialog ─────────────────────────────────────────────────────────
     var showExitDialog by remember { mutableStateOf(false) }
-    BackHandler(enabled = !showExitDialog) { showExitDialog = true }
+    BackHandler(enabled = interactive && !showExitDialog) { showExitDialog = true }
 
     // ── Layout ──────────────────────────────────────────────────────────────
     // The body ALWAYS fills the whole window (no letterboxing). In landscape
@@ -301,7 +324,7 @@ fun ILyraRoot(container: AppContainer, modifier: Modifier = Modifier) {
                                 onEvent = vm::onWheelEvent,
                                 sounds = sounds,
                                 modifier = Modifier.size(wheelSize),
-                                enabled = !showExitDialog,
+                                enabled = interactive && !showExitDialog,
                             )
                         }
 

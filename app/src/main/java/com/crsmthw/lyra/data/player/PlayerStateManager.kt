@@ -2,7 +2,10 @@ package com.crsmthw.lyra.data.player
 
 import android.content.Context
 import android.content.Intent
+import android.util.Log
+import com.crsmthw.lyra.data.local.PlaybackOriginStore
 import com.crsmthw.lyra.data.remote.SpotifyRemoteManager
+import com.crsmthw.lyra.data.remote.model.PlayerStateResponse
 import com.crsmthw.lyra.data.remote.model.SpotifyDevice
 import com.crsmthw.lyra.data.remote.model.SpotifyTrack
 import com.crsmthw.lyra.data.repository.SpotifyRepository
@@ -17,6 +20,29 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicLong
+
+/**
+ * After Lyra itself records a play's origin, a context change the poll reports within this window
+ * is NOT recorded: a poll already in flight when the play went out still describes the PREVIOUS
+ * playback and would overwrite the origin Lyra just wrote (a Liked play replaced by the playlist
+ * that was playing a second earlier).
+ */
+private const val ORIGIN_POLL_QUIET_MS = 6_000L
+
+/** The longest a single 429 may gate the PLAYER family for, whatever `Retry-After` says (30 min). */
+private const val MAX_PLAYER_BACKOFF_MS = 30L * 60L * 1_000L
+/** The LIBRARY family honours the header up to 6 h: retrying into a ban only extends it. */
+private const val MAX_LIBRARY_BACKOFF_MS = 6L * 60L * 60L * 1_000L
+
+/**
+ * Spotify rate-limits PER ENDPOINT FAMILY, not per app (device pass 2026-09-25 evening: `me/tracks`
+ * banned with `Retry-After=13657` s while every `me/player` call kept working). One shared gate
+ * therefore froze the player for a library ban. [PLAYER] = `me/player/…`; [LIBRARY] = `me/tracks`,
+ * `me/albums`, `me/playlists`, `me/shows`, `me` — the indexer's and iLyra's browse calls.
+ */
+enum class RateLimitFamily { PLAYER, LIBRARY }
 
 data class PlayerState(
     val isPlaying             : Boolean        = false,
@@ -36,6 +62,13 @@ data class PlayerState(
      * a poll window while [currentTrack] is still held at the previous track.
      */
     val hasContext            : Boolean        = false,
+    /**
+     * The playback context's uri (`response.context?.uri`) — what the play button's wake restore
+     * rebuilds the queue from (`planWakeRestore`). Locked with the track exactly like
+     * [hasContext], and — like every field but `isPlaying` — left alone by a 204, so it survives
+     * Spotify dying, which is the whole point of reading it. Null for a bare `uris` play.
+     */
+    val contextUri            : String?        = null,
     val sleepTimerMinutes     : Int            = 0,
     val sleepTimerTotalMinutes: Int            = 0,
     val currentDevice         : SpotifyDevice? = null,
@@ -45,6 +78,7 @@ class PlayerStateManager(
     private val context      : Context,
     private val repository   : SpotifyRepository,
     private val remoteManager: SpotifyRemoteManager,
+    private val originStore  : PlaybackOriginStore,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -58,7 +92,11 @@ class PlayerStateManager(
     private var isPlayingLockUntil: Long = 0L
     private var shuffleLockUntil  : Long = 0L
     private var repeatLockUntil   : Long = 0L
-    private var pollBackoffUntil  : Long = 0L
+    private var pollBackoffUntil  : Long = 0L   // the PLAYER family's window
+    private var libraryBackoffUntil: Long = 0L  // the LIBRARY family's window
+    private val _libraryRateLimitUntil = MutableStateFlow(0L)
+    /** Epoch ms until which the LIBRARY family is gated (0 = open) — the Library bar's warning icon reads it. */
+    val libraryRateLimitUntil: StateFlow<Long> = _libraryRateLimitUntil
     private var trackLockUntil    : Long = 0L
 
     @Volatile private var serviceRunning = false
@@ -71,6 +109,81 @@ class PlayerStateManager(
     // Called after each SDK-wake operation completes (playPause/skip 404 paths).
     // PlayerViewModel sets this to clear its isWakingUp flag precisely when the operation is done.
     var onWakeOperationComplete: (() -> Unit)? = null
+
+    /**
+     * The play button's wake restore (set by `PlayerViewModel.init`): runs the same
+     * `restoreAfterWake` as a track tap, with the body `planWakeRestore` picks and the progress at
+     * the tap as the base position. Returns false when it could not run at all (the ViewModel is
+     * gone), in which case [playPause] falls back to the bare single-uri `connectAndPlay`.
+     * It owns clearing the waking state; [onWakeOperationComplete] is not fired when it ran.
+     * `step` is 0 for the play button, +1 / -1 for next / previous while Spotify is dead: the
+     * restore lands on the neighbour (a uris queue Lyra knows the order of) or on the current item
+     * and then skips (a context, whose order Spotify owns) — before 2026-09-25 pm a skip on a dead
+     * Spotify went to the App Remote's skip on an EMPTY player and cleared the spinner on a timer.
+     */
+    var onWakeRestore: (suspend (track: SpotifyTrack, pausedProgressMs: Long, step: Int) -> Boolean)? = null
+
+    // ── Playback origin + play-request generation ─────────────────────────────
+
+    /**
+     * Bumped by every user play/pause/skip request. A wake restore captures it when it starts and
+     * abandons silently — no body, no waking-state change — once it moves: the device wait can
+     * take a minute, and a body landing after the user picked something else (or paused) would
+     * override them. Every Lyra-issued play also records its origin, so [recordPlayOrigin] bumps it.
+     */
+    private val playRequestGeneration = AtomicLong(0L)
+    val playGeneration: Long get() = playRequestGeneration.get()
+    fun notePlayRequest(): Long = playRequestGeneration.incrementAndGet()
+
+    /**
+     * True while a play made with the user's shuffle ON still owes its re-assert
+     * (PlayerViewModel.startPlay: for a multi-uri body the bracket shuffle OFF → play → shuffle ON;
+     * for a context / single body just the ON after the play — Spotify can DROP shuffle when a
+     * context starts after a `uris` playback, device pass 2026-09-25 A3). The mirror then
+     * reads `shuffleEnabled = false`, so without this a second tap inside the ~1.5 s window — or a
+     * pause / skip / Library play superseding a wake restore — would read "shuffle is off" and the
+     * user's shuffle would stay off for good. The next play treats `mirror || owed` as the user's
+     * setting; cleared by a successful ON, by an explicit shuffle choice ([toggleShuffle],
+     * [setShuffle], a caller's `shuffle` argument, a shuffle-play), never by a 429.
+     */
+    @Volatile var shuffleOwedOn: Boolean = false
+        private set
+    fun markShuffleOwedOn() { shuffleOwedOn = true }
+    fun clearShuffleOwed()  { shuffleOwedOn = false }
+
+    /**
+     * ONE writer for the origin file: two writes launched close together (a Lyra play and a poll
+     * observation) must land in the order they were issued, or the older origin would be what
+     * survives on disk. `synchronized` in the store protects the file, not the order.
+     */
+    private val originWriter = Dispatchers.IO.limitedParallelism(1)
+
+    @Volatile private var lastLyraOriginAt = 0L
+    /** The context uri the poll last reported (null included), so a CHANGE is what gets recorded. */
+    @Volatile private var lastObservedContextUri: String? = null
+
+    /**
+     * Records where a play Lyra is about to issue comes from, and counts as a new play request.
+     * The write runs on `Dispatchers.IO`; the generation bump is synchronous, so a caller that
+     * reads [playGeneration] right after sees its own request.
+     */
+    fun recordPlayOrigin(origin: PlaybackOrigin) {
+        notePlayRequest()
+        lastLyraOriginAt = System.currentTimeMillis()
+        scope.launch(originWriter) { originStore.save(origin) }
+    }
+
+    suspend fun loadPlayOrigin(): PlaybackOrigin? = withContext(originWriter) { originStore.load() }
+
+    /** Poll side: remember a context the user started elsewhere (e.g. inside the Spotify app). */
+    private fun observeContextUri(contextUri: String?) {
+        if (contextUri == lastObservedContextUri) return
+        lastObservedContextUri = contextUri
+        if (contextUri == null) return
+        if (System.currentTimeMillis() - lastLyraOriginAt < ORIGIN_POLL_QUIET_MS) return
+        val origin = PlaybackOrigin.forContext(contextUri)
+        scope.launch(originWriter) { originStore.save(origin) }
+    }
 
     init { startPolling() }
 
@@ -85,9 +198,14 @@ class PlayerStateManager(
         }
     }
 
-    suspend fun fetchOnce() = fetchPlayerState()
+    /**
+     * One poll now. Returns the RAW response (null on a 204 or a failure): the mirror's
+     * `isPlaying` is held by the optimistic lock, so a caller that must know what Spotify REALLY
+     * reports — the wake restore's "is the song playing yet" check — reads this instead.
+     */
+    suspend fun fetchOnce(): PlayerStateResponse? = fetchPlayerState()
 
-    private suspend fun fetchPlayerState() {
+    private suspend fun fetchPlayerState(): PlayerStateResponse? =
         repository.getPlayerState().fold(
             onSuccess = { response ->
                 if (response != null) {
@@ -96,6 +214,10 @@ class PlayerStateManager(
                     // Lock track+progress+duration together so the UI doesn't flash "Nothing Playing"
                     // or reset the seek bar to 0 while Spotify is switching devices.
                     val lockingTransfer = now < trackLockUntil && response.item == null
+                    if (response.item == null && !lockingTransfer) {
+                        Log.w("PlayerStateManager", "poll: 200 with item=null (playing=${response.isPlaying}, " +
+                              "context=${response.context?.uri}) — the UI will show Nothing Playing")
+                    }
                     _state.update {
                         it.copy(
                             isPlaying      = if (now < isPlayingLockUntil) it.isPlaying else response.isPlaying,
@@ -107,32 +229,37 @@ class PlayerStateManager(
                             // Locked with the TRACK, not on a lock of its own: `context` goes null
                             // alongside `item` mid-transfer, and the queue's echo drop reads this.
                             hasContext     = if (lockingTransfer) it.hasContext else response.context != null,
+                            contextUri     = if (lockingTransfer) it.contextUri
+                                             else response.context?.uri?.takeIf { u -> u.isNotBlank() },
                             currentDevice  = response.device,
                         )
                     }
+                    if (!lockingTransfer) observeContextUri(_state.value.contextUri)
                     val isNowPlaying = _state.value.isPlaying
                     if (isNowPlaying && progressTickJob?.isActive != true) startProgressTick()
                     else if (!isNowPlaying) progressTickJob?.cancel()
                     maybeStartService()
                 } else {
                     // 204 — no active device (Spotify killed or closed)
-                    // Clear playing state unless an optimistic lock is in effect (e.g. SDK wake-up in progress)
+                    // Clear playing state unless an optimistic lock is in effect (e.g. SDK wake-up in progress).
+                    // ONLY isPlaying: the track and its contextUri must survive, the play button
+                    // restores from them.
                     val now = System.currentTimeMillis()
                     if (now >= isPlayingLockUntil) {
                         _state.update { it.copy(isPlaying = false) }
                         progressTickJob?.cancel()
                     }
                 }
+                response
             },
             onFailure = { e ->
                 when {
-                    e.message?.contains("429") == true ->
-                        pollBackoffUntil = System.currentTimeMillis() + 60_000L
+                    e.message?.contains("429") == true -> noteRateLimited(e, "poll me/player")
                     e.isTransientNetworkError() -> { /* silent */ }
                 }
+                null
             },
         )
-    }
 
     // ── Progress tick ─────────────────────────────────────────────────────────
 
@@ -168,8 +295,47 @@ class PlayerStateManager(
     fun lockRepeat()     { repeatLockUntil    = System.currentTimeMillis() + 5_000L }
     // Prevents currentTrack from being nulled by a mid-transfer poll where response.item is briefly null.
     fun lockTrack()      { trackLockUntil     = System.currentTimeMillis() + 3_000L }
-    fun isRateLimited()  = System.currentTimeMillis() < pollBackoffUntil
-    fun noteRateLimited() { pollBackoffUntil  = System.currentTimeMillis() + 60_000L }
+    private fun backoffUntil(family: RateLimitFamily) = when (family) {
+        RateLimitFamily.PLAYER  -> pollBackoffUntil
+        RateLimitFamily.LIBRARY -> libraryBackoffUntil
+    }
+    fun isRateLimited(family: RateLimitFamily = RateLimitFamily.PLAYER) =
+        System.currentTimeMillis() < backoffUntil(family)
+    /** Seconds left in that family's rate-limit window, 0 when open. */
+    fun rateLimitSecondsLeft(family: RateLimitFamily = RateLimitFamily.PLAYER): Long =
+        ((backoffUntil(family) - System.currentTimeMillis()) / 1_000L).coerceAtLeast(0L)
+
+    /**
+     * Arms the ONE shared backoff window every Web API caller checks (`isRateLimited()`).
+     * **Honours `Retry-After`** (2026-09-25 evening): `safeCall` puts the header into the 429
+     * message as `Retry-After=<seconds>`; a fixed 60 s used to be re-armed on the FIRST call after
+     * it expired, every minute, for as long as Spotify's real penalty lasted — a frozen player
+     * (the 3 s poll is gated too) with hero buttons that silently did nothing. The window is now
+     * `max(60 s, Retry-After)`, capped at [MAX_RATE_LIMIT_BACKOFF_MS], and every arming is logged
+     * with its origin so a device log names the endpoint.
+     */
+    fun noteRateLimited(
+        e     : Throwable? = null,
+        who   : String = "caller",
+        family: RateLimitFamily = RateLimitFamily.PLAYER,
+    ) {
+        val retryAfterS = e?.message?.let { Regex("Retry-After=(\\d+)").find(it)?.groupValues?.get(1)?.toLongOrNull() }
+        val cap = when (family) {
+            RateLimitFamily.PLAYER  -> MAX_PLAYER_BACKOFF_MS
+            RateLimitFamily.LIBRARY -> MAX_LIBRARY_BACKOFF_MS
+        }
+        val backoffMs = ((retryAfterS ?: 0L) * 1_000L).coerceIn(60_000L, cap)
+        val until = System.currentTimeMillis() + backoffMs
+        when (family) {
+            RateLimitFamily.PLAYER  -> if (until > pollBackoffUntil) pollBackoffUntil = until
+            RateLimitFamily.LIBRARY -> if (until > libraryBackoffUntil) {
+                libraryBackoffUntil = until
+                _libraryRateLimitUntil.value = until
+            }
+        }
+        Log.w("PlayerStateManager", "429 from $who — Retry-After=${retryAfterS ?: "?"} s; the $family " +
+              "family backs off ${backoffMs / 1_000L} s (${e?.message?.take(80)})")
+    }
 
     // Optimistically marks Spotify as playing AND locks the state so transient 204 polls
     // during SDK wake-up don't flip the UI back to the play icon.
@@ -205,6 +371,7 @@ class PlayerStateManager(
 
     fun playPause() {
         val current = _state.value
+        notePlayRequest()
         lockIsPlaying()
         scope.launch {
             if (current.isPlaying) {
@@ -223,14 +390,22 @@ class PlayerStateManager(
                         if (e.message?.contains("404") == true && track != null) {
                             onWakeOperationStart?.invoke()
                             progressTickJob?.cancel()
-                            _state.update { it.copy(progressMs = 0L) }
-                            remoteManager.connectAndPlay(track.uri)
-                            delay(500L)
-                            fetchPlayerState()
-                            // Start tick optimistically so the bar counts from the moment
-                            // indeterminate clears, even if fetchPlayerState returned 204.
-                            if (progressTickJob?.isActive != true) startProgressTick()
-                            onWakeOperationComplete?.invoke()
+                            // The full restore (PlayerViewModel.restoreAfterWake): the SDK plays the
+                            // item, the queue is rebuilt from where it came from, and the waking
+                            // state clears only once Spotify reports the song playing — the hook
+                            // owns that clear. Before 2026-09-25 this was the bare single-uri play
+                            // below and nothing else, so a play after Spotify died queued ONE song.
+                            val restored = onWakeRestore?.invoke(track, current.progressMs, 0) == true
+                            if (!restored) {
+                                _state.update { it.copy(progressMs = 0L) }
+                                remoteManager.connectAndPlay(track.uri)
+                                delay(500L)
+                                fetchPlayerState()
+                                // Start tick optimistically so the bar counts from the moment
+                                // indeterminate clears, even if fetchPlayerState returned 204.
+                                if (progressTickJob?.isActive != true) startProgressTick()
+                                onWakeOperationComplete?.invoke()
+                            }
                         }
                     },
                 )
@@ -239,6 +414,7 @@ class PlayerStateManager(
     }
 
     fun skipNext() {
+        notePlayRequest()
         scope.launch {
             setOptimisticallyPlaying()
             val prevId = _state.value.currentTrack?.id
@@ -251,9 +427,14 @@ class PlayerStateManager(
                 onFailure = { e ->
                     if (e.message?.contains("404") == true) {
                         onWakeOperationStart?.invoke()
-                        remoteManager.skipNext()
-                        fetchUntilTrackChanges(prevId)
-                        onWakeOperationComplete?.invoke()
+                        val track = _state.value.currentTrack
+                        val restored = track != null &&
+                            onWakeRestore?.invoke(track, _state.value.progressMs, +1) == true
+                        if (!restored) {
+                            remoteManager.skipNext()
+                            fetchUntilTrackChanges(prevId)
+                            onWakeOperationComplete?.invoke()
+                        }
                     } else {
                         releasePlayingOptimism()
                     }
@@ -263,6 +444,7 @@ class PlayerStateManager(
     }
 
     fun skipPrevious() {
+        notePlayRequest()
         scope.launch {
             setOptimisticallyPlaying()
             val prevId = _state.value.currentTrack?.id
@@ -275,9 +457,14 @@ class PlayerStateManager(
                 onFailure = { e ->
                     if (e.message?.contains("404") == true) {
                         onWakeOperationStart?.invoke()
-                        remoteManager.skipPrevious()
-                        fetchUntilTrackChanges(prevId)
-                        onWakeOperationComplete?.invoke()
+                        val track = _state.value.currentTrack
+                        val restored = track != null &&
+                            onWakeRestore?.invoke(track, _state.value.progressMs, -1) == true
+                        if (!restored) {
+                            remoteManager.skipPrevious()
+                            fetchUntilTrackChanges(prevId)
+                            onWakeOperationComplete?.invoke()
+                        }
                     } else {
                         releasePlayingOptimism()
                     }
@@ -303,6 +490,7 @@ class PlayerStateManager(
     }
 
     fun toggleShuffle() {
+        clearShuffleOwed()
         val new = !_state.value.shuffleEnabled
         lockShuffle()
         _state.update { it.copy(shuffleEnabled = new) }
@@ -319,6 +507,7 @@ class PlayerStateManager(
      * structure: optimistic lock + optimistic state + Web API, 404 → App Remote.
      */
     fun setShuffle(enabled: Boolean) {
+        clearShuffleOwed()
         lockShuffle()
         _state.update { it.copy(shuffleEnabled = enabled) }
         scope.launch {
@@ -337,7 +526,7 @@ class PlayerStateManager(
     suspend fun applyShuffle(enabled: Boolean): Result<Unit> {
         lockShuffle()
         _state.update { it.copy(shuffleEnabled = enabled) }
-        return repository.setShuffle(enabled)
+        return repository.setShuffle(enabled).also { if (enabled && it.isSuccess) clearShuffleOwed() }
     }
 
     /**

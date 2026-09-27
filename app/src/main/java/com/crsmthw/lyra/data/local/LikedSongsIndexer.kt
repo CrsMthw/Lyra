@@ -2,6 +2,7 @@ package com.crsmthw.lyra.data.local
 
 import android.util.Log
 import com.crsmthw.lyra.data.player.PlayerStateManager
+import com.crsmthw.lyra.data.player.RateLimitFamily
 import com.crsmthw.lyra.data.remote.model.SpotifyTrack
 import com.crsmthw.lyra.data.repository.SpotifyRepository
 import kotlinx.coroutines.CoroutineScope
@@ -154,7 +155,7 @@ class LikedSongsIndexer(
                 if (!demands.value.any) continue
 
                 // Rate-limit gate: skip this tick entirely.
-                if (playerStateManager.isRateLimited()) continue
+                if (playerStateManager.isRateLimited(RateLimitFamily.LIBRARY)) continue
 
                 withContext(Dispatchers.IO) {
                     val cached = libraryCache.loadTrackList(LibraryCache.LIKED_SONGS_KEY)
@@ -177,7 +178,15 @@ class LikedSongsIndexer(
 
                     // Seed on first run; re-seed when the cache shrank under us (a UI-side full
                     // replace/refresh resets the deep cache) so backfill restarts from the new prefix.
-                    if (rawOffset < 0 || size < prevSize) rawOffset = size
+                    // The seed is the PERSISTED raw offset when the cache carries one (written by
+                    // this loop, see below), never below the filtered size; the filtered size alone
+                    // is the fallback. Device pass 2026-09-25 evening: seeding from the filtered size
+                    // on EVERY park→resume (the foreground service drops its demand 10 s after a
+                    // pause) re-fetched the ~200 filtered slots' worth of pages — four `me/tracks`
+                    // GETs per pause/play — until Spotify banned `me/tracks` for 3.8 hours.
+                    if (rawOffset < 0 || size < prevSize) {
+                        rawOffset = cached.rawOffset?.takeIf { it >= size } ?: size
+                    }
                     prevSize = size
 
                     if (rawOffset >= total) {
@@ -195,6 +204,7 @@ class LikedSongsIndexer(
                             if (rawCount == 0) {
                                 // Past the end.
                                 rawOffset = total
+                                libraryCache.appendToLikedSongs(emptyList(), rawOffset = total)
                                 _state.value = _state.value.copy(cached = size, total = total, complete = true)
                                 return@fold
                             }
@@ -204,8 +214,10 @@ class LikedSongsIndexer(
                                 .mapNotNull { it.track }
                                 .filter { it.isPlayable != false }
 
-                            if (newTracks.isNotEmpty()) {
-                                val result = libraryCache.appendToLikedSongs(newTracks)
+                            // The page's raw position is persisted with it, empty or not, so a
+                            // resumed loop never re-fetches what this one already covered.
+                            run {
+                                val result = libraryCache.appendToLikedSongs(newTracks, rawOffset = rawOffset)
                                 if (result != null) {
                                     prevSize = result.rowCount
                                     _state.value = _state.value.copy(
@@ -222,6 +234,7 @@ class LikedSongsIndexer(
                             // Short page = last page reached.
                             if (rawCount < PAGE_SIZE) {
                                 rawOffset = total
+                                libraryCache.appendToLikedSongs(emptyList(), rawOffset = total)
                                 _state.value = _state.value.copy(complete = true)
                             }
 
@@ -229,7 +242,7 @@ class LikedSongsIndexer(
                         },
                         onFailure = { e ->
                             if (e.message?.contains("429") == true) {
-                                playerStateManager.noteRateLimited()
+                                playerStateManager.noteRateLimited(e, "LikedSongsIndexer me/tracks", RateLimitFamily.LIBRARY)
                             }
                         },
                     )

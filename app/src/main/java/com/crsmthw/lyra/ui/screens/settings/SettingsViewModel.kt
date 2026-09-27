@@ -8,6 +8,8 @@ import com.crsmthw.lyra.data.local.EncryptedPrefs
 import com.crsmthw.lyra.data.local.LibraryCache
 import com.crsmthw.lyra.data.repository.SettingsRepository
 import com.crsmthw.lyra.di.AppContainer
+import com.crsmthw.lyra.ui.cassette.CassetteColorSource
+import com.crsmthw.lyra.ui.cassette.CassetteSettings
 import com.crsmthw.lyra.util.MosaicGenerator
 import com.crsmthw.lyra.ui.theme.ThemeMode
 import com.crsmthw.lyra.util.visualizer.VisualizerStyle
@@ -70,6 +72,10 @@ class SettingsViewModel(
     val ilyraEnabled: StateFlow<Boolean> = settingsRepo.ilyraEnabled
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
+    /** The cassette idle screen — all seven preferences as one snapshot (docs/CASSETTE.md). */
+    val cassetteSettings: StateFlow<CassetteSettings> = settingsRepo.cassetteSettings
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), CassetteSettings())
+
     private val _imageCacheBytes   = MutableStateFlow(0L)
     val imageCacheBytes: StateFlow<Long> = _imageCacheBytes
 
@@ -94,6 +100,13 @@ class SettingsViewModel(
     fun setForYouEnabled   (enabled: Boolean)   { viewModelScope.launch { settingsRepo.setForYouEnabled(enabled)       } }
     fun unlockIlyra()                             { viewModelScope.launch { settingsRepo.setIlyraUnlocked(true)           } }
     fun setIlyraEnabled     (enabled: Boolean)   { viewModelScope.launch { settingsRepo.setIlyraEnabled(enabled)         } }
+    fun setCassetteEnabled      (enabled: Boolean)             { viewModelScope.launch { settingsRepo.setCassetteEnabled(enabled)      } }
+    fun setCassetteKeepScreenOn (enabled: Boolean)             { viewModelScope.launch { settingsRepo.setCassetteKeepScreenOn(enabled) } }
+    fun setCassetteDim          (enabled: Boolean)             { viewModelScope.launch { settingsRepo.setCassetteDim(enabled)          } }
+    fun setCassetteColorSource  (source : CassetteColorSource) { viewModelScope.launch { settingsRepo.setCassetteColorSource(source)   } }
+    fun setCassetteCustomColor  (argb   : Int)                 { viewModelScope.launch { settingsRepo.setCassetteCustomColor(argb)     } }
+    fun setCassetteShowExitHint (show   : Boolean)             { viewModelScope.launch { settingsRepo.setCassetteShowExitHint(show)    } }
+    fun setCassetteIdleSeconds  (seconds: Int)                 { viewModelScope.launch { settingsRepo.setCassetteIdleSeconds(seconds)  } }
 
     /** Reset every visualizer setting to its default (surfaces=Both, 24 bands, gain 0, synced, mean). */
     fun resetVisualizerSettings() {

@@ -327,6 +327,7 @@ internal fun SinglePaneLayout(
                         listStates     = browserListStates,
                         barState       = browserBarState,
                         viewModel      = viewModel,
+                        onPlayContext  = { playerViewModel.playContext(it, shuffle = false) },
                         onOpenSettings = onOpenSettings,
                         onOpenAlbum    = onOpenAlbum,
                         onOpenArtist   = onOpenArtist,

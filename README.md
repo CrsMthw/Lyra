@@ -20,6 +20,7 @@
 - **Podcasts** — follow, browse and play shows; episode rows show what you have finished and how much is left, and every player surface handles an episode as the now-playing item
 - Synchronized lyrics — time-synced, auto-scrolling lyrics on the player screen (via LRCLIB), with a plain-text fallback when synced lyrics aren't available
 - Audio visualizer — optional, album-art-coloured, reacting across the audible range (ProjectM-style per-band normalization); a circular pulse behind the album art (in the full player *and* the pop-out panel), a wave along the bottom of other screens, or both, with resolution, gain and averaging controls in Settings
+- **Cassette idle screen** — optional: leave the full player alone for a few seconds (7 by default, 5–600 in the options) with the visualizer and lyrics off and a compact cassette slides over it, edge to edge on black with the system bars hidden — a drawn translucent shell with hubs turning at tape speed, the tape pack moving between the reels as the song plays and showing through the shell below the label, and the title, artist, album and copyright line on a graph-paper label. Coloured from the album art, your Material You palette or a colour you pick; every track change flips the shell to side B, the next ejects it and slides in a fresh one; double-tap to leave, with an optional keep-screen-on and a 20-second dim against burn-in
 - Spotify Connect device switching — transfer playback to any device on your account, with a volume slider for the active device; "This device" wakes Spotify locally when it isn't running
 - Home-screen widget — resizable Now Playing widget with playback controls; its layout and artwork scale to the size you choose, and its colours are drawn from the current album art
 
@@ -229,7 +230,7 @@ app/src/test/        JVM unit tests (171)
 - **Visualizer** — visual style inspired by [Nier-Visualizer](https://github.com/bogerchan/Nier-Visualizer) and [NextGenVisualizer](https://github.com/jeffshee/NextGenVisualizer)
 - **Visualizer audio analysis** — [projectM](https://github.com/projectM-visualizer/projectm), an open-source music visualizer whose per-band normalization + logarithmic-equalize approach Lyra's analysis is modeled on (reimplemented in Kotlin; no projectM code is used)
 - **Drag-to-reorder lists** — [Reorderable](https://github.com/Calvin-LL/Reorderable) by Calvin Liang
-- **Fonts** — Liberation Sans (SIL Open Font License, see `app/src/main/assets/fonts/`)
+- **Fonts** — Liberation Sans and Playfair Display (SIL Open Font License, see `app/src/main/assets/fonts/`)
 - **App icon** — idea by BambiD, drawn up digitally by Shubbu
 
 ---
