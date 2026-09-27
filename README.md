@@ -3,6 +3,8 @@
   <h1>Lyra</h1>
   <p>A minimal Spotify client for Android with an adaptive layout for phones, foldables, and tablets.<br/>Lyra uses your own Spotify Developer credentials — no third-party servers, no data collection.</p>
   <p><sub>Current release: <b>v4.1.0 “Quattro”</b> — new: the <a href="#features">cassette idle screen</a></sub></p>
+  <a href="https://youtu.be/RFUUrQTMKMY"><img src="assets/showcase/lyra-showcase-youtube.jpg" width="720" alt="Watch the Lyra showcase video on YouTube"/></a>
+  <p><sub><a href="https://youtu.be/RFUUrQTMKMY">▶ Watch the showcase on YouTube</a></sub></p>
 </div>
 
 ---
