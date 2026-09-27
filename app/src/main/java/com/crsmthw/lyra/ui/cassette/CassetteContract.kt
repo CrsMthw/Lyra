@@ -120,6 +120,16 @@ object CassetteTiming {
     /** The longest wind (the whole tape — a repeat-one wrap), ms: under a second, so the reels
      *  never trail the music for long. */
     const val WindMaxMs      = 900
+
+    /**
+     * The in-app settle after a screen rotation that FLIPS the image on the glass (the phone turned
+     * anticlockwise out of portrait, back from there, or turned over): the stage's first frame in the
+     * new rotation shows the shell where the old frame left it, head edge on the wrong side, and turns
+     * it 180° into the new rest angle over this long, FastOutSlowIn (finite, like every cassette
+     * move). A rotation that leaves the image where it was on the glass plays nothing. See
+     * Cassette.kt's header, the "rotation" row.
+     */
+    const val OrientationTurnMs = 600
 }
 
 /** How a track change is shown. */

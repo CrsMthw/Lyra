@@ -1,6 +1,9 @@
 package com.crsmthw.lyra.ui.cassette
 
+import android.content.res.Configuration
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationVector1D
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -32,9 +35,12 @@ import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import com.crsmthw.lyra.R
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
@@ -88,6 +94,26 @@ import kotlin.math.min
  *                    edge opposite the head: LEFT in portrait, UP in landscape), and the fresh
  *                    shell back in through the same edge, in both directions. travel = the short
  *                    side × 1.04 + the letterbox band on that side, so the shell clears the stage
+ *                    (at rest; while a rotation settle turns the stage, see the rotation row)
+ *   rotation         (2026-09-26) while the overlay is up the window asks for a JUMP CUT instead of
+ *                    the system's rotate animation (CassetteRotationAnimation, CassetteOverlay.kt):
+ *                    the old frame gives way to the new one with no system turn. The shell's angle
+ *                    ON THE GLASS is stageRotationZ + the display's content rotation (Surface
+ *                    ROTATION_n × 90). Portrait → landscape CLOCKWISE (ROTATION_270), and back, leaves
+ *                    it unchanged, so NOTHING plays. Anticlockwise (ROTATION_90), back from there,
+ *                    or a turn-over changes it by 180°: the stage's first frame in the new rotation
+ *                    is drawn where the old one left the shell (head edge on the wrong side) and
+ *                    SETTLES 180° into the new rest angle over OrientationTurnMs, FastOutSlowIn,
+ *                    scaled by spinFitScale (≈ 0.638 crosswise) so it never leaves the stage. It
+ *                    turns clockwise when the content turned clockwise (+90 or a half turn) and
+ *                    anticlockwise for −90. A rotation mid-settle carries the rest of the settle;
+ *                    a size-only change (unfolding) and a rotation that changes the smallest width
+ *                    (a fold that also rotated) never settle. The reels keep turning through it,
+ *                    and an eject keeps clearing the stage: its translation sits INSIDE the turned,
+ *                    shrunk layer, so during a settle its travel is ejectTravelTurned = short ×
+ *                    0.54 + the stage's half-extent along the eject axis / settleScale (equal to
+ *                    the rest travel at a rest angle). The whole 980 ms eject can overlap a settle,
+ *                    the parked outgoing shell included
  *   head edge        trapezoid 168..832 from y 486; capstans (367|633, 573); pinch rollers
  *                    (272|728, 590) r 27; guide rollers (122|878, 557) r 46; head recess 418..582
  *
@@ -98,30 +124,37 @@ import kotlin.math.min
  * pixel size, NOT the palette — colour is applied at draw time). Each face's frame loop runs while
  * it is spinning OR winding and parks otherwise. `progress` is sampled only by the face's
  * snapshotFlow (never in composition, never in the draw): the draw reads only the face's own
- * position ([ReelSpin.shown]) and writes nothing.
+ * position ([ReelSpin.shown]) and writes nothing. A frame that comes late — a stall, such as the
+ * traversal that draws a rotation's first frame in the new layout — turns the reels one ordinary
+ * frame only ([ReelClock]).
  */
 
 /**
- * One face's reels: the [ReelTracker] (the position the packs show, and any wind toward a new one)
- * and the two hub angles (degrees as DrawScope `rotate` takes them — clockwise-positive, so the
- * hubs' anticlockwise play turn makes them fall; see [advanceHubAngle]). [shown] and the angles
- * are snapshot state read ONLY in the draw phase (one redraw per change, no recomposition);
- * [winding] is read ONLY by the frame loop's park. The face's effect is the only writer — the
- * draw writes nothing — so a face whose effect is cancelled (the outgoing face of a flip or an
- * eject, `live = false`) stays exactly where it was last drawn.
+ * One face's reels: the [ReelTracker] (the position the packs show, and any wind toward a new one),
+ * the [ReelClock] that the frame loop runs (the hubs and the wind, frame by frame), and the two hub
+ * angles it turns (degrees as DrawScope `rotate` takes them — clockwise-positive, so the hubs'
+ * anticlockwise play turn makes them fall; see [advanceHubAngle]). [shown] and the angles are
+ * snapshot state read ONLY in the draw phase (one redraw per change, no recomposition); [winding]
+ * is read ONLY by the frame loop's park. The face's effect is the only writer — the draw writes
+ * nothing — so a face whose effect is cancelled (the outgoing face of a flip or an eject,
+ * `live = false`) stays exactly where it was last drawn.
  */
 @Stable
 private class ReelSpin(initial: Float) {
     val tracker = ReelTracker(initial)
+    val clock = ReelClock(tracker)
     var supplyDeg by mutableFloatStateOf(0f)
     var takeUpDeg by mutableFloatStateOf(0f)
     var shown by mutableFloatStateOf(tracker.displayed)
     var winding by mutableStateOf(false)
 
-    /** Mirrors the tracker into the snapshot state after every change (an equal write is free). */
+    /** Mirrors the tracker and the clock into the snapshot state after every change (an equal
+     *  write is free). */
     fun publish() {
         shown = tracker.displayed
         winding = tracker.winding
+        supplyDeg = clock.supplyDeg
+        takeUpDeg = clock.takeUpDeg
     }
 }
 
@@ -237,27 +270,22 @@ internal fun CassetteImpl(
             }
         }
 
-        // FRAME LOOP: the hubs' play drive plus any wind. ω = v / r per hub, one signed tape
-        // velocity for both (anticlockwise in play). It parks while neither is needed, so the hubs
-        // freeze exactly where they are when paused; on waking the first frame only stamps the
-        // clock (and the tracker stamps any new wind on it), so nothing snaps.
+        // FRAME LOOP: the hubs' play drive plus any wind — one ReelClock frame per frame (ω = v / r
+        // per hub, one signed tape velocity for both, anticlockwise in play). It parks while neither
+        // is needed, so the hubs freeze exactly where they are when paused; on waking the first frame
+        // only stamps the clock (and the tracker stamps any new wind on it), so nothing snaps. A
+        // STALL (a rotation's or an unfold's relayout, drawn while the display still shows the old
+        // frame) turns the hubs one ordinary frame and stands a wind still for the rest, so nothing
+        // jerks at the cut either (ReelClock, FrameCadence).
         val timeScale = debug?.timeScale ?: 1f
-        var last = -1L
+        spin.clock.park()                                // this effect's first frame only stamps, too
         while (true) {
             if (!currentSpinning && !spin.winding) {
-                last = -1L
+                spin.clock.park()
                 snapshotFlow { currentSpinning || spin.winding }.first { it }
             }
             withFrameNanos { now ->
-                val s = spin.tracker.onFrame(now, timeScale, debug?.freezeFraction)
-                if (last >= 0L) {
-                    val dt = (now - last) / 1_000_000_000f * timeScale
-                    val v = windTapeVelocity(s, currentSpinning)
-                    val r = packRadii(spin.tracker.displayed)
-                    spin.supplyDeg = advanceHubAngle(spin.supplyDeg, r.supply, dt, v, CassetteWind.HubMaxStepDeg)
-                    spin.takeUpDeg = advanceHubAngle(spin.takeUpDeg, r.takeUp, dt, v, CassetteWind.HubMaxStepDeg)
-                }
-                last = now
+                spin.clock.frame(now, currentSpinning, timeScale, debug?.freezeFraction)
                 spin.publish()
             }
         }
@@ -334,6 +362,14 @@ internal fun CassetteImpl(
  * playback-position JUMP on the same track — a seek made elsewhere, a repeat-one wrap — winds the
  * incoming face's packs and hubs to the new position instead of snapping (CassetteReelWind.kt);
  * the outgoing face stays frozen where it was.
+ *
+ * A screen rotation that turns the image ON THE GLASS by 180° (anticlockwise out of portrait,
+ * back from there, a turn-over) starts the new frame where the old one left the shell and settles
+ * it into the new rest angle ([CassetteTiming.OrientationTurnMs]); one that leaves the image where
+ * it was (clockwise out of portrait, and back) plays nothing. The hosting window must ask for a
+ * jump cut rather than the system's rotate animation ([CassetteRotationAnimation]) — see the
+ * header's rotation row. An eject under way when the phone turns keeps both shells clear of the
+ * stage while it settles ([ejectTravelTurned]).
  */
 @Composable
 fun CassetteStage(
@@ -375,6 +411,20 @@ private class StageState(initial: CassetteLabel) {
     var move: CassetteMove? = null
     var generation = 0
     val finished = mutableIntStateOf(0)
+}
+
+/**
+ * The stage's rotation settle. [state] is the pure bookkeeping ([OrientationTurnState]), fed in
+ * composition. [settle] is the running settle's Animatable, kept so that a rotation landing
+ * mid-settle starts from where the shell actually is. Plain fields, like [StageState].
+ */
+private class StageTurn {
+    val state = OrientationTurnState()
+    var settle: Animatable<Float, AnimationVector1D>? = null
+
+    /** What is left of the running settle. Read WITHOUT observation, because a read in composition
+     *  would recompose the stage's content on every frame of the settle. */
+    fun inFlightDeg(): Float = settle?.let { s -> Snapshot.withoutReadObservation { s.value } } ?: 0f
 }
 
 @Composable
@@ -435,18 +485,66 @@ internal fun CassetteStageImpl(
         val fit = cassetteFit(maxWidth.value, maxHeight.value)
         // The eject must clear the STAGE (it clips), letterbox included — in px, the unit of the
         // face layer's own size.height (= the shell's short side) that the travel is built from.
-        val ejectBandPx = run {
-            val w = constraints.maxWidth.toFloat()
-            val h = constraints.maxHeight.toFloat()
-            ejectBand(w, h, cassetteFit(w, h).short, fit.portrait)
+        val stageWPx = constraints.maxWidth.toFloat()
+        val stageHPx = constraints.maxHeight.toFloat()
+        val ejectBandPx = ejectBand(stageWPx, stageHPx, cassetteFit(stageWPx, stageHPx).short, fit.portrait)
+
+        // ── Rotation settle (the header's rotation row). Reading LocalConfiguration SUBSCRIBES the
+        // stage to every rotation: each one dispatches a new Configuration (a 180° turn-over changes
+        // nothing in it but the window configuration's rotation, which Configuration.updateFrom
+        // reports, so Compose provides a new one), and the stage recomposes and re-reads the display
+        // rotation. The rotation is read FRESH at every composition, never remembered on the
+        // configuration: Display.getRotation() on the Activity's display reads the Activity's
+        // resources configuration, which ActivityThread updates synchronously inside
+        // ViewRootImpl.performConfigurationChange, before performMeasure, on the resize-message path
+        // AND on the path where a relayout of our own hands back the new configuration
+        // mid-traversal, so it is never older than this pass's constraints. LocalConfiguration is not
+        // like that: it lags until its provider recomposes, one pass later on the relayout path. A
+        // rotation remembered on it paired the NEW constraints with the OLD rotation in that measure
+        // pass and corrupted the bookkeeping (review, 2026-09-26). The bookkeeping's orientation and
+        // smallest width come from that same Configuration, never from `fit` (the constraints);
+        // OrientationTurnState's KDoc says why that order is safe. The fit still decides what is
+        // DRAWN (the layer below).
+        val configuration = LocalConfiguration.current
+        val rotation = ContextCompat.getDisplayOrDefault(LocalContext.current).rotation
+        val stageTurn = remember { StageTurn() }
+        stageTurn.state.update(
+            rotation        = rotation,
+            configPortrait  = configuration.orientation == Configuration.ORIENTATION_PORTRAIT,
+            smallestWidthDp = configuration.smallestScreenWidthDp,
+            inFlightDeg     = stageTurn::inFlightDeg,
+        )
+        val turnGeneration = stageTurn.state.generation
+        val turnFrom = stageTurn.state.from
+        // A FRESH Animatable per settle, created AT turnFrom in this very composition, so the first
+        // frame of the new rotation already draws the shell where the old frame left it on the glass
+        // (the same pattern as the move's `anim` above).
+        val turn = remember(turnGeneration) { Animatable(turnFrom) }
+        stageTurn.settle = turn
+        LaunchedEffect(turnGeneration) {
+            if (turnGeneration > 0 && turnFrom != 0f) {
+                turn.animateTo(0f, tween(durationMillis = CassetteTiming.OrientationTurnMs, easing = FastOutSlowInEasing))
+            }
         }
+        val stageW = maxWidth.value
+        val stageH = maxHeight.value
+
         // (long × short) in the natural frame; in portrait the SAME box turned −90° about its
         // centre, overflowing its slot on purpose (requiredSize, centred; only the stage's own
-        // bounds clip it).
+        // bounds clip it). A settle adds its turn and shrinks the shell so its bounding box stays
+        // inside the stage; at rest (extra == 0, which a finished settle lands on exactly) the
+        // layer is what it always was. settleScale is the ONE copy of that scale: the eject below
+        // reads it too.
         Box(
             Modifier
                 .requiredSize(fit.long.dp, fit.short.dp)
-                .graphicsLayer { rotationZ = stageRotationZ(fit.portrait) },
+                .graphicsLayer {
+                    val extra = turn.value
+                    rotationZ = stageRotationZ(fit.portrait) + extra
+                    val k = settleScale(fit.portrait, extra, fit.long, fit.short, stageW, stageH)
+                    scaleX = k
+                    scaleY = k
+                },
         ) {
             for (face in faces) {
                 key(face.id) {
@@ -482,9 +580,27 @@ internal fun CassetteStageImpl(
                                     }
                                     CassetteMove.EJECT -> {
                                         // out through the TITLE edge (natural −y: LEFT in
-                                        // portrait, UP in landscape), back in through the same
+                                        // portrait, UP in landscape), back in through the same.
+                                        // This translation lives INSIDE the stage layer, which a
+                                        // rotation settle turns and shrinks: then the travel is
+                                        // rebuilt for the turned stage with the layer's own
+                                        // scale, so a shell parked outside stays outside and the
+                                        // incoming one starts clear. At rest the plain travel,
+                                        // bit-identical. turn.value is read here, in the layer
+                                        // only: no recomposition.
                                         val e = ejectFrameAt(t)
-                                        val travel = ejectTravel(size.height, ejectBandPx)
+                                        val extra = turn.value
+                                        val travel = if (extra == 0f) {
+                                            ejectTravel(size.height, ejectBandPx)
+                                        } else {
+                                            ejectTravelTurned(
+                                                short  = size.height,
+                                                zDeg   = stageRotationZ(fit.portrait) + extra,
+                                                k      = settleScale(fit.portrait, extra, fit.long, fit.short, stageW, stageH),
+                                                stageW = stageWPx,
+                                                stageH = stageHPx,
+                                            )
+                                        }
                                         translationY = -(if (incoming) e.incomingShift else e.outgoingShift) * travel
                                         if (incoming) { scaleX = e.incomingScale; scaleY = e.incomingScale }
                                     }

@@ -1,6 +1,7 @@
 package com.crsmthw.lyra.ui.cassette
 
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -59,6 +60,20 @@ import kotlinx.coroutines.launch
  *   own (sideB and ejectAt keep theirs).
  * - `--ef timeScale S` — the reels' clock, winds AND hubs, × S ([ReelDebug.timeScale]).
  * - `--ef windAt F` — hold every wind at fraction F of its timeline ([ReelDebug.freezeFraction]).
+ * - `--ez followRotation true` — do NOT lock the window in place. Production locks it while the
+ *   cassette is up (since 2026-09-27, CassetteOverlay's `RotationHold`), so without this extra a
+ *   rotation never reaches the stage. The jump cut + settle are what production keeps for the
+ *   rotations the lock does not stop (multi-window, a per-app override, an OEM that diverges). A
+ *   lock is honoured at ANY screen size, on this API 35 emulator and on Android 16+ alike: the
+ *   targetSdk 36 large-screen rule exempts SCREEN_ORIENTATION_LOCKED.
+ *
+ * Rotation (2026-09-26): launch with `--ez followRotation true`. LOCKED outranks `user_rotation`
+ * (DisplayRotation.rotationForOrientation), so a locked preview does not turn. Then `settings put
+ * system accelerometer_rotation 0` and `settings put system user_rotation N` (0 = portrait,
+ * 1 = ROTATION_90, 3 = ROTATION_270) while the preview is up. The activity handles the change
+ * itself, like MainActivity, so the stage's rotation settle plays.
+ * Note that the ATD image has no SystemUI and so no WMShell: its rotations take the legacy
+ * (non-shell) path, unlike a phone on Android 14+.
  */
 class CassettePreviewActivity : ComponentActivity() {
 
@@ -68,7 +83,7 @@ class CassettePreviewActivity : ComponentActivity() {
         val args = PreviewArgs.from(intent)
         setContent {
             LyraTheme {
-                ImmersiveWindow(this)
+                ImmersiveWindow(this, followRotation = args.followRotation)
                 CassettePreview(args)
             }
         }
@@ -108,6 +123,8 @@ private data class PreviewArgs(
     val sideB         : Boolean,
     val flipAt        : Float?,
     val ejectAt       : Float?,
+    /** DEBUG: leave the window free to rotate (production locks it in place while the cassette is up). */
+    val followRotation: Boolean,
     val durationMs    : Long,
     val tick          : Boolean,
     val seekTo        : Float?,
@@ -154,6 +171,7 @@ private data class PreviewArgs(
                 sideB          = i.getBooleanExtra("sideB", false),
                 flipAt         = i.floatOrNull("flipAt"),
                 ejectAt        = i.floatOrNull("ejectAt"),
+                followRotation = i.getBooleanExtra("followRotation", false),
                 durationMs     = i.getLongExtra("durationMs", if (demo) PreviewDemoDurationMs else PreviewDefaultDurationMs),
                 tick           = i.getBooleanExtra("tick", false),
                 seekTo         = i.floatOrNull("seekTo"),
@@ -172,24 +190,47 @@ private data class PreviewArgs(
     }
 }
 
-/** iLyra's window recipe: cutout ALWAYS + hidden bars, swipe to reveal transiently. */
+/**
+ * CassetteOverlay's window recipe: iLyra's cutout ALWAYS + hidden bars (swipe to reveal
+ * transiently) + the cassette's rotation animation ([CassetteRotationAnimation]) + its orientation
+ * lock, dropped in multi-window as the overlay's is. So a rotation on the emulator plays exactly
+ * what the player's overlay plays. The activity handles rotation itself, as MainActivity does (the
+ * debug manifest's configChanges), so the stage keeps its state and the settle can run. Everything
+ * is restored to what it was. The preview has no exit fade, so nothing here needs the overlay's
+ * hold-to-the-end-of-the-fade: it all goes with the activity.
+ */
 @Composable
-private fun ImmersiveWindow(activity: ComponentActivity) {
+private fun ImmersiveWindow(activity: ComponentActivity, followRotation: Boolean) {
     DisposableEffect(Unit) {
         val window = activity.window
         val view = window.decorView
+        val previousCutoutMode = window.attributes.layoutInDisplayCutoutMode
+        val previousRotationAnimation = window.attributes.rotationAnimation
         window.attributes = window.attributes.also {
             it.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            it.rotationAnimation = CassetteRotationAnimation
         }
         val controller = WindowInsetsControllerCompat(window, view)
         controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         controller.hide(WindowInsetsCompat.Type.systemBars())
         onDispose {
             window.attributes = window.attributes.also {
-                it.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT
+                it.layoutInDisplayCutoutMode = previousCutoutMode
+                it.rotationAnimation = previousRotationAnimation
             }
             WindowInsetsControllerCompat(window, view).show(WindowInsetsCompat.Type.systemBars())
         }
+    }
+    // Production's lock (CassetteOverlay's `RotationHold`), in its own effect so a multi-window
+    // flip never rewrites the attributes above. Dropped in split screen / a pop-up window, where
+    // WindowManager would letterbox a LOCKED activity. `followRotation` leaves the window free, the
+    // only way to put a rotation in front of the stage here.
+    val inMultiWindow = rememberInMultiWindowMode(activity)
+    DisposableEffect(followRotation, inMultiWindow) {
+        if (followRotation || inMultiWindow) return@DisposableEffect onDispose { }
+        val previousOrientation = activity.requestedOrientation
+        activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LOCKED
+        onDispose { activity.requestedOrientation = previousOrientation }
     }
 }
 

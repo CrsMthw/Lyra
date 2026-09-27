@@ -1,7 +1,9 @@
 package com.crsmthw.lyra.ui.cassette
 
+import android.app.Activity
 import android.view.accessibility.AccessibilityManager
 import android.view.Window
+import android.content.pm.ActivityInfo
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
@@ -49,6 +51,9 @@ import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.core.app.MultiWindowModeChangedInfo
+import androidx.core.app.OnMultiWindowModeChangedProvider
+import androidx.core.util.Consumer
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
@@ -62,16 +67,61 @@ import kotlin.math.roundToInt
 /*
  * The full player's cassette idle overlay (docs/CASSETTE.md). PlayerScreen decides WHEN it is up
  * (the idle gate); this file owns everything that happens WHILE it is up: the immersive window,
- * keep-screen-on, the dim, the burn-in drift, the gestures, the back rule, the ON_STOP exit and
- * the "Double-tap to exit" hint chip. The painting itself is `CassetteStage` (Cassette.kt).
+ * the orientation lock, keep-screen-on, the dim, the burn-in drift, the gestures, the back rule,
+ * the ON_STOP exit and the "Double-tap to exit" hint chip. The painting itself is `CassetteStage`
+ * (Cassette.kt).
  *
- * Every window-level change is keyed on `visible` and undone in `onDispose`, so an exit — or the
- * player leaving composition with the cassette up — always hands back the bars, the cutout mode,
- * the brightness and the screen timeout.
+ * Every window-level change is undone in `onDispose`, so an exit — or the player leaving
+ * composition with the cassette up — always hands back the bars, the cutout mode, the rotation
+ * animation, the orientation lock, the brightness and the screen timeout. The bars, the cutout
+ * mode, the brightness and the timeout follow `visible`, so they come back as the exit fade STARTS.
+ * The orientation lock and the rotation animation are held by the fading content itself, so they
+ * come back as the fade ENDS (at once on a stop), and the lock is dropped in multi-window: see
+ * [RotationHold].
  */
 
 /** No label yet (the feed has not emitted) — the stage still draws a blank label. */
 private val EmptyLabel = CassetteLabel(title = "", artist = "")
+
+/**
+ * The window's rotation animation while the cassette is up: a JUMP CUT, the old frame giving way to
+ * the new one with no system turn (2026-09-26). Since 2026-09-27 the window is also LOCKED in place
+ * while the cassette is up ([RotationHold]). AOSP 16/17 honours that on a LARGE screen too. The
+ * targetSdk 36+ rule that ignores an app's orientation request at sw ≥ 600 dp exempts
+ * SCREEN_ORIENTATION_LOCKED at both of its layers: ActivityRecord.isRestrictedFixedOrientation
+ * ("not explicit portrait or landscape") and DisplayArea.shouldIgnoreOrientationRequest ("for the
+ * compatibility of camera apps"). And DisplayRotation.rotationForOrientation's LOCKED branch holds
+ * the last rotation above the sensor and user_rotation. So on the unfolded Fold or a tablet no
+ * rotation normally reaches the cassette either. A rotation still reaches it where the lock does
+ * not hold:
+ * - split screen or a pop-up window, where [RotationHold] drops it. There the shell may still
+ *   choose its own animation (device pass 1 saw the system spin with a pop-up window over Lyra),
+ *   but the stage's settle plays either way;
+ * - a per-app override that remaps LOCKED. AppCompatOrientationPolicy does that for a user's
+ *   aspect-ratio choice in Settings → Apps (on Android 16 the full-screen one gives USER; on 17 the
+ *   minimum-ratio ones give PORTRAIT) and for an OEM compat override;
+ * - an OEM build that departs from AOSP.
+ * This attribute and the stage's own settle are what those rotations get.
+ *
+ * The default, ROTATE, turns a screenshot of the old frame by the quarter turn while the new frame
+ * turns in. Turning the phone CLOCKWISE out of portrait leaves the shell exactly where it was on the
+ * glass (the head edge stays on the same physical side), yet ROTATE still spun it a quarter turn
+ * and back (Cris). With a jump cut, the stage draws its first new frame where the old one left the
+ * shell, so the swap cannot be seen. A rotation that DOES flip the image by 180° is played by the
+ * stage's own settle (Cassette.kt, the header's rotation row).
+ *
+ * Why not ROTATION_ANIMATION_SEAMLESS, the camera-app mode, which looks the same when it is honoured.
+ * Under shell transitions (Android 14+, so the Fold) a SEAMLESS request that cannot be honoured falls
+ * back to ROTATE. Its documented CROSSFADE fallback is the legacy DisplayRotation path.
+ * WMShell's DefaultTransitionHandler.getRotationAnimationHint starts its hint at ROTATE and leaves
+ * it there for a task that asks for SEAMLESS. It rejects seamless when a system-alert window is
+ * shown, when the nav bar cannot change sides (a ≥ 600 dp screen, unless the device allows it), and
+ * for the upside-down rotation. JUMPCUT is passed through by the server
+ * (Transition.getTaskRotationAnimation) and skips the shell's rotation animation with no
+ * conditions. On the legacy path it is rotation_animation_jump_exit. Read in AOSP main, 2026-09-26;
+ * an OEM shell may differ. SEAMLESS is the one-line alternative.
+ */
+internal const val CassetteRotationAnimation = WindowManager.LayoutParams.ROTATION_ANIMATION_JUMPCUT
 
 /** The burn-in drift's fixed ring: eight points around the origin, [CassetteTiming.DriftMaxPx] out. */
 private val DriftRing: List<IntOffset> = CassetteTiming.DriftMaxPx.roundToInt().let { d ->
@@ -109,14 +159,18 @@ fun CassetteOverlay(
     onExit    : () -> Unit,
     modifier  : Modifier = Modifier,
 ) {
-    val window  = LocalActivity.current?.window
+    val activity = LocalActivity.current
+    val window   = activity?.window
     val view    = LocalView.current
     val context = LocalContext.current
     val haptics = LocalHapticFeedback.current
 
     // ── Immersive window: hidden bars (swipe reveals them transiently) + the cutout ──────────
-    // iLyra's recipe (ILyraRoot), minus the orientation request: the cassette follows rotation.
-    // The cutout mode is restored to what it WAS, not blindly to DEFAULT.
+    // iLyra's recipe (ILyraRoot), minus its portrait request: the cassette's own orientation lock
+    // and its rotation animation are [RotationHold]'s, taken by the overlay's content below so they
+    // outlive the exit fade. The bars and the cutout mode follow `visible`, so they come back as
+    // the fade STARTS and the player gets its insets back at once. The cutout mode is restored to
+    // what it WAS, not blindly to the default.
     DisposableEffect(visible, window) {
         if (!visible || window == null) return@DisposableEffect onDispose { }
         val previousCutoutMode = window.attributes.layoutInDisplayCutoutMode
@@ -131,6 +185,7 @@ fun CassetteOverlay(
             WindowInsetsControllerCompat(window, window.decorView).show(WindowInsetsCompat.Type.systemBars())
         }
     }
+    val rotationHold = remember { RotationHold() }
 
     // Lyra's window has focus. Lost in split-screen / a pop-up window while the user works in the
     // other app, and when the notification shade is pulled down. It is NOT an exit (pulling the
@@ -183,6 +238,21 @@ fun CassetteOverlay(
         exit     = fadeOut(screenTransitionSpec()),
         modifier = modifier.fillMaxSize(),
     ) {
+        // ── The orientation lock + the jump cut, for as long as THIS content is composed ─────────
+        // That is to the END of the exit fade, and a re-entry during the fade keeps both. The lock
+        // is dropped while Lyra is in multi-window and taken again, at the rotation current then,
+        // on the way back to full screen. A stop lets go of both at once. Why: [RotationHold].
+        val inMultiWindow = rememberInMultiWindowMode(activity)
+        DisposableEffect(activity, inMultiWindow) {
+            if (activity != null && !inMultiWindow) rotationHold.lock(activity)
+            onDispose { rotationHold.unlock() }
+        }
+        DisposableEffect(window) {
+            if (window != null) rotationHold.cut(window)
+            onDispose { rotationHold.uncut() }
+        }
+        LifecycleEventEffect(Lifecycle.Event.ON_STOP) { rotationHold.releaseAll() }
+
         // Session-scoped state: a fresh hint and drift every time the cassette comes up.
         var hintGeneration by remember { mutableIntStateOf(0) }
         var hintVisible    by remember { mutableStateOf(false) }
@@ -291,6 +361,84 @@ private class HeldItem {
 }
 
 /**
+ * The two window writes the cassette holds until its exit fade ENDS rather than until it starts:
+ * the orientation LOCK and the jump-cut rotation animation ([CassetteRotationAnimation]). NOT
+ * snapshot state: nothing in composition reads it. Each take captures what it replaces. Each
+ * release restores that value and clears its mark, so a stop's release and the fade's later
+ * `onDispose` never write twice, and a later take (back from split screen) captures afresh.
+ *
+ * **The lock** (Cris, 2026-09-27) is `SCREEN_ORIENTATION_LOCKED`. The window keeps whatever rotation
+ * it has when the cassette comes up, until the cassette has gone. An old Walkman's tape does not
+ * turn in its player; it is upright or upside down by how you hold it. So while the cassette is up
+ * there is no rotation, no cut and no hub hitch, however the phone is waved to the beat. It locks
+ * the CURRENT rotation, never portrait: a portrait lock would rotate a landscape player at the very
+ * moment the cassette slides in. AOSP 16/17 honours it on a large screen as well (see
+ * [CassetteRotationAnimation]), so the unfolded Fold and a tablet lock too. A fold or unfold with
+ * the cassette up keeps the lock (same Activity, no recreation). A physical display switch does not
+ * reset the display's rotation (DisplayRotation.physicalDisplayChanged only pauses the sensor), so
+ * the whole round trip stays in the rotation the lock was taken in. The device pass decides for
+ * One UI.
+ *
+ * **Why to the end of the fade.** When both were restored as the fade STARTED, an owed rotation
+ * landed at once over the still-opaque cassette. That is the common exit now: the phone was turned
+ * while the cassette was up. The rotation animation was already back on ROTATE, so the system spun
+ * a screenshot of the cassette a quarter turn, the very spin the jump cut is there to avoid. Held to
+ * the end, the player turns afterwards with its own ROTATE, as it does after iLyra.
+ *
+ * **A stop is the exception.** The recomposer pauses its frame clock while Lyra is stopped, so the
+ * fade, and the release at its end, would wait for the return. A user who came back holding the
+ * phone differently would meet a stale rotation. Nothing is on screen to protect then, so the stop
+ * releases both at once, whether the cassette is up or already fading.
+ *
+ * **Multi-window drops the lock.** In split screen WindowManager does not ignore LOCKED; it turns it
+ * into a fixed-orientation LETTERBOX (TaskFragment.canSpecifyOrientation is false outside full
+ * screen, and ActivityRecord letterboxes a MULTI_WINDOW parent "even with ignoreOrientationRequest
+ * disabled", i.e. on the cover screen too). Once the half's shape disagrees with the orientation
+ * the lock was taken in, the cassette shrinks into a box with bars inside its half until the exit.
+ * A pop-up window reports multi-window too, and the lock does nothing there anyway. Entering split
+ * may still show one letterboxed frame, because WindowManager resolves the split before the
+ * multi-window callback reaches the app.
+ */
+private class RotationHold {
+    private var lockedIn: Activity? = null
+    private var orientationBefore = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+    private var cutIn: Window? = null
+    private var animationBefore = WindowManager.LayoutParams.ROTATION_ANIMATION_ROTATE
+
+    fun lock(activity: Activity) {
+        if (lockedIn != null) return
+        orientationBefore = activity.requestedOrientation
+        activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LOCKED
+        lockedIn = activity
+    }
+
+    fun unlock() {
+        val activity = lockedIn ?: return
+        lockedIn = null
+        activity.requestedOrientation = orientationBefore
+    }
+
+    fun cut(window: Window) {
+        if (cutIn != null) return
+        animationBefore = window.attributes.rotationAnimation
+        window.attributes = window.attributes.also { it.rotationAnimation = CassetteRotationAnimation }
+        cutIn = window
+    }
+
+    fun uncut() {
+        val window = cutIn ?: return
+        cutIn = null
+        window.attributes = window.attributes.also { it.rotationAnimation = animationBefore }
+    }
+
+    /** The stop's release: both at once, the rotation animation back before the lock lets go. */
+    fun releaseAll() {
+        uncut()
+        unlock()
+    }
+}
+
+/**
  * The dim's bookkeeping. NOT snapshot state: nothing in composition reads it, and a restore must
  * be a no-op unless a dim actually happened — `window.attributes = …` is a WindowManager relayout,
  * too costly to issue on every touch.
@@ -332,3 +480,21 @@ internal fun rememberTouchExplorationEnabled(): Boolean {
         awaitDispose { manager.removeTouchExplorationStateChangeListener(listener) }
     }.value
 }
+
+/**
+ * Is [activity] in multi-window mode (split screen, a pop-up window)? It is OBSERVED, so entering or
+ * leaving it while the cassette is up is seen at once. The orientation lock is dropped there (see
+ * [RotationHold]). A null activity reads `false`. An activity that does not report the change (not
+ * a ComponentActivity) keeps the value it had at the first composition.
+ */
+@Composable
+internal fun rememberInMultiWindowMode(activity: Activity?): Boolean =
+    produceState(initialValue = activity?.isInMultiWindowMode == true, activity) {
+        val host = activity ?: return@produceState
+        val provider = host as? OnMultiWindowModeChangedProvider ?: return@produceState
+        val listener = Consumer<MultiWindowModeChangedInfo> { value = it.isInMultiWindowMode }
+        provider.addOnMultiWindowModeChangedListener(listener)
+        // Re-read after registering: a change between the seed and the listener is not lost.
+        value = host.isInMultiWindowMode
+        awaitDispose { provider.removeOnMultiWindowModeChangedListener(listener) }
+    }.value

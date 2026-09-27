@@ -57,6 +57,13 @@ import kotlin.math.sqrt
  *   a tooth's ~17–20° width and well under the 30° at which the hub's 60°-periodic art aliases,
  *   so the direction always reads. A real deck winds 10–30× play speed and would alias — the hubs
  *   carry direction and effort, the packs carry distance, on one shared velocity curve.
+ * ── The frame clock ([ReelClock] — the body of the face's frame loop) ───────────────────────
+ *   every frame is PACED ([paceFrame] against [FrameCadence], the median of the last 9 frame
+ *   intervals): a frame longer than 2.5 × that cadence is a STALL — the main thread was blocked, as
+ *   it is while a rotation or an unfold lays out and draws its first frame in the new layout — and
+ *   advances the hubs by ONE cadence frame while a running wind stands still for the rest
+ *   ([ReelTracker.holdFrame]). A stall of any length, on any frame, is one ordinary step: no hub
+ *   jerk, no pack skip (device pass 2026-09-26, items 1–2). Nothing is held, so nothing can stick.
  */
 
 /** The wind's tuning constants, in the painter's units (see the header above). */
@@ -275,6 +282,17 @@ internal class ReelTracker(initial: Float) {
         return ReelInput.Wind
     }
 
+    /**
+     * A STALL's excess ([ReelClock], [paceFrame]): a running, stamped wind's timeline stands still
+     * for `elapsedNanos`, so the frame after a stall moves the packs one ordinary frame instead of
+     * the whole stall. Called BEFORE that frame's [onFrame]. An unstamped wind is untouched (that
+     * [onFrame] stamps it), and so is a tracker with no wind.
+     */
+    fun holdFrame(elapsedNanos: Long) {
+        val w = wind ?: return
+        if (w.startNanos >= 0L && elapsedNanos > 0L) w.startNanos += elapsedNanos
+    }
+
     /** No value followed an exact-0 hold within [CassetteTiming.WindZeroHoldMs]: the 0 was real —
      *  wind to it (or take it, when it is no jump from the target). A no-op when not holding. */
     fun onHoldExpired(durationMs: Long) {
@@ -349,6 +367,130 @@ internal class ReelTracker(initial: Float) {
         /** A NaN or out-of-range position reads as the nearest end (NaN as the start), like
          *  [packRadii]. */
         fun sanitize(v: Float): Float = if (v.isNaN()) 0f else v.coerceIn(0f, 1f)
+    }
+}
+
+/**
+ * How much of a frame's `elapsedNanos` the reels advance by, against the recent frame cadence
+ * (`cadenceNanos`, [FrameCadence]): all of it, unless the frame is a STALL — longer than
+ * [FrameCadence.StallFactor] × the cadence: the main thread was blocked (the traversal that lays
+ * out and draws a rotation's or an unfold's first frame in the new layout, a slow first draw, a
+ * garbage collection) — which advances by ONE cadence frame. The rest, `elapsedNanos − paced`, is dropped
+ * (the hubs and a running wind stand still for it), so a stall of any length shows as one ordinary
+ * step instead of a clamped [CassetteWind.HubMaxStepDeg] jerk. A single dropped frame (2×) is no
+ * stall and keeps its own two steps, as all jank did before. Non-positive input reads as 0; a
+ * non-positive cadence paces nothing.
+ */
+internal fun paceFrame(elapsedNanos: Long, cadenceNanos: Long): Long = when {
+    elapsedNanos <= 0L                                                         -> 0L
+    cadenceNanos > 0L && elapsedNanos > FrameCadence.StallFactor * cadenceNanos -> cadenceNanos
+    else                                                                       -> elapsedNanos
+}
+
+/**
+ * The frame loop's recent CADENCE: the median of the last [Window] raw frame intervals, seeded at
+ * [SeedNanos] (60 Hz). It is LEARNED from the frames, never read from the display: adaptive refresh
+ * and frame-rate votes can render the app at a rate the display does not report, and a cadence of
+ * exactly 2× the reported frame (60 fps under a 120 Hz mode) would sit ON a 2× stall threshold,
+ * where vsync jitter alone would decide which frames are paced and the hubs would stutter. The
+ * median ignores up to four outliers (a rotation's stall, and a later one), and a sustained change
+ * of cadence is adopted within five frames, because every RAW interval is recorded — stalls
+ * included. [pace] measures before it records, so a stall never raises its own threshold.
+ * Main-thread only, and it allocates nothing per frame.
+ */
+internal class FrameCadence {
+    private val recent = LongArray(Window) { SeedNanos }
+    private val sorted = LongArray(Window)
+    private var next = 0
+
+    /** The cadence now: the median of the recorded intervals, ns. */
+    val nanos: Long
+        get() {
+            recent.copyInto(sorted)
+            sorted.sort()
+            return sorted[Window / 2]
+        }
+
+    /** Paces one frame of `elapsedNanos` ([paceFrame] against the cadence so far), then records
+     *  the RAW interval. A non-positive interval paces to 0 and is not recorded. */
+    fun pace(elapsedNanos: Long): Long {
+        if (elapsedNanos <= 0L) return 0L
+        val paced = paceFrame(elapsedNanos, nanos)
+        recent[next] = elapsedNanos
+        next = (next + 1) % Window
+        return paced
+    }
+
+    companion object {
+        /** A frame longer than this many cadence frames is a stall ([paceFrame]): a single dropped
+         *  frame (2×) is not one, and 2.5 keeps a jittery 2× clear of the line. */
+        const val StallFactor = 2.5
+
+        /** How many recent frame intervals the cadence is the median of. */
+        const val Window = 9
+
+        /** The cadence assumed before any frame has been measured: 60 Hz, ns. */
+        const val SeedNanos = 16_666_667L
+    }
+}
+
+/**
+ * One face's frame clock: the BODY of the face's frame loop (Cassette.kt), pure so that what the
+ * tests run is what the loop runs. It turns the two hub angles (degrees as DrawScope `rotate` takes
+ * them, see [advanceHubAngle]) at ω = v / r with ONE signed tape velocity ([windTapeVelocity]), and
+ * advances `tracker`'s wind on the same frames; the loop mirrors [supplyDeg] / [takeUpDeg] into the
+ * face's snapshot state after every [frame].
+ *
+ * - The first frame after [park], and the very first, only STAMP: the tracker stamps a new wind
+ *   there and no hub moves, so waking never snaps and never catches up on the park.
+ * - Every later frame is PACED ([FrameCadence], [paceFrame]). A stall advances the hubs by one
+ *   cadence frame, and a running wind stands still for the excess ([ReelTracker.holdFrame], BEFORE
+ *   [ReelTracker.onFrame]), so neither skips. A rotation needs exactly this: the traversal that lays
+ *   out and draws its first frame in the new layout blocks the main thread for several frames while
+ *   the display still shows the old picture, and the frame after it used to turn the hubs up to a
+ *   clamped 20° at once — the jerk of device pass 2026-09-26, items 1–2. It covers a stall on ANY
+ *   frame (a later one, should a shell transition block the main thread again before it starts; a
+ *   turn-over, which keeps the window's size), and there is no hold that could fail to release.
+ * - What it cannot remove: frames drawn on time but never SHOWN. On the legacy freeze path (the ATD
+ *   emulator) the app keeps drawing the old layout for some 65–175 ms (measured) after
+ *   WindowManager's screenshot, so the first live frame still lands about that much play ahead of
+ *   the frozen one; nothing on the app side sees that interval.
+ */
+internal class ReelClock(private val tracker: ReelTracker) {
+    var supplyDeg = 0f
+        private set
+    var takeUpDeg = 0f
+        private set
+
+    private val cadence = FrameCadence()
+    private var last = -1L
+
+    /** The loop parked (paused, no wind): the next [frame] only stamps. */
+    fun park() {
+        last = -1L
+    }
+
+    /**
+     * One frame at `frameNanos` (the frame clock's time): advances the tracker's wind and both hubs.
+     * `playing` = the play drive is on. `timeScale` / `freezeFraction` are the debug preview's reel
+     * clock ([ReelDebug]; 1 and null in production).
+     */
+    fun frame(frameNanos: Long, playing: Boolean, timeScale: Float = 1f, freezeFraction: Float? = null) {
+        val previous = last
+        last = frameNanos
+        if (previous < 0L) {
+            tracker.onFrame(frameNanos, timeScale, freezeFraction)     // stamps any new wind; no hub moves
+            return
+        }
+        val elapsed = frameNanos - previous
+        val paced = cadence.pace(elapsed)
+        if (paced < elapsed) tracker.holdFrame(elapsed - paced)        // a stall: the wind skips none of it
+        val s = tracker.onFrame(frameNanos, timeScale, freezeFraction)
+        val dt = paced / 1_000_000_000f * timeScale
+        val v = windTapeVelocity(s, playing)
+        val r = packRadii(tracker.displayed)
+        supplyDeg = advanceHubAngle(supplyDeg, r.supply, dt, v, CassetteWind.HubMaxStepDeg)
+        takeUpDeg = advanceHubAngle(takeUpDeg, r.takeUp, dt, v, CassetteWind.HubMaxStepDeg)
     }
 }
 

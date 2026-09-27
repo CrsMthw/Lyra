@@ -380,6 +380,35 @@ class CassetteReelTrackerTest {
     }
 
     @Test
+    fun `a stall's excess stands a running wind's clock still, so its packs move one frame, not the stall`() {
+        // ReelClock paces a stall (a rotation's relayout) to one frame and hands the excess to
+        // holdFrame BEFORE onFrame: the wind's timeline must not run on through the stall, or the
+        // packs would skip at the cut.
+        val t = primed(0.2f).also { it.onProgress(0.8f, Track240) }
+        val ref = primed(0.2f).also { it.onProgress(0.8f, Track240) }
+        val clock = Clock()
+        val refClock = Clock()
+        clock.frame(t); refClock.frame(ref)                   // the stamps
+        repeat(10) { clock.frame(t); refClock.frame(ref) }
+        // a four-frame stall: three frames of excess, then the frame itself
+        t.holdFrame(3 * Frame60); clock.now += 3 * Frame60
+        val speed = clock.frame(t)
+        val refSpeed = refClock.frame(ref)
+        assertEquals(ref.displayed, t.displayed, "exactly where one ordinary frame takes it")
+        assertEquals(refSpeed, speed, "at the same speed")
+        assertEquals(refClock.toEnd(ref), clock.toEnd(t), "and it ends the same number of frames later")
+        assertEquals(0.8f, t.displayed)
+        val unstamped = primed(0.2f).also { it.onProgress(0.8f, Track240) }
+        unstamped.holdFrame(Frame60)                          // an unstamped wind is untouched
+        assertEquals(0f, unstamped.onFrame(clock.now), "it still stamps on its next frame")
+        assertEquals(0.2f, unstamped.displayed)
+        val idle = primed(0.4f)
+        idle.holdFrame(Frame60)                               // no wind: nothing to stand still
+        assertFalse(idle.winding)
+        assertEquals(0.4f, idle.displayed)
+    }
+
+    @Test
     fun `a correction in a wind's last frames still lands it exactly on the corrected value`() {
         // Past the re-base limit (98 % of the ease) the end simply moves: the difference lands in
         // the last frame or two, on the corrected value, never on a NaN.
