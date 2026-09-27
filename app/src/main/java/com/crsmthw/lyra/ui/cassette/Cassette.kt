@@ -37,7 +37,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
@@ -125,35 +124,37 @@ import kotlin.math.min
  * pixel size, NOT the palette — colour is applied at draw time). Each face's frame loop runs while
  * it is spinning OR winding and parks otherwise. `progress` is sampled only by the face's
  * snapshotFlow (never in composition, never in the draw): the draw reads only the face's own
- * position ([ReelSpin.shown]) and writes no snapshot state (a plain draw counter only). Across a
- * relayout the hub clock is held until the new layout has drawn ([LayoutHold]).
+ * position ([ReelSpin.shown]) and writes nothing. A frame that comes late — a stall, such as the
+ * traversal that draws a rotation's first frame in the new layout — turns the reels one ordinary
+ * frame only ([ReelClock]).
  */
 
 /**
- * One face's reels: the [ReelTracker] (the position the packs show, and any wind toward a new one)
- * and the two hub angles (degrees as DrawScope `rotate` takes them — clockwise-positive, so the
- * hubs' anticlockwise play turn makes them fall; see [advanceHubAngle]). [shown] and the angles
- * are snapshot state read ONLY in the draw phase (one redraw per change, no recomposition);
- * [winding] is read ONLY by the frame loop's park. The face's effect is the only writer — the
- * draw writes nothing — so a face whose effect is cancelled (the outgoing face of a flip or an
- * eject, `live = false`) stays exactly where it was last drawn.
+ * One face's reels: the [ReelTracker] (the position the packs show, and any wind toward a new one),
+ * the [ReelClock] that the frame loop runs (the hubs and the wind, frame by frame), and the two hub
+ * angles it turns (degrees as DrawScope `rotate` takes them — clockwise-positive, so the hubs'
+ * anticlockwise play turn makes them fall; see [advanceHubAngle]). [shown] and the angles are
+ * snapshot state read ONLY in the draw phase (one redraw per change, no recomposition); [winding]
+ * is read ONLY by the frame loop's park. The face's effect is the only writer — the draw writes
+ * nothing — so a face whose effect is cancelled (the outgoing face of a flip or an eject,
+ * `live = false`) stays exactly where it was last drawn.
  */
 @Stable
 private class ReelSpin(initial: Float) {
     val tracker = ReelTracker(initial)
+    val clock = ReelClock(tracker)
     var supplyDeg by mutableFloatStateOf(0f)
     var takeUpDeg by mutableFloatStateOf(0f)
     var shown by mutableFloatStateOf(tracker.displayed)
     var winding by mutableStateOf(false)
 
-    /** How many times this face has drawn — a PLAIN counter (never snapshot state) the draw stamps
-     *  and the frame loop's [LayoutHold] reads, so the hubs stay put until a relayout has drawn. */
-    var draws = 0L
-
-    /** Mirrors the tracker into the snapshot state after every change (an equal write is free). */
+    /** Mirrors the tracker and the clock into the snapshot state after every change (an equal
+     *  write is free). */
     fun publish() {
         shown = tracker.displayed
         winding = tracker.winding
+        supplyDeg = clock.supplyDeg
+        takeUpDeg = clock.takeUpDeg
     }
 }
 
@@ -232,9 +233,6 @@ internal fun CassetteImpl(
     val currentProgress by rememberUpdatedState(progress)
     val currentDuration by rememberUpdatedState(durationMs)
     val currentSpinning by rememberUpdatedState(spinning)
-    // The host view: the frame loop reads its laid-out size per frame (plain fields) to hold the hub
-    // clock across a relayout — see LayoutHold / LayoutEpoch.
-    val hostView = LocalView.current
 
     LaunchedEffect(live, debug) {
         if (!live) return@LaunchedEffect                 // the outgoing face: frozen at spin.shown
@@ -272,36 +270,22 @@ internal fun CassetteImpl(
             }
         }
 
-        // FRAME LOOP: the hubs' play drive plus any wind. ω = v / r per hub, one signed tape
-        // velocity for both (anticlockwise in play). It parks while neither is needed, so the hubs
-        // freeze exactly where they are when paused; on waking the first frame only stamps the
-        // clock (and the tracker stamps any new wind on it), so nothing snaps. Across a RELAYOUT
-        // (a rotation, an unfold — the display shows a stale frame until the new layout has drawn)
-        // the clock is HELD (LayoutHold), so the first live frame after the cut continues exactly
-        // from the stale one instead of landing a clamped step ahead of it.
+        // FRAME LOOP: the hubs' play drive plus any wind — one ReelClock frame per frame (ω = v / r
+        // per hub, one signed tape velocity for both, anticlockwise in play). It parks while neither
+        // is needed, so the hubs freeze exactly where they are when paused; on waking the first frame
+        // only stamps the clock (and the tracker stamps any new wind on it), so nothing snaps. A
+        // STALL (a rotation's or an unfold's relayout, drawn while the display still shows the old
+        // frame) turns the hubs one ordinary frame and stands a wind still for the rest, so nothing
+        // jerks at the cut either (ReelClock, FrameCadence).
         val timeScale = debug?.timeScale ?: 1f
-        val layoutHold = LayoutHold()
-        var last = -1L
+        spin.clock.park()                                // this effect's first frame only stamps, too
         while (true) {
             if (!currentSpinning && !spin.winding) {
-                last = -1L
+                spin.clock.park()
                 snapshotFlow { currentSpinning || spin.winding }.first { it }
             }
             withFrameNanos { now ->
-                val held = layoutHold.frame(LayoutEpoch(hostView.width, hostView.height), spin.draws)
-                if (held) {
-                    if (last >= 0L) spin.tracker.holdFrame(now - last)   // a running wind stands still too
-                } else {
-                    val s = spin.tracker.onFrame(now, timeScale, debug?.freezeFraction)
-                    if (last >= 0L) {
-                        val dt = (now - last) / 1_000_000_000f * timeScale
-                        val v = windTapeVelocity(s, currentSpinning)
-                        val r = packRadii(spin.tracker.displayed)
-                        spin.supplyDeg = advanceHubAngle(spin.supplyDeg, r.supply, dt, v, CassetteWind.HubMaxStepDeg)
-                        spin.takeUpDeg = advanceHubAngle(spin.takeUpDeg, r.takeUp, dt, v, CassetteWind.HubMaxStepDeg)
-                    }
-                }
-                last = now
+                spin.clock.frame(now, currentSpinning, timeScale, debug?.freezeFraction)
                 spin.publish()
             }
         }
@@ -351,9 +335,7 @@ internal fun CassetteImpl(
                     }
                     onDrawBehind {
                         // The face's OWN position — never `progress()`, which would flash the
-                        // target for a frame before a wind starts. The draw writes no snapshot
-                        // state — only the plain draw counter LayoutHold reads.
-                        spin.draws++
+                        // target for a frame before a wind starts. The draw writes nothing.
                         val radii = packRadii(spin.shown)
                         drawLayer(under)
                         translate(ox, oy) {

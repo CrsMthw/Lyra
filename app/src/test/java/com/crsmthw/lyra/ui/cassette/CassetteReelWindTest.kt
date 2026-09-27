@@ -380,26 +380,32 @@ class CassetteReelTrackerTest {
     }
 
     @Test
-    fun `a held frame stands a running wind's clock still, so its packs do not skip either`() {
-        // The hub clock is held across a relayout (LayoutHold); the wind's timeline must not run on
-        // behind the frozen display, or the packs would jump at the cut.
-        val t = primed(0.2f)
-        t.onProgress(0.8f, Track240)
+    fun `a stall's excess stands a running wind's clock still, so its packs move one frame, not the stall`() {
+        // ReelClock paces a stall (a rotation's relayout) to one frame and hands the excess to
+        // holdFrame BEFORE onFrame: the wind's timeline must not run on through the stall, or the
+        // packs would skip at the cut.
+        val t = primed(0.2f).also { it.onProgress(0.8f, Track240) }
+        val ref = primed(0.2f).also { it.onProgress(0.8f, Track240) }
         val clock = Clock()
-        clock.frame(t)                                        // the stamp
-        repeat(10) { clock.frame(t) }
-        val before = t.displayed
-        val speedBefore = t.onFrame(clock.now); clock.now += Frame60
-        // three held frames: the loop calls holdFrame with each frame's elapsed time instead of onFrame
-        repeat(3) { t.holdFrame(Frame60); clock.now += Frame60 }
-        val after = t.onFrame(clock.now); clock.now += Frame60
-        val perFrame = abs(t.displayed - before)
-        assertTrue(perFrame < 0.05f, "one frame's motion after the hold, not four: $perFrame")
-        assertTrue(abs(after - speedBefore) < 0.15f, "the speed carries on ($speedBefore → $after)")
+        val refClock = Clock()
+        clock.frame(t); refClock.frame(ref)                   // the stamps
+        repeat(10) { clock.frame(t); refClock.frame(ref) }
+        // a four-frame stall: three frames of excess, then the frame itself
+        t.holdFrame(3 * Frame60); clock.now += 3 * Frame60
+        val speed = clock.frame(t)
+        val refSpeed = refClock.frame(ref)
+        assertEquals(ref.displayed, t.displayed, "exactly where one ordinary frame takes it")
+        assertEquals(refSpeed, speed, "at the same speed")
+        assertEquals(refClock.toEnd(ref), clock.toEnd(t), "and it ends the same number of frames later")
+        assertEquals(0.8f, t.displayed)
         val unstamped = primed(0.2f).also { it.onProgress(0.8f, Track240) }
         unstamped.holdFrame(Frame60)                          // an unstamped wind is untouched
-        assertEquals(0f, unstamped.onFrame(clock.now), "it still stamps on the next advancing frame")
+        assertEquals(0f, unstamped.onFrame(clock.now), "it still stamps on its next frame")
         assertEquals(0.2f, unstamped.displayed)
+        val idle = primed(0.4f)
+        idle.holdFrame(Frame60)                               // no wind: nothing to stand still
+        assertFalse(idle.winding)
+        assertEquals(0.4f, idle.displayed)
     }
 
     @Test

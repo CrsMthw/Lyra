@@ -467,51 +467,313 @@ class CassetteEjectTravelTurnedTest {
     }
 }
 
-class CassetteLayoutHoldTest {
+// ── The frame clock across a rotation's stall (device pass 2026-09-26, items 1–2) ──────────────────
+//
+// A rotation (or an unfold) lays out and draws its first frame in the new layout in ONE traversal
+// that blocks the main thread for several frames while the display still shows the old picture. The
+// frame after it used to turn the hubs a clamped 20° step at once: the "little jerk". ReelClock paces
+// that frame to one ordinary frame and stands a running wind still for the rest. These tests drive
+// the production ReelClock — the frame loop's whole body — never a model of it.
 
-    private val portrait  = LayoutEpoch(1248, 1972)
-    private val landscape = LayoutEpoch(1972, 1248)
+/** One 60 Hz frame, ns: FrameCadence's seed, so a steady 60 Hz run is never paced. */
+private const val Frame60Ns = FrameCadence.SeedNanos
+
+/** One 120 Hz frame, ns. */
+private const val Frame120Ns = 8_333_333L
+
+/** A four-minute song, ms. */
+private const val SongMs = 240_000L
+
+/** A tracker already primed at `p` (its first value only primes). */
+private fun primedAt(p: Float) = ReelTracker(p).also { it.onProgress(p, SongMs) }
+
+/** An angle difference unwrapped into (−180, 180]. */
+private fun unwrapDeg(d: Float): Float {
+    var x = d % 360f
+    if (x > 180f) x -= 360f
+    if (x <= -180f) x += 360f
+    return x
+}
+
+/** What one frame shows: the packs' position and both hub angles. */
+private data class ReelShot(val displayed: Float, val supplyDeg: Float, val takeUpDeg: Float)
+
+/** A value the collector classifies between two frames. */
+private typealias ReelEvent = (ReelTracker) -> Unit
+
+/**
+ * Drives a [ReelClock] the way the face's frame loop does: a first (stamping) frame, then one frame
+ * per entry of `intervals` (ns since the previous frame). `events[i]` runs just BEFORE frame i, as
+ * the collector does between frames. Returns what every frame shows.
+ */
+private fun runClock(
+    start: Float,
+    intervals: List<Long>,
+    events: Map<Int, ReelEvent> = emptyMap(),
+    playing: Boolean = true,
+    timeScale: Float = 1f,
+): List<ReelShot> {
+    val tracker = primedAt(start)
+    val clock = ReelClock(tracker)
+    var now = 1_000_000_000L
+    val shots = ArrayList<ReelShot>()
+    for (i in 0..intervals.size) {
+        if (i > 0) now += intervals[i - 1]
+        events[i]?.invoke(tracker)
+        clock.frame(now, playing, timeScale)
+        shots += ReelShot(tracker.displayed, clock.supplyDeg, clock.takeUpDeg)
+    }
+    return shots
+}
+
+class CassettePaceFrameTest {
+
+    private val f = Frame60Ns
 
     @Test
-    fun `the first epoch only records, and an unchanged epoch never holds`() {
-        val hold = LayoutHold()
-        assertFalse(hold.frame(portrait, 0L))
-        repeat(5) { assertFalse(hold.frame(portrait, it + 1L)) }
-        assertFalse(hold.frame(portrait, 6L), "no draw happening does not matter while nothing changed")
+    fun `an ordinary frame and a single dropped frame are taken whole`() {
+        assertEquals(f, paceFrame(f, f))
+        assertEquals(f / 2, paceFrame(f / 2, f), "a faster frame too")
+        assertEquals(2 * f, paceFrame(2 * f, f), "one dropped frame is jank, not a stall")
+        assertEquals(2 * f + 400_000L, paceFrame(2 * f + 400_000L, f), "nor with vsync jitter on it")
     }
 
     @Test
-    fun `a relayout holds until the new layout has drawn, plus the stall frame after it`() {
-        // Device pass 2026-09-26, items 1–2: the hubs jerked at the cut of a no-motion rotation.
-        val hold = LayoutHold()
-        hold.frame(portrait, 10L)
-        assertTrue(hold.frame(landscape, 10L), "the frame that first sees the new size: its dt is the stall")
-        assertTrue(hold.frame(landscape, 10L), "no draw since (the traversal is still stalling)")
-        assertTrue(hold.frame(landscape, 11L), "drawn — held once more so the frozen and the live frame meet")
-        assertFalse(hold.frame(landscape, 12L), "then the clock runs")
-        assertFalse(hold.frame(landscape, 12L), "and a frame with no draw is not a hold either")
+    fun `a stall of any length is one cadence frame`() {
+        assertEquals(f, paceFrame(3 * f, f))
+        assertEquals(f, paceFrame(150_000_000L, f), "a relayout's stall")
+        assertEquals(f, paceFrame(5_000_000_000L, f))
+        assertEquals(Frame120Ns, paceFrame(30_000_000L, Frame120Ns), "against a 120 Hz cadence")
     }
 
     @Test
-    fun `a turn and a turn back are two holds`() {
-        val hold = LayoutHold()
-        hold.frame(portrait, 0L)
-        assertTrue(hold.frame(landscape, 0L))
-        assertTrue(hold.frame(landscape, 1L))
-        assertFalse(hold.frame(landscape, 2L))
-        assertTrue(hold.frame(portrait, 2L), "back")
-        assertTrue(hold.frame(portrait, 3L))
-        assertFalse(hold.frame(portrait, 4L))
+    fun `degenerate input never paces backwards`() {
+        assertEquals(0L, paceFrame(0L, f))
+        assertEquals(0L, paceFrame(-5L, f))
+        assertEquals(150_000_000L, paceFrame(150_000_000L, 0L), "no cadence: nothing to pace against")
+    }
+}
+
+class CassetteFrameCadenceTest {
+
+    @Test
+    fun `a steady cadence is never paced`() {
+        val c = FrameCadence()
+        assertEquals(FrameCadence.SeedNanos, c.nanos, "seeded at 60 Hz")
+        repeat(200) { assertEquals(Frame60Ns, c.pace(Frame60Ns)) }
+        val fast = FrameCadence()
+        repeat(200) { assertEquals(Frame120Ns, fast.pace(Frame120Ns)) }
+        assertEquals(Frame120Ns, fast.nanos, "120 Hz learned")
     }
 
     @Test
-    fun `a second relayout while still holding re-anchors on the newer draw count`() {
-        val hold = LayoutHold()
-        hold.frame(portrait, 0L)
-        assertTrue(hold.frame(landscape, 0L))
-        assertTrue(hold.frame(portrait, 3L), "an unfold-then-fold before the first drew")
-        assertTrue(hold.frame(portrait, 3L))
-        assertTrue(hold.frame(portrait, 4L))
-        assertFalse(hold.frame(portrait, 5L))
+    fun `twice the cadence is never paced - 60 fps after 120 Hz, 30 fps from the 60 Hz seed`() {
+        // The case a display-reported rate gets wrong: 60 fps under a 120 Hz mode sits exactly on a
+        // 2x line, where vsync jitter would pace every other frame. The learned cadence never does.
+        val c = FrameCadence()
+        repeat(20) { c.pace(Frame120Ns) }
+        repeat(50) { assertEquals(Frame60Ns, c.pace(Frame60Ns), "60 fps after a 120 Hz run: taken whole") }
+        assertEquals(Frame60Ns, c.nanos, "and adopted")
+        val slow = FrameCadence()
+        repeat(50) { assertEquals(2 * Frame60Ns, slow.pace(2 * Frame60Ns)) }
+    }
+
+    @Test
+    fun `jitter around single dropped frames is never paced`() {
+        val c = FrameCadence()
+        val jitter = longArrayOf(-300_000L, 250_000L, 400_000L, -150_000L, 0L)
+        repeat(200) { i ->
+            val e = (if (i % 2 == 0) Frame60Ns else 2 * Frame60Ns) + jitter[i % jitter.size]
+            assertEquals(e, c.pace(e), "frame $i")
+        }
+    }
+
+    @Test
+    fun `stalls are paced to the cadence and never move it, four in a window included`() {
+        val c = FrameCadence()
+        repeat(20) { c.pace(Frame60Ns) }
+        for (i in 0 until 9) {
+            val e = if (i == 0 || i == 1 || i == 4 || i == 5) 300_000_000L else Frame60Ns
+            assertEquals(Frame60Ns, c.pace(e), "frame $i")
+        }
+        assertEquals(Frame60Ns, c.nanos)
+    }
+
+    @Test
+    fun `a sustained slower cadence is adopted within five frames`() {
+        val c = FrameCadence()
+        repeat(20) { c.pace(Frame60Ns) }
+        val slow = 3 * Frame60Ns                       // 20 fps: a stall against 60 Hz, at first
+        val paced = List(FrameCadence.Window) { c.pace(slow) }
+        assertEquals(5, paced.count { it < slow }, "$paced")
+        assertEquals(slow, c.nanos)
+        repeat(20) { assertEquals(slow, c.pace(slow)) }
+    }
+
+    @Test
+    fun `a non-positive interval paces to 0 and is not recorded`() {
+        val c = FrameCadence()
+        repeat(20) {
+            assertEquals(0L, c.pace(0L))
+            assertEquals(0L, c.pace(-1L))
+        }
+        assertEquals(FrameCadence.SeedNanos, c.nanos)
+    }
+}
+
+class CassetteReelClockTest {
+
+    /** A jump to 0.8 before frame 5 (a wind of ~47 frames), and a tick inside it before frame 20. */
+    private val windWithTick: Map<Int, ReelEvent> = mapOf(
+        5 to { t -> t.onProgress(0.8f, SongMs) },
+        20 to { t -> t.onProgress(0.8f + 1_000f / SongMs, SongMs) },
+    )
+
+    @Test
+    fun `a stall is invisible - after it the reels are exactly where a run without it has them`() {
+        // On the wind's stamping frame, early in it, mid-cruise, and in plain play after it; at the
+        // production clock and at the preview's quarter speed.
+        val steady = List(90) { Frame60Ns }
+        for (timeScale in listOf(1f, 0.25f)) {
+            val reference = runClock(0.2f, steady, windWithTick, timeScale = timeScale)
+            for (stall in listOf(150_000_000L, 1_000_000_000L, 5_000_000_000L)) {
+                for (at in listOf(5, 6, 12, 30, 70)) {
+                    val intervals = steady.toMutableList().also { it[at - 1] = stall }
+                    assertEquals(
+                        reference,
+                        runClock(0.2f, intervals, windWithTick, timeScale = timeScale),
+                        "a ${stall / 1_000_000} ms stall at frame $at, time scale $timeScale",
+                    )
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `two stalls close together are both one frame - a turn and a turn back, a late second stall`() {
+        // A shell transition can block the main thread again a few frames after the first frame in
+        // the new layout, and a turn straight back is a second relayout: neither may leak.
+        val steady = List(90) { Frame60Ns }
+        val reference = runClock(0.2f, steady, windWithTick)
+        for (at in listOf(listOf(10, 11), listOf(10, 14), listOf(10, 11, 14, 15))) {
+            val intervals = steady.toMutableList().also { list -> at.forEach { list[it - 1] = 300_000_000L } }
+            assertEquals(reference, runClock(0.2f, intervals, windWithTick), "stalls at $at")
+        }
+    }
+
+    @Test
+    fun `after a stall the hubs turn on every frame, one ordinary step at most, with the progress standing still`() {
+        // The stuck hold's regression: cd357cd waited for a draw that its own held frames never
+        // caused, so with static progress (the Settings preview, a stalled poll) the hubs stopped
+        // for good after a rotation. A pace has nothing to wait for.
+        val intervals = List(620) { i -> if (i == 10) 900_000_000L else Frame60Ns }
+        val shots = runClock(0.35f, intervals)
+        val steady = abs(unwrapDeg(shots[5].takeUpDeg - shots[4].takeUpDeg))
+        assertTrue(steady > 1f, "the take-up hub turns $steady° a frame")
+        for (i in 1 until shots.size) {
+            val dSupply = abs(unwrapDeg(shots[i].supplyDeg - shots[i - 1].supplyDeg))
+            val dTakeUp = abs(unwrapDeg(shots[i].takeUpDeg - shots[i - 1].takeUpDeg))
+            assertTrue(dSupply > 0.5f && dTakeUp > 0.5f, "frame $i: both hubs turned ($dSupply°, $dTakeUp°)")
+            assertTrue(dTakeUp <= steady + 1e-3f, "frame $i: one ordinary step at most ($dTakeUp° > $steady°)")
+        }
+    }
+
+    @Test
+    fun `waking from a park only stamps, and the seek that woke it winds all the way`() {
+        // Paused, the loop parks; the phone turns with no frame at all; then a seek from elsewhere
+        // wakes it with a wind. cd357cd's hold armed on exactly that wake frame and never let go.
+        val t = primedAt(0.3f)
+        val clock = ReelClock(t)
+        var now = 1_000_000_000L
+        repeat(30) { clock.frame(now, playing = true); now += Frame60Ns }
+        clock.park()
+        now += 10_000_000_000L                                  // ten seconds parked
+        val supply = clock.supplyDeg
+        val takeUp = clock.takeUpDeg
+        t.onProgress(0.9f, SongMs)                              // the seek: a wind, still paused
+        assertTrue(t.winding)
+        clock.frame(now, playing = false); now += Frame60Ns
+        assertEquals(supply, clock.supplyDeg, "the wake frame turns no hub")
+        assertEquals(takeUp, clock.takeUpDeg)
+        assertEquals(0.3f, t.displayed, "and moves no pack: it only stamps the wind")
+        // The same wind on a fresh clock, frame for frame, to the end.
+        val ref = primedAt(0.3f).also { it.onProgress(0.9f, SongMs) }
+        val refClock = ReelClock(ref)
+        var refNow = 50_000_000_000L
+        refClock.frame(refNow, playing = false); refNow += Frame60Ns
+        var frames = 0
+        while (t.winding || ref.winding) {
+            val (s0, r0) = clock.supplyDeg to refClock.supplyDeg
+            clock.frame(now, playing = false); now += Frame60Ns
+            refClock.frame(refNow, playing = false); refNow += Frame60Ns
+            assertEquals(ref.displayed, t.displayed, "frame $frames")
+            assertEquals(unwrapDeg(refClock.supplyDeg - r0), unwrapDeg(clock.supplyDeg - s0), 1e-3f, "frame $frames")
+            frames++
+            check(frames < 1_000) { "the wind never ended" }
+        }
+        assertEquals(0.9f, t.displayed, "the wind landed on the seek")
+        assertTrue(frames in 40..60, "a 0.6-tape wind is ~47 frames: $frames")
+    }
+
+    @Test
+    fun `resuming after a park turns the hubs one ordinary step, not the pause`() {
+        val t = primedAt(0.35f)
+        val clock = ReelClock(t)
+        var now = 1_000_000_000L
+        repeat(10) { clock.frame(now, playing = true); now += Frame60Ns }
+        val beforeLast = clock.takeUpDeg
+        clock.frame(now, playing = true); now += Frame60Ns
+        val steady = abs(unwrapDeg(clock.takeUpDeg - beforeLast))
+        clock.park()
+        now += 3_000_000_000L
+        val parked = clock.takeUpDeg
+        clock.frame(now, playing = true); now += Frame60Ns
+        assertEquals(parked, clock.takeUpDeg, "the wake frame only stamps")
+        clock.frame(now, playing = true)
+        assertEquals(steady, abs(unwrapDeg(clock.takeUpDeg - parked)), 1e-3f)
+    }
+
+    @Test
+    fun `with no stall the clock is the inline loop it replaced, bit for bit`() {
+        // The frame loop's body moved into ReelClock: in ordinary play — steady frames, single
+        // dropped frames, 120 Hz, a tick, a wind, a rewind — nothing it shows may differ.
+        val intervals = List(400) { i ->
+            when {
+                i < 100 -> Frame60Ns
+                i < 200 -> if (i % 7 == 0) 2 * Frame60Ns else Frame60Ns
+                else    -> Frame120Ns
+            }
+        }
+        val events: Map<Int, ReelEvent> = mapOf(
+            40 to { t -> t.onProgress(0.3f + 1_000f / SongMs, SongMs) },
+            60 to { t -> t.onProgress(0.7f, SongMs) },
+            150 to { t -> t.onProgress(0.2f, SongMs) },
+            300 to { t -> t.onProgress(0.2f + 1_000f / SongMs, SongMs) },
+        )
+        val clockShots = runClock(0.3f, intervals, events)
+        // The loop body before the clock (cd357cd^), verbatim but for its fields.
+        val t = primedAt(0.3f)
+        var supply = 0f
+        var takeUp = 0f
+        var last = -1L
+        var now = 1_000_000_000L
+        val timeScale = 1f
+        val oldShots = ArrayList<ReelShot>()
+        for (i in 0..intervals.size) {
+            if (i > 0) now += intervals[i - 1]
+            events[i]?.invoke(t)
+            val s = t.onFrame(now, timeScale, null)
+            if (last >= 0L) {
+                val dt = (now - last) / 1_000_000_000f * timeScale
+                val v = windTapeVelocity(s, true)
+                val r = packRadii(t.displayed)
+                supply = advanceHubAngle(supply, r.supply, dt, v, CassetteWind.HubMaxStepDeg)
+                takeUp = advanceHubAngle(takeUp, r.takeUp, dt, v, CassetteWind.HubMaxStepDeg)
+            }
+            last = now
+            oldShots += ReelShot(t.displayed, supply, takeUp)
+        }
+        assertEquals(oldShots, clockShots)
+        assertTrue(oldShots.map { it.displayed }.distinct().size > 50, "the run did wind")
     }
 }
