@@ -380,6 +380,29 @@ class CassetteReelTrackerTest {
     }
 
     @Test
+    fun `a held frame stands a running wind's clock still, so its packs do not skip either`() {
+        // The hub clock is held across a relayout (LayoutHold); the wind's timeline must not run on
+        // behind the frozen display, or the packs would jump at the cut.
+        val t = primed(0.2f)
+        t.onProgress(0.8f, Track240)
+        val clock = Clock()
+        clock.frame(t)                                        // the stamp
+        repeat(10) { clock.frame(t) }
+        val before = t.displayed
+        val speedBefore = t.onFrame(clock.now); clock.now += Frame60
+        // three held frames: the loop calls holdFrame with each frame's elapsed time instead of onFrame
+        repeat(3) { t.holdFrame(Frame60); clock.now += Frame60 }
+        val after = t.onFrame(clock.now); clock.now += Frame60
+        val perFrame = abs(t.displayed - before)
+        assertTrue(perFrame < 0.05f, "one frame's motion after the hold, not four: $perFrame")
+        assertTrue(abs(after - speedBefore) < 0.15f, "the speed carries on ($speedBefore → $after)")
+        val unstamped = primed(0.2f).also { it.onProgress(0.8f, Track240) }
+        unstamped.holdFrame(Frame60)                          // an unstamped wind is untouched
+        assertEquals(0f, unstamped.onFrame(clock.now), "it still stamps on the next advancing frame")
+        assertEquals(0.2f, unstamped.displayed)
+    }
+
+    @Test
     fun `a correction in a wind's last frames still lands it exactly on the corrected value`() {
         // Past the re-base limit (98 % of the ease) the end simply moves: the difference lands in
         // the last frame or two, on the corrected value, never on a NaN.

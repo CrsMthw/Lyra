@@ -466,3 +466,52 @@ class CassetteEjectTravelTurnedTest {
         assertTrue(negative.isFinite(), "$negative")
     }
 }
+
+class CassetteLayoutHoldTest {
+
+    private val portrait  = LayoutEpoch(1248, 1972)
+    private val landscape = LayoutEpoch(1972, 1248)
+
+    @Test
+    fun `the first epoch only records, and an unchanged epoch never holds`() {
+        val hold = LayoutHold()
+        assertFalse(hold.frame(portrait, 0L))
+        repeat(5) { assertFalse(hold.frame(portrait, it + 1L)) }
+        assertFalse(hold.frame(portrait, 6L), "no draw happening does not matter while nothing changed")
+    }
+
+    @Test
+    fun `a relayout holds until the new layout has drawn, plus the stall frame after it`() {
+        // Device pass 2026-09-26, items 1–2: the hubs jerked at the cut of a no-motion rotation.
+        val hold = LayoutHold()
+        hold.frame(portrait, 10L)
+        assertTrue(hold.frame(landscape, 10L), "the frame that first sees the new size: its dt is the stall")
+        assertTrue(hold.frame(landscape, 10L), "no draw since (the traversal is still stalling)")
+        assertTrue(hold.frame(landscape, 11L), "drawn — held once more so the frozen and the live frame meet")
+        assertFalse(hold.frame(landscape, 12L), "then the clock runs")
+        assertFalse(hold.frame(landscape, 12L), "and a frame with no draw is not a hold either")
+    }
+
+    @Test
+    fun `a turn and a turn back are two holds`() {
+        val hold = LayoutHold()
+        hold.frame(portrait, 0L)
+        assertTrue(hold.frame(landscape, 0L))
+        assertTrue(hold.frame(landscape, 1L))
+        assertFalse(hold.frame(landscape, 2L))
+        assertTrue(hold.frame(portrait, 2L), "back")
+        assertTrue(hold.frame(portrait, 3L))
+        assertFalse(hold.frame(portrait, 4L))
+    }
+
+    @Test
+    fun `a second relayout while still holding re-anchors on the newer draw count`() {
+        val hold = LayoutHold()
+        hold.frame(portrait, 0L)
+        assertTrue(hold.frame(landscape, 0L))
+        assertTrue(hold.frame(portrait, 3L), "an unfold-then-fold before the first drew")
+        assertTrue(hold.frame(portrait, 3L))
+        assertTrue(hold.frame(portrait, 4L))
+        assertFalse(hold.frame(portrait, 5L))
+    }
+}

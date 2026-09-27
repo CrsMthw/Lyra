@@ -275,6 +275,16 @@ internal class ReelTracker(initial: Float) {
         return ReelInput.Wind
     }
 
+    /**
+     * A frame the hub clock HELD ([LayoutHold], a relayout the display is frozen across): a running,
+     * stamped wind's timeline stands still for `elapsedNanos` too, so its packs do not skip at the
+     * cut either. An unstamped wind is untouched (it stamps on the next advancing frame).
+     */
+    fun holdFrame(elapsedNanos: Long) {
+        val w = wind ?: return
+        if (w.startNanos >= 0L && elapsedNanos > 0L) w.startNanos += elapsedNanos
+    }
+
     /** No value followed an exact-0 hold within [CassetteTiming.WindZeroHoldMs]: the 0 was real —
      *  wind to it (or take it, when it is no jump from the target). A no-op when not holding. */
     fun onHoldExpired(durationMs: Long) {
