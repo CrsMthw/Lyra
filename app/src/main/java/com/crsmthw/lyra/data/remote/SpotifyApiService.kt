@@ -1,6 +1,7 @@
 package com.crsmthw.lyra.data.remote
 
 import com.crsmthw.lyra.data.remote.model.*
+import retrofit2.Response
 import retrofit2.http.*
 
 /**
@@ -109,10 +110,21 @@ interface SpotifyApiService {
     )
 
     // ── Player ───────────────────────────────────────────────────────────────
+    /**
+     * `Response<T>`, not `T?` (2026-10-04): Retrofit 3.0.0 never returns null for a nullable suspend
+     * return — a 204 ("no active device") threw a KotlinNullPointerException that reached the
+     * failure branch, so the poll's 204 arm was dead. The repository unwraps it
+     * (`bodyOrNullOnNoContent`: 204 → null, a non-2xx → `HttpException`, as before).
+     *
+     * No `market` on purpose (review 2026-10-04): with one Spotify relinks, and `item.id` / `uri`
+     * may become the market copy's — the heart check, like / add-to-playlist and the liked cache
+     * would then address the copy. `linked_from` is parsed for when Spotify sends it anyway; the
+     * confirm's "another item playing" rule covers a relinked play without it.
+     */
     @GET("me/player")
     suspend fun getPlayerState(
         @Query("additional_types") additionalTypes: String = PLAYER_ADDITIONAL_TYPES,
-    ): PlayerStateResponse?
+    ): Response<PlayerStateResponse>
 
     /**
      * `device_id` targets a device that only has to be LISTED by `me/player/devices`, not active —
@@ -150,8 +162,9 @@ interface SpotifyApiService {
     @PUT("me/player/volume")
     suspend fun setVolume(@Query("volume_percent") volume: Int)
 
+    /** `Response<T>` for the same 204 reason as [getPlayerState]. */
     @GET("me/player/queue")
-    suspend fun getQueue(): QueueResponse?
+    suspend fun getQueue(): Response<QueueResponse>
 
     @POST("me/player/queue")
     suspend fun addToQueue(@Query("uri") uri: String)
@@ -174,11 +187,21 @@ interface SpotifyApiService {
         @Query("offset")     offset   : Int    = 0,
     ): Paged<SpotifyArtist>
 
+    /** `Response<T>` for the same 204 reason as [getPlayerState]. */
     @GET("me/player/devices")
-    suspend fun getAvailableDevices(): DevicesResponse?
+    suspend fun getAvailableDevices(): Response<DevicesResponse>
 
     @PUT("me/player")
     suspend fun transferPlayback(@Body request: TransferPlaybackRequest)
+
+    // ── Tracks ───────────────────────────────────────────────────────────────
+    /**
+     * One track — the single-item GET, which is current API (`Get Several Tracks` is the
+     * deprecated one). Called ONLY when a play needs its album as a fallback context and the
+     * caller did not know it (2026-10-04, `PlayerViewModel.lookUpAlbumUri`).
+     */
+    @GET("tracks/{id}")
+    suspend fun getTrack(@Path("id") id: String): SpotifyTrack
 
     // ── Albums ───────────────────────────────────────────────────────────────
     @GET("albums/{id}")

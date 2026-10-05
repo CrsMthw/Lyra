@@ -180,12 +180,13 @@ fun ILyraRoot(
                     uris = effect.uris,
                     startPositionMs = effect.startPositionMs,
                     shuffle = effect.shuffle,
+                    albumUri = effect.albumUri,
                 )
                 is ILyraEffect.PlayLikedSong -> playerVm.playFromLikedSongs(
                     trackUri = effect.uri,
                     shuffle = effect.shuffle,
                 )
-                is ILyraEffect.ShuffleContext -> playerVm.shuffleContext(effect.contextUri)
+                is ILyraEffect.ShuffleContext -> playerVm.shuffleContext(effect.contextUri, effect.itemCount)
                 ILyraEffect.PlayPause -> playerVm.playPause()
                 ILyraEffect.Next -> playerVm.skipNext()
                 ILyraEffect.Previous -> playerVm.skipPrevious()

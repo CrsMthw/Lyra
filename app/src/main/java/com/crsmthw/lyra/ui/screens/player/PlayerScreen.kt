@@ -74,7 +74,9 @@ import androidx.lifecycle.repeatOnLifecycle
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.crossfade
+import com.crsmthw.lyra.ui.components.PlayerStatusHint
 import com.crsmthw.lyra.R
+import com.crsmthw.lyra.data.remote.model.nullIfBlank
 import com.crsmthw.lyra.data.repository.LyricsState
 import com.crsmthw.lyra.ui.cassette.CassetteColorSource
 import com.crsmthw.lyra.ui.cassette.CassetteOverlay
@@ -217,17 +219,43 @@ fun PlayerScreen(
         ImageRequest.Builder(context).data(displayedTrack?.artUrl).crossfade(200).build()
     }
 
-    // Keyed on the id, not the item: the art slide must run on every change of the playing item,
-    // episode or not. `recheckLiked` takes the whole item so it can skip episodes itself.
-    LaunchedEffect(state.currentTrack?.id) {
+    // The lyrics pane's KEY and content holder (audit 2026-10-04 C1): the two art / lyrics
+    // AnimatedContents below animate over this Boolean — never over `state`, which AnimatedContent
+    // hashes in a ScatterMap on every composition, and whose Gson-null track id (a local file)
+    // crashed the screen on its first frame. The outgoing lyrics pane keeps the last AVAILABLE
+    // lyrics through its fade: a plain holder written in composition, like the Library's
+    // `PaneStateHolder` — not snapshot state, so no write-in-composition.
+    val lyricsAvailable = state.lyricsState is LyricsState.Synced || state.lyricsState is LyricsState.Plain
+    val lyricsShowing   = state.lyricsMode && lyricsAvailable
+    val shownLyrics     = remember { LyricsHolder() }
+    if (lyricsAvailable) shownLyrics.value = state.lyricsState
+
+    // Keyed on the URI, not the item (and never the id — two local files share `null`, audit W3):
+    // the art slide must run on every change of the playing item, episode or not. `recheckLiked`
+    // takes the whole item so it can skip episodes and local files itself.
+    LaunchedEffect(state.currentTrack?.uri) {
         state.currentTrack?.let { viewModel.recheckLiked(it) }
         val incoming = state.currentTrack
-        if (incoming?.id != displayedTrack?.id) {
+        if (incoming?.uri != displayedTrack?.uri) {
             if (incoming != null && displayedTrack != null) {
                 artOffsetX.snapTo(if (skipDirection >= 0) 1500f else -1500f)
             }
-            displayedTrack = incoming
+            // The LATEST copy of the same item: an art fill that landed while `snapTo` was
+            // suspended found the previous item still displayed and adopted nothing.
+            displayedTrack = state.currentTrack?.takeIf { it.uri == incoming?.uri && it.artUrl.isNotEmpty() } ?: incoming
             artOffsetX.animateTo(0f, animationSpec = artSlideInSpec)
+        }
+    }
+    // The SAME item with new art — the SDK mirror's display-only track (no art) replaced by its
+    // catalog lookup (2026-10-04): adopted in place, no slide. Its own effect, never a key added to
+    // the one above: that would cancel a slide-in still running when the lookup lands and leave
+    // the art parked off-centre (the restart sees the same id and animates nothing), and re-fire
+    // `recheckLiked`. A fill only — an empty url never replaces art already shown.
+    LaunchedEffect(state.currentTrack?.artUrl) {
+        val incoming = state.currentTrack ?: return@LaunchedEffect
+        val shown    = displayedTrack ?: return@LaunchedEffect
+        if (incoming.uri == shown.uri && incoming.artUrl.isNotEmpty() && incoming.artUrl != shown.artUrl) {
+            displayedTrack = incoming
         }
     }
 
@@ -597,22 +625,16 @@ fun PlayerScreen(
                                     )
                                 }
                                 AnimatedContent(
-                                    targetState  = state,
-                                    contentKey   = { s ->
-                                        val avail = s.lyricsState is LyricsState.Synced || s.lyricsState is LyricsState.Plain
-                                        s.lyricsMode && avail
-                                    },
+                                    targetState  = lyricsShowing,   // the KEY, never `state` (audit C1)
                                     transitionSpec = { fadeIn(tween(300)) togetherWith fadeOut(tween(300)) },
                                     modifier     = Modifier.fillMaxSize(),
                                     label        = "art-lyrics-landscape",
-                                ) { snapshot ->
-                                    val snapAvail   = snapshot.lyricsState is LyricsState.Synced || snapshot.lyricsState is LyricsState.Plain
-                                    val snapShowing = snapshot.lyricsMode && snapAvail
+                                ) { snapShowing ->
                                     if (snapShowing) {
-                                        when (val ls = snapshot.lyricsState) {
+                                        when (val ls = shownLyrics.value) {
                                             is LyricsState.Synced -> SyncedLyricsView(
                                                 lines            = ls.lines,
-                                                currentLineIndex = snapshot.currentLyricLineIndex,
+                                                currentLineIndex = state.currentLyricLineIndex,
                                                 textColor        = lyricsTextColor,
                                                 modifier         = lyricsContentMod,
                                             )
@@ -621,6 +643,7 @@ fun PlayerScreen(
                                                 textColor = lyricsTextColor,
                                                 modifier  = lyricsContentMod,
                                             )
+                                            else -> Unit   // the holder only ever holds Synced / Plain once shown
                                         }
                                     } else {
                                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -770,22 +793,16 @@ fun PlayerScreen(
                                     )
                                 }
                                 AnimatedContent(
-                                    targetState  = state,
-                                    contentKey   = { s ->
-                                        val avail = s.lyricsState is LyricsState.Synced || s.lyricsState is LyricsState.Plain
-                                        s.lyricsMode && avail
-                                    },
+                                    targetState  = lyricsShowing,   // the KEY, never `state` (audit C1)
                                     transitionSpec = { fadeIn(tween(300)) togetherWith fadeOut(tween(300)) },
                                     modifier     = Modifier.fillMaxSize(),
                                     label        = "art-lyrics-portrait",
-                                ) { snapshot ->
-                                    val snapAvail   = snapshot.lyricsState is LyricsState.Synced || snapshot.lyricsState is LyricsState.Plain
-                                    val snapShowing = snapshot.lyricsMode && snapAvail
+                                ) { snapShowing ->
                                     if (snapShowing) {
-                                        when (val ls = snapshot.lyricsState) {
+                                        when (val ls = shownLyrics.value) {
                                             is LyricsState.Synced -> SyncedLyricsView(
                                                 lines            = ls.lines,
-                                                currentLineIndex = snapshot.currentLyricLineIndex,
+                                                currentLineIndex = state.currentLyricLineIndex,
                                                 textColor        = lyricsTextColor,
                                                 modifier         = lyricsContentMod,
                                             )
@@ -794,6 +811,7 @@ fun PlayerScreen(
                                                 textColor = lyricsTextColor,
                                                 modifier  = lyricsContentMod,
                                             )
+                                            else -> Unit   // the holder only ever holds Synced / Plain once shown
                                         }
                                     } else {
                                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -947,7 +965,7 @@ fun PlayerScreen(
                 settings   = cassetteSettings,
                 seed       = cassetteSeed,
                 label      = cassetteLabel,
-                trackKey   = state.currentTrack?.id,
+                trackKey   = state.currentTrack?.uri,
                 progress   = {
                     val ui = state
                     cassetteReelHold.progress(hasItem = ui.currentTrack != null, progress = ui.progress)
@@ -1025,9 +1043,14 @@ private fun PlayerControls(
                             color    = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = if (onOpenArtist != null)
-                                Modifier.clickable { onOpenArtist(artist.id) }
-                            else Modifier,
+                            // Tappable only with a real id (audit 2026-10-04 C5): a local file's
+                            // artist has none, and `ArtistDetail.createRoute` asserts non-null.
+                            modifier = run {
+                                val artistId = artist.id.nullIfBlank()
+                                if (onOpenArtist != null && artistId != null)
+                                    Modifier.clickable { onOpenArtist(artistId) }
+                                else Modifier
+                            },
                         )
                     }
                 }
@@ -1062,7 +1085,8 @@ private fun PlayerControls(
         }
         // Hidden for an episode: `me/tracks` liking does not accept an episode. The unified
         // library could save episodes, but that is a separate feature, not a re-used heart.
-        if (!isEpisode) {
+        // Hidden for a LOCAL FILE too (audit 2026-10-04 C4): there is no catalog track to like.
+        if (!isEpisode && state.currentTrack?.isLocalItem != true) {
             val likeStateDesc = stringResource(if (state.isLiked) R.string.cd_state_liked else R.string.cd_state_not_liked)
             IconButton(
                 onClick  = { haptics.toggle(!state.isLiked); onToggleLike() },
@@ -1084,11 +1108,11 @@ private fun PlayerControls(
     var dragValue  by remember { mutableFloatStateOf(0f) }
     val progressAnim  = remember { Animatable(state.progress) }
     val snapThreshold = if (state.durationMs > 0L) (3000f / state.durationMs.toFloat()).coerceAtMost(0.5f) else 0.05f
-    val prevTrackIdRef = remember { arrayOf(state.currentTrack?.id) }
-    LaunchedEffect(state.progress, state.currentTrack?.id, state.isPlaying, isDragging) {
+    val prevTrackUriRef = remember { arrayOf(state.currentTrack?.uri) }
+    LaunchedEffect(state.progress, state.currentTrack?.uri, state.isPlaying, isDragging) {
         val target = if (isDragging) dragValue else state.progress
-        val trackChanged = state.currentTrack?.id != prevTrackIdRef[0]
-        if (trackChanged) prevTrackIdRef[0] = state.currentTrack?.id
+        val trackChanged = state.currentTrack?.uri != prevTrackUriRef[0]
+        if (trackChanged) prevTrackUriRef[0] = state.currentTrack?.uri
         if (trackChanged || !state.isPlaying || isDragging || abs(target - progressAnim.value) > snapThreshold) {
             progressAnim.snapTo(target)
         } else {
@@ -1256,6 +1280,14 @@ private fun PlayerControls(
         }
     }
 
+    // 2026-10-04: "Spotify didn't report the song playing." / "Open Spotify" — composes nothing
+    // unless one of the two is set.
+    PlayerStatusHint(
+        playUnconfirmed  = state.playUnconfirmed,
+        spotifyNotListed = state.showsOpenSpotifyHint,
+        modifier         = Modifier.padding(top = spacingSmall),
+    )
+
     Spacer(Modifier.height(spacingLarge))
 
     Row(
@@ -1385,7 +1417,7 @@ private fun PlayerControls(
                         // Disabled rather than removed for an episode: dropping a segment from a
                         // connected ButtonGroup would re-shape its neighbours (share would become
                         // the trailing pill) every time the now-playing item changed type.
-                        enabled           = state.currentTrack != null && !isEpisode,
+                        enabled           = state.currentTrack != null && !isEpisode && state.currentTrack?.isLocalItem != true,
                         modifier          = Modifier.size(40.dp).animateWidth(addInteraction),
                         shape             = ButtonGroupDefaults.connectedTrailingButtonShape,
                         colors            = accentButtonColors,
@@ -1398,7 +1430,7 @@ private fun PlayerControls(
                     DropdownMenuItem(
                         text        = { Text(addToPlaylistLabel) },
                         leadingIcon = { Icon(Icons.Default.LibraryAdd, null) },
-                        enabled     = state.currentTrack != null && !isEpisode,
+                        enabled     = state.currentTrack != null && !isEpisode && state.currentTrack?.isLocalItem != true,
                         onClick     = { haptics.press(); menuState.dismiss(); onAddToPlaylist() },
                     )
                 },
@@ -1463,3 +1495,6 @@ private class CassetteIdleClock {
     var lastTouch: Long    = SystemClock.uptimeMillis()
     var pressed  : Boolean = false
 }
+
+/** The last AVAILABLE lyrics, read by the outgoing lyrics pane through its fade (audit C1 — see `lyricsShowing`). */
+private class LyricsHolder { var value: LyricsState = LyricsState.None }

@@ -3,6 +3,7 @@ package com.crsmthw.lyra.data.local
 import android.util.Log
 import com.crsmthw.lyra.data.player.PlayerStateManager
 import com.crsmthw.lyra.data.player.RateLimitFamily
+import com.crsmthw.lyra.data.remote.isHttp
 import com.crsmthw.lyra.data.remote.model.SpotifyTrack
 import com.crsmthw.lyra.data.repository.SpotifyRepository
 import kotlinx.coroutines.CoroutineScope
@@ -163,6 +164,12 @@ class LikedSongsIndexer(
                         // No liked list in the cache (the Library never opened Liked Songs).
                         // Do nothing this tick; state.total stays null so the iLyra knows not to show
                         // an index status. The indexer NEVER creates the list.
+                        // The list is gone (never built, Settings → Clear library cache, a sign-out):
+                        // forget the loop's own position too, or the next account's list — when it
+                        // is at least as long as the old one, so no shrink is seen — would be paged
+                        // from the previous account's offset (2026-10-04 evening).
+                        rawOffset = -1
+                        prevSize = -1
                         _state.value = _state.value.copy(cached = null, total = null, complete = false)
                         return@withContext
                     }
@@ -241,7 +248,7 @@ class LikedSongsIndexer(
                             Log.d(TAG, "Indexed page: offset=$rawOffset total=$total cached=${_state.value.cached}")
                         },
                         onFailure = { e ->
-                            if (e.message?.contains("429") == true) {
+                            if (e.isHttp(429)) {
                                 playerStateManager.noteRateLimited(e, "LikedSongsIndexer me/tracks", RateLimitFamily.LIBRARY)
                             }
                         },

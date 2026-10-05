@@ -2,7 +2,7 @@ package com.crsmthw.lyra.ui.components
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.icons.Icons
@@ -154,7 +154,7 @@ fun DevicePickerSheet(
                             }
                         }
                     } else {
-                        items(devices, key = { it.id ?: it.name }) { device ->
+                        itemsIndexed(devices, key = { index, d -> deviceRowKey(d, index) }) { _, device ->
                             DeviceRow(
                                 name     = device.name,
                                 icon     = deviceTypeIcon(device.type),
@@ -272,3 +272,9 @@ private fun deviceTypeIcon(type: String): ImageVector = when (type.lowercase()) 
     "automobile"             -> Icons.Default.DirectionsCar
     else                     -> Icons.Default.Devices
 }
+
+/**
+ * A row key that stays unique for two id-less devices with the same generic name (`id` is documented
+ * Nullable, audit 2026-10-04 C6) and never collides with the list's fixed keys.
+ */
+internal fun deviceRowKey(device: SpotifyDevice, index: Int): String = "device:${device.id ?: "noid"}#$index"

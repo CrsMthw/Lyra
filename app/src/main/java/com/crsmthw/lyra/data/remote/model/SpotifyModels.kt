@@ -121,6 +121,12 @@ data class SpotifyTrack(
     val images      : List<SpotifyImage>?  = null,
     /** The episode's parent show, embedded by the player and queue endpoints. */
     val show        : SpotifyShow?         = null,
+    /**
+     * Track relinking: when Spotify plays a different (market-available) copy of the requested
+     * track, `item.uri` is the copy and this names the uri that was asked for — so the play
+     * confirm (`confirmVerdict`) accepts a relinked track as the requested one (2026-10-04).
+     */
+    @SerializedName("linked_from") val linkedFrom: LinkedTrackRef? = null,
 ) {
     /**
      * True when this item is a podcast episode.
@@ -132,10 +138,27 @@ data class SpotifyTrack(
      * parsed still resolve correctly.
      */
     val isEpisode      : Boolean get() = type == "episode" || uri.startsWith("spotify:episode:")
+    /**
+     * A LOCAL FILE — `spotify:local:<artist>:<album>:<title>:<seconds>` (audit 2026-10-04, decision
+     * 2): Spotify's `is_local` flag OR the uri's prefix. The flag alone is unreliable: Spotify's
+     * concepts example carries it on the playlist-items WRAPPER, and the SDK mirror used to hard-code
+     * it false. Nothing addressable exists for a local file — no catalog id (`id` is null), no page,
+     * no like, no add-to-playlist, no artist / album page — so every affordance that addresses the
+     * API gates on THIS, never on `isLocal` and never on a null check of `id`.
+     */
+    val isLocalItem    : Boolean get() = isLocal || uri.startsWith("spotify:local:")
+    /**
+     * The id `me/library` (like / contains) is asked about, or null when there is nothing to ask:
+     * an episode (a track endpoint would answer about a different item) or a local file. Read off
+     * the uri behind its `spotify:track:` prefix — never `substringAfterLast(':')`, which turns a
+     * local uri into its duration — and never the Gson field, which can be null.
+     */
+    val likeTargetId   : String? get() = if (isEpisode || isLocalItem) null else trackIdOf(uri)
     val primaryArtist  : String  get() = artists?.firstOrNull()?.name ?: show?.name ?: "Unknown"
-    /** Null for an episode — there is no artist page to navigate to. */
-    val primaryArtistId: String? get() = artists?.firstOrNull()?.id
-    val allArtists     : String  get() = artists?.joinToString(" · ") { it.name } ?: primaryArtist
+    /** Null for an episode — there is no artist page to navigate to — and for a Gson-null or blank id. */
+    val primaryArtistId: String? get() = artists?.firstOrNull()?.id.nullIfBlank()
+    /** Every artist joined; the show's name for an episode. `takeIf` BEFORE the join: an empty list is `""`, which an elvis never catches (audit W10). */
+    val allArtists     : String  get() = artists?.takeIf { it.isNotEmpty() }?.joinToString(" · ") { it.name } ?: primaryArtist
     val thumbnailUrl   : String  get() = album?.images?.lastOrNull()?.url
                                          ?: images?.lastOrNull()?.url
                                          ?: show?.images?.lastOrNull()?.url
@@ -156,9 +179,29 @@ data class SpotifyTrack(
      */
     @Suppress("UNNECESSARY_SAFE_CALL")
     val shareUrl       : String? get() =
-        if (isLocal) null
+        if (isLocalItem) null
         else id?.let { "https://open.spotify.com/${if (isEpisode) "episode" else "track"}/$it" }
 }
+
+/**
+ * A Gson-built `String` read honestly: Gson allocates through `Unsafe`, so a declared non-null
+ * field can arrive null (a local file's `id`), and a blank is no id either. The receiver is
+ * nullable on purpose — pass the declared-non-null field straight in, no cast, no `!!`.
+ */
+fun String?.nullIfBlank(): String? = this?.takeIf { it.isNotBlank() }
+
+/**
+ * The catalog id behind a `spotify:track:<id>` uri; null for EVERY other shape — a local file
+ * (`spotify:local:…:127`, whose last segment is the duration), an episode, a context uri, a blank.
+ * The ONE way an id is cut out of a uri (audit 2026-10-04 W12).
+ */
+fun trackIdOf(uri: String?): String? =
+    uri?.takeIf { it.startsWith("spotify:track:") }?.substringAfterLast(':').nullIfBlank()
+
+/** `linked_from` on a relinked track — only the uri is read. Every field nullable (Gson `Unsafe`). */
+data class LinkedTrackRef(
+    val uri: String? = null,
+)
 
 // ── Saved track wrapper (for liked songs) ───────────────────────────────────
 data class SavedTrack(
@@ -218,6 +261,8 @@ data class PlayerStateResponse(
     @SerializedName("shuffle_state")      val shuffleState : Boolean,
     @SerializedName("repeat_state")       val repeatState  : String,  // "off"|"context"|"track"
     val device         : SpotifyDevice?,
+    /** `track` / `episode` / `ad` / `unknown` — logged by the poll whenever `item` is null (2026-10-04). */
+    @SerializedName("currently_playing_type") val currentlyPlayingType: String? = null,
     /**
      * The playback CONTEXT — playlist / album / artist / show — or null when playback was started
      * from a bare `uris` list (a single track tapped in Search, a one-episode show). Reuses
@@ -240,6 +285,16 @@ data class SpotifyDevice(
     @SerializedName("is_private_session") val isPrivateSession    : Boolean  = false,
     @SerializedName("supports_volume")   val supportsVolume       : Boolean  = true,
 )
+
+/**
+ * One-line summary for the player logs — name / type / active / restricted / id prefix. Every field
+ * is read null-safely: Gson can leave the declared-non-null `name` / `type` null.
+ */
+fun SpotifyDevice.describe(): String {
+    val n: String? = name
+    val t: String? = type
+    return "${n ?: "?"}/${t ?: "?"}/active=$isActive/restricted=$isRestricted/id=${id?.take(6) ?: "-"}"
+}
 
 /** Same null-tolerant shape as the paged wrappers above — the array here is `devices`, not `items`. */
 data class DevicesResponse(
@@ -411,7 +466,7 @@ data class AlbumTrack(
     @SerializedName("disc_number")  val discNumber  : Int      = 1,
 ) {
     val primaryArtist: String get() = artists?.firstOrNull()?.name ?: "Unknown"
-    val allArtists   : String get() = artists?.joinToString(" · ") { it.name } ?: primaryArtist
+    val allArtists   : String get() = artists?.takeIf { it.isNotEmpty() }?.joinToString(" · ") { it.name } ?: primaryArtist
 }
 
 data class SpotifyAlbumFull(

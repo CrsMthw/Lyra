@@ -22,6 +22,9 @@ class PlaybackOriginStore(context: Context) {
         runCatching { file.writeText(gson.toJson(origin.toRecord())) }
     }
 
+    /** Deletes the file — sign-out only (`PlayerStateManager.resetForSignOut`, through its one writer). */
+    fun clear() = synchronized(lock) { runCatching { file.delete() } }
+
     fun load(): PlaybackOrigin? = synchronized(lock) {
         runCatching {
             if (!file.exists()) return@runCatching null

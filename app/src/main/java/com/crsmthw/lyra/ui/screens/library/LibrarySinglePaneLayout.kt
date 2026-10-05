@@ -37,6 +37,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.crsmthw.lyra.data.player.albumContextUri
 import com.crsmthw.lyra.R
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import com.crsmthw.lyra.util.NavTransitionMillis
@@ -336,8 +337,10 @@ internal fun SinglePaneLayout(
                         onPlayTopTrack = { idx ->
                             state.topTracks.getOrNull(idx)?.let { tapped ->
                                 playerViewModel.playTrack(
-                                    uri  = tapped.uri,
-                                    uris = state.topTracks.drop(idx).map { it.uri },
+                                    uri      = tapped.uri,
+                                    uris     = state.topTracks.drop(idx).map { it.uri },
+                                    albumUri = tapped.albumContextUri(),
+                                    track    = tapped,
                                 )
                             }
                         },

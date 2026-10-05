@@ -13,9 +13,11 @@ sealed interface PlaybackOrigin {
     data class Context(val contextUri: String) : PlaybackOrigin
 
     /**
-     * Liked Songs. Nothing is stored: the `collection` context REJECTS an `offset`
-     * ("Can't have offset for context type: COLLECTION"), so a restore always rebuilds a `uris`
-     * window from the liked cache, starting at the current track.
+     * Liked Songs. Nothing is stored: a restore addresses the user's `collection` context
+     * (`spotify:user:<id>:collection` + `offset.uri` = the current track — the body Spotify's own
+     * clients send, Lyra's primary Liked body since 2026-10-04) from the cached user id, and only
+     * without one rebuilds a `uris` window from the liked cache, starting at the current track.
+     * (The 2021 "Can't have offset for context type: COLLECTION" 400 is long gone.)
      */
     data object Liked : PlaybackOrigin
 
@@ -30,8 +32,10 @@ sealed interface PlaybackOrigin {
 
     companion object {
         /**
-         * The largest `uris` body `me/player/play` takes — above ~800 it answers 413. The same cap
-         * as `playFromLikedSongs` and the show screen's episode queue.
+         * The largest `uris` body `me/player/play` takes — above ~800 it answers 413. Caps the
+         * Search / Stats lists, the show screen's episode queue, and the liked window
+         * `playFromLikedSongs` sends ONLY when no user id is cached (Liked Songs plays as the
+         * uncapped collection context otherwise, 2026-10-04).
          */
         const val URI_CAP = 750
 
@@ -58,6 +62,15 @@ sealed interface PlaybackOrigin {
  */
 fun isCollectionContext(uri: String?): Boolean =
     uri != null && (uri.endsWith(":collection") || uri.startsWith("spotify:collection"))
+
+/**
+ * `spotify:user:<id>:collection` — the Liked Songs context — from a user id that may be unknown
+ * (Gson-null, blank, or no user cached yet). Null then: the ONE builder of that uri (audit
+ * 2026-10-04 W6 — two Library heroes interpolated `state.user?.id` and could send
+ * `spotify:user:null:collection`). Callers hide the Play / Shuffle affordance on null.
+ */
+fun likedCollectionUri(userId: String?): String? =
+    userId?.takeIf { it.isNotBlank() }?.let { "spotify:user:$it:collection" }
 
 /**
  * The on-disk shape of a [PlaybackOrigin]. Gson allocates via `Unsafe` (defaults never run), so

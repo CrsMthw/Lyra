@@ -85,6 +85,7 @@ fun PlayerCardContent(
     val pickerState by playerViewModel.pickerState.collectAsStateWithLifecycle()
     // A podcast episode can't be liked or added to a playlist — both endpoints are track-only.
     val isEpisode = state.currentTrack?.isEpisode == true
+    val isLocalItem = state.currentTrack?.isLocalItem == true   // no like, no add-to-playlist (audit C3/C4)
     var showDevicePicker by remember { mutableStateOf(false) }
     var showPlaylistPicker by remember { mutableStateOf(false) }
 
@@ -154,14 +155,27 @@ fun PlayerCardContent(
         ImageRequest.Builder(context).data(displayedTrack?.artUrl).crossfade(200).build()
     }
 
-    LaunchedEffect(state.currentTrack?.id) {
+    // Keyed on the URI, never the id (audit W3: two local files share `null`).
+    LaunchedEffect(state.currentTrack?.uri) {
         val incoming = state.currentTrack
-        if (incoming?.id != displayedTrack?.id) {
+        if (incoming?.uri != displayedTrack?.uri) {
             if (incoming != null && displayedTrack != null) {
                 artOffsetX.snapTo(if (skipDirection >= 0) 1500f else -1500f)
             }
-            displayedTrack = incoming
+            // The LATEST copy of the same item: an art fill that landed while `snapTo` was
+            // suspended found the previous item still displayed and adopted nothing.
+            displayedTrack = state.currentTrack?.takeIf { it.uri == incoming?.uri && it.artUrl.isNotEmpty() } ?: incoming
             artOffsetX.animateTo(0f, artSlideInSpec)
+        }
+    }
+    // Same item, new art (the SDK mirror's display-only track filled by its catalog lookup): adopt
+    // it in place, no slide — a separate effect so a running slide-in is never cancelled. See
+    // PlayerScreen's twin.
+    LaunchedEffect(state.currentTrack?.artUrl) {
+        val incoming = state.currentTrack ?: return@LaunchedEffect
+        val shown    = displayedTrack ?: return@LaunchedEffect
+        if (incoming.uri == shown.uri && incoming.artUrl.isNotEmpty() && incoming.artUrl != shown.artUrl) {
+            displayedTrack = incoming
         }
     }
 
@@ -244,7 +258,15 @@ fun PlayerCardContent(
         // Reserve space for all non-art elements (header, track info, seekbar, time,
         // controls, spacers, action bar, bottom padding). Art takes the remainder, capped
         // at the panel width (minus horizontal padding) so it stays square.
-        val reservedChrome = 360.dp
+        // + the quiet status line when one shows (2026-10-04, PlayerStatusHint): the text alone,
+        // or the text and its "Open Spotify" button — so the art shrinks instead of the action
+        // bar being pushed past the panel's height cap.
+        val hintChrome = when {
+            state.showsOpenSpotifyHint -> 96.dp   // up to three bodySmall lines + the button
+            state.playUnconfirmed      -> 28.dp
+            else                       -> 0.dp
+        }
+        val reservedChrome = 360.dp + hintChrome
         val artSize = minOf(
             maxWidth - 40.dp,  // full width minus 2×20dp horizontal padding
             (maxHeight - reservedChrome).coerceAtLeast(60.dp),
@@ -377,8 +399,9 @@ fun PlayerCardContent(
                         color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,
                         overflow = TextOverflow.Ellipsis)
                 }
-                // Hidden for an episode — `me/tracks` liking does not accept one.
-                if (!isEpisode) {
+                // Hidden for an episode — `me/tracks` liking does not accept one — and for a local
+                // file (audit C4): there is no catalog track to like.
+                if (!isEpisode && !isLocalItem) {
                     val likeStateDesc = stringResource(if (state.isLiked) R.string.cd_state_liked else R.string.cd_state_not_liked)
                     IconButton(
                         onClick  = { haptics.toggle(!state.isLiked); playerViewModel.toggleLike() },
@@ -398,11 +421,11 @@ fun PlayerCardContent(
             var dragValue  by remember { mutableFloatStateOf(0f) }
             val progressAnim  = remember { Animatable(state.progress) }
             val snapThreshold = if (state.durationMs > 0L) (3000f / state.durationMs.toFloat()).coerceAtMost(0.5f) else 0.05f
-            val prevTrackIdRef = remember { arrayOf(state.currentTrack?.id) }
-            LaunchedEffect(state.progress, state.currentTrack?.id, state.isPlaying, isDragging) {
+            val prevTrackUriRef = remember { arrayOf(state.currentTrack?.uri) }
+            LaunchedEffect(state.progress, state.currentTrack?.uri, state.isPlaying, isDragging) {
                 val target = if (isDragging) dragValue else state.progress
-                val trackChanged = state.currentTrack?.id != prevTrackIdRef[0]
-                if (trackChanged) prevTrackIdRef[0] = state.currentTrack?.id
+                val trackChanged = state.currentTrack?.uri != prevTrackUriRef[0]
+                if (trackChanged) prevTrackUriRef[0] = state.currentTrack?.uri
                 if (trackChanged || !state.isPlaying || isDragging || abs(target - progressAnim.value) > snapThreshold) {
                     progressAnim.snapTo(target)
                 } else {
@@ -546,6 +569,13 @@ fun PlayerCardContent(
                 }
             }
 
+            // 2026-10-04: the quiet "didn't report" / "Open Spotify" line — nothing unless set.
+            PlayerStatusHint(
+                playUnconfirmed  = state.playUnconfirmed,
+                spotifyNotListed = state.showsOpenSpotifyHint,
+                modifier         = Modifier.padding(top = 8.dp),
+            )
+
             Spacer(Modifier.height(24.dp))
 
             // Action bar — device chip left, S-size icon-only connected button group right
@@ -553,7 +583,7 @@ fun PlayerCardContent(
             // Add-to-playlist is disabled rather than removed for an episode: dropping a segment
             // from a connected ButtonGroup would re-shape its neighbours whenever the now-playing
             // item changed type. The playlist endpoints are track-only.
-            val addEnabled = enabled && !isEpisode
+            val addEnabled = enabled && !isEpisode && !isLocalItem
             val deviceIcon = when (state.currentDevice?.type?.lowercase()) {
                 "computer"               -> Icons.Default.Computer
                 "smartphone"             -> Icons.Default.PhoneAndroid

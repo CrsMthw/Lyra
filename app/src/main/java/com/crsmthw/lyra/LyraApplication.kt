@@ -28,7 +28,7 @@ class LyraApplication : Application(), SingletonImageLoader.Factory {
 
     /**
      * App-scoped collector that keeps the home-screen widget in sync. Keyed on only the fields the
-     * widget renders (track / play / shuffle / repeat) so the 1 s progress tick doesn't churn it.
+     * widget renders (track / art / play / shuffle / repeat) so the 1 s progress tick doesn't churn it.
      * Lives for the process lifetime — covers both the foreground service and any UI being open;
      * when the process is dead the widget simply shows the last persisted snapshot.
      */
@@ -36,7 +36,9 @@ class LyraApplication : Application(), SingletonImageLoader.Factory {
         val player = container.playerStateManager
         appScope.launch {
             player.state
-                .map { Triple(it.currentTrack?.id, it.isPlaying, it.shuffleEnabled to it.repeatState) }
+                // The art url too: the SDK mirror's display-only track (no art) is replaced by its
+                // catalog lookup under the SAME id (2026-10-04), and the widget must pick that up.
+                .map { listOf(it.currentTrack?.uri, it.currentTrack?.artUrl, it.isPlaying, it.shuffleEnabled, it.repeatState) }
                 .distinctUntilChanged()
                 .collect {
                     // A failure here must not kill the collector — otherwise one bad update freezes

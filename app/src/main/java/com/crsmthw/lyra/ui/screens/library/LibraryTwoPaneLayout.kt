@@ -25,6 +25,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import com.crsmthw.lyra.data.player.albumContextUri
 import com.crsmthw.lyra.R
 import com.crsmthw.lyra.ui.screens.player.PlayerViewModel
 import com.crsmthw.lyra.util.horizontalSystemBarsPadding
@@ -127,8 +128,10 @@ internal fun TwoPaneLayout(
                         onPlayTopTrack        = { idx ->
                             state.topTracks.getOrNull(idx)?.let { tapped ->
                                 playerViewModel.playTrack(
-                                    uri  = tapped.uri,
-                                    uris = state.topTracks.drop(idx).map { it.uri },
+                                    uri      = tapped.uri,
+                                    uris     = state.topTracks.drop(idx).map { it.uri },
+                                    albumUri = tapped.albumContextUri(),
+                                    track    = tapped,
                                 )
                             }
                         },
@@ -200,16 +203,26 @@ internal fun TwoPaneLayout(
                     // that `selectPlaylist` flips to the detail content-ready (no mid-transition emission
                     // to make it cull the outgoing) — see `LibraryViewModel.selectPlaylist`.
                     val rightPaneSlideSpec = screenTransitionSpec<IntOffset>()
+                    // The KEY, never the state (audit 2026-10-04 C2): AnimatedContent hashes its
+                    // target in a ScatterMap on every composition, and `LibraryUiState.hashCode`
+                    // walks every cached track — a playlist holding a local file (Gson-null id)
+                    // crashed the unfolded Library on open, from the cache, on every reopen. The
+                    // outgoing pane renders the last state it was given (`RightPaneSnapshots`, a
+                    // plain holder written in composition like single-pane's `PaneStateHolder`);
+                    // the current pane always renders the live state.
+                    val paneKey   = state.currentPlaylist?.id to (state.currentPlaylist == null)
+                    val snapshots = remember { RightPaneSnapshots() }
+                    snapshots.put(paneKey, state)
                     AnimatedContent(
-                        targetState    = state,
-                        contentKey     = { s -> s.currentPlaylist?.id to (s.currentPlaylist == null) },
+                        targetState    = paneKey,
                         modifier       = Modifier.fillMaxSize(),
                         transitionSpec = {
                             slideInHorizontally(rightPaneSlideSpec) { it } togetherWith
                             slideOutHorizontally(rightPaneSlideSpec) { -it }
                         },
                         label = "right_pane",
-                    ) { snapshot ->
+                    ) { key ->
+                        val snapshot = if (key == paneKey) state else snapshots.get(key) ?: state
                         val showPlaceholder = snapshot.currentPlaylist == null &&
                             !snapshot.isLoadingTracks && snapshot.currentTracks.isEmpty()
                         if (showPlaceholder) {
@@ -261,4 +274,16 @@ internal fun TwoPaneLayout(
             alpha    = 0.20f,
         )
     }
+}
+
+/**
+ * The last [LibraryUiState] rendered under each right-pane key (playlist id, isLiked) — the
+ * outgoing pane's included, so a lateral swap keeps rendering what it showed. Three entries.
+ */
+private class RightPaneSnapshots {
+    private val map = object : LinkedHashMap<Pair<String?, Boolean>, LibraryUiState>(4, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Pair<String?, Boolean>, LibraryUiState>?) = size > 3
+    }
+    fun put(key: Pair<String?, Boolean>, state: LibraryUiState) { map[key] = state }
+    fun get(key: Pair<String?, Boolean>): LibraryUiState? = map[key]
 }

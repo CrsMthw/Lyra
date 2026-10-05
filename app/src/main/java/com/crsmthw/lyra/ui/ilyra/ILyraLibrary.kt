@@ -6,6 +6,7 @@ import com.crsmthw.lyra.data.local.LibraryCache
 import com.crsmthw.lyra.data.local.LibraryCacheData
 import com.crsmthw.lyra.data.player.PlayerStateManager
 import com.crsmthw.lyra.data.player.RateLimitFamily
+import com.crsmthw.lyra.data.remote.isHttp
 import com.crsmthw.lyra.data.remote.model.AlbumTrack
 import com.crsmthw.lyra.data.remote.model.ShowPage
 import com.crsmthw.lyra.data.remote.model.SpotifyAlbum
@@ -41,9 +42,9 @@ class ILyraLibrary(
         if (playerStateManager.isRateLimited(RateLimitFamily.LIBRARY)) Result.failure(RateLimitedException())
         else Result.success(Unit)
 
-    /** Marks the global rate-limit gate when a 429 is detected in a failure message. */
+    /** Marks the global rate-limit gate on a 429 (the typed status, never the message text). */
     private fun noteIfRateLimited(error: Throwable?) {
-        if (error?.message?.contains("429") == true) playerStateManager.noteRateLimited(error, "ILyraLibrary", RateLimitFamily.LIBRARY)
+        if (error.isHttp(429)) playerStateManager.noteRateLimited(error, "ILyraLibrary", RateLimitFamily.LIBRARY)
     }
 
     private suspend fun loadCache(): LibraryCacheData? = withContext(Dispatchers.IO) {

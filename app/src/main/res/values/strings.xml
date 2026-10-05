@@ -61,6 +61,11 @@
     <string name="player_this_device">This device</string>
     <string name="player_this_device_hint">Use this ONLY if your device isn\'t in the list below — wakes Spotify up and transfers playback here.</string>
     <string name="player_no_device">No device</string>
+    <!-- 2026-10-04: a play Spotify accepted but never reported playing (PlayerUiState.playUnconfirmed) -->
+    <string name="player_play_unconfirmed">Spotify didn\'t report the song playing.</string>
+    <!-- 2026-10-04: the wake restore waited 15 s and the phone is not listed as a Spotify device -->
+    <string name="player_spotify_not_listed">Spotify isn\'t visible to Lyra right now, a known bug in recent versions of the Spotify Android app. Open the Spotify app once.</string>
+    <string name="player_open_spotify">Open Spotify</string>
     <string name="player_device_picker_empty">No devices found</string>
     <string name="player_device_picker_retry">Retry</string>
     <string name="player_device_volume">Device volume</string>
@@ -156,6 +161,8 @@
     <string name="queue_next_up">Next up</string>
     <string name="queue_empty">Nothing up next</string>
     <string name="queue_nothing_playing">Nothing playing right now</string>
+    <!-- 2026-10-04 evening: the player mirror reads the App Remote (Spotify dropped off Connect; the queue is blind). -->
+    <string name="queue_connect_dropout_note">Spotify isn\'t connected to Spotify Connect right now</string>
 
     <!-- Settings -->
     <string name="settings_title">Settings</string>
@@ -395,6 +402,8 @@
     <string name="library_rate_limit_wait">Cached data is shown. Wait, then retry.</string>
     <string name="library_rate_limit_reopen">Wait, then reopen.</string>
     <string name="library_partial_load_error">Some playlists could not be loaded</string>
+    <!-- A refresh whose 401 survived TokenManager's token refresh (2026-10-04) — never Spotify's raw body. -->
+    <string name="library_session_refresh_failed">Couldn\'t refresh the Spotify session. Pull to refresh to try again.</string>
     <!-- (end hygiene) -->
     <!-- Playlist editing (lane: playlist-edit) -->
     <string name="edit_playlist_details">Edit details</string>

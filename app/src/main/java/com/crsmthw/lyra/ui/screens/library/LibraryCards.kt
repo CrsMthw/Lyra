@@ -35,7 +35,8 @@ import java.io.File
 internal fun LikedSongsCard(
     count             : Int,
     onOpen            : () -> Unit,
-    onPlay            : () -> Unit,
+    /** Null = Liked Songs cannot be played yet (no user id for the collection uri): the button is disabled. */
+    onPlay            : (() -> Unit)?,
     modifier          : Modifier = Modifier,
     isSelected        : Boolean = false,
     artSharedModifier : Modifier = Modifier,   // container-transform source — applied to the art tile
@@ -77,8 +78,9 @@ internal fun LikedSongsCard(
             }
 
             SmallFloatingActionButton(
-                onClick         = onPlay,
-                containerColor  = MaterialTheme.colorScheme.primaryContainer,
+                onClick         = onPlay ?: {},
+                containerColor  = if (onPlay != null) MaterialTheme.colorScheme.primaryContainer
+                                  else MaterialTheme.colorScheme.surfaceVariant,
                 contentColor    = MaterialTheme.colorScheme.onPrimaryContainer,
                 elevation       = FloatingActionButtonDefaults.elevation(defaultElevation = 4.dp),
                 modifier        = Modifier.size(40.dp),

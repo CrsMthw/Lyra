@@ -1,5 +1,6 @@
 package com.crsmthw.lyra.ui.screens.library
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -11,6 +12,7 @@ import com.crsmthw.lyra.data.local.ReorderCalculator
 import com.crsmthw.lyra.data.player.PlaybackOrigin
 import com.crsmthw.lyra.data.player.PlayerStateManager
 import com.crsmthw.lyra.data.remote.SpotifyRemoteManager
+import com.crsmthw.lyra.data.remote.isHttp
 import com.crsmthw.lyra.data.remote.model.*
 import com.crsmthw.lyra.data.repository.PartialRemovalException
 import com.crsmthw.lyra.data.repository.SettingsRepository
@@ -81,6 +83,13 @@ data class LibraryUiState(
     /** Epoch ms until which Spotify's LIBRARY endpoints are rate-limited (0 = open) — the shared gate, so the bar's warning icon also covers the indexer's 429s (2026-09-25). */
     val libraryRateLimitUntil : Long                   = 0L,
     val refreshPartial        : Boolean                = false, // sweep incomplete — UI resolves fallback from string resource
+    /**
+     * [refreshError] is a 401 that survived TokenManager's refresh-and-retry (2026-10-04: a DNS blip
+     * failed the token refresh and the dialog showed Spotify's raw "Missing/invalid/expired access
+     * token" JSON). The UI words it itself (`library_session_refresh_failed`) — the ViewModel never
+     * carries English. Written ONLY alongside [refreshError] ([withRefreshError] / the sweep sites).
+     */
+    val refreshSessionFailed  : Boolean                = false,
     val user                  : SpotifyUser?           = null,
     val playlistsWithMosaics  : Set<String>            = emptySet(),
     // ── Multi-select removal (owned playlists only) ──
@@ -243,7 +252,8 @@ class LibraryViewModel(
         invalidateReorderSession()
         _uiState.update { it.copy(
             selectionMode       = true,
-            selectedUris        = if (uri != null) setOf(uri) else emptySet(),
+            // A local file cannot be removed by uri (Spotify documents no way to today — audit W13).
+            selectedUris        = if (uri != null && !uri.startsWith("spotify:local:")) setOf(uri) else emptySet(),
             reorderMode         = false,
             isLoadingReorder    = false,
             isCommittingReorder = false,
@@ -253,6 +263,7 @@ class LibraryViewModel(
 
     /** A tap (or a long-press) on a row while in selection mode: checks / unchecks it. */
     fun toggleTrackSelection(uri: String) {
+        if (uri.startsWith("spotify:local:")) return   // not removable by uri (audit W13) — never selected
         _uiState.update { s ->
             if (!s.selectionMode) s
             else s.copy(
@@ -277,7 +288,7 @@ class LibraryViewModel(
     fun removeSelectedTracks() {
         val s        = _uiState.value
         val playlist = s.currentPlaylist ?: return
-        val uris     = s.selectedUris.toList()
+        val uris     = s.selectedUris.filterNot { it.startsWith("spotify:local:") }
         if (uris.isEmpty() || s.isRemovingSelection) return
         _uiState.update { it.copy(isRemovingSelection = true, removeResult = null) }
         viewModelScope.launch {
@@ -693,10 +704,11 @@ class LibraryViewModel(
                             currentTracks   = if (wasOpen) emptyList() else s.currentTracks,
                             refreshError    = null,
                             refreshPartial  = false,
+                            refreshSessionFailed = false,
                         ).let { if (wasOpen) it.modesCleared() else it }
                     }
                 },
-                onFailure = { e -> _uiState.update { it.copy(refreshError = e.message) } },
+                onFailure = { e -> _uiState.update { it.withRefreshError(e) } },
             )
         }
     }
@@ -978,7 +990,7 @@ class LibraryViewModel(
 
     fun loadLibrary() {
         viewModelScope.launch {
-            _uiState.update { it.copy(error = null, refreshError = null, refreshPartial = false) }
+            _uiState.update { it.copy(error = null, refreshError = null, refreshPartial = false, refreshSessionFailed = false) }
 
             // Show cached data immediately so the screen is never blank
             val cached = withContext(Dispatchers.IO) { cache.load() }
@@ -1003,7 +1015,10 @@ class LibraryViewModel(
 
             // Refresh from network (silently if we have cached data)
             repository.getCurrentUser().fold(
-                onSuccess = { user -> _uiState.update { it.copy(user = user) } },
+                onSuccess = { user ->
+                    Log.d("LibraryVM", "me: id=${user.id} name=${user.displayName}")
+                    _uiState.update { it.copy(user = user) }
+                },
                 onFailure = { },
             )
 
@@ -1016,11 +1031,10 @@ class LibraryViewModel(
             if (playlistsResult.isFailure) {
                 val e = playlistsResult.exceptionOrNull()
                 if (!e.isTransientNetworkError()) {
-                    val msg = e?.message
                     if (hasCache) {
-                        _uiState.update { it.copy(refreshError = msg) }
+                        _uiState.update { it.withRefreshError(e) }
                     } else {
-                        _uiState.update { it.copy(error = msg, isLoading = false) }
+                        _uiState.update { it.copy(error = e?.message, isLoading = false) }
                     }
                 }
                 return@launch
@@ -1034,9 +1048,10 @@ class LibraryViewModel(
                         playlistCount  = sweep.total,
                         refreshError   = if (!sweep.complete) sweep.error?.message else s.refreshError,
                         refreshPartial = if (!sweep.complete) true else s.refreshPartial,
+                        refreshSessionFailed = if (!sweep.complete) sweep.error.isSessionRefreshFailure() else s.refreshSessionFailed,
                     )
                 else if (!sweep.complete)
-                    s.copy(refreshError = sweep.error?.message, refreshPartial = true)
+                    s.withRefreshError(sweep.error).copy(refreshPartial = true)
                 else s
             }
 
@@ -1130,11 +1145,12 @@ class LibraryViewModel(
                     )
                 }
                 ctx.type == "artist" -> {
-                    val track  = h.track ?: continue
-                    val artist = track.artists?.firstOrNull() ?: continue
+                    val track    = h.track ?: continue
+                    val artist   = track.artists?.firstOrNull() ?: continue
+                    val artistId = artist.id.nullIfBlank() ?: continue   // Gson-null for a local file (audit C7)
                     items += JumpBackInItem(
                         type   = "artist",
-                        id     = artist.id,
+                        id     = artistId,
                         uri    = uri,
                         title  = artist.name,
                         artUrl = track.artUrl.takeIf { it.isNotBlank() },
@@ -1150,14 +1166,17 @@ class LibraryViewModel(
             for (h in resp.items.orEmpty()) {
                 if (items.size >= MAX_JUMP_BACK_IN) break
                 val track = h.track ?: continue
-                val album = track.album ?: continue
-                val uri   = "spotify:album:${album.id}"
+                if (track.isLocalItem) continue                           // its album has no id (audit C7)
+                val album     = track.album ?: continue
+                val albumId   = album.id.nullIfBlank() ?: continue        // Gson can leave it null
+                val albumName = album.name.nullIfBlank() ?: continue
+                val uri       = "spotify:album:$albumId"
                 if (!seen.add(uri)) continue
                 items += JumpBackInItem(
                     type     = "album",
-                    id       = album.id,
+                    id       = albumId,
                     uri      = uri,
-                    title    = album.name,
+                    title    = albumName,
                     subtitle = track.allArtists,
                     artUrl   = track.artUrl.takeIf { it.isNotBlank() },
                 )
@@ -1324,10 +1343,13 @@ class LibraryViewModel(
 
     fun refreshLibrary() {
         if (_uiState.value.isLibraryRefreshing) return
-        _uiState.update { it.copy(isLibraryRefreshing = true, refreshError = null, refreshPartial = false) }
+        _uiState.update { it.copy(isLibraryRefreshing = true, refreshError = null, refreshPartial = false, refreshSessionFailed = false) }
         viewModelScope.launch {
             repository.getCurrentUser().fold(
-                onSuccess = { user -> _uiState.update { it.copy(user = user) } },
+                onSuccess = { user ->
+                    Log.d("LibraryVM", "me: id=${user.id} name=${user.displayName}")
+                    _uiState.update { it.copy(user = user) }
+                },
                 onFailure = { },
             )
 
@@ -1337,7 +1359,7 @@ class LibraryViewModel(
             if (playlistsResult.isFailure) {
                 val e = playlistsResult.exceptionOrNull()
                 if (!e.isTransientNetworkError()) {
-                    _uiState.update { it.copy(refreshError = e?.message) }
+                    _uiState.update { it.withRefreshError(e) }
                 }
                 _uiState.update { it.copy(isLibraryRefreshing = false) }
                 return@launch
@@ -1351,9 +1373,10 @@ class LibraryViewModel(
                         playlistCount  = sweep.total,
                         refreshError   = if (!sweep.complete) sweep.error?.message else s.refreshError,
                         refreshPartial = if (!sweep.complete) true else s.refreshPartial,
+                        refreshSessionFailed = if (!sweep.complete) sweep.error.isSessionRefreshFailure() else s.refreshSessionFailed,
                     )
                 else if (!sweep.complete)
-                    s.copy(refreshError = sweep.error?.message, refreshPartial = true)
+                    s.withRefreshError(sweep.error).copy(refreshPartial = true)
                 else s
             }
 
@@ -1494,7 +1517,7 @@ class LibraryViewModel(
                 },
                 onFailure = { e ->
                     if (_uiState.value.currentPlaylist?.id != playlist.id) return@fold
-                    val msg = if (e.message?.contains("403") == true)
+                    val msg = if (e.isHttp(403))
                         "Track list unavailable for this playlist. You can still play it with the ▶ button."
                     else e.message
                     _uiState.update { it.copy(error = msg, isLoadingTracks = false) }
@@ -1838,6 +1861,17 @@ private fun SpotifyPlaylist.withTrackCount(total: Int): SpotifyPlaylist =
 private fun List<SpotifyPlaylist>.withTrackCount(playlistId: String, total: Int): List<SpotifyPlaylist> =
     if (none { it.id == playlistId && it.trackCount != total }) this
     else map { if (it.id == playlistId) it.withTrackCount(total) else it }
+
+/**
+ * A `HTTP 401` from the API client: TokenManager has already tried to refresh the token (and
+ * retried a network failure once) — the session could not be refreshed. Shown as
+ * `library_session_refresh_failed`, never as Spotify's raw body (2026-10-04).
+ */
+private fun Throwable?.isSessionRefreshFailure(): Boolean = isHttp(401)
+
+/** The non-blocking refresh error for [e], with its session flag — the ONE writer of the pair. */
+private fun LibraryUiState.withRefreshError(e: Throwable?): LibraryUiState =
+    copy(refreshError = e?.message, refreshSessionFailed = e.isSessionRefreshFailure())
 
 private fun Throwable?.isTransientNetworkError(): Boolean =
     this?.cause is java.net.UnknownHostException ||

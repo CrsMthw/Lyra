@@ -24,6 +24,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
@@ -70,6 +71,7 @@ fun QueueScreen(
     onOpenArtist: (String) -> Unit = {},
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val connectDropout by viewModel.connectDropout.collectAsStateWithLifecycle()
     // Hoisted at screen level (`rememberTopAppBarState` is `rememberSaveable`) so the bar's collapse
     // survives navigating away to an album / artist and back.
     val barState = rememberTopAppBarState()
@@ -164,6 +166,7 @@ fun QueueScreen(
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
+                            if (connectDropout) ConnectDropoutNote()
                         }
                     }
                     else -> {
@@ -199,7 +202,7 @@ fun QueueScreen(
                                         // to artist) addresses a track-only endpoint or an object an
                                         // episode does not have. A null handler disables it.
                                         onLongClick = if (track.isEpisode) null else {
-                                            { viewModel.trackActions.open(track.toTrackActionTarget()) }
+                                            { track.toTrackActionTarget()?.let { viewModel.trackActions.open(it) } }
                                         },
                                     )
                                 }
@@ -233,6 +236,7 @@ fun QueueScreen(
                                             style = MaterialTheme.typography.bodyMedium,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
+                                        if (connectDropout) ConnectDropoutNote()
                                     }
                                 }
                             } else {
@@ -252,7 +256,7 @@ fun QueueScreen(
                                         track       = track,
                                         // See NowPlayingCard above — episodes get no actions sheet.
                                         onLongClick = if (track.isEpisode) null else {
-                                            { viewModel.trackActions.open(track.toTrackActionTarget()) }
+                                            { track.toTrackActionTarget()?.let { viewModel.trackActions.open(it) } }
                                         },
                                     )
                                 }
@@ -407,4 +411,20 @@ private fun QueueTrackItem(track: SpotifyTrack, onLongClick: (() -> Unit)? = nul
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
+}
+
+/**
+ * One quiet line under the queue's empty state while the player mirror reads the App Remote:
+ * Spotify has dropped off Spotify Connect, so the Web API (and its queue) cannot see it.
+ */
+@Composable
+private fun ConnectDropoutNote() {
+    Spacer(Modifier.height(8.dp))
+    Text(
+        text      = stringResource(R.string.queue_connect_dropout_note),
+        style     = MaterialTheme.typography.bodySmall,
+        color     = MaterialTheme.colorScheme.onSurfaceVariant,
+        textAlign = TextAlign.Center,
+        modifier  = Modifier.padding(horizontal = 32.dp),
+    )
 }

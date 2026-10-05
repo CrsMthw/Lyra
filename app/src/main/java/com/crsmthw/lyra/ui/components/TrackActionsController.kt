@@ -6,6 +6,8 @@ import com.crsmthw.lyra.data.remote.model.SpotifyAlbum
 import com.crsmthw.lyra.data.remote.model.SpotifyAlbumFull
 import com.crsmthw.lyra.data.remote.model.SpotifyPlaylist
 import com.crsmthw.lyra.data.remote.model.SpotifyTrack
+import com.crsmthw.lyra.data.remote.model.trackIdOf
+import com.crsmthw.lyra.data.remote.isInsufficientScope
 import com.crsmthw.lyra.data.repository.SpotifyRepository
 import com.crsmthw.lyra.ui.screens.player.AddToPlaylistResult
 import com.crsmthw.lyra.ui.screens.player.PlaylistPickerState
@@ -41,18 +43,27 @@ data class TrackActionTarget(
 /** The owned playlist the long-pressed row currently lives in, if any. */
 data class RemovablePlaylist(val id: String, val name: String)
 
-/** Maps a full [SpotifyTrack] (Library, Search, Artist top-tracks, Queue) to a menu target. */
-fun SpotifyTrack.toTrackActionTarget(removable: RemovablePlaylist? = null) = TrackActionTarget(
-    id        = id,
-    uri       = uri,
-    name      = name,
-    subtitle  = allArtists,
-    artUrl    = artUrl,
-    albumId   = album?.id,
-    artistId  = primaryArtistId,
-    removable = removable,
-    track     = this,
-)
+/**
+ * Maps a full [SpotifyTrack] (Library, Search, Artist top-tracks, Queue) to a menu target — or
+ * NULL for a local file (audit 2026-10-04 C3): nothing in the sheet can address one (no like, no
+ * add-to-playlist, no album or artist page, no share), and the constructor's non-null `id` used to
+ * throw on the main thread for its Gson-null id. Callers simply do not open the sheet on null.
+ */
+fun SpotifyTrack.toTrackActionTarget(removable: RemovablePlaylist? = null): TrackActionTarget? {
+    if (isLocalItem) return null
+    val id = trackIdOf(uri) ?: return null
+    return TrackActionTarget(
+        id        = id,
+        uri       = uri,
+        name      = name,
+        subtitle  = allArtists,
+        artUrl    = artUrl,
+        albumId   = album?.id,
+        artistId  = primaryArtistId,
+        removable = removable,
+        track     = this,
+    )
+}
 
 /**
  * Maps an [AlbumTrack] (album-detail rows carry no nested album) to a menu target, reconstructing a
@@ -265,7 +276,13 @@ class TrackActionsController(
         _pickerState.update { it.copy(addResult = null) }
     }
 
+    /**
+     * "Reconnect Spotify" ONLY for a 403 whose body names the scope (audit 2026-10-04 W7): the
+     * playlist-modify scopes are requested, so a plain 403 "Forbidden" is a playlist the user does
+     * not own — reconnecting cannot fix that, and the old substring test also matched a 429's
+     * `Retry-After=1403`.
+     */
     private fun errorResult(e: Throwable): AddToPlaylistResult =
-        if (e.message?.contains("403") == true) AddToPlaylistResult.NeedsReconnect
+        if (e.isInsufficientScope()) AddToPlaylistResult.NeedsReconnect
         else AddToPlaylistResult.Error(e.message)
 }

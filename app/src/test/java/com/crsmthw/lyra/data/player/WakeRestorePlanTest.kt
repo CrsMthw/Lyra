@@ -196,4 +196,14 @@ class WakeRestorePlanTest {
         assertEquals(750, origin.uris.size)
         assertEquals(t1, origin.uris.first())
     }
+
+    // ── likedCollectionUri (audit 2026-10-04 W6) ─────────────────────────────
+
+    @Test
+    fun `likedCollectionUri builds the collection uri only from a real user id`() {
+        assertEquals("spotify:user:1230128430:collection", likedCollectionUri("1230128430"))
+        assertNull(likedCollectionUri(null))
+        assertNull(likedCollectionUri(""))
+        assertNull(likedCollectionUri("  "))
+    }
 }

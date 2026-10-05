@@ -33,6 +33,15 @@ class QueueViewModel(
     private val _uiState = MutableStateFlow(QueueUiState())
     val uiState: StateFlow<QueueUiState> = _uiState
 
+    /**
+     * True while the player mirror reads the App Remote (`PlayerStateManager.mirrorSource` = SDK —
+     * Spotify has dropped off Connect, `me/player/queue` is blind and the SDK has no queue) AND the
+     * local Spotify app is NOT paused — a real dropout during playback, not Connect merely idle with
+     * the App Remote bound (`PlayerStateManager.connectDropout`, 2026-10-04 evening follow-up): the
+     * screen keeps its empty state and adds one quiet line saying why.
+     */
+    val connectDropout: StateFlow<Boolean> = playerStateManager.connectDropout
+
     /** Backs the song touch-and-hold menu for queue rows. */
     val trackActions = TrackActionsController(repository, libraryCache, viewModelScope)
 

@@ -67,7 +67,8 @@ class LyraForegroundService : Service() {
         val manager = (application as LyraApplication).container.playerStateManager
         scope.launch {
             manager.state
-                .distinctUntilChangedBy { Triple(it.currentTrack?.id, it.sleepTimerMinutes, it.isPlaying) }
+                // By URI, never id (audit 2026-10-04 W3): two local files share a null id.
+                .distinctUntilChangedBy { Triple(it.currentTrack?.uri, it.sleepTimerMinutes, it.isPlaying) }
                 .collect { state ->
                     notificationManager.notify(
                         NOTIFICATION_ID,

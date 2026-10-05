@@ -23,13 +23,22 @@ sealed interface ILyraEffect {
         val uris: List<String>? = null,
         val startPositionMs: Long? = null,
         val shuffle: Boolean? = false,
+        /**
+         * The track's album (`spotify:album:<id>`) where the row carries one — the fallback
+         * context when a play leaves Spotify EMPTY (2026-10-04). Null = looked up only if needed.
+         */
+        val albumUri: String? = null,
     ) : ILyraEffect
 
-    /** → PlayerViewModel.playFromLikedSongs(uri, shuffle) — the cached-uris path Liked Songs uses. */
+    /** → PlayerViewModel.playFromLikedSongs(uri, shuffle) — the Liked `collection` context positioned on [uri]. */
     data class PlayLikedSong(val uri: String, val shuffle: Boolean? = false) : ILyraEffect
 
-    /** → PlayerViewModel.shuffleContext(contextUri) — shuffle on, then play the context. */
-    data class ShuffleContext(val contextUri: String) : ILyraEffect
+    /**
+     * → PlayerViewModel.shuffleContext(contextUri, itemCount) — shuffle on, then play the context
+     * from a random raw position below [itemCount] (the context's server TOTAL — for the Liked
+     * collection the cached liked total, never a row count; null = no offset, Spotify's choice).
+     */
+    data class ShuffleContext(val contextUri: String, val itemCount: Int? = null) : ILyraEffect
 
     data object PlayPause : ILyraEffect
     data object Next : ILyraEffect

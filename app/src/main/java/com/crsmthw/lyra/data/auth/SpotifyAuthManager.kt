@@ -2,6 +2,7 @@ package com.crsmthw.lyra.data.auth
 
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import androidx.core.net.toUri
 import com.crsmthw.lyra.data.local.EncryptedPrefs
 import kotlinx.coroutines.channels.BufferOverflow
@@ -12,6 +13,9 @@ import net.openid.appauth.*
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
+
+/** The refresh path's log tag — shared with `TokenManager`, so one logcat filter shows the whole refresh. */
+private const val REFRESH_LOG_TAG = "TokenManager"
 
 /**
  * Handles Spotify OAuth 2.0 PKCE flow via AppAuth.
@@ -131,6 +135,9 @@ class SpotifyAuthManager(
                             // one that reports itself available and silently returns nothing.
                             scope           = tokenResp.scope,
                         )
+                        // Shapes only — never a token value.
+                        Log.d(REFRESH_LOG_TAG, "token endpoint: refreshed (new refresh token: " +
+                              "${tokenResp.refreshToken != null}, scope returned: ${tokenResp.scope != null})")
                         cont.resume(Result.success(Unit))
                     }
                     ex != null -> cont.resume(Result.failure(ex))
@@ -145,6 +152,7 @@ class SpotifyAuthManager(
         val refreshToken = encryptedPrefs.refreshToken
         val clientId     = encryptedPrefs.clientId
         if (refreshToken.isBlank() || clientId.isBlank()) {
+            Log.d(REFRESH_LOG_TAG, "token endpoint: not called — no refresh token / client ID stored")
             return Result.failure(Exception("No refresh token / client ID available"))
         }
 
@@ -173,6 +181,9 @@ class SpotifyAuthManager(
                             // reconnect hint exists to avoid.
                             scope           = tokenResp.scope,
                         )
+                        // Shapes only — never a token value.
+                        Log.d(REFRESH_LOG_TAG, "token endpoint: refreshed (new refresh token: " +
+                              "${tokenResp.refreshToken != null}, scope returned: ${tokenResp.scope != null})")
                         cont.resume(Result.success(Unit))
                     }
                     ex != null -> {
@@ -188,9 +199,17 @@ class SpotifyAuthManager(
                             encryptedPrefs.clearTokens()
                             _sessionExpired.tryEmit(Unit)
                         }
+                        Log.d(REFRESH_LOG_TAG, "token endpoint: " +
+                              (if (invalidGrant) "invalid_grant — tokens discarded, sign-in required"
+                               else "failed — type=${ex.type} code=${ex.code} error=${ex.error} " +
+                                    "${ex.message?.take(160)} (cause ${ex.cause?.javaClass?.simpleName}: " +
+                                    "${ex.cause?.message?.take(160)})"))
                         cont.resume(Result.failure(ex))
                     }
-                    else       -> cont.resume(Result.failure(Exception("Refresh failed")))
+                    else       -> {
+                        Log.d(REFRESH_LOG_TAG, "token endpoint: no response and no error")
+                        cont.resume(Result.failure(Exception("Refresh failed")))
+                    }
                 }
             }
         }

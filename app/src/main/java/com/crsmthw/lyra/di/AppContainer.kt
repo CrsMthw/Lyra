@@ -170,4 +170,32 @@ class AppContainer(context: Context) {
     // ── Home-screen widget ────────────────────────────────────────────────────
     val nowPlayingWidgetUpdater =
         com.crsmthw.lyra.widget.NowPlayingWidgetUpdater(context, imageLoader, dataStore)
+
+    /**
+     * THE sign-out (Settings → Log out, 2026-10-04 evening) — clears the ACCOUNT, not the app:
+     *  1. the tokens + granted scopes (`SpotifyAuthManager.logout`) — first, so nothing after this
+     *     can fetch more of the old account;
+     *  2. `LibraryCache.clearAccount` — playlists, every track list incl. Liked Songs and the liked
+     *     indexer's persisted raw offset, the cached user (the id the Liked collection body is built
+     *     from), For you, albums / artists / shows, AND Search's recent searches; the playlist
+     *     mosaics with them (as Settings → Clear library cache does);
+     *  3. `PlayerStateManager.resetForSignOut` — the player mirror, the pending hold, the shuffle
+     *     debt and the playback-origin file (deleted through the manager's one origin writer).
+     * Synchronous on purpose: a delete that landed after the next account's first save would wipe
+     * THAT account's data. The liked indexer forgets its in-memory offset when it next finds no
+     * list. Kept: the settings (DataStore), the Client ID, the image cache, the App Remote bind
+     * (the on-device Spotify app's own account), `PlayerViewModel.knownLocalDeviceId` (per phone).
+     * The Library / Search ViewModels are back-stack-scoped and go with the `popUpTo(0)` that
+     * follows. A session that EXPIRED (`sessionExpired`, `invalid_grant`) is not a sign-out and
+     * keeps the caches — it is usually the same account signing back in.
+     */
+    fun signOut() {
+        authManager.logout()
+        libraryCache.clearAccount()
+        runCatching {
+            mosaicGenerator.dir.deleteRecursively()
+            mosaicGenerator.dir.mkdirs()
+        }
+        playerStateManager.resetForSignOut()
+    }
 }

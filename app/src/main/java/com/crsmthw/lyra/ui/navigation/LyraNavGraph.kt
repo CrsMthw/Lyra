@@ -499,8 +499,8 @@ fun LyraNavGraph(
                     onAlbumClick          = { albumId -> safePush(Screen.AlbumDetail.createRoute(albumId)) },
                     onArtistClick         = { artistId -> safePush(Screen.ArtistDetail.createRoute(artistId)) },
                     onShowClick           = { showId -> safePush(Screen.ShowDetail.createRoute(showId)) },
-                    onTrackClick          = { uri, uris ->
-                        playerVm.playTrack(uri, uris = uris)
+                    onTrackClick          = { uri, uris, albumUri, track ->
+                        playerVm.playTrack(uri, uris = uris, albumUri = albumUri, track = track)
                         safePush(Screen.Player.route)
                     },
                     sharedTransitionScope = this@SharedTransitionLayout,
@@ -614,7 +614,8 @@ fun LyraNavGraph(
                     viewModel = vm,
                     onBack    = ::safeNavigateUp,
                     onLogout  = {
-                        container.authManager.logout()
+                        // Tokens AND the account's caches (AppContainer.signOut, 2026-10-04 evening).
+                        container.signOut()
                         navController.navigate(Screen.Auth.route) {
                             popUpTo(0) { inclusive = true }
                             launchSingleTop = true

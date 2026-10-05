@@ -53,7 +53,15 @@ class NowPlayingWidgetUpdater(
         }
 
         val artUrl = track.artUrl.takeIf { it.isNotBlank() }
-        if (artUrl != null && artUrl != lastArtUrl) {
+        if (artUrl == null) {
+            // An item with no art yet — the SDK mirror's display-only track before its catalog
+            // lookup lands (2026-10-04) — shows NO art, never the previous song's (the mirror's
+            // rule); the lookup's url arrives as a new state and loads below.
+            lastArtUrl  = null
+            lastArtFile = null
+            lastAccent  = SPOTIFY_GREEN
+            lastBg      = SPOTIFY_GREEN
+        } else if (artUrl != lastArtUrl) {
             loadArtAndPalette(artUrl)?.let { extracted ->
                 lastArtUrl  = artUrl
                 lastArtFile = extracted.file

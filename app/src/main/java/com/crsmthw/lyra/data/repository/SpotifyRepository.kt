@@ -2,10 +2,12 @@ package com.crsmthw.lyra.data.repository
 
 import com.crsmthw.lyra.data.local.EncryptedPrefs
 import com.crsmthw.lyra.data.remote.SpotifyApiService
+import com.crsmthw.lyra.data.remote.SpotifyHttpException
 import com.crsmthw.lyra.data.remote.model.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import retrofit2.HttpException
+import retrofit2.Response
 
 /** Hard cap the Search endpoint puts on `limit` — also the step between search pages. */
 const val SEARCH_PAGE_SIZE = 10
@@ -100,6 +102,11 @@ class SpotifyRepository(
         api.getFollowedArtists(after = after)
     }
 
+    /** One `GET tracks/{id}` — a play's album fallback when the album is unknown (2026-10-04). */
+    suspend fun getTrack(id: String): Result<SpotifyTrack> = safeCall {
+        api.getTrack(id)
+    }
+
     suspend fun getAlbum(id: String): Result<SpotifyAlbumFull> = safeCall {
         api.getAlbum(id)
     }
@@ -185,7 +192,7 @@ class SpotifyRepository(
     }
 
     suspend fun getPlayerState(): Result<PlayerStateResponse?> = safeCall {
-        api.getPlayerState()
+        api.getPlayerState().bodyOrNullOnNoContent()
     }
 
     suspend fun play(
@@ -287,11 +294,11 @@ class SpotifyRepository(
     }
 
     suspend fun getQueue(): Result<QueueResponse?> = safeCall {
-        api.getQueue()
+        api.getQueue().bodyOrNullOnNoContent()
     }
 
     suspend fun getAvailableDevices(): Result<List<SpotifyDevice>> = safeCall {
-        api.getAvailableDevices()?.devices ?: emptyList()
+        api.getAvailableDevices().bodyOrNullOnNoContent()?.devices ?: emptyList()
     }
 
     suspend fun transferPlayback(deviceId: String): Result<Unit> = safeCall {
@@ -314,13 +321,29 @@ class SpotifyRepository(
                 try {
                     block()
                 } catch (e: HttpException) {
-                    when (e.code()) {
-                        429  -> throw Exception("HTTP 429: Retry-After=${e.response()?.headers()?.get("Retry-After") ?: "unknown"}")
-                        else -> throw Exception("HTTP ${e.code()}: ${e.response()?.errorBody()?.string()}")
-                    }
+                    // A TYPED failure (audit 2026-10-04, decision 5): the same message text as
+                    // before, plus the status as a number and the cause — classify on the number.
+                    throw SpotifyHttpException(
+                        code          = e.code(),
+                        retryAfterRaw = e.response()?.headers()?.get("Retry-After"),
+                        body          = if (e.code() == 429) null else e.response()?.errorBody()?.string(),
+                        cause         = e,
+                    )
                 }
             }
         }
+}
+
+/**
+ * The body of a `Response<T>` endpoint whose 204 means "nothing" (`me/player`, its queue, its
+ * devices): null on a 204 / an empty success, the body otherwise, and an [HttpException] for any
+ * non-2xx — so `safeCall` still maps a 404 / 429 to its `"HTTP <code>: …"` text exactly as for a
+ * plain suspend endpoint, which throws on its own. Retrofit 3.0.0 cannot return null from a
+ * `suspend fun …(): T?` (a 204 threw a KotlinNullPointerException), hence the wrapper (2026-10-04).
+ */
+internal fun <T> Response<T>.bodyOrNullOnNoContent(): T? {
+    if (!isSuccessful) throw HttpException(this)
+    return if (code() == 204) null else body()
 }
 
 /**

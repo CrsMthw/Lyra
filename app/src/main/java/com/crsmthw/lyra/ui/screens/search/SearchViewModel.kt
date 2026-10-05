@@ -397,7 +397,13 @@ class SearchViewModelFactory(private val container: AppContainer) : ViewModelPro
 // ── Result → RecentSearch mappers ───────────────────────────────────────────────
 
 fun SpotifyTrack.toRecentSearch() =
-    RecentSearch("track", id, uri, name, allArtists, thumbnailUrl.ifBlank { null })
+    RecentSearch("track", id, uri, name, allArtists, thumbnailUrl.ifBlank { null }, albumId = albumIdOrNull())
+
+/** The album id, read null-safely (Gson can leave the declared non-null `album.id` null). */
+private fun SpotifyTrack.albumIdOrNull(): String? {
+    val id: String? = album?.id
+    return id?.takeIf { it.isNotBlank() }
+}
 
 fun SpotifyAlbum.toRecentSearch() =
     RecentSearch(

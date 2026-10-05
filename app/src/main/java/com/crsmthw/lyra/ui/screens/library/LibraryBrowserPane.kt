@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import com.crsmthw.lyra.R
+import com.crsmthw.lyra.data.player.likedCollectionUri
 import com.crsmthw.lyra.ui.components.BarContentGap
 import com.crsmthw.lyra.ui.components.BarFadeHeight
 import com.crsmthw.lyra.ui.components.CrampedLabelAutoSize
@@ -186,7 +187,9 @@ internal fun LibraryBrowserPane(
                 count             = state.likedSongCount,
                 isSelected        = likedSongsSelected,
                 onOpen            = { haptics.confirm(); viewModel.selectLikedSongs() },
-                onPlay            = { onPlayContext("spotify:user:${state.user?.id}:collection") },
+                // Null while the user id is unknown (audit 2026-10-04 W6): the Play button is
+                // disabled rather than sending `spotify:user:null:collection`.
+                onPlay            = likedCollectionUri(state.user?.id)?.let { uri -> { onPlayContext(uri) } },
                 artSharedModifier = likedArt,
             )
         }
@@ -233,7 +236,7 @@ internal fun LibraryBrowserPane(
                         TopTrackCard(
                             track       = track,
                             onClick     = { haptics.confirm(); onPlayTopTrack(idx) },
-                            onLongClick = { viewModel.trackActions.open(track.toTrackActionTarget()) },
+                            onLongClick = { track.toTrackActionTarget()?.let { viewModel.trackActions.open(it) } },
                         )
                     }
                 }
@@ -531,7 +534,7 @@ internal fun LibraryBrowserPane(
             if (state.isLoading) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { ContainedLoadingIndicator() }
             } else if (fullAreaError != null) {
-                val isRateLimit   = fullAreaError.contains("429")
+                val isRateLimit   = fullAreaError.startsWith("HTTP 429")
                 val retryAfterSec = if (isRateLimit)
                     Regex("Retry-After=(\\d+)").find(fullAreaError)?.groupValues?.get(1)?.toLongOrNull()
                 else null
@@ -679,6 +682,7 @@ internal fun LibraryBrowserPane(
         RefreshErrorDialog(
             error          = state.refreshError ?: gateError,
             isPartialSweep = state.refreshPartial,
+            sessionRefreshFailed = state.refreshSessionFailed,
             onDismiss      = { showRefreshErrorDialog = false },
         )
     }

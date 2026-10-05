@@ -39,7 +39,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
+import com.crsmthw.lyra.data.player.albumContextUri
 import com.crsmthw.lyra.R
+import com.crsmthw.lyra.data.player.likedCollectionUri
 import com.crsmthw.lyra.ui.components.DetailArtHero
 import com.crsmthw.lyra.ui.components.DetailTopBar
 import com.crsmthw.lyra.ui.components.DetailTopBarFade
@@ -94,7 +96,7 @@ internal fun RightPaneContent(
     // frame on each pane swap / screen re-entry. Cosmetic here — but the same shape as the bug
     // that made the search bar→FAB morph stutter, so keep both seeded.
     // (Both seeds now come from the ViewModel's derived StateFlows' own current values.)
-    val currentTrackId by playerViewModel.currentTrackId.collectAsStateWithLifecycle()
+    val currentTrackUri by playerViewModel.currentTrackUri.collectAsStateWithLifecycle()
     val isPlayingState by playerViewModel.isPlayingFlow.collectAsStateWithLifecycle()
     val playlist     = state.currentPlaylist
     val isLikedSongs = playlist == null
@@ -132,7 +134,9 @@ internal fun RightPaneContent(
         state.currentTracks.isNotEmpty()          -> state.currentTracks.size
         else                                      -> playlist.trackCount         // metadata fallback — avoids layout shift
     }
-    val playUri      = playlist?.uri ?: "spotify:user:${state.user?.id}:collection"
+    // Null for Liked Songs while the user id is unknown (audit 2026-10-04 W6): the hero then shows
+    // no Play / Shuffle rather than sending `spotify:user:null:collection`.
+    val playUri      = playlist?.uri ?: likedCollectionUri(state.user?.id)
 
     // Delay the loading spinner so cache hits (< ~250ms) never flash it.
     val latestState = rememberUpdatedState(state)
@@ -204,7 +208,7 @@ internal fun RightPaneContent(
         ) {
         TrackList(
             tracks         = state.currentTracks,
-            currentTrackId = currentTrackId,
+            currentTrackUri = currentTrackUri,
             isPlaying      = isPlayingState,
             isLoadingMore  = state.isLoadingMoreTracks,
             canLoadMore    = canLoadMore,
@@ -219,7 +223,12 @@ internal fun RightPaneContent(
                 } else if (playlist != null) {
                     // Positioned by uri (offset.uri) on every path — a row index is a FILTERED
                     // position and is never sent anywhere (docs/PLAYER.md → Playback 404 Fallback).
-                    playerViewModel.playTrack(track.uri, contextUri = playlist.uri)
+                    playerViewModel.playTrack(
+                        track.uri,
+                        contextUri = playlist.uri,
+                        albumUri   = track.albumContextUri(),
+                        track      = track,
+                    )
                     onTrackClick()
                 } else {
                     playerViewModel.playFromLikedSongs(track.uri)
@@ -240,7 +249,8 @@ internal fun RightPaneContent(
                     // by-uri playlist-items DELETE, which removes an episode perfectly well.
                     val removable = playlist?.takeIf { it.owner?.id == state.user?.id }
                         ?.let { RemovablePlaylist(it.id, it.name) }
-                    viewModel.trackActions.open(track.toTrackActionTarget(removable))
+                    // Null for a local file (audit 2026-10-04 C3): no sheet, no crash.
+                    track.toTrackActionTarget(removable)?.let { viewModel.trackActions.open(it) }
                 }
             },
             selectedUris   = if (inSelection) state.selectedUris else null,
@@ -269,8 +279,8 @@ internal fun RightPaneContent(
                     isLikedSongs = isLikedSongs,
                     name         = playlistName,
                     trackCount   = trackCount,
-                    onPlay       = { haptics.press(); playerViewModel.playContext(playUri, shuffle = false) },
-                    onShuffle    = { haptics.press(); playerViewModel.shuffleContext(playUri, trackCount) },
+                    onPlay       = playUri?.let { uri -> { haptics.press(); playerViewModel.playContext(uri, shuffle = false) } },
+                    onShuffle    = playUri?.let { uri -> { haptics.press(); playerViewModel.shuffleContext(uri, trackCount) } },
                     selecting    = inSelection || inReorder,
                     playlistId   = playlist?.id,
                     sharedScope  = sharedScope,
@@ -291,7 +301,7 @@ internal fun RightPaneContent(
                     ) {
                         Text(state.error.orEmpty(), color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
-                        if (!isLikedSongs && playUri.isNotBlank()) {
+                        if (!isLikedSongs && !playUri.isNullOrBlank()) {
                             Spacer(Modifier.height(16.dp))
                             Button(onClick = { playerViewModel.playContext(playUri, shuffle = false) }) {
                                 Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(8.dp))
@@ -746,8 +756,8 @@ private fun TrackListHero(
     isLikedSongs: Boolean,
     name        : String,
     trackCount  : Int,
-    onPlay      : () -> Unit,
-    onShuffle   : () -> Unit,
+    onPlay      : (() -> Unit)?,
+    onShuffle   : (() -> Unit)?,
     selecting   : Boolean = false,
     playlistId  : String? = null,
     sharedScope : SharedTransitionScope? = null,
@@ -813,7 +823,8 @@ private fun TrackListHero(
 @Composable
 private fun TrackList(
     tracks         : List<com.crsmthw.lyra.data.remote.model.SpotifyTrack>,
-    currentTrackId : String?,
+    /** The playing item's URI — never an id: every local row has `id == null` and all lit up (audit W4). */
+    currentTrackUri: String?,
     isPlaying      : Boolean,
     isLoadingMore  : Boolean,
     canLoadMore    : Boolean,
@@ -962,7 +973,7 @@ private fun TrackList(
                         ) {
                             TrackRow(
                                 track     = track,
-                                isPlaying = currentTrackId == track.id && isPlaying,
+                                isPlaying = currentTrackUri != null && currentTrackUri == track.uri && isPlaying,
                                 onClick   = {},
                                 modifier  = Modifier.weight(1f),
                             )
@@ -992,7 +1003,7 @@ private fun TrackList(
             } else {
                 TrackRow(
                     track       = track,
-                    isPlaying   = currentTrackId == track.id && isPlaying,
+                    isPlaying   = currentTrackUri != null && currentTrackUri == track.uri && isPlaying,
                     onClick     = { onTrackClick(track) },
                     onLongClick = onTrackLongClick
                         ?.takeIf { selectedUris != null || !track.isEpisode }

@@ -250,10 +250,17 @@ internal fun PullThresholdHaptics(state: PullToRefreshState) {
 internal fun RefreshErrorDialog(
     error          : String?,
     isPartialSweep : Boolean = false,
+    /** [error] is a 401 the token refresh could not rescue — worded here, never Spotify's raw body. */
+    sessionRefreshFailed : Boolean = false,
     onDismiss      : () -> Unit,
 ) {
-    val displayError = error ?: if (isPartialSweep) stringResource(R.string.library_partial_load_error) else ""
-    val isRateLimit   = error?.contains("429") == true
+    val displayError = when {
+        sessionRefreshFailed -> stringResource(R.string.library_session_refresh_failed)
+        error != null        -> error
+        isPartialSweep       -> stringResource(R.string.library_partial_load_error)
+        else                 -> ""
+    }
+    val isRateLimit   = error?.startsWith("HTTP 429") == true
     val retryAfterSec = run {
         val e = error ?: return@run null
         if (!isRateLimit) return@run null

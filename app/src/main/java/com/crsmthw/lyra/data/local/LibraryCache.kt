@@ -50,6 +50,12 @@ data class RecentSearch(
     val name     : String,
     val subtitle : String,
     val imageUrl : String?,
+    /**
+     * A TRACK's album id (2026-10-04) — the fallback context when a uris play leaves Spotify
+     * EMPTY. Null on entries saved before it existed (Gson leaves it null: the play then looks
+     * the album up only if a fallback is needed) and on every non-track entry.
+     */
+    val albumId  : String? = null,
 )
 
 /**
@@ -190,7 +196,10 @@ class LibraryCache(context: Context) {
             saveLocked(current.copy(
                 playlists      = playlists,
                 likedSongCount = likedSongCount,
-                user           = user,
+                // A failed `me` in this load never erases the user a previous load knew (audit
+                // 2026-10-04 W6): a null here was persisted, and every later launch then built the
+                // Liked Songs context without an id. Sign-out clears it through clearAccount().
+                user           = user ?: current.user,
             ))
         }
     }
@@ -575,6 +584,21 @@ class LibraryCache(context: Context) {
     }
 
     fun clear() = synchronized(lock) { file.delete() }
+
+    /**
+     * Sign-out (2026-10-04 evening, `AppContainer.signOut`): EVERYTHING this cache holds for the
+     * account, under ONE lock — the library file (playlists, every track list incl. Liked Songs and
+     * the liked indexer's persisted `rawOffset`, the user, For you, albums / artists / shows) AND
+     * Search's recent searches. A stale user id after an account switch would make every Liked tap
+     * send ANOTHER account's collection (`spotify:user:<id>:collection`). [clear] (Settings → Clear
+     * library cache) deliberately leaves the recents alone. Bumps [revision] so a live Library
+     * re-syncs to the empty set.
+     */
+    fun clearAccount() = synchronized(lock) {
+        runCatching { file.delete() }
+        runCatching { recentsFile.delete() }
+        _revision.value++
+    }
 
     // ── Recent searches (Search screen) ─────────────────────────────────────────
     // Stored in their own file so they're independent of the main library cache and its refresh /

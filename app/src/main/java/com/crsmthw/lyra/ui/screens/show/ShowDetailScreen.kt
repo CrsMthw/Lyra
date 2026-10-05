@@ -62,7 +62,7 @@ import java.time.format.FormatStyle
 /**
  * How many episode uris a single Play may hand `me/player/play`.
  *
- * 750, the same cap `PlayerViewModel.playFromLikedSongs` uses. A smaller number would not reduce
+ * 750 — `PlaybackOrigin.URI_CAP`, the `uris` cap Lyra uses everywhere. A smaller number would not reduce
  * the real risk: multiple EPISODE uris in `uris` are undocumented (the Web API reference describes
  * `uris` as track uris, and a show is not a valid `context_uri`), so if Spotify refuses the shape it
  * refuses it at two entries as readily as at seven hundred — which is what `PlayerViewModel`'s
@@ -187,7 +187,7 @@ fun ShowDetailScreen(
                 // the proven single-uri call shape (and with it the App Remote restore path's
                 // `needsRestore == false`) rather than a one-element list that behaves the same but
                 // arms extra machinery. Capped at EPISODE_QUEUE_LIMIT, matching
-                // PlayerViewModel.playFromLikedSongs.
+                // PlaybackOrigin.URI_CAP.
                 fun queueFrom(episode: SpotifyEpisode?): List<String>? {
                     if (episode == null) return null
                     // Locate by id in the SAME list that is sliced — the rendered rows are a

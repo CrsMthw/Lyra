@@ -35,6 +35,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
+import com.crsmthw.lyra.data.player.albumContextUri
 import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.remote.model.SpotifyArtist
 import com.crsmthw.lyra.data.remote.model.SpotifyTrack
@@ -248,11 +249,13 @@ fun StatsScreen(
                                             haptics.confirm()
                                             // Proven play path (state refresh + wake/404 fallback).
                                             playerViewModel.playTrack(
-                                                uri  = track.uri,
-                                                uris = state.current.topTracks.drop(idx).map { it.uri },
+                                                uri      = track.uri,
+                                                uris     = state.current.topTracks.drop(idx).map { it.uri },
+                                                albumUri = track.albumContextUri(),
+                                                track    = track,
                                             )
                                         },
-                                        onLongClick = { viewModel.trackActions.open(track.toTrackActionTarget()) },
+                                        onLongClick = { track.toTrackActionTarget()?.let { viewModel.trackActions.open(it) } },
                                     )
                                 }
                             }

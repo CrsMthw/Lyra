@@ -57,6 +57,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
+import com.crsmthw.lyra.data.player.albumContextUri
+import com.crsmthw.lyra.data.remote.model.SpotifyTrack
 import com.crsmthw.lyra.R
 import com.crsmthw.lyra.data.local.RecentSearch
 import com.crsmthw.lyra.data.remote.model.SpotifyAlbum
@@ -93,7 +95,12 @@ fun SearchScreen(
     onAlbumClick          : (albumId: String) -> Unit,
     onArtistClick         : (artistId: String) -> Unit,
     onShowClick           : (showId: String) -> Unit,
-    onTrackClick          : (uri: String, allUris: List<String>) -> Unit,
+    /**
+     * A track tap: its uri, the list it plays from, the album to fall back to when a uris play
+     * leaves Spotify EMPTY (null = unknown) and the track itself when the row has it
+     * (2026-10-04, PlayerViewModel.playTrack).
+     */
+    onTrackClick          : (uri: String, allUris: List<String>, albumUri: String?, track: SpotifyTrack?) -> Unit,
     sharedTransitionScope : SharedTransitionScope? = null,
     animatedContentScope  : AnimatedContentScope? = null,
 ) {
@@ -414,7 +421,12 @@ fun SearchScreen(
                                                 keyboard?.hide()
                                                 viewModel.addRecentSearch(track.toRecentSearch())
                                                 val idx = tracks.indexOfFirst { it.uri == track.uri }.coerceAtLeast(0)
-                                                onTrackClick(track.uri, tracks.drop(idx).map { it.uri })
+                                                onTrackClick(
+                                                    track.uri,
+                                                    tracks.drop(idx).map { it.uri },
+                                                    track.albumContextUri(),
+                                                    track,
+                                                )
                                             },
                                             // Drop the keyboard HERE, from the gesture, then hand
                                             // the target to the effect above — it opens the sheet
@@ -576,7 +588,12 @@ fun SearchScreen(
                             keyboard?.hide()
                             viewModel.addRecentSearch(recent)   // re-tapping moves it to the front
                             when (recent.type) {
-                                "track"    -> onTrackClick(recent.uri, listOf(recent.uri))
+                                "track"    -> onTrackClick(
+                                    recent.uri,
+                                    listOf(recent.uri),
+                                    recent.albumId?.takeIf { it.isNotBlank() }?.let { "spotify:album:$it" },
+                                    null,
+                                )
                                 "album"    -> onAlbumClick(recent.id)
                                 "artist"   -> onArtistClick(recent.id)
                                 "show"     -> onShowClick(recent.id)

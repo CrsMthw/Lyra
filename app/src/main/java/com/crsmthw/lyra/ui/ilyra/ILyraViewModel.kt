@@ -1042,6 +1042,8 @@ class ILyraViewModel(
                 ILyraEffect.PlayTrack(
                     uri = item.id,
                     contextUri = screen.albumUri,
+                    // The row's album IS the context, so this only marks it as already sent.
+                    albumUri = screen.albumUri,
                     // Positioned by uri (offset.uri) on every path, the App Remote wake restore
                     // included — the row index is this FILTERED list's position and is never sent
                     // (resolved 2026-09-25, docs/IPOD.md).
@@ -1411,7 +1413,19 @@ class ILyraViewModel(
         viewModelScope.launch {
             val userId = cachedUserId ?: library.resolveUserId().also { cachedUserId = it }
             if (userId != null) {
-                _effects.send(ILyraEffect.ShuffleContext("spotify:user:$userId:collection"))
+                // The liked TOTAL bounds Shuffle's random start (playContext sends an offset for the
+                // collection since 2026-10-04 evening — with none Spotify replayed the current
+                // song). The indexer's in-memory total first (this VM holds its fast demand, so it is
+                // set within one tick; it IS the cached list's server total); only while it is still
+                // null is the cache file parsed — the liked list's snapshot id, then the library
+                // meta's count. Never the cached ROW count (filtered — CLAUDE.md → counts come from
+                // the server); unknown → no offset, Spotify picks.
+                val likedTotal = (likedSongsIndexer.state.value.total
+                    ?: withContext(Dispatchers.IO) {
+                        libraryCache.loadTrackList(LibraryCache.LIKED_SONGS_KEY)?.snapshotId?.toIntOrNull()
+                            ?: libraryCache.load()?.likedSongCount
+                    })?.takeIf { it > 0 }
+                _effects.send(ILyraEffect.ShuffleContext("spotify:user:$userId:collection", likedTotal))
             }
             // The wheel has already clicked, so the LCD must move either way: with no user id
             // Now Playing shows its empty state rather than the menu sitting inert.
